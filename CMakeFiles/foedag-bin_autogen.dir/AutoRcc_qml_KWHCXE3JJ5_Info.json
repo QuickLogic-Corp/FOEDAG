@@ -1,0 +1,25 @@
+{
+	"BUILD_DIR" : "C:/testFOEDAGWin/FOEDAG/foedag-bin_autogen",
+	"CMAKE_BINARY_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"CMAKE_CURRENT_BINARY_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"CMAKE_CURRENT_SOURCE_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"CMAKE_SOURCE_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"INCLUDE_DIR" : "C:/testFOEDAGWin/FOEDAG/foedag-bin_autogen/include",
+	"INPUTS" : 
+	[
+		"C:/testFOEDAGWin/FOEDAG/src/MainWindow/MainToolBar.qml",
+		"C:/testFOEDAGWin/FOEDAG/src/MainWindow/NewProjectDialog.qml",
+		"C:/testFOEDAGWin/FOEDAG/src/MainWindow/MainMenuBar.qml",
+		"C:/testFOEDAGWin/FOEDAG/src/MainWindow/mainWindow.qml"
+	],
+	"LOCK_FILE" : "C:/testFOEDAGWin/FOEDAG/CMakeFiles/foedag-bin_autogen.dir/AutoRcc_qml_KWHCXE3JJ5_Lock.lock",
+	"MULTI_CONFIG" : false,
+	"OPTIONS" : [ "-name", "qml" ],
+	"OUTPUT_CHECKSUM" : "KWHCXE3JJ5",
+	"OUTPUT_NAME" : "qrc_qml.cpp",
+	"RCC_EXECUTABLE" : "C:/msys64/mingw64/bin/rcc.exe",
+	"RCC_LIST_OPTIONS" : [ "--list" ],
+	"SETTINGS_FILE" : "C:/testFOEDAGWin/FOEDAG/CMakeFiles/foedag-bin_autogen.dir/AutoRcc_qml_KWHCXE3JJ5_Used.txt",
+	"SOURCE" : "C:/testFOEDAGWin/FOEDAG/src/MainWindow/qml.qrc",
+	"VERBOSITY" : 0
+}

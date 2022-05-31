@@ -1,0 +1,2 @@
+C:/msys64/mingw64/bin/ar.exe qc ../../lib/libtexteditor.a CMakeFiles/texteditor.dir/texteditor_autogen/mocs_compilation.cpp.obj CMakeFiles/texteditor.dir/text_editor.cpp.obj CMakeFiles/texteditor.dir/text_editor_form.cpp.obj CMakeFiles/texteditor.dir/editor.cpp.obj CMakeFiles/texteditor.dir/search_dialog.cpp.obj
+C:/msys64/mingw64/bin/ranlib.exe ../../lib/libtexteditor.a

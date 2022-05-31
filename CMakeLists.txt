@@ -200,13 +200,15 @@ else()
   
   link_directories(${CMAKE_CURRENT_BINARY_DIR}/lib/)
 
-  if(CMAKE_SYSTEM_NAME MATCHES "MSYS")
+  #if(CMAKE_SYSTEM_NAME MATCHES "MSYS")
+  if(CMAKE_SYSTEM_NAME MATCHES "Windows")
     message("MSYS MODE")
-    set(TCL_STATIC_LIB libtcl8.6.a)
+    set(TCL_STATIC_LIB libtcl86.dll.a)
     add_library(tcl_static STATIC IMPORTED )
     set_target_properties(tcl_static PROPERTIES
       IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/${TCL_STATIC_LIB})
-
+	set(TCL_STUBB_LIB libtclstub86.a)
+	set(ZLIB_STATIC_LIB libzlibstatic.a)
   else()
     message("LINUX MODE")
     get_filename_component(buildDirRelFilePath ${TCL_STATIC_LIB}

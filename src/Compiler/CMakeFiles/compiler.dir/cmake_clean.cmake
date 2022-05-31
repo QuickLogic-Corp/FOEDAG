@@ -1,0 +1,41 @@
+file(REMOVE_RECURSE
+  "../../lib/libcompiler.a"
+  "../../lib/libcompiler.pdb"
+  "CMakeFiles/compiler_autogen.dir/AutogenUsed.txt"
+  "CMakeFiles/compiler_autogen.dir/ParseCache.txt"
+  "compiler_autogen"
+  "CMakeFiles/compiler.dir/Compiler.cpp.obj"
+  "CMakeFiles/compiler.dir/Compiler.cpp.obj.d"
+  "CMakeFiles/compiler.dir/CompilerDefines.cpp.obj"
+  "CMakeFiles/compiler.dir/CompilerDefines.cpp.obj.d"
+  "CMakeFiles/compiler.dir/CompilerOpenFPGA.cpp.obj"
+  "CMakeFiles/compiler.dir/CompilerOpenFPGA.cpp.obj.d"
+  "CMakeFiles/compiler.dir/CompilerOpenFPGA_ql.cpp.obj"
+  "CMakeFiles/compiler.dir/CompilerOpenFPGA_ql.cpp.obj.d"
+  "CMakeFiles/compiler.dir/Constraints.cpp.obj"
+  "CMakeFiles/compiler.dir/Constraints.cpp.obj.d"
+  "CMakeFiles/compiler.dir/Design.cpp.obj"
+  "CMakeFiles/compiler.dir/Design.cpp.obj.d"
+  "CMakeFiles/compiler.dir/Task.cpp.obj"
+  "CMakeFiles/compiler.dir/Task.cpp.obj.d"
+  "CMakeFiles/compiler.dir/TaskManager.cpp.obj"
+  "CMakeFiles/compiler.dir/TaskManager.cpp.obj.d"
+  "CMakeFiles/compiler.dir/TaskModel.cpp.obj"
+  "CMakeFiles/compiler.dir/TaskModel.cpp.obj.d"
+  "CMakeFiles/compiler.dir/TaskTableView.cpp.obj"
+  "CMakeFiles/compiler.dir/TaskTableView.cpp.obj.d"
+  "CMakeFiles/compiler.dir/WorkerThread.cpp.obj"
+  "CMakeFiles/compiler.dir/WorkerThread.cpp.obj.d"
+  "CMakeFiles/compiler.dir/compiler_autogen/EWIEGA46WW/qrc_compiler_resources.cpp.obj"
+  "CMakeFiles/compiler.dir/compiler_autogen/EWIEGA46WW/qrc_compiler_resources.cpp.obj.d"
+  "CMakeFiles/compiler.dir/compiler_autogen/mocs_compilation.cpp.obj"
+  "CMakeFiles/compiler.dir/compiler_autogen/mocs_compilation.cpp.obj.d"
+  "CMakeFiles/compiler.dir/foedag_version_number.cpp.obj"
+  "CMakeFiles/compiler.dir/foedag_version_number.cpp.obj.d"
+  "compiler_autogen/EWIEGA46WW/qrc_compiler_resources.cpp"
+)
+
+# Per-language clean rules from dependency scanning.
+foreach(lang CXX)
+  include(CMakeFiles/compiler.dir/cmake_clean_${lang}.cmake OPTIONAL)
+endforeach()

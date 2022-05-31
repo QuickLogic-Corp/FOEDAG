@@ -1,0 +1,110 @@
+{
+	"BUILD_DIR" : "C:/testFOEDAGWin/FOEDAG/src/NewProject/newproject_bin_autogen",
+	"CMAKE_BINARY_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"CMAKE_CURRENT_BINARY_DIR" : "C:/testFOEDAGWin/FOEDAG/src/NewProject",
+	"CMAKE_CURRENT_SOURCE_DIR" : "C:/testFOEDAGWin/FOEDAG/src/NewProject",
+	"CMAKE_EXECUTABLE" : "C:/msys64/mingw64/bin/cmake.exe",
+	"CMAKE_LIST_FILES" : 
+	[
+		"C:/testFOEDAGWin/FOEDAG/src/NewProject/CMakeLists.txt",
+		"C:/testFOEDAGWin/FOEDAG/cmake/cmake_qt.txt",
+		"C:/msys64/mingw64/lib/cmake/Qt5/Qt5ConfigVersion.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5/Qt5Config.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5/Qt5ModuleLocation.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Core/Qt5CoreConfigVersion.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Core/Qt5CoreConfig.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Gui/Qt5GuiConfigVersion.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Gui/Qt5GuiConfig.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Widgets/Qt5WidgetsConfigVersion.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Widgets/Qt5WidgetsConfig.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Xml/Qt5XmlConfigVersion.cmake",
+		"C:/msys64/mingw64/lib/cmake/Qt5Xml/Qt5XmlConfig.cmake",
+		"C:/testFOEDAGWin/FOEDAG/cmake/cmake_tcl.txt",
+		"C:/testFOEDAGWin/FOEDAG/src/NewProject/newproject.qrc",
+		"C:/testFOEDAGWin/FOEDAG/src/NewProject/newproject.qrc"
+	],
+	"CMAKE_SOURCE_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"DEP_FILE" : "",
+	"DEP_FILE_RULE_NAME" : "",
+	"HEADERS" : [],
+	"HEADER_EXTENSIONS" : [ "h", "hh", "h++", "hm", "hpp", "hxx", "in", "txx" ],
+	"INCLUDE_DIR" : "C:/testFOEDAGWin/FOEDAG/src/NewProject/newproject_bin_autogen/include",
+	"MOC_COMPILATION_FILE" : "C:/testFOEDAGWin/FOEDAG/src/NewProject/newproject_bin_autogen/mocs_compilation.cpp",
+	"MOC_DEFINITIONS" : 
+	[
+		"FOEDAG_CORE_LIBRARY",
+		"QT_CORE_LIB",
+		"QT_GUI_LIB",
+		"QT_NETWORK_LIB",
+		"QT_NO_DEBUG",
+		"QT_QMLMODELS_LIB",
+		"QT_QML_LIB",
+		"QT_QUICK_LIB",
+		"QT_WIDGETS_LIB",
+		"QT_XML_LIB"
+	],
+	"MOC_DEPEND_FILTERS" : 
+	[
+		[
+			"Q_PLUGIN_METADATA",
+			"[\n][ \t]*Q_PLUGIN_METADATA[ \t]*\\([^\\)]*FILE[ \t]*\"([^\"]+)\""
+		]
+	],
+	"MOC_INCLUDES" : 
+	[
+		"C:/testFOEDAGWin/FOEDAG/src/NewProject",
+		"C:/testFOEDAGWin/FOEDAG/src",
+		"C:/testFOEDAGWin/FOEDAG/src",
+		"C:/testFOEDAGWin/FOEDAG/include",
+		"C:/msys64/mingw64/include/QtWidgets",
+		"C:/msys64/mingw64/include/QtGui",
+		"C:/msys64/mingw64/include/QtCore",
+		"C:/msys64/mingw64/share/qt5/mkspecs/win32-g++",
+		"C:/msys64/mingw64/include/QtXml",
+		"C:/msys64/mingw64/include/QtQuick",
+		"C:/msys64/mingw64/include/QtQmlModels",
+		"C:/msys64/mingw64/include/QtQml",
+		"C:/msys64/mingw64/include/QtNetwork",
+		"C:/msys64/mingw64/include",
+		"C:/msys64/mingw64/include/c++/11.2.0",
+		"C:/msys64/mingw64/include/c++/11.2.0/x86_64-w64-mingw32",
+		"C:/msys64/mingw64/include/c++/11.2.0/backward",
+		"C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/11.2.0/include",
+		"C:/msys64/mingw64/lib/gcc/x86_64-w64-mingw32/11.2.0/include-fixed"
+	],
+	"MOC_MACRO_NAMES" : [ "Q_OBJECT", "Q_GADGET", "Q_NAMESPACE", "Q_NAMESPACE_EXPORT" ],
+	"MOC_OPTIONS" : [],
+	"MOC_PATH_PREFIX" : false,
+	"MOC_PREDEFS_CMD" : 
+	[
+		"C:/msys64/mingw64/bin/g++.exe",
+		"-dM",
+		"-E",
+		"-c",
+		"C:/msys64/mingw64/share/cmake-3.21/Modules/CMakeCXXCompilerABI.cpp"
+	],
+	"MOC_PREDEFS_FILE" : "C:/testFOEDAGWin/FOEDAG/src/NewProject/newproject_bin_autogen/moc_predefs.h",
+	"MOC_RELAXED_MODE" : false,
+	"MOC_SKIP" : [],
+	"MULTI_CONFIG" : false,
+	"PARALLEL" : 4,
+	"PARSE_CACHE_FILE" : "C:/testFOEDAGWin/FOEDAG/src/NewProject/CMakeFiles/newproject_bin_autogen.dir/ParseCache.txt",
+	"QT_MOC_EXECUTABLE" : "C:/msys64/mingw64/bin/moc.exe",
+	"QT_UIC_EXECUTABLE" : "C:/msys64/mingw64/bin/uic.exe",
+	"QT_VERSION_MAJOR" : 5,
+	"QT_VERSION_MINOR" : 15,
+	"SETTINGS_FILE" : "C:/testFOEDAGWin/FOEDAG/src/NewProject/CMakeFiles/newproject_bin_autogen.dir/AutogenUsed.txt",
+	"SOURCES" : 
+	[
+		[
+			"C:/testFOEDAGWin/FOEDAG/src/NewProject/Main/newproject_main.cpp",
+			"MU",
+			null
+		]
+	],
+	"UIC_OPTIONS" : [],
+	"UIC_SEARCH_PATHS" : [],
+	"UIC_SKIP" : [],
+	"UIC_UI_FILES" : [],
+	"VERBOSITY" : 0
+}

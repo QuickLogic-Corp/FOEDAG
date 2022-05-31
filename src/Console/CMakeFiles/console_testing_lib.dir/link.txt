@@ -1,0 +1,2 @@
+C:/msys64/mingw64/bin/ar.exe qc ../../lib/libconsole_testing_lib.a CMakeFiles/console_testing_lib.dir/console_testing_lib_autogen/mocs_compilation.cpp.obj CMakeFiles/console_testing_lib.dir/Test/ConsoleTestUtils.cpp.obj
+C:/msys64/mingw64/bin/ranlib.exe ../../lib/libconsole_testing_lib.a

@@ -1,0 +1,5 @@
+if(EXISTS "C:/testFOEDAGWin/FOEDAG/HelloTcl_test[1]_tests.cmake")
+  include("C:/testFOEDAGWin/FOEDAG/HelloTcl_test[1]_tests.cmake")
+else()
+  add_test(HelloTcl_test_NOT_BUILT HelloTcl_test_NOT_BUILT)
+endif()

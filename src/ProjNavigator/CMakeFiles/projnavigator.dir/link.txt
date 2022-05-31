@@ -1,0 +1,2 @@
+C:/msys64/mingw64/bin/ar.exe qc ../../lib/libprojnavigator.a CMakeFiles/projnavigator.dir/projnavigator_autogen/mocs_compilation.cpp.obj CMakeFiles/projnavigator.dir/sources_form.cpp.obj CMakeFiles/projnavigator.dir/create_fileset_dialog.cpp.obj CMakeFiles/projnavigator.dir/add_file_dialog.cpp.obj CMakeFiles/projnavigator.dir/add_file_form.cpp.obj CMakeFiles/projnavigator.dir/select_file_type_form.cpp.obj CMakeFiles/projnavigator.dir/tcl_command_integration.cpp.obj
+C:/msys64/mingw64/bin/ranlib.exe ../../lib/libprojnavigator.a

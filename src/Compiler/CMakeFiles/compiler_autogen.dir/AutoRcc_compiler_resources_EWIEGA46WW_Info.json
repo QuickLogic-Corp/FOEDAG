@@ -1,0 +1,26 @@
+{
+	"BUILD_DIR" : "C:/testFOEDAGWin/FOEDAG/src/Compiler/compiler_autogen",
+	"CMAKE_BINARY_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"CMAKE_CURRENT_BINARY_DIR" : "C:/testFOEDAGWin/FOEDAG/src/Compiler",
+	"CMAKE_CURRENT_SOURCE_DIR" : "C:/testFOEDAGWin/FOEDAG/src/Compiler",
+	"CMAKE_SOURCE_DIR" : "C:/testFOEDAGWin/FOEDAG",
+	"INCLUDE_DIR" : "C:/testFOEDAGWin/FOEDAG/src/Compiler/compiler_autogen/include",
+	"INPUTS" : 
+	[
+		"C:/testFOEDAGWin/FOEDAG/src/Compiler/down-arrow.png",
+		"C:/testFOEDAGWin/FOEDAG/src/Compiler/loading.png",
+		"C:/testFOEDAGWin/FOEDAG/src/Compiler/next.png",
+		"C:/testFOEDAGWin/FOEDAG/src/Compiler/failed.png",
+		"C:/testFOEDAGWin/FOEDAG/src/Compiler/checked.png"
+	],
+	"LOCK_FILE" : "C:/testFOEDAGWin/FOEDAG/src/Compiler/CMakeFiles/compiler_autogen.dir/AutoRcc_compiler_resources_EWIEGA46WW_Lock.lock",
+	"MULTI_CONFIG" : false,
+	"OPTIONS" : [ "-name", "compiler_resources" ],
+	"OUTPUT_CHECKSUM" : "EWIEGA46WW",
+	"OUTPUT_NAME" : "qrc_compiler_resources.cpp",
+	"RCC_EXECUTABLE" : "C:/msys64/mingw64/bin/rcc.exe",
+	"RCC_LIST_OPTIONS" : [ "--list" ],
+	"SETTINGS_FILE" : "C:/testFOEDAGWin/FOEDAG/src/Compiler/CMakeFiles/compiler_autogen.dir/AutoRcc_compiler_resources_EWIEGA46WW_Used.txt",
+	"SOURCE" : "C:/testFOEDAGWin/FOEDAG/src/Compiler/compiler_resources.qrc",
+	"VERBOSITY" : 0
+}

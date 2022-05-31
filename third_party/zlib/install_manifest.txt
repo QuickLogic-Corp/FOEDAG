@@ -1,0 +1,7 @@
+C:/Program Files (x86)/zlib/lib/libzlib.dll.a
+C:/Program Files (x86)/zlib/bin/libzlib.dll
+C:/Program Files (x86)/zlib/lib/libzlibstatic.a
+C:/Program Files (x86)/zlib/include/zconf.h
+C:/Program Files (x86)/zlib/include/zlib.h
+C:/Program Files (x86)/zlib/share/man/man3/zlib.3
+C:/Program Files (x86)/zlib/share/pkgconfig/zlib.pc

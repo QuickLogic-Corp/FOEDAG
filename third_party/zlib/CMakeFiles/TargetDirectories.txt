@@ -1,0 +1,12 @@
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/install/local.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/install.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/list_install_components.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/rebuild_cache.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/edit_cache.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/install/strip.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/example64.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/minigzip.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/example.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/zlibstatic.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/minigzip64.dir
+C:/testFOEDAGWin/FOEDAG/third_party/zlib/CMakeFiles/zlib.dir
