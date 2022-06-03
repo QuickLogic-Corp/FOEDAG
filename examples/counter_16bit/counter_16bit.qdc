@@ -1,0 +1,74 @@
+# ---------------------------ConstraintsFile--------------------------- #
+
+#synthesis
+generate_verilog -value false
+no_abc_opt -value true
+no_adder -value true
+no_ff_map -value true
+
+
+#verifier
+dont_use_clock_network -assignsignal { \
+}
+use_clock_network -assignsignal { \
+}
+
+
+#logicoptimizer
+assign_default_signal -assignsignal { \
+}
+insert_buffer -value false
+net_load_limit -value 100
+opt -value true
+
+
+#placer
+fixplace_ff -floptocell { \
+}
+fixplace_io -iotocell { \
+    {count[0] IO_4} \
+    {count[1] IO_5} \
+    {count[2] IO_6} \
+    {count[3] IO_10} \
+    {count[4] IO_11} \
+    {count[5] IO_12} \
+    {count[6] IO_13} \
+    {count[7] IO_3} \
+    {count[8] IO_18} \
+    {count[9] IO_21} \
+    {count[10] IO_22} \
+    {count[11] IO_24} \
+    {count[12] IO_25} \
+    {count[13] IO_26} \
+    {count[14] IO_27} \
+    {count[15] IO_28} \
+    {clk IO_7} \
+    {reset IO_8} \
+    {enable IO_9}\
+}
+placer_effort -value 5
+placer_goal -value {area}
+
+
+#router
+pnr_attempts -value 4
+router_goal -value {area}
+
+
+#timingengine
+default_clock_period -value 20
+device_cell_base_timing_report -value true
+select_process_corner -flow_type {FPGA} -value {Typical}
+
+
+#powerestimation
+activity_factor -activity { \
+}
+capacitance -componentval { \
+}
+clocknet_frequency -clock { \
+}
+operating_iovoltage -value 1
+operating_voltage -value 1
+system_frequency -value 10
+
