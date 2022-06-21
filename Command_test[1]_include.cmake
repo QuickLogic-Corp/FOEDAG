@@ -1,5 +1,0 @@
-if(EXISTS "C:/testFOEDAGWin/FOEDAG/Command_test[1]_tests.cmake")
-  include("C:/testFOEDAGWin/FOEDAG/Command_test[1]_tests.cmake")
-else()
-  add_test(Command_test_NOT_BUILT Command_test_NOT_BUILT)
-endif()

@@ -1,2 +1,0 @@
-C:/msys64/mingw64/bin/ar.exe qc lib/libfoedag.a CMakeFiles/foedag.dir/foedag_autogen/mocs_compilation.cpp.obj CMakeFiles/foedag.dir/foedag_autogen/KWHCXE3JJ5/qrc_main_window_resource.cpp.obj CMakeFiles/foedag.dir/foedag_autogen/KWHCXE3JJ5/qrc_qml.cpp.obj CMakeFiles/foedag.dir/foedag_autogen/C6UJGKXMYJ/qrc_newproject.cpp.obj
-C:/msys64/mingw64/bin/ranlib.exe lib/libfoedag.a

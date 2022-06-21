@@ -18,7 +18,7 @@ pacman -S mingw-w64-x86_64-zlib
 
 ## Clone and Initialize Submodules
 ```
-git clone https://github.com/os-fpga/FOEDAG.git
+git clone https://github.com/QuickLogic-Corp/FOEDAG.git
 cd FOEDAG
 git checkout winbuild
 git submodule update --init --recursive
