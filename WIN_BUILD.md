@@ -64,10 +64,29 @@ In C:\Aurora\bin directory, all exes will be there, yosys, vpr etc.
 
 Add the following path to Windows PATH variable.
 ```
-<Your installation location>\Aurora\bin
+{Your installation location}\Aurora\bin
 ```
 You can use the below link as a guide to set the variables.
 https://www.computerhope.com/issues/ch000549.htm#windows11
+
+In the MSYS2-Mingwx64 shell which is used to build FOEDAG, set the PATH variable.
+```
+export PATH=/{Your installation location}/Aurora/bin/:$PATH
+```
+If aurora was extracted to C:\ then use
+export PATH=/c/Aurora/bin/:$PATH
+
+Verify if vpr, yosys binaries are picked correctly using the below commands.
+```
+which vpr
+```
+should result in /{Your installation location}/Aurora/bin/vpr
+```
+which yosys
+```
+should result in /{Your installation location}/Aurora/bin/yosys
+This indicates that the PATH is set correctly.
+
 
 ## Compile latest openfpga source code on Windows using MSYS2-Mingwx64 shell.
 This step will generate latest libopenfpga.a, openfpga.exe, libvpr.a, vpr.exe.
@@ -125,6 +144,9 @@ make
 Copy the contents of C:\yosysWinbuild\build\bin to C:\Aurora\bin. Replace all contents.
 
 Copy the folder C:\yosysWinbuild\build\share\yosys\quicklogic\qlf_k6n10f to C:\Aurora\share\yosys\quicklogic. Replace all contents.
+
+## Copy QLF_K6N10 folder to \FOEDAG\share\foedag as it is needed to build the designs.
+QLF_K6N10 folder will have proprietary device xml files. Distribution of these XML files is TBD in windows. Currently it is extracted and copied to \FOEDAG\share\foedag.
 
 
 ## Test counter_16bit example.
