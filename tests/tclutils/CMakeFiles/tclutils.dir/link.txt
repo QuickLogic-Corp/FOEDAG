@@ -1,2 +1,0 @@
-C:/msys64/mingw64/bin/ar.exe qc ../../lib/libtclutils.a CMakeFiles/tclutils.dir/tclutils_autogen/mocs_compilation.cpp.obj CMakeFiles/tclutils.dir/TclUtils.cpp.obj
-C:/msys64/mingw64/bin/ranlib.exe ../../lib/libtclutils.a

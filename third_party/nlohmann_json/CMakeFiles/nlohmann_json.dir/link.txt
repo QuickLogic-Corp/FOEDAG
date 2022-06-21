@@ -1,2 +1,0 @@
-C:/msys64/mingw64/bin/ar.exe qc libnlohmann_json.a CMakeFiles/nlohmann_json.dir/nlohmann_json_autogen/mocs_compilation.cpp.obj
-C:/msys64/mingw64/bin/ranlib.exe libnlohmann_json.a

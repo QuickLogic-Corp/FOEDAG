@@ -1,2 +1,0 @@
-C:/msys64/mingw64/bin/ar.exe qc ../../lib/libQConsole.a CMakeFiles/QConsole.dir/QConsole_autogen/mocs_compilation.cpp.obj CMakeFiles/QConsole.dir/src/qconsole.cpp.obj
-C:/msys64/mingw64/bin/ranlib.exe ../../lib/libQConsole.a

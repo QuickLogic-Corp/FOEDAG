@@ -1,2 +1,0 @@
-C:/msys64/mingw64/bin/ar.exe qc ../../lib/libnewfile.a CMakeFiles/newfile.dir/newfile_autogen/mocs_compilation.cpp.obj CMakeFiles/newfile.dir/new_file.cpp.obj CMakeFiles/newfile.dir/new_file_dialog.cpp.obj CMakeFiles/newfile.dir/newfilemodel.cpp.obj
-C:/msys64/mingw64/bin/ranlib.exe ../../lib/libnewfile.a
