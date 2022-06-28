@@ -48,13 +48,16 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void newFile();
   void newProjectDlg();
   void openProject();
+  void closeProject();
   void openFileSlot();
   void newDesignCreated(const QString& design);
+  void reloadSettings();
 
  private: /* Menu bar builders */
   void createMenus();
   void createToolBars();
   void createActions();
+  void connectProjectManager();
   void gui_start() override;
 
   void ReShowWindow(QString strProject);
@@ -68,6 +71,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QAction* newAction = nullptr;
   QAction* newProjectAction = nullptr;
   QAction* openProjectAction = nullptr;
+  QAction* closeProjectAction = nullptr;
   QAction* exitAction = nullptr;
   QAction* openFile = nullptr;
   QAction* startAction = nullptr;
@@ -78,10 +82,11 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QToolBar* debugToolBar = nullptr;
   Session* m_session = nullptr;
   TclInterpreter* m_interpreter = nullptr;
-  std::string mainWindowName = "FOEDAG";
+  std::string mainWindowName = "AURORA";
   class TaskManager* m_taskManager{nullptr};
   class Compiler* m_compiler{nullptr};
   class TclConsoleWidget* m_console{nullptr};
+  class ProjectManager* m_projectManager{nullptr};
 };
 
 }  // namespace FOEDAG

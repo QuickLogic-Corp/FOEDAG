@@ -19,6 +19,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// clang-format off
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -36,7 +38,7 @@ namespace FOEDAG {
 class CompilerOpenFPGA_ql : public Compiler {
  public:
   CompilerOpenFPGA_ql() = default;
-  ~CompilerOpenFPGA_ql() = default;
+  ~CompilerOpenFPGA_ql();
 
   void YosysExecPath(const std::filesystem::path& path) {
     m_yosysExecutablePath = path;
@@ -94,6 +96,28 @@ class CompilerOpenFPGA_ql : public Compiler {
 
   //void SynthType(SynthesisType type) { m_synthType = type; }
 
+  std::filesystem::path GenerateTempFilePath();
+  int CleanTempFiles();
+  std::string ToUpper(std::string str);
+  std::string ToLower(std::string str);
+  std::vector<std::string> list_device_variants(
+      std::string family,
+      std::string foundry,
+      std::string node,
+      std::filesystem::path device_data_dir_path);
+  std::string DeviceString(std::string family,
+                           std::string foundry,
+                           std::string node,
+                           std::string voltage_threshold,
+                           std::string p_v_t_corner);
+  std::vector<std::string> ListDevices();
+  bool DeviceExists(std::string family,
+                    std::string foundry,
+                    std::string node,
+                    std::string voltage_threshold,
+                    std::string p_v_t_corner);
+  bool DeviceExists(std::string device);
+
  protected:
   virtual bool IPGenerate();
   virtual bool Synthesize();
@@ -140,8 +164,14 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_openFPGAScript;
   virtual std::string BaseVprCommand();
   bool m_keepAllSignals = false;
+
+private:
+  std::vector<std::filesystem::path> m_TempFileList;
+  std::filesystem::path m_cryptdbPath;
 };
 
 }  // namespace FOEDAG
 
 #endif
+
+// clang-format on

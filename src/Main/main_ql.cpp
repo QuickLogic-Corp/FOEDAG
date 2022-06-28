@@ -19,6 +19,8 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// clang-format off
+
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/CompilerOpenFPGA.h"
 #include "Main/CommandLine.h"
@@ -46,12 +48,13 @@ int main(int argc, char** argv) {
     opcompiler = new FOEDAG::CompilerOpenFPGA();
     compiler = opcompiler;
     compiler->SetUseVerific(cmd->UseVerific());
-  } else if (cmd->CompilerName() == "ql") {
+  } else if (cmd->CompilerName() == "test") {
+      compiler = new FOEDAG::Compiler();
+  } else {
+    // default flow should be QL flow.
     opcompiler_ql = new FOEDAG::CompilerOpenFPGA_ql();
     compiler = opcompiler_ql;
     compiler->SetUseVerific(cmd->UseVerific());
-  } else {
-    compiler = new FOEDAG::Compiler();
   }
 
   FOEDAG::Foedag* foedag = new FOEDAG::Foedag(
@@ -59,9 +62,11 @@ int main(int argc, char** argv) {
   if (opcompiler) {
     std::filesystem::path binpath = foedag->Context()->BinaryPath();
     std::filesystem::path datapath = foedag->Context()->DataPath();
-    std::filesystem::path yosysPath = "yosys";
+    std::filesystem::path yosysPath = binpath / "yosys";
     std::filesystem::path vprPath = binpath / "vpr";
     std::filesystem::path openFpgaPath = binpath / "openfpga";
+    std::filesystem::path pinConvPath = binpath / "pin_c";
+    std::filesystem::path litexPath = binpath / "litex";
     std::filesystem::path archPath =
         datapath / "Arch" / "k6_frac_N10_tileable_40nm.xml";
     std::filesystem::path openFpgaArchPath =
@@ -80,7 +85,10 @@ int main(int argc, char** argv) {
     opcompiler->OpenFpgaBitstreamSettingFile(bitstreamSettingPath);
     opcompiler->OpenFpgaSimSettingFile(simSettingPath);
     opcompiler->OpenFpgaRepackConstraintsFile(repackConstraintPath);
-
+    opcompiler->PinConvExecPath(pinConvPath);
+    opcompiler->BuildLiteXIPCatalog(litexPath);
   }
   return foedag->init(guiType);
 }
+
+// clang-format on

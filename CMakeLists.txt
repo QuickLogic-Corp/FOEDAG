@@ -36,7 +36,7 @@ endif(NOT CMAKE_BUILD_TYPE)
 
 set(VERSION_MAJOR 0)
 set(VERSION_MINOR 0)
-set(VERSION_PATCH 5)
+set(VERSION_PATCH 6)
 
 option(
   WITH_LIBCXX
@@ -71,12 +71,14 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_VERBOSE_MAKEFILE ON)
 
 add_subdirectory(third_party/tcl_cmake EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/QScintilla-2.13.1)
 add_subdirectory(third_party/QConsole)
 add_subdirectory(third_party/nlohmann_json)
+add_subdirectory(third_party/cryptor-gh)
 add_subdirectory(tests/tclutils)
 add_subdirectory(src/NewProject)
 add_subdirectory(src/NewFile)
@@ -85,7 +87,9 @@ add_subdirectory(src/DesignRuns)
 add_subdirectory(src/Console)
 add_subdirectory(src/Main)
 add_subdirectory(src/Compiler)
+add_subdirectory(src/IPGenerate)
 add_subdirectory(src/TextEditor)
+
 
 # NOTE: Set the global output directories after the subprojects have had their go at it
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
@@ -178,7 +182,7 @@ else()
   #add_executable(foedag-bin ${PROJECT_SOURCE_DIR}/src/Main/main.cpp ${QRC_MAIN_WINDOW})
   add_executable(foedag-bin ${PROJECT_SOURCE_DIR}/src/Main/main_ql.cpp ${QRC_MAIN_WINDOW})
 endif()
-set_target_properties(foedag-bin PROPERTIES OUTPUT_NAME foedag)
+set_target_properties(foedag-bin PROPERTIES OUTPUT_NAME aurora)
 
 if (MSVC)
   message("WINDOWS MODE")
@@ -257,7 +261,6 @@ add_custom_command(TARGET foedag POST_BUILD
           ${CMAKE_CURRENT_BINARY_DIR}/lib/tcl8.6/init.tcl)
 
 execute_process(COMMAND git rev-parse --short HEAD
-  COMMAND tr -d '\n'
   OUTPUT_VARIABLE GIT_HASH
   ERROR_VARIABLE GIT_HASH_ERR
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
@@ -268,6 +271,7 @@ configure_file(foedag_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/foedag_ve
 # Explicit lib build order
 add_dependencies(foedag foedagcore)
 add_dependencies(compiler tcl_stubb_build)
+add_dependencies(ipgenerate tcl_stubb_build)
 add_dependencies(foedagcore tcl_stubb_build)
 add_dependencies(console tcl_stubb_build)
 add_dependencies(console tcl_static)
@@ -290,6 +294,7 @@ add_dependencies(foedagcore tcl_build)
 add_dependencies(console_debug tcl_build)
 add_dependencies(newfile tcl_stubb_build)
 add_dependencies(newfile_bin tcl_stubb_build)
+add_dependencies(compiler cryptor)
 
 if (APPLE)
   # In macOS, it is necessary to add the correct @rpath to the executable for
@@ -316,7 +321,7 @@ endif()
 
 target_link_libraries(foedag-bin PUBLIC foedag )
 target_link_directories(foedag-bin PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/lib PUBLIC ${CMAKE_INSTALL_PREFIX}/lib/foedag/lib)
-target_link_libraries(foedag  PUBLIC foedagcore newproject newfile projnavigator designruns texteditor qscintilla2_qt compiler console QConsole tcl_stubb tcl_static zlib nlohmann_json)
+target_link_libraries(foedag  PUBLIC foedagcore newproject newfile projnavigator designruns texteditor qscintilla2_qt compiler ipgenerate console QConsole tcl_stubb tcl_static zlib nlohmann_json)
 target_link_libraries(foedag  PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml Qt5::Quick)
 
 if(NOT NO_TCMALLOC)
