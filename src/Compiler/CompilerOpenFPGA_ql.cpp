@@ -1924,6 +1924,7 @@ bool CompilerOpenFPGA_ql::Packing() {
                    " PinPlacement failed!");
       return false;
     }
+#endif // Somesh
     (*m_out) << "Design " << m_projManager->projectName()
              << " PinPlacement Done!" << std::endl;
   }
