@@ -29,7 +29,7 @@ https://www.computerhope.com/issues/ch000549.htm#windows11
 pacman -S --needed base-devel mingw-w64-x86_64-toolchain git mingw-w64-x86_64-cmake mingw-w64-x86_64-qt5-base-debug mingw-w64-x86_64-qt5 mingw-w64-x86_64-swig mingw-w64-x86_64-qt5-declarative-debug mingw-w64-x86_64-tcl mingw-w64-x86_64-zlib
 ```
 
-If you see errors:
+If you see errors  like below:
 ```
 error: mingw-w64-x86_64-graphite2: signature from "David Macek <david.macek.0@gmail.com>" is unknown trust
 :: File /var/cache/pacman/pkg/mingw-w64-x86_64-graphite2-1.3.14-2-any.pkg.tar.zst is corrupted (invalid 
@@ -37,10 +37,17 @@ or corrupted package (PGP signature)).
 Do you want to delete it? [Y/n] Y
 error: failed to commit transaction (invalid or corrupted package)
 Errors occurred, no packages were upgraded.
+```
 
+It means that the GPG keystore DB or other packages are out of date, and have to upgraded.
+It is known that this might cause issues, for a foolproof method, either uninstall and re-install MSYS2, or force update all packages as below:
+```
 update all packages first:
 $ pacman -Syyu --overwrite '*'
 ```
+
+Once done, then try installing the required packages as above.
+
 ## It is recommended to create a new folder and clone into that folder and build.
 
 ## Clone and Initialize Submodules
@@ -50,14 +57,35 @@ cd FOEDAG
 git checkout winbuild
 git submodule update --init --recursive
 ```
-## Compile source codes
+## Build
 
 ```
-cmake -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release
-make
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${PWD}/install -S . -B build -G "MSYS Makefiles"
+make -C build -j$(nproc)
 ```
 
+## Run GUI
+```
+./build/bin/aurora.exe
+```
 
+## Run BATCH
+```
+./build/bin/aurora.exe --help
+```
+
+## Clean
+```
+make -C build -j$(nproc) clean
+```
+
+## Deep Clean
+```
+rm -rf build/
+rm -rf install/ (if any)
+```
+
+<!-- OUTDATED SECTION, REMOVE THIS SHORTLY
 ## Install Aurora.
 
 https://github.com/QuickLogic-Corp/edaSoftware/releases
@@ -171,3 +199,4 @@ Executing without --batch option like this
 will launch FOEDAG in GUI mode and run the example.
 
 In case you need to run synth step every time, delete FOEDAG\examples\counter_16bit\counter_16bit folder.
+-->
