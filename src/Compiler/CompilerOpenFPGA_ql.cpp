@@ -1073,7 +1073,6 @@ bool CompilerOpenFPGA_ql::IPGenerate() {
            << "..." << std::endl;
 
   // placeholder for ipgenerate process ++
-  #if 0 //Somesh
   std::string settings_json_filename = m_projManager->projectName() + ".json";
   std::string settings_json_path = (std::filesystem::path(settings_json_filename)).string();
   GetSession()->GetSettings()->loadJsonFile(QString::fromStdString(settings_json_path));
@@ -1114,7 +1113,6 @@ bool CompilerOpenFPGA_ql::IPGenerate() {
       return false;
     }
   }
-  #endif
   // placeholder for ipgenerate process --
 
   (*m_out) << "Design " << ProjManager()->projectName() << " IPs are generated!"
@@ -1880,7 +1878,6 @@ bool CompilerOpenFPGA_ql::Packing() {
            << std::endl;
 
   // placeholder for pin_placement process ++
-  #if 0 //Somesh
   // we are already loaded, so, no need to read the json again at this point.
   //std::string settings_json_filename = m_projManager->projectName() + ".json";
   //std::string settings_json_path = (std::filesystem::path(settings_json_filename)).string();
@@ -1924,7 +1921,6 @@ bool CompilerOpenFPGA_ql::Packing() {
                    " PinPlacement failed!");
       return false;
     }
-#endif // Somesh
     (*m_out) << "Design " << m_projManager->projectName()
              << " PinPlacement Done!" << std::endl;
   }
