@@ -1779,7 +1779,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
         CRFileCryptProc::getInstance()->getCryptDBFileName(device_base_dir_path.string(),
                                                            family + "_" + foundry + "_" + node);
 
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath)) {
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
       // empty string returned on error.
       return std::string("");
@@ -2518,7 +2518,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
         CRFileCryptProc::getInstance()->getCryptDBFileName(device_base_dir_path.string(),
                                                            family + "_" + foundry + "_" + node);
 
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath)) {
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
       // empty string returned on error.
       return std::string("");
@@ -3004,7 +3004,7 @@ std::vector<std::string> CompilerOpenFPGA_ql::ListDevices() {
     if(dir_entry_family.is_directory()) {
       
       // we would see family at this level
-      family = dir_entry_family.path().filename();
+      family = dir_entry_family.path().filename().string();
 
       // look at the directories inside the 'family' dir for 'foundry' entries
       for (const std::filesystem::directory_entry& dir_entry_foundry : 
@@ -3013,7 +3013,7 @@ std::vector<std::string> CompilerOpenFPGA_ql::ListDevices() {
         if(dir_entry_foundry.is_directory()) {
       
           // we would see foundry at this level
-          foundry = dir_entry_foundry.path().filename();
+          foundry = dir_entry_foundry.path().filename().string();
 
           // look at the directories inside the 'foundry' dir for 'node' entries
           for (const std::filesystem::directory_entry& dir_entry_node : 
@@ -3022,7 +3022,7 @@ std::vector<std::string> CompilerOpenFPGA_ql::ListDevices() {
             if(dir_entry_node.is_directory()) {
             
               // we would see devices at this level
-              node = dir_entry_node.path().filename();
+              node = dir_entry_node.path().filename().string();
 
               // get all the device_variants for this device:
               std::vector<std::string> device_variants;

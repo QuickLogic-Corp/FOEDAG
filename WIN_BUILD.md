@@ -26,14 +26,20 @@ https://www.computerhope.com/issues/ch000549.htm#windows11
 
 ## Install all the below mentioned packages
 ```
-pacman -S git
-pacman -S mingw-w64-x86_64-cmake
-pacman -S mingw-w64-x86_64-qt5-base-debug
-pacman -S mingw-w64-x86_64-qt5
-pacman -S mingw-w64-x86_64-swig
-pacman -S mingw-w64-x86_64-qt5-declarative-debug
-pacman -S mingw-w64-x86_64-tcl
-pacman -S mingw-w64-x86_64-zlib
+pacman -S --needed base-devel mingw-w64-x86_64-toolchain git mingw-w64-x86_64-cmake mingw-w64-x86_64-qt5-base-debug mingw-w64-x86_64-qt5 mingw-w64-x86_64-swig mingw-w64-x86_64-qt5-declarative-debug mingw-w64-x86_64-tcl mingw-w64-x86_64-zlib
+```
+
+If you see errors:
+```
+error: mingw-w64-x86_64-graphite2: signature from "David Macek <david.macek.0@gmail.com>" is unknown trust
+:: File /var/cache/pacman/pkg/mingw-w64-x86_64-graphite2-1.3.14-2-any.pkg.tar.zst is corrupted (invalid 
+or corrupted package (PGP signature)).
+Do you want to delete it? [Y/n] Y
+error: failed to commit transaction (invalid or corrupted package)
+Errors occurred, no packages were upgraded.
+
+update all packages first:
+$ pacman -Syyu --overwrite '*'
 ```
 ## It is recommended to create a new folder and clone into that folder and build.
 
