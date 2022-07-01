@@ -2603,9 +2603,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     // empty string returned on error.
     return std::string("");
   }
-  vpr_analysis_command += vpr_options +
-                          std::string(" ") + 
-                          std::string("--analysis");
+  vpr_analysis_command += vpr_options;// +
+                        //   std::string(" ") + 
+                        //   std::string("--analysis");
 
   result = ReplaceAll(result, "${VPR_ANALYSIS_COMMAND}", vpr_analysis_command);
 

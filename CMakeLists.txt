@@ -443,11 +443,11 @@ if (WIN32 AND $<CONFIG:Debug>)
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag)
 endif()
 
-install(
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/include/tcl.h
-        ${CMAKE_CURRENT_BINARY_DIR}/include/tclDecls.h
-        ${CMAKE_CURRENT_BINARY_DIR}/include/tclPlatDecls.h
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/include) 
+# install(
+#   FILES ${CMAKE_CURRENT_BINARY_DIR}/include/tcl.h
+#         ${CMAKE_CURRENT_BINARY_DIR}/include/tclDecls.h
+#         ${CMAKE_CURRENT_BINARY_DIR}/include/tclPlatDecls.h
+#   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/include) 
 #install(
 #  EXPORT Foedag
 #  FILE Foedag.cmake
