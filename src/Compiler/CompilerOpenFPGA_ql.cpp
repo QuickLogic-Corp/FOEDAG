@@ -964,6 +964,35 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
 
+  // note: we invoke these steps using the base class compiler.
+  //       this is so that, the base class status is reflected correctly as well.
+  auto route_and_sta = [](void* clientData, Tcl_Interp* interp, int argc,
+                  const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    for (int i = 1; i < argc; i++) {
+      std::string arg = argv[i];
+      if (arg == "clean") {
+          compiler->RouteOpt(Compiler::RoutingOpt::Clean);
+          compiler->TimingAnalysisOpt(Compiler::STAOpt::Clean);
+      } else {
+          compiler->ErrorMessage("Unknown option: " + arg);
+      }
+    }
+    // route
+    bool status = compiler->Compile(Action::Routing);
+    // if route was ok, do STA
+    if(status == true) {
+      status = compiler->Compile(Action::STA);
+    }
+
+    if(status == false) {
+      return TCL_ERROR;
+    }
+    
+    return TCL_OK;
+  };
+  interp->registerCmd("route_and_sta", route_and_sta, this, 0);
+
   auto listdir = [](void* clientData, Tcl_Interp* interp, int argc,
                         const char* argv[]) -> int {
 
@@ -2163,10 +2192,25 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
 
+#ifdef _WIN32
+
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+// hence, we can also be at Placed state here.
+  if ( (m_state != State::Placed) && (m_state != State::Routed) ) {
+    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be in placed/routed state"));
+    return false;
+  }
+
+#else // #ifdef _WIN32
+
   if (m_state != State::Routed) {
     ErrorMessage(std::string(__func__) + std::string("(): Design needs to be in routed state"));
     return false;
   }
+
+#endif // #ifdef _WIN32
+
 
   (*m_out) << "Analysis for design: " << ProjManager()->projectName() << "..."
            << std::endl;
@@ -2221,6 +2265,12 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
   command += vpr_options +
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+            std::string(" ") + 
+             std::string("--route") +
+#endif // #ifdef _WIN32
              std::string(" ") + 
              std::string("--analysis") +
              std::string(" ") + 
@@ -2242,6 +2292,13 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   (*m_out) << "Design " << ProjManager()->projectName()
            << " is timing analysed!" << std::endl;
 
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+// hence, we set the state here, so that just sta can be called instead of route and sta as well.
+  m_state = State::Routed;
+#endif // #ifdef _WIN32
+
   return true;
 }
 
@@ -2251,11 +2308,20 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     ErrorMessage("No design specified");
     return false;
   }
-
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+// hence, we can also be at Placed state here.
+  if ( (m_state != State::Placed) && (m_state != State::Routed) ) {
+    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be in placed/routed state"));
+    return false;
+  }
+#else // #ifdef _WIN32
   if (m_state != State::Routed) {
     ErrorMessage(std::string(__func__) + std::string("(): Design needs to be in routed state"));
     return false;
   }
+#endif // #ifdef _WIN32
 
   (*m_out) << "Analysis for design: " << ProjManager()->projectName() << "..."
            << std::endl;
@@ -2311,6 +2377,12 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     return false;
   }
   command += vpr_options +
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+             std::string(" ") + 
+             std::string("--route") +
+#endif // #ifdef _WIN32
              std::string(" ") + 
              std::string("--analysis") +
              std::string(" ") + 
@@ -2603,9 +2675,15 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     // empty string returned on error.
     return std::string("");
   }
-  vpr_analysis_command += vpr_options;// +
-                        //   std::string(" ") + 
-                        //   std::string("--analysis");
+  vpr_analysis_command += vpr_options +
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+                          std::string(" ") + 
+                          std::string("--route") +
+#endif // #ifdef _WIN32
+                          std::string(" ") + 
+                          std::string("--analysis");
 
   result = ReplaceAll(result, "${VPR_ANALYSIS_COMMAND}", vpr_analysis_command);
 
