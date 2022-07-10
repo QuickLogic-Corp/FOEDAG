@@ -57,11 +57,11 @@ elseif(APPLE)
   set(TCL_STATIC_LIB libtcl8.6.dylib)
 endif()
 
-if ((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+if ((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
   set(TCL_STATIC_LIB libtcl86.dll.a)
   set(ZLIB_STATIC_LIB libzlibstatic.a)
   set(TCL_STUBB_LIB libtclstub86.a)
-endif((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+endif((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
 
 if(MSVC)
   add_custom_target(tcl_build DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${TCL_STATIC_LIB})
@@ -106,13 +106,13 @@ else()
   )
   add_custom_target(tcl_build DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${TCL_STATIC_LIB})
 
-  if ((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+  if ((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
     set(STATIC_LINK --enable-shared=off)
-  else((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+  else((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
     set(STATIC_LINK )
-  endif((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+  endif((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
 
-  if ((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+  if ((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${TCL_STATIC_LIB}
         COMMAND echo "       Copying TCL Lib"
         COMMAND cp /mingw64/lib/${TCL_STATIC_LIB} ${CMAKE_CURRENT_BINARY_DIR}/../../lib/
@@ -127,7 +127,7 @@ else()
         COMMAND echo "       TCL Stub Lib copy completed"
         DEPENDS ../tcl8.6.12/generic/tcl.h
     )
-  else((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+  else((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${TCL_STATIC_LIB}
         COMMAND echo "       Compiling Tcl"
         COMMAND rm -rf configure
@@ -145,7 +145,7 @@ else()
         COMMAND echo "       Tcl Stubb Compilation completed"
         DEPENDS ../tcl8.6.12/generic/tcl.h
     )
-  endif((DEFINED ENV{MSYSTEM}) AND ($ENV{MSYSTEM} STREQUAL MINGW64))
+  endif((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
 endif()
 
 if(MSVC)
