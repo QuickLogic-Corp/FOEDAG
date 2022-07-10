@@ -443,12 +443,17 @@ if (WIN32 AND $<CONFIG:Debug>)
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag)
 endif()
 
+if ($ENV{MSYSTEM} STREQUAL MINGW64)
+# we do not have the TCL header files to 'install' as we don't build it.
+# we just use the TCL MinGW64 lib.
+else($ENV{MSYSTEM} STREQUAL MINGW64)
+install(
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/include/tcl.h
+        ${CMAKE_CURRENT_BINARY_DIR}/include/tclDecls.h
+        ${CMAKE_CURRENT_BINARY_DIR}/include/tclPlatDecls.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/include)
+endif($ENV{MSYSTEM} STREQUAL MINGW64)
 # install(
-#   FILES ${CMAKE_CURRENT_BINARY_DIR}/include/tcl.h
-#         ${CMAKE_CURRENT_BINARY_DIR}/include/tclDecls.h
-#         ${CMAKE_CURRENT_BINARY_DIR}/include/tclPlatDecls.h
-#   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/include) 
-#install(
 #  EXPORT Foedag
 #  FILE Foedag.cmake
 #  DESTINATION cmake)
