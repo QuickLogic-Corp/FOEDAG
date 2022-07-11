@@ -200,7 +200,7 @@ if (MSVC)
   set_target_properties(tcl_static PROPERTIES
     IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/${TCL_STATIC_LIB})
 
-else()
+else(MSVC)
   set(TCL_STATIC_LIB libtcl8.6.so)
   set(TCL_STUBB_LIB libtclstub8.6.a)
   set(ZLIB_STATIC_LIB libz.a)
@@ -210,16 +210,16 @@ else()
   
   link_directories(${CMAKE_CURRENT_BINARY_DIR}/lib/)
 
-  #if(CMAKE_SYSTEM_NAME MATCHES "MSYS")
-  if(CMAKE_SYSTEM_NAME MATCHES "Windows")
+  if((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
     message("MSYS MODE")
     set(TCL_STATIC_LIB libtcl86.dll.a)
+    set(TCL_STUBB_LIB libtclstub86.a)
+    set(ZLIB_STATIC_LIB libzlibstatic.a)
+
     add_library(tcl_static STATIC IMPORTED )
     set_target_properties(tcl_static PROPERTIES
       IMPORTED_LOCATION ${CMAKE_CURRENT_BINARY_DIR}/lib/${TCL_STATIC_LIB})
-	set(TCL_STUBB_LIB libtclstub86.a)
-	set(ZLIB_STATIC_LIB libzlibstatic.a)
-  else()
+  else((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
     message("LINUX MODE")
     get_filename_component(buildDirRelFilePath ${TCL_STATIC_LIB}
                          REALPATH BASE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lib)
@@ -229,9 +229,9 @@ else()
     set_target_properties(tcl_static PROPERTIES
       IMPORTED_LOCATION ${buildDirRelFilePath} IMPORTED_NO_SONAME ON)
 
-  endif()
+  endif((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
   
-endif()
+endif(MSVC)
 
 add_library(tcl_stubb STATIC IMPORTED )
 set_target_properties(tcl_stubb PROPERTIES

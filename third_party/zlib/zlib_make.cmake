@@ -3,10 +3,12 @@ execute_process(
     ERROR_QUIET
 )
 
+if ((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
 execute_process(
     COMMAND cmake -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release
     ERROR_QUIET
 )
+endif((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
 
 execute_process(
     COMMAND make
