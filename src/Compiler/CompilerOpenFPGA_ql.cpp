@@ -1101,48 +1101,50 @@ bool CompilerOpenFPGA_ql::IPGenerate() {
   (*m_out) << "IP generation for design: " << ProjManager()->projectName()
            << "..." << std::endl;
 
-  // placeholder for ipgenerate process ++
-  std::string settings_json_filename = m_projManager->projectName() + ".json";
-  std::string settings_json_path = (std::filesystem::path(settings_json_filename)).string();
-  GetSession()->GetSettings()->loadJsonFile(QString::fromStdString(settings_json_path));
-  json settings_general_device_obj = GetSession()->GetSettings()->getJson()["general"]["device"];
+// this is only an example of using python process - as this is not needed currently, it
+// is disabled.
+//   // placeholder for ipgenerate process ++
+//   std::string settings_json_filename = m_projManager->projectName() + ".json";
+//   std::string settings_json_path = (std::filesystem::path(settings_json_filename)).string();
+//   GetSession()->GetSettings()->loadJsonFile(QString::fromStdString(settings_json_path));
+//   json settings_general_device_obj = GetSession()->GetSettings()->getJson()["general"]["device"];
   
 
-  std::string family = settings_general_device_obj["family"]["default"].get<std::string>();
-  std::string foundry = settings_general_device_obj["foundry"]["default"].get<std::string>();
-  std::string node = settings_general_device_obj["node"]["default"].get<std::string>();
+//   std::string family = settings_general_device_obj["family"]["default"].get<std::string>();
+//   std::string foundry = settings_general_device_obj["foundry"]["default"].get<std::string>();
+//   std::string node = settings_general_device_obj["node"]["default"].get<std::string>();
 
-  // use script from project dir:
-  //std::filesystem::path python_script_path = std::filesystem::path(std::filesystem::current_path() / std::string("example.py"));
-  // use script from scripts dir: try getting from environment variable
-  const char* const path_scripts = std::getenv("AURORA2_SCRIPTS_DIR"); // this is from setup.sh
-  std::filesystem::path scriptsDir;
-  std::error_code ec;
-  if (path_scripts != nullptr) {
-    std::filesystem::path dirpath = std::string(path_scripts);
-    if (std::filesystem::exists(dirpath, ec)) {
-      scriptsDir = dirpath;
-    }
-  }
+//   // use script from project dir:
+//   //std::filesystem::path python_script_path = std::filesystem::path(std::filesystem::current_path() / std::string("example.py"));
+//   // use script from scripts dir: try getting from environment variable
+//   const char* const path_scripts = std::getenv("AURORA2_SCRIPTS_DIR"); // this is from setup.sh
+//   std::filesystem::path scriptsDir;
+//   std::error_code ec;
+//   if (path_scripts != nullptr) {
+//     std::filesystem::path dirpath = std::string(path_scripts);
+//     if (std::filesystem::exists(dirpath, ec)) {
+//       scriptsDir = dirpath;
+//     }
+//   }
 
-  // proceed if we have a valid scripts directory
-  if (!scriptsDir.empty()) {
-    std::filesystem::path python_script_path =
-        std::filesystem::path(scriptsDir / std::string("example.py"));
-    std::string command = std::string("python3") + std::string(" ") +
-                          python_script_path.string() + std::string(" ") +
-                          std::string("IPGenerate") + std::string(" ") +
-                          m_projManager->projectName();
+//   // proceed if we have a valid scripts directory
+//   if (!scriptsDir.empty()) {
+//     std::filesystem::path python_script_path =
+//         std::filesystem::path(scriptsDir / std::string("example.py"));
+//     std::string command = std::string("python3") + std::string(" ") +
+//                           python_script_path.string() + std::string(" ") +
+//                           std::string("IPGenerate") + std::string(" ") +
+//                           m_projManager->projectName();
 
-    int status = ExecuteAndMonitorSystemCommand(command);
-    CleanTempFiles();
-    if (status) {
-      ErrorMessage("Design " + m_projManager->projectName() +
-                   " IP generation failed!");
-      return false;
-    }
-  }
-  // placeholder for ipgenerate process --
+//     int status = ExecuteAndMonitorSystemCommand(command);
+//     CleanTempFiles();
+//     if (status) {
+//       ErrorMessage("Design " + m_projManager->projectName() +
+//                    " IP generation failed!");
+//       return false;
+//     }
+//   }
+//   // placeholder for ipgenerate process --
 
   (*m_out) << "Design " << ProjManager()->projectName() << " IPs are generated!"
            << std::endl;
@@ -1917,54 +1919,56 @@ bool CompilerOpenFPGA_ql::Packing() {
   (*m_out) << "Design " << ProjManager()->projectName() << " is packed!"
            << std::endl;
 
-  // placeholder for pin_placement process ++
-  // we are already loaded, so, no need to read the json again at this point.
-  //std::string settings_json_filename = m_projManager->projectName() + ".json";
-  //std::string settings_json_path = (std::filesystem::path(settings_json_filename)).string();
-  //GetSession()->GetSettings()->loadJsonFile(QString::fromStdString(settings_json_path));
-  json settings_general_device_obj = GetSession()->GetSettings()->getJson()["general"]["device"];
+// this is only an example of using python process - as this is not needed currently, it
+// is disabled.
+//   // placeholder for pin_placement process ++
+//   // we are already loaded, so, no need to read the json again at this point.
+//   //std::string settings_json_filename = m_projManager->projectName() + ".json";
+//   //std::string settings_json_path = (std::filesystem::path(settings_json_filename)).string();
+//   //GetSession()->GetSettings()->loadJsonFile(QString::fromStdString(settings_json_path));
+//   json settings_general_device_obj = GetSession()->GetSettings()->getJson()["general"]["device"];
   
 
-  std::string family = settings_general_device_obj["family"]["default"].get<std::string>();
-  std::string foundry = settings_general_device_obj["foundry"]["default"].get<std::string>();
-  std::string node = settings_general_device_obj["node"]["default"].get<std::string>();
-  m_OpenFpgaPinMapXml = std::filesystem::path(GetSession()->Context()->DataPath() / family / foundry / node / std::string("pinmap.xml"));
-  m_OpenFpgaPinMapCSV = std::filesystem::path(GetSession()->Context()->DataPath() / family / foundry / node / std::string("pinmap.csv"));
+//   std::string family = settings_general_device_obj["family"]["default"].get<std::string>();
+//   std::string foundry = settings_general_device_obj["foundry"]["default"].get<std::string>();
+//   std::string node = settings_general_device_obj["node"]["default"].get<std::string>();
+//   m_OpenFpgaPinMapXml = std::filesystem::path(GetSession()->Context()->DataPath() / family / foundry / node / std::string("pinmap.xml"));
+//   m_OpenFpgaPinMapCSV = std::filesystem::path(GetSession()->Context()->DataPath() / family / foundry / node / std::string("pinmap.csv"));
 
-  // use script from project dir:
-  //std::filesystem::path python_script_path = std::filesystem::path(std::filesystem::current_path() / std::string("example.py"));
-  // use script from scripts dir:
-  const char* const path_scripts =
-      std::getenv("AURORA2_SCRIPTS_DIR");  // this is from setup.sh
-  std::filesystem::path scriptsDir;
-  std::error_code ec;
-  if (path_scripts != nullptr) {
-    std::filesystem::path dirpath = std::string(path_scripts);
-    if (std::filesystem::exists(dirpath, ec)) {
-      scriptsDir = dirpath;
-    }
-  }
+//   // use script from project dir:
+//   //std::filesystem::path python_script_path = std::filesystem::path(std::filesystem::current_path() / std::string("example.py"));
+//   // use script from scripts dir:
+//   const char* const path_scripts =
+//       std::getenv("AURORA2_SCRIPTS_DIR");  // this is from setup.sh
+//   std::filesystem::path scriptsDir;
+//   std::error_code ec;
+//   if (path_scripts != nullptr) {
+//     std::filesystem::path dirpath = std::string(path_scripts);
+//     if (std::filesystem::exists(dirpath, ec)) {
+//       scriptsDir = dirpath;
+//     }
+//   }
 
-  // proceed if we have a valid scripts directory
-  if (!scriptsDir.empty()) {
-    std::filesystem::path python_script_path =
-        std::filesystem::path(scriptsDir / std::string("example.py"));
-    command = std::string("python3") + std::string(" ") +
-              python_script_path.string() + std::string(" ") +
-              m_OpenFpgaPinMapXml.string() + std::string(" ") +
-              m_OpenFpgaPinMapCSV.string();
+//   // proceed if we have a valid scripts directory
+//   if (!scriptsDir.empty()) {
+//     std::filesystem::path python_script_path =
+//         std::filesystem::path(scriptsDir / std::string("example.py"));
+//     command = std::string("python3") + std::string(" ") +
+//               python_script_path.string() + std::string(" ") +
+//               m_OpenFpgaPinMapXml.string() + std::string(" ") +
+//               m_OpenFpgaPinMapCSV.string();
 
-    status = ExecuteAndMonitorSystemCommand(command);
-    CleanTempFiles();
-    if (status) {
-      ErrorMessage("Design " + m_projManager->projectName() +
-                   " PinPlacement failed!");
-      return false;
-    }
-    (*m_out) << "Design " << m_projManager->projectName()
-             << " PinPlacement Done!" << std::endl;
-  }
-  // placeholder for pin_placement process --
+//     status = ExecuteAndMonitorSystemCommand(command);
+//     CleanTempFiles();
+//     if (status) {
+//       ErrorMessage("Design " + m_projManager->projectName() +
+//                    " PinPlacement failed!");
+//       return false;
+//     }
+//     (*m_out) << "Design " << m_projManager->projectName()
+//              << " PinPlacement Done!" << std::endl;
+//   }
+//   // placeholder for pin_placement process --
 
   return true;
 }
