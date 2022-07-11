@@ -186,7 +186,7 @@ if(WIN32)
     #add_executable(foedag-bin WIN32 ${PROJECT_SOURCE_DIR}/src/Main/main_ql.cpp ${QRC_MAIN_WINDOW})
   endif(MSVC)
 else(WIN32)
-  add_executable(foedag-bin ${PROJECT_SOURCE_DIR}/src/Main/main.cpp ${QRC_MAIN_WINDOW})
+  add_executable(foedag-bin ${PROJECT_SOURCE_DIR}/src/Main/main_ql.cpp ${QRC_MAIN_WINDOW})
 endif(WIN32)
 set_target_properties(foedag-bin PROPERTIES OUTPUT_NAME aurora)
 
