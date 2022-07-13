@@ -395,7 +395,7 @@ bool Foedag::initBatch() {
     auto logger =
         new FileLoggerBuffer{commands->OutLogger(), std::cout.rdbuf()};
     std::cout.rdbuf(logger);
-    std::cerr.rdbuf(logger);
+    //std::cerr.rdbuf(logger);
     m_tclChannelHandler = new FOEDAG::TclWorker(interpreter->getInterp(),
                                                 std::cout, &std::cerr, true);
   }
