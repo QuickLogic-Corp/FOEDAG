@@ -37,6 +37,7 @@ namespace FOEDAG {
 class Session;
 class TclInterpreter;
 class ProjectFileLoader;
+class DockWidget;
 /** Main window of the program */
 class MainWindow : public QMainWindow, public TopLevelInterface {
   Q_OBJECT
@@ -126,9 +127,9 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void clearDockWidgets();
   void startStopButtonsState();
   void loadFile(const QString& file);
-  QDockWidget* PrepareTab(const QString& name, const QString& objName,
-                          QWidget* widget, QDockWidget* tabToAdd,
-                          Qt::DockWidgetArea area = Qt::BottomDockWidgetArea);
+  DockWidget* PrepareTab(const QString& name, const QString& objName,
+                         QWidget* widget, QDockWidget* tabToAdd,
+                         Qt::DockWidgetArea area = Qt::BottomDockWidgetArea);
 
   void addPinPlannerRefreshButton(QDockWidget* dock);
 
@@ -155,6 +156,8 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void pinPlannerSaved();
   void setStatusAndProgressText(const QString& text);
   void saveSettings();
+  void setEnableSaveButtons(bool enable);
+  bool isEnableSaveButtons() const;
 
  private: /* Objects/Widgets under the main window */
   /* Enum holding different states of actions visibility on the welcome page.
@@ -191,7 +194,6 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QAction* licensesAction = nullptr;
   QAction* pinAssignmentAction = nullptr;
   QAction* ipConfiguratorAction = nullptr;
-  QAction* saveAction = nullptr;
   QAction* showWelcomePageAction = nullptr;
   QAction* stopCompileMessageAction = nullptr;
   QAction* bitstreamAction = nullptr;
@@ -206,7 +208,6 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   /* Tool bar objects */
   QToolBar* fileToolBar = nullptr;
   QToolBar* debugToolBar = nullptr;
-  QToolBar* saveToolBar = nullptr;
   Session* m_session = nullptr;
   TclInterpreter* m_interpreter = nullptr;
   ProjectInfo m_projectInfo;
@@ -232,6 +233,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   bool m_blockRefereshEn{false};
   QTableView* m_taskView{nullptr};
   class TaskModel* m_taskModel{nullptr};
+  QVector<QPushButton*> m_saveButtons;
 };
 
 }  // namespace FOEDAG

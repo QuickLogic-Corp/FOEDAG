@@ -36,6 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Console/TclConsoleWidget.h"
 #include "Console/TclErrorParser.h"
 #include "DesignRuns/runs_form.h"
+#include "DockWidget.h"
 #include "IpConfigurator/IpCatalogTree.h"
 #include "IpConfigurator/IpConfigWidget.h"
 #include "IpConfigurator/IpConfigurator.h"
@@ -144,7 +145,7 @@ MainWindow::MainWindow(Session* session)
   //  leftSplitter->addWidget(editor1);
   //  leftSplitter->setStretchFactor(1, 1);
 
-  //  QDockWidget* texteditorDockWidget = new QDockWidget(tr("Text Editor"));
+  //  QDockWidget* texteditorDockWidget = new DockWidget(tr("Text Editor"));
   //  texteditorDockWidget->setObjectName("texteditorDockWidget");
   //  texteditorDockWidget->setWidget(editor2);
   //  texteditorDockWidget->setAllowedAreas(Qt::LeftDockWidgetArea |
@@ -323,10 +324,10 @@ void MainWindow::startStopButtonsState() {
   stopAction->setEnabled(isRunning());
 }
 
-QDockWidget* MainWindow::PrepareTab(const QString& name, const QString& objName,
-                                    QWidget* widget, QDockWidget* tabToAdd,
-                                    Qt::DockWidgetArea area) {
-  QDockWidget* dock = new QDockWidget(name, this);
+DockWidget* MainWindow::PrepareTab(const QString& name, const QString& objName,
+                                   QWidget* widget, QDockWidget* tabToAdd,
+                                   Qt::DockWidgetArea area) {
+  DockWidget* dock = new DockWidget(name, this);
   dock->setObjectName(objName);
   dock->setWidget(widget);
   addDockWidget(area, dock);
@@ -345,6 +346,19 @@ void MainWindow::addPinPlannerRefreshButton(QDockWidget* dock) {
   QWidget* w = new QWidget;
   auto layout = new QHBoxLayout;
   layout->addWidget(new QLabel{dock->windowTitle()});
+
+  auto saveButton = new QPushButton{dock};
+  saveButton->setObjectName("saveButton");
+  connect(saveButton, &QPushButton::clicked, this,
+          &MainWindow::saveActionTriggered);
+  saveButton->setSizePolicy(
+      QSizePolicy{QSizePolicy::Maximum, QSizePolicy::Maximum});
+  saveButton->setIcon(QIcon{":/images/save-action.png"});
+  saveButton->setToolTip("Save to *.pin file");
+  saveButton->setEnabled(false);
+  m_saveButtons.push_back(saveButton);
+  layout->addWidget(saveButton);
+
   layout->addWidget(btn);
   layout->addSpacerItem(
       new QSpacerItem{10, 10, QSizePolicy::Expanding, QSizePolicy::Expanding});
@@ -363,6 +377,7 @@ void MainWindow::cleanUpDockWidgets(std::vector<QDockWidget*>& dockWidgets) {
     }
   }
   dockWidgets.clear();
+  m_saveButtons.clear();
 }
 
 void MainWindow::openProject(const QString& project, bool delayedOpen,
@@ -466,7 +481,7 @@ void MainWindow::refreshPinPlanner() {
   auto pinAssignment = findChild<PinAssignmentCreator*>();
   if (!pinAssignment) return;
 
-  if (saveAction->isEnabled()) {  // changes from pin planner not saved to file
+  if (isEnableSaveButtons()) {  // changes from pin planner not saved to file
     auto answer = QMessageBox::question(
         this, "Pin planner",
         "Some changes are not saved. Do you want to continue?");
@@ -508,7 +523,7 @@ void MainWindow::defaultProjectPath() {
 void MainWindow::pinPlannerPinName() {
   bool save{false};
   bool clean{false};
-  if (saveAction->isEnabled()) {  // changes from pin planner not saved to file
+  if (isEnableSaveButtons()) {  // changes from pin planner not saved to file
     auto answer = QMessageBox::question(
         this, "Pin planner",
         "Some changes are not saved. Do you want to save them?",
@@ -761,7 +776,9 @@ void MainWindow::createMenus() {
   helpMenu->addAction(licensesAction);
 
   preferencesMenu->addAction(defualtProjectPathAction);
+#ifndef PRODUCTION_BUILD
   preferencesMenu->addAction(pinPlannerPinNameAction);
+#endif
   preferencesMenu->addAction(showWelcomePageAction);
   preferencesMenu->addAction(stopCompileMessageAction);
   preferencesMenu->addAction(bitstreamAction);
@@ -773,10 +790,6 @@ void MainWindow::createMenus() {
 void MainWindow::createToolBars() {
   fileToolBar = addToolBar(tr("&File"));
   fileToolBar->addAction(newAction);
-
-  saveToolBar = addToolBar(tr("Save"));
-  saveToolBar->addAction(saveAction);
-  saveToolBar->setHidden(true);
 
   debugToolBar = addToolBar(tr("Debug"));
   debugToolBar->addAction(startAction);
@@ -899,12 +912,6 @@ void MainWindow::createActions() {
   connect(ipConfiguratorAction, &QAction::triggered, this,
           &MainWindow::ipConfiguratorActionTriggered);
 
-  saveAction = new QAction(tr("Save"), this);
-  connect(saveAction, &QAction::triggered, this,
-          &MainWindow::saveActionTriggered);
-  saveAction->setIcon(QIcon(":/images/save.png"));
-  saveAction->setEnabled(false);
-
   showWelcomePageAction = new QAction(tr("Show welcome page"), this);
   showWelcomePageAction->setCheckable(true);
   showWelcomePageAction->setChecked(m_showWelcomePage);
@@ -1002,7 +1009,7 @@ void MainWindow::ReShowWindow(QString strProject) {
 
   updateMenusVisibility(false);
 
-  QDockWidget* sourceDockWidget = new QDockWidget(tr("Source"), this);
+  QDockWidget* sourceDockWidget = new DockWidget(tr("Source"), this);
   sourceDockWidget->setObjectName("sourcedockwidget");
   sourcesForm = new SourcesForm(this);
   connect(
@@ -1027,7 +1034,7 @@ void MainWindow::ReShowWindow(QString strProject) {
       ComponentId::ProjectManager);
   reloadSettings();
 
-  QDockWidget* propertiesDockWidget = new QDockWidget(tr("Properties"), this);
+  QDockWidget* propertiesDockWidget = new DockWidget(tr("Properties"), this);
   PropertyWidget* propertyWidget =
       new PropertyWidget{sourcesForm->ProjManager()};
   connect(sourcesForm, &SourcesForm::ShowProperty, propertyWidget,
@@ -1067,7 +1074,7 @@ void MainWindow::ReShowWindow(QString strProject) {
   setCentralWidget(centralWidget);
 
   // console
-  QDockWidget* consoleDocWidget = new QDockWidget(tr("Console"), this);
+  QDockWidget* consoleDocWidget = new DockWidget(tr("Console"), this);
   consoleDocWidget->setObjectName("consoledocwidget");
   m_dockConsole = consoleDocWidget;
 
@@ -1102,7 +1109,7 @@ void MainWindow::ReShowWindow(QString strProject) {
 
   addDockWidget(Qt::BottomDockWidgetArea, consoleDocWidget);
 
-  // QDockWidget* runDockWidget = new QDockWidget(tr("Design Runs"), this);
+  // QDockWidget* runDockWidget = new DockWidget(tr("Design Runs"), this);
   // runDockWidget->setObjectName("designrundockwidget");
   // RunsForm* runForm = new RunsForm(this);
   // runForm->RegisterCommands(GlobalSession);
@@ -1163,7 +1170,7 @@ void MainWindow::ReShowWindow(QString strProject) {
       new TaskManagerComponent{m_taskManager}, ComponentId::TaskManager);
   m_projectFileLoader->registerComponent(new CompilerComponent(m_compiler),
                                          ComponentId::Compiler);
-  QDockWidget* taskDockWidget = new QDockWidget(tr("Task"), this);
+  QDockWidget* taskDockWidget = new DockWidget(tr("Task"), this);
   taskDockWidget->setWidget(m_taskView);
   addDockWidget(Qt::LeftDockWidgetArea, taskDockWidget);
 
@@ -1295,18 +1302,18 @@ void MainWindow::pinAssignmentActionTriggered() {
     addPinPlannerRefreshButton(packagePinDockWidget);
     m_pinAssignmentDocks = {portsDockWidget, packagePinDockWidget};
   } else {
-    if (saveAction->isEnabled()) {
+    if (isEnableSaveButtons()) {
       auto answer = QMessageBox::question(
           this, "Warning",
           "Pin planner data were modified. Do you want to save it?",
           QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
           QMessageBox::Yes);
       if (answer == QMessageBox::No) {
-        saveAction->setEnabled(false);
+        setEnableSaveButtons(false);
         cleanUpDockWidgets(m_pinAssignmentDocks);
       } else if (answer == QMessageBox::Yes) {
         saveActionTriggered();
-        const bool saved = !saveAction->isEnabled();
+        const bool saved = !isEnableSaveButtons();
         if (saved)
           cleanUpDockWidgets(m_pinAssignmentDocks);
         else
@@ -1318,7 +1325,6 @@ void MainWindow::pinAssignmentActionTriggered() {
       cleanUpDockWidgets(m_pinAssignmentDocks);
     }
   }
-  saveToolBar->setHidden(!pinAssignmentAction->isChecked());
   if (!pinAssignmentAction->isChecked()) {
     // cleanup pin planner
     auto pinAssignment = findChild<PinAssignmentCreator*>();
@@ -1332,16 +1338,20 @@ void MainWindow::pinAssignmentChanged() {
       dock->setWindowTitle(dock->windowTitle() + "*");
     }
   }
-  saveAction->setEnabled(true);
+  setEnableSaveButtons(true);
 }
 
 void MainWindow::ipConfiguratorActionTriggered() {
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
-    m_availableIpsgDockWidget = PrepareTab(tr("IPs"), "availableIpsWidget",
-                                           creator.GetAvailableIpsWidget(),
-                                           nullptr, Qt::RightDockWidgetArea);
+    auto availableIpsgDockWidget = PrepareTab(tr("IPs"), "availableIpsWidget",
+                                              creator.GetAvailableIpsWidget(),
+                                              nullptr, Qt::RightDockWidgetArea);
+    connect(availableIpsgDockWidget, &DockWidget::closed, ipConfiguratorAction,
+            &QAction::trigger);
+
+    m_availableIpsgDockWidget = availableIpsgDockWidget;
 
     // Get the actual IpCatalogTree
     auto ipsWidgets = m_availableIpsgDockWidget->findChildren<IpCatalogTree*>();
@@ -1440,7 +1450,9 @@ void MainWindow::resetIps() {
 void MainWindow::updateViewMenu() {
   viewMenu->clear();
   viewMenu->addAction(ipConfiguratorAction);
+#ifndef PRODUCTION_BUILD
   viewMenu->addAction(pinAssignmentAction);
+#endif
   const QList<QDockWidget*> dockwidgets = findChildren<QDockWidget*>();
   if (!dockwidgets.empty()) {
     viewMenu->addSeparator();
@@ -1578,7 +1590,7 @@ void MainWindow::setVisibleRefreshButtons(bool visible) {
 }
 
 void MainWindow::pinPlannerSaved() {
-  saveAction->setEnabled(false);
+  setEnableSaveButtons(false);
   for (auto& dock : m_pinAssignmentDocks) {
     if (dock->windowTitle().endsWith("*")) {
       dock->setWindowTitle(
@@ -1610,6 +1622,15 @@ void MainWindow::saveSettings() {
       }
     }
   }
+}
+
+void MainWindow::setEnableSaveButtons(bool enable) {
+  for (const auto& b : m_saveButtons) b->setEnabled(enable);
+}
+
+bool MainWindow::isEnableSaveButtons() const {
+  if (!m_saveButtons.isEmpty()) return m_saveButtons.first()->isEnabled();
+  return false;
 }
 
 void MainWindow::onShowWelcomePage(bool show) {
