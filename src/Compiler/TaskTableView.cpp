@@ -50,10 +50,6 @@ TaskTableView::TaskTableView(TaskManager *tManager, QWidget *parent)
           SLOT(customMenuRequested(const QPoint &)));
   setSelectionBehavior(QAbstractItemView::SelectionBehavior::SelectItems);
   setSelectionMode(QAbstractItemView::SelectionMode::SingleSelection);
-  connect(m_taskManager, &TaskManager::taskStateChanged, this, [this]() {
-    m_viewDisabled = m_taskManager->status() == TaskStatus::InProgress;
-    viewport()->setEnabled(!m_viewDisabled);
-  });
   initializeResources();
 }
 
@@ -89,7 +85,6 @@ void TaskTableView::setModel(QAbstractItemModel *model) {
     // which can.
     setIndexWidget(statusIndex, new QLabel);
     auto task = m_taskManager->task(statusIndex.data(TaskId).toUInt());
-    connect(task, &Task::enableChanged, this, [this]() { update(); });
     if (task && ((task->type() == TaskType::Settings) ||
                  (task->type() == TaskType::Button))) {
       auto index = this->model()->index(i, TitleCol);
@@ -107,6 +102,11 @@ void TaskTableView::setModel(QAbstractItemModel *model) {
   }
 }
 
+void TaskTableView::setViewDisabled(bool disabled) {
+  m_viewDisabled = disabled;
+  viewport()->setEnabled(!m_viewDisabled);
+}
+
 void TaskTableView::customMenuRequested(const QPoint &pos) {
   // We only disabled the viewport in order to have scrollbar enabled.
   // Mouse events keep on coming in this case though, so we catch them manually.
@@ -119,30 +119,37 @@ void TaskTableView::customMenuRequested(const QPoint &pos) {
       return;
 
     QMenu *menu = new QMenu(this);
-    if (task->isEnable()) {
-      if (task->type() != TaskType::None) {
-        QAction *start = new QAction("Run", this);
-        connect(start, &QAction::triggered, this,
-                [this, index]() { userActionHandle(index); });
-        menu->addAction(start);
-        if (TaskManager::isSimulation(task)) {
-          QAction *view = new QAction("View waveform", this);
-          connect(view, &QAction::triggered, this,
-                  [this, task]() { emit ViewWaveform(task); });
-          menu->addAction(view);
-        }
-        addTaskLogAction(menu, task);
-        menu->addSeparator();
+    if (task->type() != TaskType::None) {
+      QAction *start = new QAction("Run", this);
+      connect(start, &QAction::triggered, this,
+              [this, index]() { userActionHandle(index); });
+      menu->addAction(start);
+      if (task->cleanTask() != nullptr) {
+        QAction *clean = new QAction("Clean", this);
+        connect(clean, &QAction::triggered, this,
+                [this, index]() { userActionCleanHandle(index); });
+        menu->addAction(clean);
       }
+      if (TaskManager::isSimulation(task)) {
+        QAction *view = new QAction("View waveform", this);
+        connect(view, &QAction::triggered, this,
+                [this, task]() { emit ViewWaveform(task); });
+        menu->addAction(view);
+      }
+      addTaskLogAction(menu, task);
+      menu->addSeparator();
     }
     addExpandCollapse(menu);
-    if (TaskManager::isSimulation(task)) addEnableDisableTask(menu, task);
     menu->popup(viewport()->mapToGlobal(pos));
   }
 }
 
 void TaskTableView::userActionHandle(const QModelIndex &index) {
   model()->setData(index, QVariant(), UserActionRole);
+}
+
+void TaskTableView::userActionCleanHandle(const QModelIndex &index) {
+  model()->setData(index, QVariant(), UserActionCleanRole);
 }
 
 void TaskTableView::dataChanged(const QModelIndex &topLeft,
@@ -166,6 +173,7 @@ QRect TaskTableView::expandArea(const QModelIndex &index) const {
   auto r = style()->proxy()->subElementRect(QStyle::SE_ItemViewItemDecoration,
                                             &opt, this);
   int h = rowHeight(index.row());
+  r.setTopLeft(r.topLeft() + QPoint{20, 0});  //  move out of the check box
   r.setSize({h, h});
   return r;
 }
@@ -228,14 +236,6 @@ void TaskTableView::addExpandCollapse(QMenu *menu) {
   connect(collapse, &QAction::triggered, this,
           [areaAction]() { areaAction(ExpandAreaAction::Collapse); });
   menu->addAction(collapse);
-}
-
-void TaskTableView::addEnableDisableTask(QMenu *menu, Task *task) {
-  QAction *enable = new QAction{"Enable/Disable task", this};
-  connect(enable, &QAction::triggered, this,
-          [task]() { task->setEnable(!task->isEnable()); });
-  menu->addSeparator();
-  menu->addAction(enable);
 }
 
 TaskTableView::TasksDelegate::TasksDelegate(TaskTableView &view,

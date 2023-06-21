@@ -34,7 +34,7 @@ enum class SynthesisType { Yosys, QL, RS };
 
 class CompilerOpenFPGA : public Compiler {
  public:
-  CompilerOpenFPGA() = default;
+  CompilerOpenFPGA() { m_name = "openfpga"; };
   ~CompilerOpenFPGA() = default;
   void AnalyzeExecPath(const std::filesystem::path& path) {
     m_analyzeExecutablePath = path;
@@ -57,6 +57,9 @@ class CompilerOpenFPGA : public Compiler {
   void ArchitectureFile(const std::filesystem::path& path) {
     m_architectureFile = path;
   }
+  void DeviceTagVersion(const std::string& version) {
+    m_deviceTagVersion = version;
+  }
   void YosysScript(const std::string& script) { m_yosysScript = script; }
   void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }
   void OpenFpgaArchitectureFile(const std::filesystem::path& path) {
@@ -77,15 +80,44 @@ class CompilerOpenFPGA : public Compiler {
   void OpenFpgaPinmapXMLFile(const std::filesystem::path& path) {
     m_OpenFpgaPinMapXml = path;
   }
+  void OpenFpgaPinConstraintFile(const std::filesystem::path& path) {
+    m_OpenFpgaPinConstraintXml = path;
+  }
   void PbPinFixup(const std::string& name) { m_pb_pin_fixup = name; }
   void DeviceSize(const std::string& XxY) { m_deviceSize = XxY; }
-  void Help(std::ostream* out);
+
+  void MaxDeviceDSPCount(uint32_t max_dsp) { m_maxDeviceDSPCount = max_dsp; }
+  void MaxDeviceBRAMCount(uint32_t max_bram) {
+    m_maxDeviceBRAMCount = max_bram;
+  }
+  void MaxDeviceCarryLength(uint32_t carry_length) {
+    m_maxDeviceCarryLength = carry_length;
+  }
+  void MaxDeviceLUTCount(uint32_t max_lut) { m_maxDeviceLUTCount = max_lut; }
+  void MaxDeviceFFCount(uint32_t max_ff) { m_maxDeviceFFCount = max_ff; }
+  void MaxDeviceIOCount(uint32_t max_io) { m_maxDeviceIOCount = max_io; }
+  uint32_t MaxDeviceDSPCount() { return m_maxDeviceDSPCount; }
+  uint32_t MaxDeviceBRAMCount() { return m_maxDeviceBRAMCount; }
+  uint32_t MaxDeviceCarryLength() { return m_maxDeviceCarryLength; }
+  uint32_t MaxDeviceLUTCount() { return m_maxDeviceLUTCount; }
+  uint32_t MaxDeviceFFCount() { return m_maxDeviceFFCount; }
+  uint32_t MaxDeviceIOCount() { return m_maxDeviceIOCount; }
+  void MaxUserDSPCount(uint32_t max_dsp) { m_maxUserDSPCount = max_dsp; }
+  void MaxUserBRAMCount(uint32_t max_bram) { m_maxUserBRAMCount = max_bram; }
+  void MaxUserCarryLength(uint32_t max_carry_length) {
+    m_maxUserCarryLength = max_carry_length;
+  }
+  int32_t MaxUserDSPCount() { return m_maxUserDSPCount; }
+  int32_t MaxUserBRAMCount() { return m_maxUserBRAMCount; }
+  int32_t MaxUserCarryLength() { return m_maxUserCarryLength; }
+
+  std::vector<std::string> helpTags() const;
   void Version(std::ostream* out);
   void KeepAllSignals(bool on) { m_keepAllSignals = on; }
   const std::string& YosysPluginLibName() { return m_yosysPluginLib; }
   const std::string& YosysPluginName() { return m_yosysPlugin; }
   const std::string& YosysMapTechnology() { return m_mapToTechnology; }
-
+  const std::string& DeviceTagVersion() { return m_deviceTagVersion; }
   void YosysPluginLibName(const std::string& libname) {
     m_yosysPluginLib = libname;
   }
@@ -117,10 +149,13 @@ class CompilerOpenFPGA : public Compiler {
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   virtual bool LoadDeviceData(const std::string& deviceName);
+  virtual bool LoadDeviceData(const std::string& deviceName,
+                              const std::filesystem::path& deviceListFile);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
                              const std::filesystem::path& synth_scrypt_path,
                              const std::filesystem::path& outputFile);
+  virtual void reloadSettings();
   virtual std::vector<std::string> GetCleanFiles(
       Action action, const std::string& projectName,
       const std::string& topModule) const;
@@ -166,11 +201,21 @@ class CompilerOpenFPGA : public Compiler {
   std::filesystem::path m_OpenFpgaRepackConstraintsFile = "";
   std::filesystem::path m_OpenFpgaFabricKeyFile = "";
   std::filesystem::path m_OpenFpgaPinMapXml = "";
+  std::filesystem::path m_OpenFpgaPinConstraintXml = "";
+  std::string m_deviceTagVersion;
   std::string m_deviceSize;
   std::string m_yosysScript;
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
-
+  uint32_t m_maxDeviceDSPCount = 0;
+  uint32_t m_maxDeviceBRAMCount = 0;
+  uint32_t m_maxDeviceLUTCount = 0;
+  uint32_t m_maxDeviceFFCount = 0;
+  uint32_t m_maxDeviceIOCount = 0;
+  uint32_t m_maxDeviceCarryLength = 0;
+  int32_t m_maxUserDSPCount = -1;
+  int32_t m_maxUserBRAMCount = -1;
+  int32_t m_maxUserCarryLength = -1;
   virtual std::string BaseVprCommand();
   virtual std::string BaseStaCommand();
   virtual std::string BaseStaScript(std::string libFileName,

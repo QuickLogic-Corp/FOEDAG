@@ -43,15 +43,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/Log.h"
-#include "Compiler/TclInterpreterHandler.h"
 #include "Compiler/WorkerThread.h"
 #include "IPGenerate/IPCatalog.h"
 #include "IPGenerate/IPGenerator.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
-#include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
-#include "Utils/ProcessUtils.h"
 #include "Utils/StringUtils.h"
 
 extern FOEDAG::Session* GlobalSession;
@@ -89,9 +86,13 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       const auto& path = std::filesystem::current_path();
       expandedFile = path / expandedFile;
     }
-    bool status =
-        compiler->BuildLiteXIPCatalog(expandedFile.lexically_normal());
-    return (status) ? TCL_OK : TCL_ERROR;
+    auto fn = [compiler, expandedFile]() -> bool {
+      return compiler->BuildLiteXIPCatalog(expandedFile.lexically_normal());
+    };
+    WorkerThread* thread = new WorkerThread{
+        {}, Compiler::Action::NoAction, generator->GetCompiler()};
+    bool res = thread->Start(fn);
+    return res ? TCL_OK : TCL_ERROR;
   };
   interp->registerCmd("add_litex_ip_catalog", add_litex_ip_catalog, this, 0);
 
@@ -175,6 +176,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     std::string out_file;
     std::string version;
     std::vector<SParameter> parameters;
+    bool generated{true};
     for (int i = 1; i < argc; i++) {
       std::string arg = argv[i];
       if (i == 1) {
@@ -188,6 +190,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       } else if (arg == "-version") {
         i++;
         version = argv[i];
+      } else if (arg == "-template") {
+        generated = false;
       } else if (arg.find("-P") == 0) {
         std::string def;
         std::string value;
@@ -212,6 +216,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     }
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_file);
+    instance->Generated(generated);
     if (!generator->AddIPInstance(instance)) {
       ok = false;
     }
@@ -241,6 +246,29 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   };
   interp->registerCmd("delete_ip", delete_ip, this, 0);
 
+  auto simulate_ip = [](void* clientData, Tcl_Interp* interp, int argc,
+                        const char* argv[]) -> int {
+    IPGenerator* generator = (IPGenerator*)clientData;
+    if (argc < 2) {
+      Tcl_AppendResult(interp, "Wrong arguments. Please read simulate_ip help",
+                       nullptr);
+      return TCL_ERROR;
+    }
+    const std::string ipName{argv[1]};
+    WorkerThread* thread = new WorkerThread{
+        {}, Compiler::Action::Analyze, generator->GetCompiler()};
+    std::string message{};
+    auto fn = [generator, &message](const std::string& ipName) -> bool {
+      auto [ok, res] = generator->SimulateIpTcl(ipName);
+      if (!ok) message = res;
+      return ok;
+    };
+    bool res = thread->Start(fn, ipName);
+    if (!res) Tcl_AppendResult(interp, message.c_str(), nullptr);
+    return res ? TCL_OK : TCL_ERROR;
+  };
+  interp->registerCmd("simulate_ip", simulate_ip, this, nullptr);
+
   return true;
 }
 
@@ -252,9 +280,10 @@ bool IPGenerator::AddIPInstance(IPInstance* instance) {
   auto isMatch = [instance](IPInstance* targetInstance) {
     return targetInstance->ModuleName() == instance->ModuleName();
   };
-  m_instances.erase(
-      std::remove_if(m_instances.begin(), m_instances.end(), isMatch),
-      m_instances.end());
+  auto it = std::find_if(m_instances.begin(), m_instances.end(), isMatch);
+  if (it != m_instances.end()) {
+    m_instances.erase(it);
+  }
 
   // Check parameters
   std::set<std::string> legalParams;
@@ -413,7 +442,7 @@ bool IPGenerator::Generate() {
     // Take a list of moduleNames and only generate those IPs
     std::vector<std::string> modules;
     StringUtils::tokenize(compiler->IPGenMoreOpt(), " ", modules);
-    for (auto moduleName : modules) {
+    for (const auto& moduleName : modules) {
       IPInstance* inst = GetIPInstance(moduleName);
       if (inst) {
         instances.push_back(inst);
@@ -451,7 +480,7 @@ bool IPGenerator::Generate() {
         FileUtils::MkDirs(jsonFile.parent_path());
         std::ofstream jsonF(jsonFile);
         jsonF << "{" << std::endl;
-        for (auto param : inst->Parameters()) {
+        for (const auto& param : inst->Parameters()) {
           std::string value;
           // The configure_ip command loses type info because we go from full
           // json meta data provided by the ip_catalog generators to a single
@@ -499,6 +528,11 @@ bool IPGenerator::Generate() {
           std::stringstream buffer;
           newbuffer << newfile.rdbuf();
         }
+        if (newbuffer.str() == previousbuffer.str()) {
+          m_compiler->Message("IP Generate, reusing IP " +
+                              GetBuildDir(inst).string());
+          continue;
+        }
 
         // Find path to litex enabled python interpreter
         std::filesystem::path pythonPath = IPCatalog::getPythonPath();
@@ -521,20 +555,13 @@ bool IPGenerator::Generate() {
           }
         }
 
-        std::string command = pythonPath.string() + " " + executable.string() +
-                              " --build --json " +
-                              FileUtils::GetFullPath(jsonFile).string();
+        StringVector args{executable.string(), "--build", "--json",
+                          FileUtils::GetFullPath(jsonFile).string()};
         std::ostringstream help;
-
-        if (newbuffer.str() == previousbuffer.str()) {
-          m_compiler->Message("IP Generate, reusing IP " +
-                              inst->OutputFile().string());
-          continue;
-        }
-
         m_compiler->Message("IP Generate, generating IP " +
-                            inst->OutputFile().string());
-        if (FileUtils::ExecuteSystemCommand(command, &help)) {
+                            GetBuildDir(inst).string());
+        if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help)
+                .code) {
           m_compiler->ErrorMessage("IP Generate, " + help.str());
           return false;
         }
@@ -546,21 +573,109 @@ bool IPGenerator::Generate() {
   return status;
 }
 
+std::pair<bool, std::string> IPGenerator::IsSimulateIpSupported(
+    const std::string& name) const {
+  auto it =
+      std::find_if(m_instances.begin(), m_instances.end(),
+                   [name](IPInstance* i) { return name == i->ModuleName(); });
+  if (it == m_instances.end())
+    return {false, "No IP generated with name " + name};
+
+  IPInstance* inst{*it};
+  auto path = GetSimDir(inst);
+
+  if (!FileUtils::FileExists(path / "Makefile"))
+    return {false, "Simulation not available for " + name};
+  return {true, {}};
+}
+
+std::pair<bool, std::string> IPGenerator::SimulateIpTcl(
+    const std::string& name) {
+  auto it =
+      std::find_if(m_instances.begin(), m_instances.end(),
+                   [name](IPInstance* i) { return name == i->ModuleName(); });
+  if (it == m_instances.end())
+    return {false, "No IP generated with name " + name};
+
+  IPInstance* inst{*it};
+  auto path = GetSimDir(inst);
+
+  auto [supported, message] = IsSimulateIpSupported(name);
+  if (!supported) return {supported, message};
+
+  auto artifactsPath{GetSimArtifactsDir(inst)};
+  if (!FileUtils::MkDirs(artifactsPath)) {
+    return {false, "Failed to create folder " + artifactsPath.string()};
+  }
+
+  std::string command = "make";
+  StringVector args{"OUT_DIR=" + artifactsPath.string()};
+  if (auto ret = FileUtils::ExecuteSystemCommand(
+          command, args, m_compiler->GetOutStream(), -1, path.string(),
+          m_compiler->GetErrStream());
+      ret.code != 0) {
+    return {false, ret.message};
+  }
+  return {true, std::string{}};
+}
+
+void IPGenerator::SimulateIp(const std::string& name) {
+  int returnVal{};
+  auto resultStr =
+      GlobalSession->TclInterp()->evalCmd("simulate_ip " + name, &returnVal);
+  if (returnVal != TCL_OK) {
+    if (m_compiler) m_compiler->ErrorMessage(resultStr);
+  }
+}
+
+std::pair<bool, std::string> IPGenerator::OpenWaveForm(
+    const std::string& name) {
+  auto it =
+      std::find_if(m_instances.begin(), m_instances.end(),
+                   [name](IPInstance* i) { return name == i->ModuleName(); });
+  if (it == m_instances.end())
+    return {false, "No IP generated with name " + name};
+
+  IPInstance* inst{*it};
+  auto path = GetSimDir(inst);
+
+  auto [supported, message] = IsSimulateIpSupported(name);
+  if (!supported) return {supported, message};
+
+  auto artifactsPath{GetSimArtifactsDir(inst)};
+  StringVector extensions{".fst", ".vcd"};
+  for (const auto& ext : extensions) {
+    auto file = FileUtils::FindFileByExtension(artifactsPath, ext);
+    if (!file.empty()) {
+      const std::string cmd = "wave_open " + file.string();
+      bool ok = GlobalSession->CmdStack()->push_and_exec(new Command(cmd));
+      return {ok, "Command \'" + cmd + "\' failed."};
+    }
+  }
+  return {false,
+          "Waveform file does not exist at " + artifactsPath.string() +
+              ".\nSupported files: " + StringUtils::join(extensions, ", ")};
+}
+
 // This will return the expected VLNV path for the given instance
 std::filesystem::path IPGenerator::GetBuildDir(IPInstance* instance) const {
+  auto projectIPsPath = GetProjectIPsPath();
+  if (!projectIPsPath.empty())
+    return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
+  return {};
+}
+
+std::filesystem::path IPGenerator::GetSimDir(IPInstance* instance) const {
+  return GetBuildDir(instance) / "sim";
+}
+
+std::filesystem::path IPGenerator::GetSimArtifactsDir(
+    IPInstance* instance) const {
   std::filesystem::path dir{};
-
-  auto meta = FOEDAG::getIpInfoFromPath(instance->Definition()->FilePath());
-  ProjectManager* projManager = nullptr;
-  if (m_compiler && (projManager = m_compiler->ProjManager())) {
-    QString projName = projManager->getProjectName();
-
-    // Build up the expected ip build path
-    std::filesystem::path baseDir(projManager->getProjectPath().toStdString());
-    std::string projIpDir = projName.toStdString() + ".IPs";
-    dir = baseDir / projIpDir / meta.vendor / meta.library / meta.name /
-          meta.version / instance->ModuleName();
-  }
+  auto projectIPsPath = GetProjectIPsPath();
+  if (!projectIPsPath.empty())
+    dir = GetMetaPath(projectIPsPath / "simulation", instance) /
+          instance->ModuleName();
   return dir;
 }
 
@@ -568,8 +683,7 @@ std::filesystem::path IPGenerator::GetBuildDir(IPInstance* instance) const {
 std::filesystem::path IPGenerator::GetCachePath(IPInstance* instance) const {
   std::filesystem::path dir{};
 
-  ProjectManager* projManager = nullptr;
-  if (m_compiler && (projManager = m_compiler->ProjManager())) {
+  if (m_compiler && m_compiler->ProjManager()) {
     std::filesystem::path ipPath = GetBuildDir(instance);
     auto def = instance->Definition();
     std::string ip_config_file =
@@ -578,6 +692,41 @@ std::filesystem::path IPGenerator::GetCachePath(IPInstance* instance) const {
   }
 
   return dir;
+}
+
+std::filesystem::path IPGenerator::GetTmpCachePath(IPInstance* instance) const {
+  std::filesystem::path dir{};
+  if (m_compiler && m_compiler->ProjManager()) {
+    auto ipPath = GetMetaPath(GetTmpPath(), instance) / instance->ModuleName();
+    auto def = instance->Definition();
+    std::string ip_config_file =
+        def->Name() + "_" + instance->ModuleName() + ".json";
+    dir = ipPath / ip_config_file;
+  }
+  return dir;
+}
+
+std::filesystem::path IPGenerator::GetTmpPath() const {
+  auto projectIPsPath = GetProjectIPsPath();
+  if (!projectIPsPath.empty()) return projectIPsPath / ".tmp";
+  return {};
+}
+
+std::filesystem::path IPGenerator::GetProjectIPsPath() const {
+  if (m_compiler && m_compiler->ProjManager()) {
+    ProjectManager* projManager{m_compiler->ProjManager()};
+    std::filesystem::path baseDir(projManager->projectPath());
+    std::string projIpDir = projManager->projectName() + ".IPs";
+    return baseDir / projIpDir;
+  }
+  return {};
+}
+
+std::filesystem::path IPGenerator::GetMetaPath(
+    const std::filesystem::path& base, IPInstance* inst) const {
+  auto meta = FOEDAG::getIpInfoFromPath(inst->Definition()->FilePath());
+  auto ipPath = base / meta.vendor / meta.library / meta.name / meta.version;
+  return ipPath;
 }
 
 // This will return a vector of paths to ./*.json and ./src/* in a given IP

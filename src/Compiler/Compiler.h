@@ -29,7 +29,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Command/Command.h"
 #include "Command/CommandStack.h"
-//#include "DesignQuery/DesignQuery.h"
 #include "IPGenerate/IPGenerator.h"
 #include "Main/CommandLine.h"
 #include "Simulation/Simulator.h"
@@ -45,12 +44,16 @@ class Session;
 class DesignManager;
 class TclCommandIntegration;
 class Constraints;
+class CFGCompiler;
+class ToolContext;
 
 struct DeviceData {
   std::string family;
   std::string series;
   std::string package;
 };
+
+enum class ClbPacking { Auto, Dense, Timing_driven };
 
 class Compiler {
   friend Simulator;
@@ -73,7 +76,9 @@ class Compiler {
     SimulateRTL,
     SimulateGate,
     SimulatePNR,
-    SimulateBitstream
+    SimulateBitstream,
+    ProgramDevice,
+    Configuration
   };
   enum class State {
     None,
@@ -91,8 +96,8 @@ class Compiler {
   enum MsgSeverity { Ignore, Info, Warning, Error };
   enum class IPGenerateOpt { None, Clean, List };
   enum class DesignAnalysisOpt { None, Clean };
-  enum class SynthesisOpt { None, Area, Delay, Mixed, Clean };
-  enum class PackingOpt { None, Clean };
+  enum class SynthesisOpt { Area, Delay, Mixed, Clean };
+  enum class PackingOpt { None, Clean, Debug };
   enum class GlobalPlacementOpt { None, Clean };
   enum class PlacementOpt { None, Clean };
   enum class PinAssignOpt { Random, In_Define_Order, Free };
@@ -103,13 +108,14 @@ class Compiler {
   enum class STAEngineOpt { Tatum, Opensta };
 
   // Most common use case, create the compiler in your main
-  Compiler() = default;
+  Compiler() { m_name = "dummy"; };
   Compiler(TclInterpreter* interp, std::ostream* out,
            TclInterpreterHandler* tclInterpreterHandler = nullptr);
   void SetInterpreter(TclInterpreter* interp) { m_interp = interp; }
   void SetOutStream(std::ostream* out) { m_out = out; };
   void SetErrStream(std::ostream* err) { m_err = err; };
   std::ostream* GetOutStream() { return m_out; }
+  std::ostream* GetErrStream() { return m_err; }
   void SetTclInterpreterHandler(TclInterpreterHandler* tclInterpreterHandler);
   void SetSession(Session* session) { m_session = session; }
   Session* GetSession() const { return m_session; }
@@ -119,7 +125,9 @@ class Compiler {
   State CompilerState() const { return m_state; }
   void CompilerState(State st) { m_state = st; }
   bool Compile(Action action);
+  void GenerateReport(int action);
   void Stop();
+  void ResetStopFlag();
   TclInterpreter* TclInterp() { return m_interp; }
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
   void start();
@@ -133,11 +141,17 @@ class Compiler {
   TaskManager* GetTaskManager() const;
   Constraints* getConstraints() { return m_constraints; }
   void setGuiTclSync(TclCommandIntegration* tclCommands);
-  virtual void Help(std::ostream* out);
+  virtual std::vector<std::string> helpTags() const;
+  virtual void Help(ToolContext* context, std::ostream* out);
+  TclCommandIntegration* GuiTclSync() const;
   virtual void Version(std::ostream* out);
-  virtual void Message(const std::string& message) const;
-  virtual void ErrorMessage(const std::string& message,
-                            bool append = true) const;
+  virtual void Message(const std::string& message,
+                       const std::string& messagePrefix = "",
+                       bool raw = false) const;
+  virtual void ErrorMessage(const std::string& message, bool append = true,
+                            const std::string& messagePrefix = "",
+                            bool raw = false) const;
+  virtual void reloadSettings() {}
   virtual std::vector<std::string> GetCleanFiles(
       Action action, const std::string& projectName,
       const std::string& topModule) const;
@@ -150,7 +164,8 @@ class Compiler {
   void SetSimulator(Simulator* simulator) { m_simulator = simulator; }
   Simulator* GetSimulator();
 
-  bool BuildLiteXIPCatalog(std::filesystem::path litexPath);
+  bool BuildLiteXIPCatalog(std::filesystem::path litexPath,
+                           bool namesOnly = false);
   bool HasIPInstances();
   bool HasIPDefinitions();
 
@@ -180,10 +195,15 @@ class Compiler {
   void PowerAnalysisOpt(PowerOpt opt) { m_powerOpt = opt; }
   STAEngineOpt TimingAnalysisEngineOpt() const { return m_staEngineOpt; }
   void TimingAnalysisEngineOpt(STAEngineOpt opt) { m_staEngineOpt = opt; }
-
   BitstreamOpt BitsOpt() const { return m_bitstreamOpt; }
   void BitsOpt(BitstreamOpt opt) { m_bitstreamOpt = opt; }
+
   // Compiler specific opt
+  const std::string& BistreamMoreOpt() { return m_bitstreamMoreOpt; }
+  void BitstreamMoreOpt(const std::string& opt) {
+    m_bitstreamMoreOpt += opt + " ";
+  }
+
   const std::string& SynthMoreOpt() { return m_synthMoreOpt; }
   void SynthMoreOpt(const std::string& opt) { m_synthMoreOpt = opt; }
 
@@ -218,6 +238,9 @@ class Compiler {
   void SetNetlistType(NetlistType type) { m_netlistType = type; }
   NetlistType GetNetlistType() { return m_netlistType; }
 
+  void SetConfiguration(CFGCompiler* c) { m_configuration = c; }
+  CFGCompiler* GetConfiguration() { return m_configuration; }
+
   void virtual CustomSimulatorSetup(Simulator::SimulationType action);
   void SetWaveformFile(const std::string& wave) { m_waveformFile = wave; }
   const std::string& GetWavefromFile() { return m_waveformFile; }
@@ -232,6 +255,33 @@ class Compiler {
   DeviceData deviceData() const;
   void setDeviceData(const DeviceData& newDeviceData);
 
+  void ClbPackingOption(ClbPacking clbPacking);
+  ClbPacking ClbPackingOption() const;
+
+  virtual int ExecuteAndMonitorSystemCommand(
+      const std::string& command, const std::string logFile = std::string{},
+      bool appendLog = false);
+
+  void ProgrammerToolExecPath(const std::filesystem::path& path) {
+    m_programmerToolExecutablePath = path;
+  }
+
+  std::filesystem::path GetProgrammerToolExecPath() const {
+    return m_programmerToolExecutablePath;
+  }
+
+  void SetConfigFileSearchDirectory(const std::filesystem::path& path) {
+    m_configFileSearchDir = path;
+  }
+
+  std::filesystem::path GetConfigFileSearchDirectory() const {
+    return m_configFileSearchDir;
+  }
+
+  std::string Name() const { return m_name; }
+
+  static constexpr SynthesisOpt SYNTH_OPT_DEFAULT{SynthesisOpt::Mixed};
+
  protected:
   /* Methods that can be customized for each new compiler flow */
   virtual bool IPGenerate();
@@ -244,6 +294,11 @@ class Compiler {
   virtual bool TimingAnalysis();
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
+
+  bool chatGpt(const std::string& message);
+  bool sendChatGpt(const std::string& message);
+  bool resetChatGpt();
+  void chatgptConfig(const std::string& file);
 
   /*!
    * \brief CheckTargetDevice
@@ -261,9 +316,6 @@ class Compiler {
 
   void SetEnvironmentVariable(const std::string variable,
                               const std::string value);
-  virtual int ExecuteAndMonitorSystemCommand(
-      const std::string& command, const std::string logFile = std::string{},
-      bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
@@ -302,7 +354,7 @@ class Compiler {
   // Tasks generic options
   IPGenerateOpt m_ipGenerateOpt = IPGenerateOpt::None;
   DesignAnalysisOpt m_analysisOpt = DesignAnalysisOpt::None;
-  SynthesisOpt m_synthOpt = SynthesisOpt::None;
+  SynthesisOpt m_synthOpt = SYNTH_OPT_DEFAULT;
   PackingOpt m_packingOpt = PackingOpt::None;
   GlobalPlacementOpt m_globalPlacementOpt = GlobalPlacementOpt::None;
   PlacementOpt m_placementOpt = PlacementOpt::None;
@@ -314,9 +366,11 @@ class Compiler {
   BitstreamOpt m_bitstreamOpt = BitstreamOpt::DefaultBitsOpt;
   std::filesystem::path m_PinMapCSV{};
   DeviceData m_deviceData;
+  ClbPacking m_clbPacking{ClbPacking::Auto};
 
   // Compiler specific options
   std::string m_pnrOpt;
+  std::string m_bitstreamMoreOpt;
   std::string m_synthMoreOpt;
   std::string m_placeMoreOpt;
   std::string m_ipGenMoreOpt;
@@ -331,8 +385,8 @@ class Compiler {
   // Sub engines
   IPGenerator* m_IPGenerator = nullptr;
   Simulator* m_simulator = nullptr;
-  // DesignQuery* m_DesignQuery = nullptr;
-
+  class DesignQuery* m_DesignQuery = nullptr;
+  CFGCompiler* m_configuration = nullptr;
   // Error message severity
   std::map<std::string, MsgSeverity> m_severityMap;
 
@@ -341,9 +395,14 @@ class Compiler {
   NetlistType m_netlistType = NetlistType::Blif;
 
   std::string m_waveformFile;
+  std::string m_chatgptConfigFile{};
 
   // GTKWave
   QProcess* m_gtkwave_process = nullptr;
+
+  std::filesystem::path m_programmerToolExecutablePath{};
+  std::filesystem::path m_configFileSearchDir{};
+  std::string m_name;
 };
 
 }  // namespace FOEDAG

@@ -29,13 +29,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
+#include "Utils/FileUtils.h"
 
 namespace {
-static constexpr const char *RESOURCE_REPORT_NAME{
-    "STA - Report Resource Utilization"};
-static constexpr const char *TIMING_REPORT_NAME{"STA - Report Static Timing"};
-static constexpr const char *CIRCUIT_REPORT_NAME{
-    "STA - Circuit Statistics Report"};
+static constexpr const char *DESIGN_STAT_REPORT_NAME{"STA - Design statistics"};
+static constexpr const char *RESOURCE_REPORT_NAME{"STA - Utilization report"};
 
 static const QString LOAD_ARCH_SECTION{"# Loading Architecture Description"};
 static const QString BLOCK_GRAPH_BUILD_SECTION{
@@ -57,6 +55,7 @@ static const QRegExp FIND_HISTOGRAM{"Final.*histogram:"};
 
 static const QRegularExpression SPLIT_STAT_TIMING{
     "([-]?(([0-9]*[.])?[0-9]+) (ns?(?=,)|.*|MHz))"};
+static const QString STATISTIC_SECTION{"Pb types usage..."};
 
 static const QStringList TIMING_FIELDS{"Hold WNS",
                                        "Hold TNS",
@@ -81,8 +80,14 @@ namespace FOEDAG {
 TimingAnalysisReportManager::TimingAnalysisReportManager(
     const TaskManager &taskManager, Compiler *compiler)
     : AbstractReportManager(taskManager), m_compiler{compiler} {
-  m_circuitColumns = {ReportColumn{"Block type"},
-                      ReportColumn{"Number of blocks", Qt::AlignCenter}};
+  m_circuitColumns = {ReportColumn{"Logic"},
+                      ReportColumn{"Used", Qt::AlignCenter},
+                      ReportColumn{"Available", Qt::AlignCenter},
+                      ReportColumn{"%", Qt::AlignCenter}};
+  m_bramColumns = m_circuitColumns;
+  m_bramColumns[0].m_name = "Block RAM";
+  m_dspColumns = m_circuitColumns;
+  m_dspColumns[0].m_name = "DSP";
 
   m_openSTATimingColumns = {ReportColumn{"Delay", Qt::AlignCenter},
                             ReportColumn{"Time", Qt::AlignCenter},
@@ -93,40 +98,30 @@ TimingAnalysisReportManager::TimingAnalysisReportManager(
 }
 
 QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
-  if (m_compiler &&
-      m_compiler->TimingAnalysisEngineOpt() == Compiler::STAEngineOpt::Opensta)
-    return {QString(TIMING_REPORT_NAME)};
-
-  return {QString(CIRCUIT_REPORT_NAME), QString(RESOURCE_REPORT_NAME),
-          QString(TIMING_REPORT_NAME)};
+  return {QString(RESOURCE_REPORT_NAME), QString(DESIGN_STAT_REPORT_NAME)};
 }
 
 std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     const QString &reportId) {
-  if (!isFileParsed()) parseLogFile();
+  if (isFileOutdated(logFile())) parseLogFile();
+  if (!FileUtils::FileExists(logFile())) clean();
 
   ITaskReport::DataReports dataReports;
 
-  if (reportId == QString(RESOURCE_REPORT_NAME)) {
+  if (reportId == QString(DESIGN_STAT_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
         m_resourceColumns, m_resourceData, QString{}));
-  } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, m_circuitData, QString{}));
-
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, m_timingData, QString{}));
-    if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
-                          Compiler::STAEngineOpt::Opensta) {
-      for (auto &hgrm : m_histograms)
-        dataReports.push_back(std::make_unique<TableReport>(
-            m_openSTATimingColumns, hgrm.second, hgrm.first));
-    } else {
-      for (auto &hgrm : m_histograms)
-        dataReports.push_back(std::make_unique<TableReport>(
-            m_histogramColumns, hgrm.second, hgrm.first));
-    }
+        m_circuitColumns, m_circuitData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_bramColumns, m_bramData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_dspColumns, m_dspData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_ioColumns, m_ioData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_clockColumns, m_clockData, QString{}));
   }
 
   emit reportCreated(reportId);
@@ -173,18 +168,8 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void TimingAnalysisReportManager::parseLogFile() {
-  m_messages.clear();
-  m_histograms.clear();
-  m_resourceData.clear();
-  m_timingData.clear();
-  m_circuitData.clear();
-
-  if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
-                        Compiler::STAEngineOpt::Opensta) {
-    parseOpenSTALog();
-    return;
-  }
-  auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
+  clean();
+  auto logFile = createLogFile();
   if (!logFile) return;
 
   auto timings = QStringList{};
@@ -195,6 +180,7 @@ void TimingAnalysisReportManager::parseLogFile() {
   QString line;
   auto lineNr = 0;
   while (in.readLineInto(&line)) {
+    parseStatisticLine(line);
     if (line.startsWith(LOAD_ARCH_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_ARCH_SECTION, {});
     else if (line.startsWith(BLOCK_GRAPH_BUILD_SECTION))
@@ -204,8 +190,6 @@ void TimingAnalysisReportManager::parseLogFile() {
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_CIRCUIT_SECTION, {});
     else if (line.startsWith(LOAD_TIM_CONSTR))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_TIM_CONSTR, {});
-    else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
-      m_circuitData = parseCircuitStats(in, lineNr);
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
       m_messages.insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
@@ -231,17 +215,42 @@ void TimingAnalysisReportManager::parseLogFile() {
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
       m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
+    else if (line.startsWith(STATISTIC_SECTION))
+      lineNr = parseStatisticsSection(in, lineNr);
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
+  m_circuitData = CreateLogicData();
+  m_bramData = CreateBramData();
+  m_dspData = CreateDspData();
+  m_ioData = CreateIOData();
+  m_clockData = CreateClockData();
+  designStatistics();
 
   logFile->close();
 
-  setFileParsed(true);
+  setFileTimeStamp(this->logFile());
+}
+
+std::filesystem::path TimingAnalysisReportManager::logFile() const {
+  return logFilePath(TIMING_ANALYSIS_LOG);
+}
+
+void TimingAnalysisReportManager::clean() {
+  AbstractReportManager::clean();
+  m_messages.clear();
+  m_histograms.clear();
+  m_timingData.clear();
+  m_resourceData.clear();
+  m_circuitData.clear();
+  m_bramData.clear();
+  m_dspData.clear();
+  m_ioData.clear();
+  m_clockData.clear();
 }
 
 void TimingAnalysisReportManager::parseOpenSTALog() {
-  auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
+  auto logFile = createLogFile();
   if (!logFile) return;
 
   auto in = QTextStream(logFile.get());
@@ -267,7 +276,7 @@ void TimingAnalysisReportManager::parseOpenSTALog() {
 
   logFile->close();
 
-  setFileParsed(true);
+  setFileTimeStamp(this->logFile());
 }
 
 IDataReport::TableData TimingAnalysisReportManager::parseOpenSTATimingTable(

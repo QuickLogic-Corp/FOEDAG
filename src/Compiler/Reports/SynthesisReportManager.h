@@ -44,10 +44,13 @@ class SynthesisReportManager final : public AbstractReportManager {
   SynthesisReportManager(const TaskManager &taskManager);
 
  private:
+  void parseLogLine(const QString &line) override;
   QStringList getAvailableReportIds() const override;
   std::unique_ptr<ITaskReport> createReport(const QString &reportId) override;
   QString getTimingLogFileName() const override;
   void splitTimingData(const QString &timingStr) override;
+  std::filesystem::path logFile() const override;
+  void clean() override;
   // Go through the log file and fills internal data collections (stats,
   // messages)
   void parseLogFile() override;
@@ -56,6 +59,13 @@ class SynthesisReportManager final : public AbstractReportManager {
   void fillLevels(const QString &line, IDataReport::TableData &stats) const;
   // Parses input stream and gets all statistics with their values
   IDataReport::TableData getStatistics(const QString &statsStr) const;
+
+  IDataReport::ColumnValues m_circuitColumns;
+  IDataReport::ColumnValues m_bramColumns;
+  IDataReport::ColumnValues m_dspColumns;
+  IDataReport::TableData m_circuitData;
+  IDataReport::TableData m_bramData;
+  IDataReport::TableData m_dspData;
 };
 
 }  // namespace FOEDAG

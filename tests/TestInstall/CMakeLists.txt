@@ -80,7 +80,7 @@ else()
   set(TCL_STUBB_LIB libtclstub8.6.a)
   set(ZLIB_STATIC_LIB libz.a)
 
-  if(APPLE) 
+  if(APPLE)
     set(TCL_STATIC_LIB libtcl8.6.dylib)
     add_library(tcl_static SHARED IMPORTED )
   elseif ((DEFINED ENV{MSYSTEM}) AND ("$ENV{MSYSTEM}" STREQUAL "MINGW64"))
@@ -98,9 +98,9 @@ ADD_LIBRARY(tcl_stubb STATIC IMPORTED)
 
 SET_TARGET_PROPERTIES(tcl_static PROPERTIES
   IMPORTED_LOCATION ${INSTALL_DIR}/lib/foedag/lib/${TCL_STATIC_LIB})
-  
+
 SET_TARGET_PROPERTIES(tcl_stubb PROPERTIES
-  IMPORTED_LOCATION ${INSTALL_DIR}/lib/foedag/lib/${TCL_STUBB_LIB})   
+  IMPORTED_LOCATION ${INSTALL_DIR}/lib/foedag/lib/${TCL_STUBB_LIB})
 
 
 ADD_LIBRARY(zlib STATIC IMPORTED)
@@ -159,7 +159,7 @@ target_link_libraries(test_hellofoedag
   compiler
   simulation
   ipgenerate
-#  designquery
+  designquery
   foedagutils
   QConsole
   qscintilla2_qt
@@ -168,6 +168,9 @@ target_link_libraries(test_hellofoedag
   zlib
   ipconfigurator
   pinassignment
+  cfgcompiler
+  programmer
+  cfgcommon
   $<$<BOOL:${FOEDAG_WITH_PYTHON}>:${Python3_LIBRARIES}>
   Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml
 #  Qt5::Quick

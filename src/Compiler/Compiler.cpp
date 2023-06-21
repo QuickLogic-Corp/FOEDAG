@@ -36,10 +36,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #include <QDir>
 #include <QProcess>
-#include <charconv>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <functional>
 #include <sstream>
 #include <thread>
 
@@ -48,6 +48,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/TclInterpreterHandler.h"
 #include "Compiler/WorkerThread.h"
 #include "CompilerDefines.h"
+#include "Configuration/CFGCompiler/CFGCompiler.h"
+#include "DesignQuery/DesignQuery.h"
 #include "IPGenerate/IPCatalogBuilder.h"
 #include "Log.h"
 #include "Main/Settings.h"
@@ -60,6 +62,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
 #include "Utils/ProcessUtils.h"
+#include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
 #include "scope_guard/scope_guard.hpp"
 
@@ -67,6 +70,7 @@ extern FOEDAG::Session* GlobalSession;
 using namespace FOEDAG;
 using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
+static const int CHATGPT_TIMEOUT{180000};
 
 auto CreateDummyLog =
     [](ProjectManager* projManager,
@@ -93,126 +97,16 @@ void Compiler::Version(std::ostream* out) {
   LogUtils::PrintVersion(out);
 }
 
-void Compiler::Help(std::ostream* out) {
-  (*out) << "-------------------------" << std::endl;
-  (*out) << "-----  FOEDAG HELP  -----" << std::endl;
-  (*out) << "-------------------------" << std::endl;
-  (*out) << "Options:" << std::endl;
-  (*out) << "   --help           : This help" << std::endl;
-  (*out) << "   --version        : Version" << std::endl;
-  (*out) << "   --batch          : Tcl only, no GUI" << std::endl;
-  (*out) << "   --replay <script>: Replay GUI test" << std::endl;
-  (*out) << "   --script <script>: Execute a Tcl script" << std::endl;
-  (*out) << "   --project <project file>: Open a project" << std::endl;
-  (*out) << "   --compiler <name>: Compiler name {openfpga...}, default is "
-            "a dummy compiler"
-         << std::endl;
-  (*out) << "   --mute           : Mutes stdout in batch mode" << std::endl;
-  (*out) << "Tcl commands:" << std::endl;
-  (*out) << "   help                       : This help" << std::endl;
-  (*out) << "   create_design <name> ?-type <project type>? : Creates a design "
-            "with <name> name"
-         << std::endl;
-  (*out) << "   close_design     : Close current design" << std::endl;
-  (*out) << "               <project type> : rtl, gate-level" << std::endl;
-  (*out) << "   open_project <file>        : Opens a project in started "
-            "upfront GUI"
-         << std::endl;
-  (*out) << "   run_project <file>         : Opens and immediately runs the "
-            "project"
-         << std::endl;
-  (*out) << "   add_design_file <file list> ?type?   ?-work <libName>?  "
-         << std::endl;
-  (*out) << "              Each invocation of the command compiles the "
-            "file list into a compilation unit "
-         << std::endl;
-  (*out) << "                       <type> : -VHDL_1987, -VHDL_1993, "
-            "-VHDL_2000, -VHDL_2008, -V_1995, "
-            "-V_2001, -SV_2005, -SV_2009, -SV_2012, -SV_2017> "
-         << std::endl;
-  (*out) << "              -work <libName> : Compiles the compilation unit "
-            "into library <libName>, default is \"work\""
-         << std::endl;
-  (*out) << "   add_simulation_file <file list> ?type?   ?-work <libName>?  "
-         << std::endl;
-  (*out) << "              Each invocation of the command compiles the "
-            "file list into a compilation unit "
-         << std::endl;
-  (*out) << "                       <type> : -VHDL_1987, -VHDL_1993, "
-            "-VHDL_2000, -VHDL_2008, -V_1995, "
-            "-V_2001, -SV_2005, -SV_2009, -SV_2012, -SV_2017, -C, -CPP> "
-         << std::endl;
-  (*out) << "              -work <libName> : Compiles the compilation unit "
-            "into library <libName>, default is \"work\""
-         << std::endl;
-  (*out) << "   clear_simulation_files     : Remove all simulation files"
-         << std::endl;
-  (*out) << "   read_netlist <file>        : Read a netlist instead of an RTL "
-            "design (Skip Synthesis)"
-         << std::endl;
-  (*out) << "   add_include_path <path1>...: As in +incdir+" << std::endl;
-  (*out) << "   add_library_path <path1>...: As in +libdir+" << std::endl;
-  (*out) << "   add_library_ext <.v> <.sv> ...: As in +libext+" << std::endl;
-  (*out) << "   set_macro <name>=<value>...: As in -D<macro>=<value>"
-         << std::endl;
-  (*out) << "   set_top_module <top> ?-work <libName>? : Sets the top module"
-         << std::endl;
-  (*out) << "   add_constraint_file <file> : Sets SDC + location constraints"
-         << std::endl;
-  (*out) << "     Constraints: set_pin_loc, set_region_loc, all SDC commands"
-         << std::endl;
-  (*out) << "   script_path                : path of the Tcl script passed "
-            "with --script"
-         << std::endl;
-  (*out) << "   add_litex_ip_catalog <directory> : Browses directory for LiteX "
-            "IP generators, adds the IP(s) to the IP Catalog"
-         << std::endl;
-  (*out) << "   ip_catalog ?<ip_name>?     : Lists all available IPs, and "
-            "their parameters if <ip_name> is given "
-         << std::endl;
-  (*out) << "   ip_configure <IP_NAME> -mod_name <name> -out_file <filename> "
-            "-version <ver_name> -P<param>=\"<value>\"..."
-         << std::endl;
-  (*out) << "                              : Configures an IP <IP_NAME> and "
-            "generates the corresponding file with module name"
-         << std::endl;
-  (*out) << "   ipgenerate ?clean? ?-modules {moduleName1 moduleName2} : "
-            "Generates all IP instances set by "
-            "ip_configure. -modules limits which IPs are generated."
-         << std::endl;
-  (*out)
-      << "   synthesize <optimization> ?clean? : Optional optimization (area, "
-         "delay, mixed, none)"
-      << std::endl;
-  (*out) << "   place ?clean" << std::endl;
-  (*out) << "   pin_loc_assign_method <Method>: "
-            "(in_define_order(Default)/random/free)"
-         << std::endl;
-  (*out) << "   synth_options <option list>: Synthesis Options" << std::endl;
-  (*out) << "   pnr_options <option list>  : PnR Options" << std::endl;
-  (*out) << "   packing ?clean?" << std::endl;
-  // (*out) << "   global_placement ?clean?" << std::endl;
-  (*out) << "   place ?clean?" << std::endl;
-  (*out) << "   route ?clean?" << std::endl;
-  (*out) << "   sta ?clean?" << std::endl;
-  (*out) << "   power ?clean?" << std::endl;
-  (*out) << "   bitstream ?clean? ?enable_simulation?" << std::endl;
-  (*out) << "   simulate <level> ?<simulator>? ?clean? : Simulates the design "
-            "and testbench"
-         << std::endl;
-  (*out) << "             <level>: rtl, gate, pnr, bitstream_bd, bitstream_fd."
-         << std::endl;
-  (*out) << "                 rtl: RTL simulation," << std::endl;
-  (*out) << "                gate: post-synthesis simulation," << std::endl;
-  (*out) << "                 pnr: post-pnr simulation," << std::endl;
-  (*out) << "        bitstream_bd: Back-door bitstream simulation" << std::endl;
-  (*out) << "        bitstream_fd: Front-door bitstream simulation"
-         << std::endl;
-  (*out) << "        <simulator> : verilator, vcs, questa, icarus, ghdl, "
-            "xcelium"
-         << std::endl;
-  writeWaveHelp(out, 3, 24);  // 24 is the col count of the : in the line above
-  (*out) << "-------------------------" << std::endl;
+void Compiler::Help(ToolContext* context, std::ostream* out) {
+  auto dataPath = context->DataPath();
+  dataPath = dataPath / "etc" / "help.txt";
+  std::ifstream stream(dataPath);
+  if (stream.good()) {
+    std::string helpContent((std::istreambuf_iterator<char>(stream)),
+                            std::istreambuf_iterator<char>());
+    (*out) << QtUtils::replaceTags(helpContent, helpTags());
+  }
+  stream.close();
 }
 
 void Compiler::CustomSimulatorSetup(Simulator::SimulationType action) {}
@@ -227,6 +121,7 @@ Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
   IPCatalog* catalog = new IPCatalog();
   m_IPGenerator = new IPGenerator(catalog, this);
   m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
+  m_name = "dummy";
 }
 
 void Compiler::SetTclInterpreterHandler(
@@ -243,24 +138,39 @@ Compiler::~Compiler() {
 }
 
 std::string Compiler::GetMessagePrefix() const {
-  std::string prefix{};
-
+  if (!GetTaskManager()) return std::string{};
   auto task = GetTaskManager()->currentTask();
   // Leave prefix empty if no abbreviation was given
   if (task && task->abbreviation() != "") {
-    prefix = task->abbreviation().toStdString() + ": ";
+    return task->abbreviation().toStdString() + ": ";
   }
-
-  return prefix;
+  return std::string{};
 }
 
-void Compiler::Message(const std::string& message) const {
-  if (m_out) (*m_out) << "INFO: " << GetMessagePrefix() << message << std::endl;
+void Compiler::Message(const std::string& message,
+                       const std::string& messagePrefix, bool raw) const {
+  if (m_out) {
+    const std::string prefix =
+        messagePrefix.empty() ? GetMessagePrefix() : messagePrefix;
+    if (raw) {
+      (*m_out) << prefix << message;
+    } else {
+      (*m_out) << "INFO: " << prefix << message << std::endl;
+    }
+  }
 }
 
-void Compiler::ErrorMessage(const std::string& message, bool append) const {
-  if (m_err)
-    (*m_err) << "ERROR: " << GetMessagePrefix() << message << std::endl;
+void Compiler::ErrorMessage(const std::string& message, bool append,
+                            const std::string& messagePrefix, bool raw) const {
+  if (m_err) {
+    const std::string prefix =
+        messagePrefix.empty() ? GetMessagePrefix() : messagePrefix;
+    if (raw) {
+      (*m_err) << prefix << message;
+    } else {
+      (*m_err) << "ERROR: " << prefix << message << std::endl;
+    }
+  }
   if (append) Tcl_AppendResult(m_interp->getInterp(), message.c_str(), nullptr);
 }
 
@@ -276,7 +186,7 @@ void Compiler::CleanFiles(Action action) {
                                    ProjManager()->DesignTopModule());
   for (const auto& fileName : removeFiles) {
     const std::filesystem::path p{base / fileName};
-    FileUtils::removeFile(p.string());
+    FileUtils::removeFile(p);
   }
 }
 
@@ -344,7 +254,8 @@ tcl_interp_clone
   return script;
 }
 
-bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath) {
+bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
+                                   bool namesOnly) {
   if (m_IPGenerator == nullptr) {
     IPCatalog* catalog = new IPCatalog();
     m_IPGenerator = new IPGenerator(catalog, this);
@@ -353,8 +264,8 @@ bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
   }
   IPCatalogBuilder builder(this);
-  bool result =
-      builder.buildLiteXCatalog(GetIPGenerator()->Catalog(), litexPath);
+  bool result = builder.buildLiteXCatalog(GetIPGenerator()->Catalog(),
+                                          litexPath, namesOnly);
   return result;
 }
 
@@ -417,23 +328,60 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     IPCatalog* catalog = new IPCatalog();
     m_IPGenerator = new IPGenerator(catalog, this);
   }
-  // if (m_DesignQuery == nullptr) {
-  //   m_DesignQuery = new DesignQuery(this);
-  // }
+  if (m_DesignQuery == nullptr) {
+    m_DesignQuery = new DesignQuery(this);
+  }
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
   }
   m_simulator->RegisterCommands(m_interp);
   m_IPGenerator->RegisterCommands(interp, batchMode);
-  // m_DesignQuery->RegisterCommands(interp, batchMode);
+  m_DesignQuery->RegisterCommands(interp, batchMode);
   if (m_constraints == nullptr) {
     SetConstraints(new Constraints{this});
   }
+  if (m_configuration == nullptr) {
+    SetConfiguration(new CFGCompiler(this));
+    GetConfiguration()->RegisterCommands(interp, batchMode);
+  }
+
+  auto chatgpt = [](void* clientData, Tcl_Interp* interp, int argc,
+                    const char* argv[]) -> int {
+    Compiler* compiler = (Compiler*)clientData;
+    auto args = StringUtils::FromArgs(argc, argv);
+    if (args.size() >= 2) {
+      if (args.size() > 4) {
+        if (args[3] == "-c") compiler->chatgptConfig(args[4]);
+      }
+      if (args[1] == "send") {
+        WorkerThread* wthread =
+            new WorkerThread(args[2], Action::IPGen, compiler);
+        auto fn = [compiler](const std::string& str) -> bool {
+          return compiler->chatGpt(str);
+        };
+        auto exitSt = wthread->Start(fn, args[2]);
+        return exitSt ? TCL_OK : TCL_ERROR;
+      } else if (args[1] == "reset") {
+        WorkerThread* wthread =
+            new WorkerThread("reset", Action::IPGen, compiler);
+        auto fn = [compiler](const std::string&) -> bool {
+          return compiler->chatGpt({});
+        };
+        auto exitSt = wthread->Start(fn, std::string{});
+        return exitSt ? TCL_OK : TCL_ERROR;
+      }
+      compiler->ErrorMessage("Wrong arguments");
+      return TCL_ERROR;
+    }
+    compiler->ErrorMessage("Wrong number of arguments");
+    return TCL_ERROR;
+  };
+  interp->registerCmd("chatgpt", chatgpt, this, nullptr);
 
   auto help = [](void* clientData, Tcl_Interp* interp, int argc,
                  const char* argv[]) -> int {
     Compiler* compiler = (Compiler*)clientData;
-    compiler->Help(compiler->GetOutStream());
+    compiler->Help(GlobalSession->Context(), compiler->GetOutStream());
     return TCL_OK;
   };
   interp->registerCmd("help", help, this, 0);
@@ -662,17 +610,15 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       expandedFile = fullPath.string();
     }
     std::filesystem::path the_path = expandedFile;
-    std::string origPathFileList = expandedFile;
     if (!the_path.is_absolute()) {
       const auto& path = std::filesystem::current_path();
       expandedFile = std::filesystem::path(path / expandedFile).string();
     }
 
-    compiler->Message(std::string("Reading ") + actualType + " " +
-                      expandedFile + std::string("\n"));
+    compiler->Message("Reading " + actualType + " " + expandedFile);
     std::ostringstream out;
     bool ok = compiler->m_tclCmdIntegration->TclAddDesignFiles(
-        {}, {}, origPathFileList.c_str(), language, out);
+        {}, {}, expandedFile.c_str(), language, out);
     if (!ok) {
       compiler->ErrorMessage(out.str());
       return TCL_ERROR;
@@ -815,8 +761,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       const auto& path = std::filesystem::current_path();
       expandedFile = std::filesystem::path(path / expandedFile).string();
     }
-    compiler->Message(std::string("Adding constraint file ") + expandedFile +
-                      std::string("\n"));
+    compiler->Message("Adding constraint file " + expandedFile);
     std::ostringstream out;
     bool ok = compiler->m_tclCmdIntegration->TclAddConstrFiles(
         expandedFile.c_str(), out);
@@ -908,7 +853,8 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
                        const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
       bool status = true;
-      Simulator::SimulatorType sim_tool = Simulator::SimulatorType::Icarus;
+      const auto default_sim_tool{Simulator::SimulatorType::Icarus};
+      Simulator::SimulatorType sim_tool = default_sim_tool;
       if (argc < 2) {
         compiler->ErrorMessage(
             "Wrong number of arguments: simulate <type> ?<simulator>? "
@@ -922,14 +868,12 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         bool ok{false};
-        auto sim = Simulator::ToSimulatorType(arg, ok,
-                                              Simulator::SimulatorType::Icarus);
+        auto sim = Simulator::ToSimulatorType(arg, ok, default_sim_tool);
         if (ok) {
           sim_tool = sim;
           sim_tool_valid = true;
-        }
-        if (arg == "rtl" || arg == "gate" || arg == "pnr" ||
-            arg == "bitstream_fd" || arg == "bitstream_bd") {
+        } else if (arg == "rtl" || arg == "gate" || arg == "pnr" ||
+                   arg == "bitstream_fd" || arg == "bitstream_bd") {
           sim_type = arg;
         } else if (arg == "clean") {
           clean = true;
@@ -1004,14 +948,13 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->SynthOpt(Compiler::SynthesisOpt::Area);
         } else if (arg == "delay") {
           compiler->SynthOpt(Compiler::SynthesisOpt::Delay);
-        } else if (arg == "none") {
-          compiler->SynthOpt(Compiler::SynthesisOpt::None);
         } else if (arg == "clean") {
           compiler->SynthOpt(Compiler::SynthesisOpt::Clean);
         } else {
           compiler->ErrorMessage("Unknown optimization option: " + arg);
         }
       }
+      if (compiler->GuiTclSync()) compiler->GuiTclSync()->saveSettings();
       return compiler->Compile(Action::Synthesis) ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("synthesize", synthesize, this, 0);
@@ -1035,8 +978,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto globalplacement = [](void* clientData, Tcl_Interp* interp, int argc,
                               const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
-      compiler->Message(
-          "Warning: global_placement is disabled in Jan'23 release");
+      compiler->Message("Warning: Global placement is disabled");
       return TCL_OK;
 
       for (int i = 1; i < argc; i++) {
@@ -1094,6 +1036,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
             "No Argument passed: type random/in_define_order/free");
         return TCL_ERROR;
       }
+      if (compiler->GuiTclSync()) compiler->GuiTclSync()->saveSettings();
       return TCL_OK;
     };
     interp->registerCmd("pin_loc_assign_method", pin_loc_assign_method, this,
@@ -1131,6 +1074,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown option: " + arg);
         }
       }
+      if (compiler->GuiTclSync()) compiler->GuiTclSync()->saveSettings();
       return compiler->Compile(Action::STA) ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("sta", sta, this, 0);
@@ -1161,6 +1105,12 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->BitsOpt(Compiler::BitstreamOpt::Clean);
         } else if (arg == "enable_simulation") {
           compiler->BitsOpt(Compiler::BitstreamOpt::EnableSimulation);
+        } else if (arg == "write_xml") {
+          compiler->BitstreamMoreOpt(arg);
+        } else if (arg == "write_fabric_independent") {
+          compiler->BitstreamMoreOpt(arg);
+        } else if (arg == "pb_pin_fixup") {
+          compiler->BitstreamMoreOpt(arg);
         } else {
           compiler->ErrorMessage("Unknown bitstream option: " + arg);
         }
@@ -1203,8 +1153,10 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown option: " + arg);
         }
       }
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
       WorkerThread* wthread =
-          new WorkerThread("ip_th", Action::IPGen, compiler);
+          new WorkerThread("ip_th", Action::IPGen, compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("ipgenerate", ipgenerate, this, 0);
@@ -1220,8 +1172,10 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown analysis option: " + arg);
         }
       }
-      WorkerThread* wthread =
-          new WorkerThread("analyze_th", Action::Analyze, compiler);
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
+      WorkerThread* wthread = new WorkerThread("analyze_th", Action::Analyze,
+                                               compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("analyze", analyze, this, 0);
@@ -1240,18 +1194,17 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       std::string wave_file;
       bool clean{false};
       bool sim_tool_valid{false};
-      Simulator::SimulatorType sim_tool = Simulator::SimulatorType::Icarus;
+      const auto default_sim_tool{Simulator::SimulatorType::Icarus};
+      Simulator::SimulatorType sim_tool = default_sim_tool;
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         bool ok{false};
-        auto sim = Simulator::ToSimulatorType(arg, ok,
-                                              Simulator::SimulatorType::Icarus);
+        auto sim = Simulator::ToSimulatorType(arg, ok, default_sim_tool);
         if (ok) {
           sim_tool = sim;
           sim_tool_valid = true;
-        }
-        if (arg == "rtl" || arg == "gate" || arg == "pnr" ||
-            arg == "bitstream_fd" || arg == "bitstream_bd") {
+        } else if (arg == "rtl" || arg == "gate" || arg == "pnr" ||
+                   arg == "bitstream_fd" || arg == "bitstream_bd") {
           sim_type = arg;
         } else if (arg == "clean") {
           clean = true;
@@ -1320,8 +1273,6 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->SynthOpt(Compiler::SynthesisOpt::Area);
         } else if (arg == "delay") {
           compiler->SynthOpt(Compiler::SynthesisOpt::Delay);
-        } else if (arg == "none") {
-          compiler->SynthOpt(Compiler::SynthesisOpt::None);
         } else if (arg == "clean") {
           compiler->SynthOpt(Compiler::SynthesisOpt::Clean);
         } else {
@@ -1352,8 +1303,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           setSynthOption(lookupVal.toStdString());
         }
       }
-      WorkerThread* wthread =
-          new WorkerThread("synth_th", Action::Synthesis, compiler);
+      if (compiler->GuiTclSync()) compiler->GuiTclSync()->saveSettings();
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
+      WorkerThread* wthread = new WorkerThread("synth_th", Action::Synthesis,
+                                               compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("synthesize", synthesize, this, 0);
@@ -1370,8 +1324,10 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown option: " + arg);
         }
       }
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
       WorkerThread* wthread =
-          new WorkerThread("pack_th", Action::Pack, compiler);
+          new WorkerThread("pack_th", Action::Pack, compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("packing", packing, this, 0);
@@ -1379,8 +1335,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto globalplacement = [](void* clientData, Tcl_Interp* interp, int argc,
                               const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
-      compiler->Message(
-          "Warning: global_placement is disabled in Jan'23 release");
+      compiler->Message("Warning: Global placement is disabled");
       return TCL_OK;
 
       for (int i = 1; i < argc; i++) {
@@ -1409,8 +1364,10 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown option: " + arg);
         }
       }
-      WorkerThread* wthread =
-          new WorkerThread("place_th", Action::Detailed, compiler);
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
+      WorkerThread* wthread = new WorkerThread("place_th", Action::Detailed,
+                                               compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("detailed_placement", placement, this, 0);
@@ -1458,8 +1415,10 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown option: " + arg);
         }
       }
-      WorkerThread* wthread =
-          new WorkerThread("route_th", Action::Routing, compiler);
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
+      WorkerThread* wthread = new WorkerThread("route_th", Action::Routing,
+                                               compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("route", route, this, 0);
@@ -1481,7 +1440,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->ErrorMessage("Unknown option: " + arg);
         }
       }
-      WorkerThread* wthread = new WorkerThread("sta_th", Action::STA, compiler);
+      if (compiler->GuiTclSync()) compiler->GuiTclSync()->saveSettings();
+      std::function<void(int)> generateReport =
+          std::bind(&Compiler::GenerateReport, compiler, std::placeholders::_1);
+      WorkerThread* wthread =
+          new WorkerThread("sta_th", Action::STA, compiler, generateReport);
       return wthread->start() ? TCL_OK : TCL_ERROR;
     };
     interp->registerCmd("sta", sta, this, 0);
@@ -1514,6 +1477,12 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->BitsOpt(Compiler::BitstreamOpt::Clean);
         } else if (arg == "enable_simulation") {
           compiler->BitsOpt(Compiler::BitstreamOpt::EnableSimulation);
+        } else if (arg == "write_xml") {
+          compiler->BitstreamMoreOpt(arg);
+        } else if (arg == "write_fabric_independent") {
+          compiler->BitstreamMoreOpt(arg);
+        } else if (arg == "pb_pin_fixup") {
+          compiler->BitstreamMoreOpt(arg);
         } else {
           compiler->ErrorMessage("Unknown bitstream option: " + arg);
         }
@@ -1725,6 +1694,19 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     return TCL_OK;
   };
   interp->registerCmd("wave_refresh", wave_refresh, this, nullptr);
+
+  auto diagnostic = [](void* clientData, Tcl_Interp* interp, int argc,
+                       const char* argv[]) -> int {
+    Compiler* compiler = (Compiler*)clientData;
+    for (int i = 1; i < argc; i++) {
+      const std::string arg{argv[i]};
+      if (arg == "packer") {
+        compiler->PackOpt(Compiler::PackingOpt::Debug);
+      }
+    }
+    return TCL_OK;
+  };
+  interp->registerCmd("diagnostic", diagnostic, this, nullptr);
 
   return true;
 }
@@ -2013,9 +1995,22 @@ void Compiler::setDeviceData(const DeviceData& newDeviceData) {
   m_deviceData = newDeviceData;
 }
 
+void Compiler::ClbPackingOption(ClbPacking clbPacking) {
+  m_clbPacking = clbPacking;
+}
+
+ClbPacking Compiler::ClbPackingOption() const { return m_clbPacking; }
+
 bool Compiler::Compile(Action action) {
   uint task{toTaskId(static_cast<int>(action), this)};
-  m_stop = false;
+  if (m_stop) {
+    ResetStopFlag();
+    if (task != TaskManager::invalid_id && m_taskManager) {
+      m_taskManager->task(task)->setStatus(TaskStatus::Fail);
+    }
+    return false;
+  }
+  ResetStopFlag();
   bool res{false};
   if (task != TaskManager::invalid_id && m_taskManager) {
     m_taskManager->task(task)->setStatus(TaskStatus::InProgress);
@@ -2028,11 +2023,19 @@ bool Compiler::Compile(Action action) {
   return res;
 }
 
+void Compiler::GenerateReport(int action) {
+  handleJsonReportGeneration(m_taskManager->task(toTaskId(action, this)),
+                             m_taskManager, m_projManager->getProjectPath());
+}
+
 void Compiler::Stop() {
   m_stop = true;
-  ErrorMessage("Compilation was interrupted by user");
+  ErrorMessage("Interrupted by user");
   if (m_process) m_process->terminate();
+  FileUtils::terminateSystemCommand();
 }
+
+void Compiler::ResetStopFlag() { m_stop = false; }
 
 bool Compiler::Analyze() {
   if (!m_projManager->HasDesign() && !CreateDesign("noname")) return false;
@@ -2042,7 +2045,7 @@ bool Compiler::Analyze() {
     AnalyzeOpt(DesignAnalysisOpt::None);
     return true;
   }
-  Message("Analyzing design: " + m_projManager->projectName() + "...");
+  Message("Analyzing design: " + m_projManager->projectName());
 
   auto currentPath = std::filesystem::current_path();
   auto it = std::filesystem::directory_iterator{currentPath};
@@ -2072,10 +2075,10 @@ bool Compiler::Synthesize() {
   if (SynthOpt() == SynthesisOpt::Clean) {
     Message("Cleaning synthesis results for " + m_projManager->projectName());
     m_state = State::IPGenerated;
-    SynthOpt(SynthesisOpt::None);
+    SynthOpt(SYNTH_OPT_DEFAULT);
     return true;
   }
-  Message("Synthesizing design: " + m_projManager->projectName() + "...");
+  Message("Synthesizing design: " + m_projManager->projectName());
   for (auto constraint : m_constraints->getConstraints()) {
     Message("Constraint: " + constraint);
   }
@@ -2121,8 +2124,7 @@ bool Compiler::GlobalPlacement() {
     ErrorMessage("Design needs to be in packed state");
     return false;
   }
-  Message("Global Placement for design:" + m_projManager->projectName() +
-          "...");
+  Message("Global Placement for design:" + m_projManager->projectName());
   for (int i = 0; i < 100; i = i + 10) {
     std::stringstream outStr;
     outStr << std::setw(2) << i << "%";
@@ -2209,6 +2211,8 @@ bool Compiler::RunCompileTask(Action action) {
       return GetSimulator()->Simulate(
           Simulator::SimulationType::BitstreamBackDoor,
           GetSimulator()->GetSimulatorType(), m_waveformFile);
+    case Action::Configuration:
+      return GetConfiguration()->Configure();
     default:
       break;
   }
@@ -2331,13 +2335,19 @@ void Compiler::setGuiTclSync(TclCommandIntegration* tclCommands) {
     m_projManager = m_tclCmdIntegration->GetProjectManager();
 }
 
+std::vector<std::string> Compiler::helpTags() const { return {"foedag"}; }
+
+TclCommandIntegration* Compiler::GuiTclSync() const {
+  return m_tclCmdIntegration;
+}
+
 bool Compiler::IPGenerate() {
   if (!m_projManager->HasDesign() && !CreateDesign("noname")) return false;
   if (!HasIPInstances()) {
     // No instances configured, no-op w/o error
     return true;
   }
-  Message("IP generation for design: " + m_projManager->projectName() + "...");
+  Message("IP generation for design: " + m_projManager->projectName());
   bool status = GetIPGenerator()->Generate();
   if (status) {
     Message("Design " + m_projManager->projectName() + " IPs are generated");
@@ -2365,7 +2375,7 @@ bool Compiler::Packing() {
     ErrorMessage("No design specified");
     return false;
   }
-  Message("Packing for design: " + m_projManager->projectName() + "...");
+  Message("Packing for design: " + m_projManager->projectName());
   Message("Design " + m_projManager->projectName() + " is packed");
   m_state = State::Packed;
 
@@ -2387,7 +2397,7 @@ bool Compiler::Placement() {
         std::string(ProjManager()->projectName() + "_post_synth.place"));
     return true;
   }
-  Message("Placement for design: " + m_projManager->projectName() + "...");
+  Message("Placement for design: " + m_projManager->projectName());
   Message("Design " + m_projManager->projectName() + " is placed");
   m_state = State::Placed;
 
@@ -2410,7 +2420,7 @@ bool Compiler::Route() {
     return true;
   }
 
-  Message("Routing for design: " + m_projManager->projectName() + "...");
+  Message("Routing for design: " + m_projManager->projectName());
   Message("Design " + m_projManager->projectName() + " is routed");
   m_state = State::Routed;
 
@@ -2423,8 +2433,7 @@ bool Compiler::TimingAnalysis() {
     ErrorMessage("No design specified");
     return false;
   }
-  Message("Timing analysis for design: " + m_projManager->projectName() +
-          "...");
+  Message("Timing analysis for design: " + m_projManager->projectName());
   Message("Design " + m_projManager->projectName() + " is analyzed");
   CreateDummyLog(m_projManager, TIMING_ANALYSIS_LOG);
   return true;
@@ -2435,7 +2444,7 @@ bool Compiler::PowerAnalysis() {
     ErrorMessage("No design specified");
     return false;
   }
-  Message("Power analysis for design: " + m_projManager->projectName() + "...");
+  Message("Power analysis for design: " + m_projManager->projectName());
   Message("Design " + m_projManager->projectName() + " is analyzed");
 
   CreateDummyLog(m_projManager, POWER_ANALYSIS_LOG);
@@ -2447,12 +2456,123 @@ bool Compiler::GenerateBitstream() {
     ErrorMessage("No design specified");
     return false;
   }
-  Message("Bitstream generation for design: " + m_projManager->projectName() +
-          "...");
+  Message("Bitstream generation for design: " + m_projManager->projectName());
   Message("Design " + m_projManager->projectName() + " bitstream is generated");
 
   CreateDummyLog(m_projManager, BITSTREAM_LOG);
   return true;
+}
+
+bool Compiler::chatGpt(const std::string& message) {
+  emit m_tclCmdIntegration->chatGptStatus(true);
+  bool result{true};
+  if (message.empty()) {
+    result = resetChatGpt();
+  } else {
+    result = sendChatGpt(message);
+  }
+  if (!result) emit m_tclCmdIntegration->chatGptStatus(false);
+  return result;
+}
+
+bool Compiler::sendChatGpt(const std::string& message) {
+  auto path = GlobalSession->Context()->DataPath();
+  path = path / ".." / "envs" / "chatGPT" / "bin";
+  path = path / "python";
+  std::filesystem::path pythonPath{path};
+  if (pythonPath.empty()) {
+    ErrorMessage(
+        "Unable to find python interpreter in local "
+        "environment.\n");
+    return false;
+  }
+
+  const std::string file{"chatgpt"};
+
+  std::string command = pythonPath.string();
+  std::vector<std::string> args;
+  args.push_back("-m");
+  args.push_back("chatgpt_raptor");
+  args.push_back("-o");
+  args.push_back(file);
+  args.push_back("-p");
+  args.push_back("\'" + message + "\'");
+  if (!m_chatgptConfigFile.empty()) {
+    args.push_back("-c");
+    args.push_back(m_chatgptConfigFile);
+  }
+  std::ostringstream help;
+
+  if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help,
+                                      CHATGPT_TIMEOUT)
+          .code != 0) {
+    ErrorMessage("ChatGPT, " + help.str(), false);
+    return false;
+  }
+
+  std::ifstream stream{file};
+  if (!stream.good()) {
+    ErrorMessage("Can't open file: " + file);
+    return false;
+  }
+  std::stringstream buffer;
+  buffer << stream.rdbuf();
+  const std::string& buf = buffer.str();
+  stream.close();
+
+  json json{};
+  try {
+    json.update(json::parse(buf));
+  } catch (json::parse_error& e) {
+    // output exception information
+    std::cerr << "Json Error: " << e.what() << std::endl;
+    return false;
+  }
+
+  std::string responce = json["message"];
+
+  // read content here from json
+  m_tclCmdIntegration->TclshowChatGpt(message, responce);
+
+  return true;
+}
+
+bool Compiler::resetChatGpt() {
+  auto path = GlobalSession->Context()->DataPath();
+  path = path / ".." / "envs" / "chatGPT" / "bin";
+  path = path / "python";
+  std::filesystem::path pythonPath{path};
+  if (pythonPath.empty()) {
+    ErrorMessage(
+        "Unable to find python interpreter in local "
+        "environment.\n");
+    return false;
+  }
+
+  std::string command = pythonPath.string();
+  std::vector<std::string> args;
+  args.push_back("-m");
+  args.push_back("chatgpt_raptor");
+  args.push_back("-n");
+  if (!m_chatgptConfigFile.empty()) {
+    args.push_back("-c");
+    args.push_back(m_chatgptConfigFile);
+  }
+  std::ostringstream help;
+
+  if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help,
+                                      CHATGPT_TIMEOUT)
+          .code != 0) {
+    ErrorMessage("ChatGPT, " + help.str(), false);
+    return false;
+  }
+
+  m_tclCmdIntegration->TclshowChatGpt({}, {});
+  return true;
+}
+
+void Compiler::chatgptConfig(const std::string& file) {
+  m_chatgptConfigFile = file;
 }
 
 bool Compiler::VerifyTargetDevice() const {
@@ -2499,7 +2619,6 @@ bool Compiler::CreateDesign(const std::string& name, const std::string& type) {
     if (!ok) return false;
     std::string message{"Created design: " + name};
     if (!type.empty()) message += ". Project type: " + type;
-    message += "\n";
     Message(message);
   }
   return true;
@@ -2546,8 +2665,10 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
   auto start = Time::now();
   PERF_LOG("Command: " + command);
   (*m_out) << "Command: " << command << std::endl;
-  auto path = std::filesystem::current_path();                  // getting path
-  std::filesystem::current_path(m_projManager->projectPath());  // setting path
+  std::error_code ec;
+  auto path = std::filesystem::current_path();  // getting path
+  std::filesystem::current_path(m_projManager->projectPath(),
+                                ec);  // setting path
   // new QProcess must be created here to avoid issues related to creating
   // QObjects in different threads
   m_process = new QProcess;
@@ -2594,10 +2715,35 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                    [&utils, this]() { utils.Start(m_process->processId()); });
 
   QString cmd{command.c_str()};
-  QStringList args = cmd.split(" ");
+  QStringList args = QtUtils::StringSplit(cmd, ' ');
+  QStringList adjustedArgs;
+
   QString program = args.first();
   args.pop_front();  // remove program
-  m_process->start(program, args);
+  QString current_arg;
+  for (int i = 0; i < args.size(); i++) {
+    QString arg = args[i];
+    if (args[i].front() == '\"' &&
+        args[i].back() != '\"') {      // Starting single-quote
+      current_arg = arg.remove(0, 1);  // remove leading quote
+    } else if (args[i].front() != '\"' &&
+               args[i].back() == '\"') {    // Ending single-quote
+      current_arg += " " + arg.chopped(1);  // remove trailing quote
+      adjustedArgs.push_back(current_arg);
+      current_arg = "";
+    } else if (args[i].front() == '\"' &&
+               args[i].back() == '\"') {  // Single-quoted argument
+      current_arg += " " + arg;
+      adjustedArgs.push_back(current_arg);
+      current_arg = "";
+    } else if (!current_arg.isEmpty()) {  // Continuing single-quoted argument
+      current_arg += " " + arg;
+    } else {  // Non-quoted argument
+      adjustedArgs.push_back(arg);
+    }
+  }
+
+  m_process->start(program, adjustedArgs);
   std::filesystem::current_path(path);
   m_process->waitForFinished(-1);
   utils.Stop();
@@ -2749,8 +2895,7 @@ int Compiler::add_files(Compiler* compiler, Tcl_Interp* interp, int argc,
     }
   }
 
-  compiler->Message(std::string("Adding ") + actualType + " " + fileList +
-                    std::string("\n"));
+  compiler->Message("Adding " + actualType + " " + fileList);
   std::ostringstream out;
   bool ok{true};
   if (filesType == Design) {

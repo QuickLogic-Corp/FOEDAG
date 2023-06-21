@@ -112,6 +112,16 @@ static constexpr const char *TA_TIMING_LOG{"post_ta_timing.rpt"};
 static constexpr const char *POWER_ANALYSIS_LOG{"power_analysis.rpt"};
 static constexpr const char *BITSTREAM_LOG{"bitstream.rpt"};
 
+static constexpr const char *SYNTH_SETTING_KEY{"Synthesis"};
+static constexpr const char *PLACE_SETTING_KEY{"Placement"};
+static constexpr const char *ROUTE_SETTING_KEY{"Routing"};
+static constexpr const char *PACKING_SETTING_KEY{"Packing"};
+static constexpr const char *TIMING_SETTING_KEY{"Timing Analysis"};
+static constexpr const char *SIM_RTL_SETTING_KEY{"Simulate RTL"};
+static constexpr const char *SIM_GATE_SETTING_KEY{"Simulate Gate"};
+static constexpr const char *SIM_PNR_SETTING_KEY{"Simulate PNR"};
+static constexpr const char *SIM_BITSTREAM_SETTING_KEY{"Simulate Bitstream"};
+
 /*!
  * \brief prepareCompilerView
  * Create app parts of the compiler task view.
@@ -119,8 +129,8 @@ static constexpr const char *BITSTREAM_LOG{"bitstream.rpt"};
  * \param taskManager - output parameter to receive pointer to task manager.
  * \return widget with compiler task view
  */
-QTableView *prepareCompilerView(Compiler *compiler,
-                                TaskManager **taskManager = nullptr);
+class TaskTableView *prepareCompilerView(Compiler *compiler,
+                                         TaskManager **taskManager = nullptr);
 
 uint toTaskId(int action, Compiler *const compiler);
 

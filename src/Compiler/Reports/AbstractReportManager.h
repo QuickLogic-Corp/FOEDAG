@@ -20,8 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
-#include <QObject>
 #include <QVector>
+#include <filesystem>
 #include <map>
 
 #include "IDataReport.h"
@@ -38,7 +38,7 @@ class TaskManager;
 /* Abstract implementation holding common logic for report managers.
  *
  */
-class AbstractReportManager : public QObject, public ITaskReportManager {
+class AbstractReportManager : public ITaskReportManager {
   Q_OBJECT
  public:
   AbstractReportManager(const TaskManager &taskManager);
@@ -56,17 +56,29 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   virtual bool isStatisticalTimingHistogram(const QString &line);
   // Parses in stream line by line till empty one occurs and creates table data.
   // Fills parsed data into 'm_resourceColumns' and 'm_resourceData'
+  virtual std::filesystem::path logFile() const = 0;
+  virtual void clean();
   void parseResourceUsage(QTextStream &in, int &lineNr);
+  void designStatistics();
 
   // Creates and opens log file instance. returns nullptr if file doesn't exist.
-  std::unique_ptr<QFile> createLogFile(const QString &fileName) const;
+  std::unique_ptr<QFile> createLogFile() const;
 
   using SectionKeys = QVector<QRegExp>;
   int parseErrorWarningSection(QTextStream &in, int lineNr,
                                const QString &sectionLine, SectionKeys keys,
                                bool stopEmptyLine = false);
 
+  int parseStatisticsSection(QTextStream &in, int lineNr);
+
   IDataReport::TableData parseCircuitStats(QTextStream &in, int &lineNr);
+  IDataReport::TableData CreateLogicData(bool lut5_6 = true);
+  IDataReport::TableData CreateBramData() const;
+  IDataReport::TableData CreateDspData() const;
+  IDataReport::TableData CreateIOData() const;
+  IDataReport::TableData CreateClockData() const;
+  virtual void parseLogLine(const QString &line);
+  void parseStatisticLine(const QString &line);
 
   using MessagesLines = std::map<int, QString>;
   // Creates parent item for either warnings or messages. Clears msgs
@@ -88,8 +100,11 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   static const QRegExp FIND_RESOURCES;
   static const QRegExp FIND_CIRCUIT_STAT;
 
-  bool isFileParsed() const;
-  void setFileParsed(bool parsed);
+  bool isFileOutdated(const std::filesystem::path &file) const;
+  void setFileTimeStamp(const std::filesystem::path &file);
+  std::filesystem::path logFilePath(const std::string &file) const;
+
+  bool isMessageSuppressed(const QString &message) const;
 
  signals:
   void reportCreated(QString reportName);
@@ -103,11 +118,17 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
 
   IDataReport::ColumnValues m_histogramColumns;
   QVector<QPair<QString, IDataReport::TableData>> m_histograms;
+  IDataReport::TableData m_ioData;
+  IDataReport::ColumnValues m_ioColumns;
+  IDataReport::TableData m_clockData;
+  IDataReport::ColumnValues m_clockColumns;
 
   Messages m_messages;
 
  private:
-  bool m_fileParsed{false};
+  time_t m_fileTimeStamp{-1};
+  const QString SPACE{"       "};
+  const QString D_SPACE{"              "};
 };
 
 }  // namespace FOEDAG

@@ -38,6 +38,9 @@ class TaskReportManagerRegistry final {
   bool registerReportManager(uint type, ReportManagerPtr manager);
   // Returns report manager the task type.
   ReportManagerPtr getReportManager(uint type) const;
+  std::vector<uint> ids() const;
+
+  void setSuppressList(const QStringList &s);
 
  private:
   std::unordered_map<uint, ReportManagerPtr> m_managers;

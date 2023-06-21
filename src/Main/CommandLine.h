@@ -55,6 +55,8 @@ class CommandLine {
 
   const std::string& ProjectFile() const { return m_projectFile; }
 
+  const std::string& Device() const { return m_device; }
+
   bool UseVerific() { return m_useVerific; }
 
   bool PrintHelp() { return m_help; }
@@ -65,7 +67,6 @@ class CommandLine {
   char** Argv() { return m_argv; }
 
   void ErrorAndExit(const std::string& message);
-  bool FileExists(const std::filesystem::path& name);
   bool Mute() const { return m_mute; }
 
  protected:
@@ -79,6 +80,7 @@ class CommandLine {
   std::string m_runTclCmd;
   std::string m_compilerName;
   std::string m_projectFile;
+  std::string m_device;
   bool m_help = false;
   bool m_version = false;
   bool m_useVerific = false;

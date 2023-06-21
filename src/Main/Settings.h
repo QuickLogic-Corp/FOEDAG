@@ -24,6 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QObject>
+#include <QVector>
+#include <filesystem>
 
 #include "nlohmann_json/json.hpp"
 // Per https://json.nlohmann.me/features/object_order/
@@ -38,7 +41,8 @@ using json = nlohmann::ordered_json;
 
 namespace FOEDAG {
 
-class Settings {
+class Settings : public QObject {
+  Q_OBJECT
  private:
   json m_json;
 
@@ -67,6 +71,16 @@ class Settings {
   static QString getTclArgString(json& jsonData);
 
   json& getJson() { return m_json; }
+
+  void syncWith(const QString& task);
+  static QString Config(const std::filesystem::path& path, const QString& group,
+                        const QString& key);
+
+ signals:
+  void sync(const QString& task);
+
+ private:
+  QVector<QString> m_syncTasks{};
 };
 
 }  // namespace FOEDAG

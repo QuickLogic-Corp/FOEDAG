@@ -58,6 +58,13 @@ std::vector<std::string> StringUtils::tokenize(std::string_view str,
   return result;
 }
 
+bool StringUtils::contains(const StringVector& strings,
+                           const std::string& str) {
+  auto end = strings.cend();
+  auto it = std::find(strings.cbegin(), end, str);
+  return it != end;
+}
+
 std::string StringUtils::join(const std::vector<std::string>& strings,
                               const std::string& separator) {
   std::string result;
@@ -65,13 +72,6 @@ std::string StringUtils::join(const std::vector<std::string>& strings,
   if (!result.empty())
     for (size_t count = 0; count < separator.size(); count++) result.pop_back();
   return result;
-}
-
-std::string StringUtils::to_string(double a_value, const int n) {
-  std::ostringstream out;
-  out.precision(n);
-  out << std::fixed << a_value;
-  return out.str();
 }
 
 std::string& StringUtils::trim(std::string& str) { return ltrim(rtrim(str)); }
@@ -262,11 +262,33 @@ std::string StringUtils::toLower(const std::string& text) {
   return result;
 }
 
+StringVector StringUtils::FromArgs(int argc, const char* argv[]) {
+  StringVector res{};
+  for (int i = 0; i < argc; i++) res.push_back(std::string{argv[i]});
+  return res;
+}
+
 std::string StringUtils::toUpper(const std::string& text) {
   auto result = text;
   std::transform(result.begin(), result.end(), result.begin(),
                  [](auto c) { return std::toupper(c); });
   return result;
+}
+
+void StringUtils::setArgumentValue(StringVector& stringVector,
+                                   const std::string& arg,
+                                   const std::string& value) {
+  if (!contains(stringVector, arg)) {
+    stringVector.push_back(arg);
+    stringVector.push_back(value);
+    return;
+  }
+  for (size_t i = 0; (i + 1) < stringVector.size(); i++) {
+    if (stringVector.at(i) == arg) {
+      stringVector[i + 1] = value;
+      return;
+    }
+  }
 }
 
 }  // namespace FOEDAG

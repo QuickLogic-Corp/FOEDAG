@@ -7,13 +7,14 @@
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
+#include "Utils/FileUtils.h"
 
 namespace {
 // report names
-static constexpr const char *CIRCUIT_REPORT_NAME{
-    "Packing - Circuit Statistics Report"};
 static constexpr const char *RESOURCE_REPORT_NAME{
-    "Packing - Report Resource Utilization"};
+    "Packing - Utilization report"};
+static constexpr const char *DESIGN_STAT_REPORT_NAME{
+    "Packing - Design statistics"};
 
 // Messages
 static const QRegExp VPR_ROUTING_OPT{
@@ -25,32 +26,48 @@ static const QString LOAD_ARCH_SECTION{"# Loading Architecture Description"};
 static const QString BUILD_TIM_GRAPH{"Build Timing Graph"};
 static const QString LOAD_TIM_CONSTR{"# Load Timing Constraints"};
 static const QString PACKING_SECTION{"# Packing"};
+static const QString STATISTIC_SECTION{"Pb types usage..."};
 }  // namespace
 
 namespace FOEDAG {
 
 PackingReportManager::PackingReportManager(const TaskManager &taskManager)
     : AbstractReportManager(taskManager) {
-  m_circuitColumns = {ReportColumn{"Block type"},
-                      ReportColumn{"Number of blocks", Qt::AlignCenter}};
+  m_circuitColumns = {ReportColumn{"Logic"},
+                      ReportColumn{"Used", Qt::AlignCenter},
+                      ReportColumn{"Available", Qt::AlignCenter},
+                      ReportColumn{"%", Qt::AlignCenter}};
+  m_bramColumns = m_circuitColumns;
+  m_bramColumns[0].m_name = "Block RAM";
+  m_dspColumns = m_circuitColumns;
+  m_dspColumns[0].m_name = "DSP";
 }
 
 QStringList PackingReportManager::getAvailableReportIds() const {
-  return {CIRCUIT_REPORT_NAME, RESOURCE_REPORT_NAME};
+  return {RESOURCE_REPORT_NAME, DESIGN_STAT_REPORT_NAME};
 }
 
 std::unique_ptr<ITaskReport> PackingReportManager::createReport(
     const QString &reportId) {
-  if (!isFileParsed()) parseLogFile();
+  if (isFileOutdated(logFile())) parseLogFile();
+  if (!FileUtils::FileExists(logFile())) clean();
 
   ITaskReport::DataReports dataReports;
 
-  if (reportId == QString(RESOURCE_REPORT_NAME)) {
+  if (reportId == QString(DESIGN_STAT_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
         m_resourceColumns, m_resourceData, QString{}));
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
         m_circuitColumns, m_circuitData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_bramColumns, m_bramData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_dspColumns, m_dspData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_ioColumns, m_ioData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_clockColumns, m_clockData, QString{}));
   }
 
   emit reportCreated(reportId);
@@ -78,11 +95,8 @@ void PackingReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void PackingReportManager::parseLogFile() {
-  m_messages.clear();
-  m_resourceData.clear();
-  m_circuitData.clear();
-
-  auto logFile = createLogFile(QString(PACKING_LOG));
+  clean();
+  auto logFile = createLogFile();
   if (!logFile) return;
 
   auto in = QTextStream(logFile.get());
@@ -91,6 +105,7 @@ void PackingReportManager::parseLogFile() {
   QString line;
   auto lineNr = 0;
   while (in.readLineInto(&line)) {
+    parseStatisticLine(line);
     if (line.startsWith(LOAD_ARCH_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_ARCH_SECTION, {});
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
@@ -103,8 +118,6 @@ void PackingReportManager::parseLogFile() {
           parseErrorWarningSection(in, lineNr, BLOCK_GRAPH_BUILD_SECTION, {});
     else if (line.startsWith(LOAD_CIRCUIT_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_CIRCUIT_SECTION, {});
-    else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
-      m_circuitData = parseCircuitStats(in, lineNr);
     else if (line.endsWith(BUILD_TIM_GRAPH))
       m_messages.insert(
           lineNr,
@@ -112,19 +125,40 @@ void PackingReportManager::parseLogFile() {
               lineNr, MessageSeverity::INFO_MESSAGE, BUILD_TIM_GRAPH, {}});
     else if (line.startsWith(LOAD_TIM_CONSTR))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_TIM_CONSTR, {});
+    else if (line.startsWith(STATISTIC_SECTION))
+      lineNr = parseStatisticsSection(in, lineNr);
     else if (line.startsWith(PACKING_SECTION))
       lineNr =
           parseErrorWarningSection(in, lineNr, PACKING_SECTION,
                                    {QRegExp("Final Clustering Statistics")});
-    else if (FIND_RESOURCES.indexIn(line) != -1)
-      parseResourceUsage(in, lineNr);
 
     ++lineNr;
   }
+  m_circuitData = CreateLogicData();
+  m_bramData = CreateBramData();
+  m_dspData = CreateDspData();
+  m_ioData = CreateIOData();
+  m_clockData = CreateClockData();
+  designStatistics();
 
   logFile->close();
 
-  setFileParsed(true);
+  setFileTimeStamp(this->logFile());
+}
+
+std::filesystem::path PackingReportManager::logFile() const {
+  return logFilePath(PACKING_LOG);
+}
+
+void PackingReportManager::clean() {
+  AbstractReportManager::clean();
+  m_messages.clear();
+  m_resourceData.clear();
+  m_circuitData.clear();
+  m_bramData.clear();
+  m_dspData.clear();
+  m_ioData.clear();
+  m_clockData.clear();
 }
 
 }  // namespace FOEDAG

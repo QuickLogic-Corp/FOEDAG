@@ -30,8 +30,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Reports/ITaskReport.h"
 #include "Compiler/Reports/ITaskReportManager.h"
 #include "Compiler/Task.h"
+#include "Compiler/TaskManager.h"
 #include "Foedag.h"
+#include "Main/JsonReportGenerator.h"
+#include "ReportGenerator.h"
 #include "TextEditor/text_editor_form.h"
+#include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
 #include "WidgetFactory.h"
 
@@ -47,59 +51,6 @@ using namespace FOEDAG;
 #define TASKS_DEBUG false
 
 namespace {
-QLabel* createTitleLabel(const QString& text) {
-  auto titleLabel = new QLabel(text);
-  auto font = titleLabel->font();
-  font.setBold(true);
-  titleLabel->setFont(font);
-
-  return titleLabel;
-}
-
-void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
-  for (auto& dataReport : report.getDataReports()) {
-    auto dataReportName = dataReport->getName();
-    if (!dataReportName.isEmpty())
-      reportLayout->addWidget(createTitleLabel(dataReportName));
-
-    if (dataReport->isEmpty()) {
-      reportLayout->addWidget(
-          new QLabel("No statistics data found to generate report."), 1,
-          Qt::AlignTop);
-      continue;
-    }
-    auto reportsView = new QTableWidget();
-    // Fill columns
-    auto columns = dataReport->getColumns();
-    reportsView->setColumnCount(columns.size());
-    auto colIndex = 0;
-    for (auto& col : columns) {
-      auto columnItem = new QTableWidgetItem(col.m_name);
-      reportsView->setHorizontalHeaderItem(colIndex, columnItem);
-      ++colIndex;
-    }
-
-    // Fill table
-    auto rowIndex = 0;
-    for (auto& lineData : dataReport->getData()) {
-      reportsView->insertRow(rowIndex);
-      auto colIndex = 0;
-      for (auto& lineValue : lineData) {
-        auto item = new QTableWidgetItem(lineValue);
-        item->setTextAlignment(columns[colIndex].m_alignment);
-        reportsView->setItem(rowIndex, colIndex, item);
-        ++colIndex;
-      }
-      ++rowIndex;
-    }
-    // Initialize the view itself
-    reportsView->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    reportsView->setSizeAdjustPolicy(QAbstractScrollArea::AdjustToContents);
-    reportsView->horizontalHeader()->resizeSections(
-        QHeaderView::ResizeToContents);
-    reportLayout->addWidget(reportsView);
-  }
-}
 
 void openReportView(Compiler* compiler, const Task* task,
                     const ITaskReport& report) {
@@ -119,7 +70,9 @@ void openReportView(Compiler* compiler, const Task* task,
         delete item;
       }
 
-      generateReport(report, reportLayout);
+      auto reportGenerator =
+          CreateReportGenerator<TableReportGenerator>(report, reportLayout);
+      reportGenerator->Generate();
 
       newReport = false;
       break;
@@ -131,7 +84,10 @@ void openReportView(Compiler* compiler, const Task* task,
     auto reportLayout = new QVBoxLayout;
     reportLayout->setContentsMargins(0, 0, 0, 0);
 
-    generateReport(report, reportLayout);
+    auto reportGenerator =
+        CreateReportGenerator<TableReportGenerator>(report, reportLayout);
+    reportGenerator->Generate();
+
     reportsWidget->setLayout(reportLayout);
 
     tabWidget->addTab(reportsWidget, reportName);
@@ -174,7 +130,8 @@ auto separateArg = [](const QString& argName,
     // Find the arg and remove it from the otherArgs
     auto argIdx = argString.indexOf(searchStr);
     if (argIdx != -1) {
-      targetArg = argString.mid(argIdx, argString.indexOf("-", argIdx + 1));
+      targetArg =
+          argString.mid(argIdx, argString.indexOf("-", argIdx + 1) - argIdx);
       otherArgs = otherArgs.replace(targetArg, "");
     }
   }
@@ -183,7 +140,6 @@ auto separateArg = [](const QString& argName,
 
 // Lookup for SynthOpt values
 static std::map<FOEDAG::Compiler::SynthesisOpt, const char*> synthOptMap = {
-    {FOEDAG::Compiler::SynthesisOpt::None, "none"},
     {FOEDAG::Compiler::SynthesisOpt::Area, "area"},
     {FOEDAG::Compiler::SynthesisOpt::Delay, "delay"},
     {FOEDAG::Compiler::SynthesisOpt::Mixed, "mixed"},
@@ -215,7 +171,7 @@ auto synthStrToOpt = [](const QString& str) -> FOEDAG::Compiler::SynthesisOpt {
         return p.second == str;
       });
 
-  auto val = FOEDAG::Compiler::SynthesisOpt::None;
+  auto val = FOEDAG::Compiler::SYNTH_OPT_DEFAULT;
   if (it != synthOptMap.end()) {
     val = (*it).first;
   }
@@ -317,9 +273,17 @@ QDialog* FOEDAG::createTaskDialog(const QString& taskName) {
 };
 
 void FOEDAG::handleTaskDialogRequested(const QString& category) {
+  QVector<QString> dependencies{SYNTH_SETTING_KEY, PACKING_SETTING_KEY};
+  const bool sync{dependencies.contains(category)};
+  dependencies.removeAll(category);
   QDialog* dlg = createTaskDialog(category);
   if (dlg) {
     dlg->exec();
+  }
+
+  if (sync) {
+    for (const auto& setting : dependencies)
+      GlobalSession->GetSettings()->syncWith(setting);
   }
 }
 
@@ -421,8 +385,11 @@ void TclArgs_setSimulateOptions(const std::string& simTypeStr,
       }
     };
 
+    if (arg.compare("-run_" + simTypeStr + "_opt") == 0) {
+      applyOptions(value, &Simulator::SetSimulatorExtraOption, simTypeStr);
+    }
     if (arg.compare("-sim_" + simTypeStr + "_opt") == 0) {
-      applyOptions(value, &Simulator::SetSimulatorRuntimeOption, simTypeStr);
+      applyOptions(value, &Simulator::SetSimulatorSimulationOption, simTypeStr);
     }
     if (arg.compare("-el_" + simTypeStr + "_opt") == 0) {
       applyOptions(value, &Simulator::SetSimulatorElaborationOption,
@@ -463,8 +430,14 @@ std::string TclArgs_getSimulateOptions(const std::string& simTypeStr,
     bool ok{false};
     auto simulatorType = Simulator::ToSimulatorType(simType, ok);
     if (ok) {
-      auto tmp =
-          simulator->GetSimulatorRuntimeOption(levelValue, simulatorType);
+      auto tmp = simulator->GetSimulatorExtraOption(levelValue, simulatorType);
+      tmp = convertSpecialChars(tmp);
+      if (!tmp.empty()) {
+        argsList.push_back("-run_" + levelStr + "_opt");
+        argsList.push_back(tmp);
+      }
+
+      tmp = simulator->GetSimulatorSimulationOption(levelValue, simulatorType);
       tmp = convertSpecialChars(tmp);
       if (!tmp.empty()) {
         argsList.push_back("-sim_" + levelStr + "_opt");
@@ -572,7 +545,7 @@ void FOEDAG::TclArgs_setPackingOptions(const std::string& argsStr) {
       separateArg(PACKING_ARG, QString::fromStdString(argsStr));
 
   auto netlistVal = Compiler::NetlistType::Verilog;
-  QStringList tokens = netlistArg.split(" ");
+  const QStringList tokens = netlistArg.split(" ");
   if (tokens.size() > 1) {
     auto iter = std::find_if(
         netlistOptMap.begin(), netlistOptMap.end(),
@@ -584,11 +557,69 @@ void FOEDAG::TclArgs_setPackingOptions(const std::string& argsStr) {
     }
   }
   compiler->SetNetlistType(netlistVal);
+
+  ClbPacking clbPacking{ClbPacking::Auto};
+  const QStringList moreOptsList = QtUtils::StringSplit(moreOpts, ' ');
+  for (int i = 0; i < (moreOpts.size() - 1); i++)
+    if (moreOptsList.at(i) == "-clb_packing") {
+      if (moreOptsList.at(i + 1) == "auto") {
+        clbPacking = ClbPacking::Auto;
+      } else if (moreOptsList.at(i + 1) == "dense") {
+        clbPacking = ClbPacking::Dense;
+      } else if (moreOptsList.at(i + 1) == "timing_driven") {
+        clbPacking = ClbPacking::Timing_driven;
+      }
+      break;
+    }
+  compiler->ClbPackingOption(clbPacking);
 }
 
 std::string FOEDAG::TclArgs_getPackingOptions() {
   QString tclOptions = QString{"-%1 %2"}.arg(
       PACKING_ARG, QString::fromStdString(netlistOptMap.at(
                        GlobalSession->GetCompiler()->GetNetlistType())));
+
+  if (GlobalSession->GetCompiler()->ClbPackingOption() == ClbPacking::Auto) {
+    tclOptions += " -clb_packing auto";
+  } else if (GlobalSession->GetCompiler()->ClbPackingOption() ==
+             ClbPacking::Dense) {
+    tclOptions += " -clb_packing dense";
+  } else if (GlobalSession->GetCompiler()->ClbPackingOption() ==
+             ClbPacking::Timing_driven) {
+    tclOptions += " -clb_packing timing_driven";
+  }
+
   return tclOptions.toStdString();
+}
+
+void FOEDAG::handleJsonReportGeneration(Task* t, TaskManager* tManager,
+                                        const QString& projectPath) {
+  auto id = tManager->taskId(t);
+  auto reportManager =
+      tManager->getReportManagerRegistry().getReportManager(id);
+  if (reportManager && reportManager->getAvailableReportIds().size() >= 2) {
+    QString taskName{};
+    if (id == SYNTHESIS)
+      taskName = "synth";
+    else if (id == ROUTING)
+      taskName = "route";
+    else if (id == TIMING_SIGN_OFF)
+      taskName = "sta";
+    else if (id == PLACEMENT)
+      taskName = "place";
+    else if (id == PACKING)
+      taskName = "packing";
+    const QSignalBlocker blocker{*reportManager};
+    auto report = reportManager->createReport(
+        reportManager->getAvailableReportIds().first());
+    auto jsonGenerator = CreateReportGenerator<JsonReportGenerator>(
+        *report, taskName + "_utilization", projectPath);
+    if (jsonGenerator) jsonGenerator->Generate();
+
+    report = reportManager->createReport(
+        reportManager->getAvailableReportIds().last());
+    jsonGenerator = CreateReportGenerator<JsonReportGenerator>(
+        *report, taskName + "_design_stat", projectPath);
+    if (jsonGenerator) jsonGenerator->Generate();
+  }
 }

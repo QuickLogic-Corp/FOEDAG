@@ -11,14 +11,16 @@
 
 #include "Main/Foedag.h"
 #include "Utils/FileUtils.h"
+#include "Utils/QtUtils.h"
+#include "Utils/StringUtils.h"
 #include "tcl_command_integration.h"
 #include "ui_sources_form.h"
 
 using namespace FOEDAG;
 static constexpr int SetFileDataRole{Qt::UserRole + 1};
 
-SourcesForm::SourcesForm(QWidget *parent)
-    : QWidget(parent), ui(new Ui::SourcesForm) {
+SourcesForm::SourcesForm(QSettings *settings, QWidget *parent)
+    : QWidget(parent), ui(new Ui::SourcesForm), m_setting(settings) {
   ui->setupUi(this);
 
   m_treeSrcHierachy = new QTreeWidget(ui->m_tabHierarchy);
@@ -120,6 +122,8 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
     } else if (SRC_TREE_DESIGN_FILE_ITEM == strPropertyRole ||
                SRC_TREE_SIM_FILE_ITEM == strPropertyRole) {
       menu->addAction(m_actOpenFile);
+      initOpenWithMenu(m_menuOpenFileWith);
+      menu->addMenu(m_menuOpenFileWith);
       menu->addAction(m_actRemoveFile);
       menu->addAction(m_actRefresh);
       menu->addSeparator();
@@ -131,6 +135,8 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
     } else if (SRC_TREE_CONSTR_FILE_ITEM == strPropertyRole) {
       if (strName.contains(SRC_TREE_FLG_TARGET)) {
         menu->addAction(m_actOpenFile);
+        initOpenWithMenu(m_menuOpenFileWith);
+        menu->addMenu(m_menuOpenFileWith);
         menu->addAction(m_actRefresh);
         menu->addSeparator();
         menu->addAction(m_actEditConstrsSets);
@@ -140,6 +146,8 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
         // menu->addAction(m_actAddFile);
       } else {
         menu->addAction(m_actOpenFile);
+        initOpenWithMenu(m_menuOpenFileWith);
+        menu->addMenu(m_menuOpenFileWith);
         menu->addAction(m_actRemoveFile);
         menu->addAction(m_actRefresh);
         menu->addSeparator();
@@ -153,11 +161,16 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
     } else if (SRC_TREE_IP_INST_ITEM == strPropertyRole) {
       menu->addAction(m_actRefresh);
       menu->addSeparator();
+      menu->addAction(m_simulateIp);
+      menu->addAction(m_waveFormView);
+      menu->addSeparator();
       menu->addAction(m_actReconfigureIp);
       menu->addAction(m_actRemoveIp);
       menu->addAction(m_actDeleteIp);
     } else if (SRC_TREE_IP_FILE_ITEM == strPropertyRole) {
       menu->addAction(m_actOpenFile);
+      initOpenWithMenu(m_menuOpenFileWith);
+      menu->addMenu(m_menuOpenFileWith);
       menu->addAction(m_actRefresh);
     } else if (SRC_TREE_IP_TOP_ITEM == strPropertyRole) {
       menu->addAction(m_actRefresh);
@@ -264,19 +277,13 @@ void SourcesForm::SlotAddFile() {
 }
 
 void SourcesForm::SlotOpenFile() {
-  // Get selected file names
-  for (auto item : m_treeSrcHierachy->selectedItems()) {
-    // Using WhatsThis role to ensure selection is a file
-    // OpenFile quietly aborts on bad filenames, so this check could be removed
-    // if a desired type is being missing
-    if (item->data(0, Qt::WhatsThisPropertyRole)
-            .toString()
-            .contains("fileitem")) {
-      QString strFileName = (item->data(0, Qt::UserRole)).toString();
-      QString strPath = m_projManager->getProjectPath();
-      emit OpenFile(strFileName.replace(PROJECT_OSRCDIR, strPath));
-    }
-  }
+  const auto selectedFiles{SelectedFiles()};
+  for (const auto &file : selectedFiles) emit OpenFile(file);
+}
+
+void SourcesForm::SlotOpenFileWith(int editor) {
+  const auto selectedFiles{SelectedFiles()};
+  for (const auto &file : selectedFiles) emit OpenFileWith(file, editor);
 }
 
 void SourcesForm::SlotRemoveFileSet() {
@@ -453,6 +460,19 @@ void SourcesForm::SlotDeleteIp() {
   }
 }
 
+void SourcesForm::SlotSimulateIp() {
+  for (auto moduleName : SelectedIpModules()) {
+    emit IpSimulationRequested(moduleName);
+  }
+}
+
+void SourcesForm::SlotWaveForm() {
+  const auto selectedIpModules{SelectedIpModules()};
+  for (const auto &moduleName : selectedIpModules) {
+    emit IpWaveFormRequest(moduleName);
+  }
+}
+
 void SourcesForm::CreateActions() {
   m_actRefresh = new QAction(tr("Refresh Hierarchy"), m_treeSrcHierachy);
   connect(m_actRefresh, SIGNAL(triggered()), this,
@@ -474,6 +494,8 @@ void SourcesForm::CreateActions() {
 
   m_actOpenFile = new QAction(tr("Open File"), m_treeSrcHierachy);
   connect(m_actOpenFile, SIGNAL(triggered()), this, SLOT(SlotOpenFile()));
+
+  m_menuOpenFileWith = new QMenu(tr("Open With"), m_treeSrcHierachy);
 
   m_actRemoveFileset = new QAction(tr("Remove File Set"), m_treeSrcHierachy);
   connect(m_actRemoveFileset, SIGNAL(triggered()), this,
@@ -513,6 +535,16 @@ void SourcesForm::CreateActions() {
       "Remove the selectd IP instance from the project and delete its build "
       "files.");
   connect(m_actDeleteIp, &QAction::triggered, this, &SourcesForm::SlotDeleteIp);
+
+  m_simulateIp = new QAction{tr("Simulate IP"), m_treeSrcHierachy};
+  m_simulateIp->setToolTip("Start simulation of selected IP");
+  connect(m_simulateIp, &QAction::triggered, this,
+          &SourcesForm::SlotSimulateIp);
+
+  m_waveFormView = new QAction{tr("View waveform"), m_treeSrcHierachy};
+  m_waveFormView->setToolTip("View waveform");
+  connect(m_waveFormView, &QAction::triggered, this,
+          &SourcesForm::SlotWaveForm);
 
   m_actProjectSettings = new QAction(tr("Project settings"), m_treeSrcHierachy);
   connect(m_actProjectSettings, &QAction::triggered, this,
@@ -639,6 +671,7 @@ void SourcesForm::AddIpInstanceTree(QTreeWidgetItem *topItem) {
       (ipGen = compiler->GetIPGenerator())) {
     QTreeWidgetItem *ipParentItem{topitemIpInstances};
     for (auto instance : ipGen->IPInstances()) {
+      if (!instance->Generated()) continue;
       QString ipName = QString::fromStdString(instance->IPName());
       QString moduleName = QString::fromStdString(instance->ModuleName());
 
@@ -690,6 +723,43 @@ QStringList SourcesForm::SelectedIpModules() const {
   }
 
   return modules;
+}
+
+QStringList SourcesForm::SelectedFiles() const {
+  QStringList selectedFiles{};
+  for (auto item : m_treeSrcHierachy->selectedItems()) {
+    // Using WhatsThis role to ensure selection is a file
+    // OpenFile quietly aborts on bad filenames, so this check could be removed
+    // if a desired type is being missing
+    if (item->data(0, Qt::WhatsThisPropertyRole)
+            .toString()
+            .contains("fileitem")) {
+      QString strFileName = (item->data(0, Qt::UserRole)).toString();
+      QString strPath = m_projManager->getProjectPath();
+      selectedFiles.push_back(strFileName.replace(PROJECT_OSRCDIR, strPath));
+    }
+  }
+  return selectedFiles;
+}
+
+void SourcesForm::initOpenWithMenu(QMenu *menu) {
+  menu->clear();
+  if (m_setting) {
+    const QString EDITOR_KEY{"editors/editor%1"};
+    for (int i = 0; i < 5; i++) {
+      auto editorString =
+          m_setting->value(EDITOR_KEY.arg(QString::number(i), {})).toString();
+      auto tmp = QtUtils::StringSplit(editorString, ';');
+      if (tmp.size() != 2) return;
+      auto name = tmp.first();
+      if (!name.isEmpty()) {
+        QAction *editor = new QAction{name};
+        connect(editor, &QAction::triggered, this,
+                [this, i]() { SlotOpenFileWith(i); });
+        menu->addAction(editor);
+      }
+    }
+  }
 }
 
 QTreeWidgetItem *SourcesForm::CreateFolderHierachyTree(QTreeWidgetItem *topItem,

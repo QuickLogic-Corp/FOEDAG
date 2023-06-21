@@ -53,10 +53,8 @@ Qt::ItemFlags TaskModel::flags(const QModelIndex &index) const {
   auto task = m_taskManager ? m_taskManager->task(taskId) : nullptr;
   auto flags = QAbstractItemModel::flags(index);
   if (task) {
-    if (task->isEnable())
-      flags |= Qt::ItemIsEnabled;
-    else
-      flags &= ~Qt::ItemIsEnabled;
+    if ((index.column() == TITLE_COL) && task->type() == TaskType::Action)
+      flags |= Qt::ItemIsUserCheckable;
   }
   return flags;
 }
@@ -82,10 +80,26 @@ int TaskModel::columnCount(const QModelIndex &parent) const {
 }
 
 QVariant TaskModel::data(const QModelIndex &index, int role) const {
-  if (role == TaskId) return ToTaskId(index);
+  auto taskID = ToTaskId(index);
+  if (role == TaskId) return taskID;
 
-  auto task = m_taskManager->task(ToTaskId(index));
+  auto task = m_taskManager->task(taskID);
   if (!task) return QVariant();
+
+  if (index.column() == TITLE_COL && role == Qt::CheckStateRole &&
+      task->type() == TaskType::Action)
+    return task->isEnable() ? Qt::Checked : Qt::Unchecked;
+
+  if (role == Qt::DisplayRole && index.column() == TIMING_COL) {
+    auto registry =
+        m_taskManager->getReportManagerRegistry().getReportManager(taskID);
+    // Bitstream generation step should not display Fmax
+    if (registry && taskID != BITSTREAM) {
+      if (registry->usedResources().stat.fmax != 0)
+        return QString::number(registry->usedResources().stat.fmax);
+    }
+    return QVariant{};
+  }
 
   if (role == Qt::DisplayRole && index.column() == TITLE_COL) {
     if (task->type() != TaskType::Settings) return task->title();
@@ -137,12 +151,12 @@ QVariant TaskModel::headerData(int section, Qt::Orientation orientation,
                                int role) const {
   if (orientation == Qt::Horizontal && role == Qt::DisplayRole) {
     switch (section) {
-      case 0:
+      case STATUS_COL:
         return "Status";
-      case 1:
+      case TITLE_COL:
         return "Task";
-      case 2:
-        return "Stats";
+      case TIMING_COL:
+        return "Fmax, MHz";
     }
   }
   return QAbstractTableModel::headerData(section, orientation, role);
@@ -169,53 +183,52 @@ void TaskModel::setTaskManager(TaskManager *newTaskManager) {
   int row{0};
   m_taskOrder.push_back({row++, IP_GENERATE});
   m_taskOrder.push_back({row++, ANALYSIS});
-  m_taskOrder.push_back({row++, ANALYSIS_CLEAN});
   m_taskOrder.push_back({row++, SIMULATE_RTL});
-  m_taskOrder.push_back({row++, SIMULATE_RTL_CLEAN});
   m_taskOrder.push_back({row++, SIMULATE_RTL_SETTINGS});
   m_taskOrder.push_back({row++, SYNTHESIS});
-  m_taskOrder.push_back({row++, SYNTHESIS_CLEAN});
   m_taskOrder.push_back({row++, SYNTHESIS_SETTINGS});
   m_taskOrder.push_back({row++, SIMULATE_GATE});
-  m_taskOrder.push_back({row++, SIMULATE_GATE_CLEAN});
   m_taskOrder.push_back({row++, SIMULATE_GATE_SETTINGS});
   m_taskOrder.push_back({row++, PACKING});
-  m_taskOrder.push_back({row++, PACKING_CLEAN});
   m_taskOrder.push_back({row++, PACKING_SETTINGS});
   // m_taskOrder.push_back({row++, GLOBAL_PLACEMENT});
-  // m_taskOrder.push_back({row++, GLOBAL_PLACEMENT_CLEAN});
   m_taskOrder.push_back({row++, PLACEMENT});
-  m_taskOrder.push_back({row++, PLACEMENT_CLEAN});
   m_taskOrder.push_back({row++, PLACEMENT_SETTINGS});
   m_taskOrder.push_back({row++, ROUTING});
-  m_taskOrder.push_back({row++, ROUTING_CLEAN});
   m_taskOrder.push_back({row++, PLACE_AND_ROUTE_VIEW});
   m_taskOrder.push_back({row++, SIMULATE_PNR});
-  m_taskOrder.push_back({row++, SIMULATE_PNR_CLEAN});
   m_taskOrder.push_back({row++, SIMULATE_PNR_SETTINGS});
   m_taskOrder.push_back({row++, TIMING_SIGN_OFF});
-  m_taskOrder.push_back({row++, TIMING_SIGN_OFF_CLEAN});
 #ifndef PRODUCTION_BUILD
   m_taskOrder.push_back({row++, TIMING_SIGN_OFF_SETTINGS});
 #endif
   m_taskOrder.push_back({row++, POWER});
-  m_taskOrder.push_back({row++, POWER_CLEAN});
   m_taskOrder.push_back({row++, BITSTREAM});
-  m_taskOrder.push_back({row++, BITSTREAM_CLEAN});
   m_taskOrder.push_back({row++, SIMULATE_BITSTREAM});
-  m_taskOrder.push_back({row++, SIMULATE_BITSTREAM_CLEAN});
   m_taskOrder.push_back({row++, SIMULATE_BITSTREAM_SETTINGS});
   for (const auto &[row, id] : m_taskOrder) appendTask(m_taskManager->task(id));
 }
 
 bool TaskModel::setData(const QModelIndex &index, const QVariant &value,
                         int role) {
+  if (role == Qt::CheckStateRole) {
+    m_taskManager->task(ToTaskId(index))
+        ->setEnable(value.toInt() == Qt::Checked);
+    return true;
+  }
   if (role == UserActionRole) {
     m_taskManager->startTask(ToTaskId(index));
     return true;
+  } else if (role == UserActionCleanRole) {
+    auto taskId = ToTaskId(index);
+    auto task = m_taskManager->task(taskId);
+    if (task && task->cleanTask() != nullptr) {
+      m_taskManager->startTask(task->cleanTask());
+    }
+    return true;
   } else if (role == ExpandAreaRole && hasChildren(index)) {
     auto task = m_taskManager->task(ToTaskId(index));
-    if (task && task->isEnable()) {
+    if (task && task->isValid()) {
       ExpandAreaAction act = value.value<ExpandAreaAction>();
       switch (act) {
         case ExpandAreaAction::Invert:

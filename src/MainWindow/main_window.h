@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 class QAction;
 class QLabel;
 class QProgressBar;
+class QListView;
 
 namespace FOEDAG {
 
@@ -38,6 +39,7 @@ class Session;
 class TclInterpreter;
 class ProjectFileLoader;
 class DockWidget;
+struct ErrorInfo;
 /** Main window of the program */
 class MainWindow : public QMainWindow, public TopLevelInterface {
   Q_OBJECT
@@ -51,7 +53,6 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   ProjectInfo Info() const;
   void SetWindowTitle(const QString& filename, const QString& project,
                       QString& projectInfo);
-  void CloseOpenedTabs();
   void ProgressVisible(bool visible) override;
 
   void openProject(const QString& project, bool delayedOpen, bool run) override;
@@ -69,6 +70,8 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void closeProject(bool force = false);
   void openFileSlot();
   void newDesignCreated(const QString& design);
+  void chatGpt(const QString& request, const QString& content);
+  void chatGptStatus(bool status);
   void reloadSettings();
   void updatePRViewButton(int state);
   bool saveActionTriggered();
@@ -84,7 +87,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void onRunProjectRequested(const QString& project);
   void startProject(bool simulation);
   void onShowStopMessage(bool showStopCompilationMsg);
-  void bitstreamEnable(bool enable);
+  void onShowMessageOnExit(bool showMessage);
   void onShowLicenses();
   void stopCompilation();
   void forceStopCompilation();
@@ -96,6 +99,14 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void pinPlannerPinName();
   void onDesignFilesChanged();
   void onDesignCreated();
+  void saveSetting(const QString& setting);
+  void openFileFromConsole(const FOEDAG::ErrorInfo& eInfo);
+  void manageLicense();
+  void compressProject();
+  void documentationClicked();
+  void releaseNodesClicked();
+  void openFileWith(QString file, int editor);
+  void editorSettings();
 
  public slots:
   void updateSourceTree();
@@ -105,6 +116,8 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
                                  const QStringList& paramList);
   void handleRemoveIpRequested(const QString& moduleName);
   void handleDeleteIpRequested(const QString& moduleName);
+  void handleSimulationIpRequested(const QString& moduleName);
+  void handlewaveFormRequested(const QString& moduleName);
   void resetIps();
 
  signals:
@@ -114,7 +127,6 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
  private: /* Menu bar builders */
   void updateViewMenu();
   void updateTaskTable();
-  void updateBitstream();
   void createMenus();
   void createToolBars();
   void createActions();
@@ -149,7 +161,6 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   // Creates the new file in a working directory holding welcome page
   // configuration
   void saveWelcomePageConfig();
-  void replaceIpConfigDockWidget(QWidget* widget);
   bool confirmCloseProject();
   bool confirmExitProgram();
   void setVisibleRefreshButtons(bool visible);
@@ -158,6 +169,8 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void saveSettings();
   void setEnableSaveButtons(bool enable);
   bool isEnableSaveButtons() const;
+  bool CloseOpenedTabs();
+  bool lastProjectClosed();
 
  private: /* Objects/Widgets under the main window */
   /* Enum holding different states of actions visibility on the welcome page.
@@ -196,13 +209,17 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QAction* ipConfiguratorAction = nullptr;
   QAction* showWelcomePageAction = nullptr;
   QAction* stopCompileMessageAction = nullptr;
-  QAction* bitstreamAction = nullptr;
+  QAction* showMessageOnExitAction = nullptr;
   QAction* simRtlAction = nullptr;
   QAction* simGateAction = nullptr;
   QAction* simPnrAction = nullptr;
   QAction* simBitstreamAction = nullptr;
   QAction* defualtProjectPathAction = nullptr;
   QAction* pinPlannerPinNameAction = nullptr;
+  QAction* manageLicenseAction = nullptr;
+  QAction* editorSettingsAction = nullptr;
+  QAction* compressProjectAction = nullptr;
+  QAction* programmerAction = nullptr;
   std::vector<std::pair<QAction*, QString>> m_recentProjectsActions;
   newProjectDialog* newProjdialog = nullptr;
   /* Tool bar objects */
@@ -230,10 +247,13 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QSettings m_settings;
   bool m_progressVisible{false};
   bool m_askStopCompilation{true};
+  bool m_askShowMessageOnExit{true};
   bool m_blockRefereshEn{false};
-  QTableView* m_taskView{nullptr};
+  class TaskTableView* m_taskView{nullptr};
   class TaskModel* m_taskModel{nullptr};
   QVector<QPushButton*> m_saveButtons;
+  QStandardItemModel* m_chatgptModel{nullptr};
+  QListView* m_chatGptListView{nullptr};
 };
 
 }  // namespace FOEDAG

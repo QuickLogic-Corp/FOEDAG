@@ -137,7 +137,15 @@ TEST(StringUtilsTest, LeafTest) {
 
 TEST(StringUtilsTest, toStringTest) {
   const auto dbl_str = std::string("3.000");
-  ASSERT_EQ(StringUtils::to_string(3.0), dbl_str);
+  auto res{StringUtils::to_string(3.0, 3)};
+  ASSERT_EQ(res, dbl_str);
+}
+
+TEST(StringUtilsTest, toNumberTest) {
+  const auto str = std::string("337");
+  auto [num, ok]{StringUtils::to_number<int>(str)};
+  ASSERT_EQ(ok, true);
+  ASSERT_EQ(num, 337);
 }
 
 TEST(StringUtilsTest, removeCommentsTest) {
@@ -182,6 +190,38 @@ TEST(StringUtilsTest, joinFewElements) {
   std::vector<std::string> join{"element1", "element2"};
   auto res = StringUtils::join(join, "---");
   EXPECT_EQ(res, "element1---element2");
+}
+
+TEST(StringUtilsTest, containsEmpty) {
+  StringVector empty{};
+  auto res = StringUtils::contains(empty, "any");
+  EXPECT_EQ(res, false);
+}
+
+TEST(StringUtilsTest, containsFound) {
+  StringVector test{"test1", "test2"};
+  auto res = StringUtils::contains(test, "test2");
+  EXPECT_EQ(res, true);
+}
+
+TEST(StringUtilsTest, containsNotFound) {
+  StringVector test{"test1", "test2"};
+  auto res = StringUtils::contains(test, "test3");
+  EXPECT_EQ(res, false);
+}
+
+TEST(StringUtilsTest, setArgumentValueEmpty) {
+  StringVector test{};
+  StringUtils::setArgumentValue(test, "arg", "value");
+  StringVector expected{"arg", "value"};
+  EXPECT_EQ(test, expected);
+}
+
+TEST(StringUtilsTest, setArgumentValueExists) {
+  StringVector test{"arg", "value"};
+  StringUtils::setArgumentValue(test, "arg", "value1");
+  StringVector expected{"arg", "value1"};
+  EXPECT_EQ(test, expected);
 }
 
 }  // namespace

@@ -8,6 +8,7 @@
 #include "DefaultTaskReport.h"
 #include "NewProject/ProjectManager/project.h"
 #include "TableReport.h"
+#include "Utils/FileUtils.h"
 
 namespace {
 static const QRegExp FIND_INIT_ROUTER{"Initializing router criticalities"};
@@ -17,12 +18,10 @@ static const QRegExp FIND_ROUTING_TIMING{"Final.*(Slack|MHz).*"};
 static const QRegExp ROUTING_SUMMARY{"Circuit successfully routed.*"};
 static const QRegExp TIMING_INFO{"Final hold Worst Negative Slack.*"};
 
-static constexpr const char *CIRCUIT_REPORT_NAME{
-    "Post routing - Circuit Statistics Report"};
 static constexpr const char *RESOURCE_REPORT_NAME{
-    "Post routing - Report Resource Utilization"};
-static constexpr const char *TIMING_REPORT_NAME{
-    "Post routing - Report Static Timing"};
+    "Post routing - Utilization report"};
+static constexpr const char *DESIGN_STAT_REPORT_NAME{
+    "Post routing - Design statistics"};
 
 static const QString LOAD_PLACEMENT_SECTION{"# Load Placement"};
 static const QString COMPUT_ROUTER_SECTION{"# Computing router lookahead map"};
@@ -32,6 +31,7 @@ static const QRegExp FIND_HISTOGRAM{"Final.*histogram:"};
 
 static const QRegularExpression SPLIT_STAT_TIMING{
     "([-]?(([0-9]*[.])?[0-9]+) (ns?(?=,)|.*|MHz))"};
+static const QString STATISTIC_SECTION{"Pb types usage..."};
 
 static const QStringList TIMING_FIELDS{"Hold WNS",
                                        "Hold TNS",
@@ -47,36 +47,44 @@ namespace FOEDAG {
 
 RoutingReportManager::RoutingReportManager(const TaskManager &taskManager)
     : AbstractReportManager(taskManager) {
-  m_circuitColumns = {ReportColumn{"Block type"},
-                      ReportColumn{"Number of blocks", Qt::AlignCenter}};
+  m_circuitColumns = {ReportColumn{"Logic"},
+                      ReportColumn{"Used", Qt::AlignCenter},
+                      ReportColumn{"Available", Qt::AlignCenter},
+                      ReportColumn{"%", Qt::AlignCenter}};
+  m_bramColumns = m_circuitColumns;
+  m_bramColumns[0].m_name = "Block RAM";
+  m_dspColumns = m_circuitColumns;
+  m_dspColumns[0].m_name = "DSP";
 
   m_routingKeys = {QRegExp("Circuit Statistics:.*"),
                    QRegExp("Final Net Connection Criticality Histogram")};
 }
 
 QStringList RoutingReportManager::getAvailableReportIds() const {
-  return {QString(CIRCUIT_REPORT_NAME), QString(RESOURCE_REPORT_NAME),
-          QString(TIMING_REPORT_NAME)};
+  return {QString(RESOURCE_REPORT_NAME), QString(DESIGN_STAT_REPORT_NAME)};
 }
 
 std::unique_ptr<ITaskReport> RoutingReportManager::createReport(
     const QString &reportId) {
-  if (!isFileParsed()) parseLogFile();
+  if (isFileOutdated(logFile())) parseLogFile();
+  if (!FileUtils::FileExists(logFile())) clean();
 
   ITaskReport::DataReports dataReports;
 
-  if (reportId == QString(RESOURCE_REPORT_NAME))
+  if (reportId == QString(DESIGN_STAT_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
         m_resourceColumns, m_resourceData, QString{}));
-  else if (reportId == QString(CIRCUIT_REPORT_NAME))
+  } else {
     dataReports.push_back(std::make_unique<TableReport>(
         m_circuitColumns, m_circuitData, QString{}));
-  else {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, m_timingData, "Statistical timing:"));
-    for (auto &hgrm : m_histograms)
-      dataReports.push_back(std::make_unique<TableReport>(
-          m_histogramColumns, hgrm.second, hgrm.first));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_bramColumns, m_bramData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_dspColumns, m_dspData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_ioColumns, m_ioData, QString{}));
+    dataReports.push_back(
+        std::make_unique<TableReport>(m_clockColumns, m_clockData, QString{}));
   }
   emit reportCreated(reportId);
 
@@ -84,9 +92,8 @@ std::unique_ptr<ITaskReport> RoutingReportManager::createReport(
 }
 
 void RoutingReportManager::parseLogFile() {
-  reset();
-
-  auto logFile = createLogFile(QString(ROUTING_LOG));
+  clean();
+  auto logFile = createLogFile();
   if (!logFile) return;
 
   QTextStream in(logFile.get());
@@ -95,11 +102,8 @@ void RoutingReportManager::parseLogFile() {
   auto lineNr = 0;
   QString line;
   while (in.readLineInto(&line)) {
-    if (FIND_RESOURCES.indexIn(line) != -1)
-      parseResourceUsage(in, lineNr);
-    else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
-      m_circuitData = parseCircuitStats(in, lineNr);
-    else if (line.startsWith(LOAD_PLACEMENT_SECTION))
+    parseStatisticLine(line);
+    if (line.startsWith(LOAD_PLACEMENT_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_PLACEMENT_SECTION, {});
     else if (line.startsWith(COMPUT_ROUTER_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, COMPUT_ROUTER_SECTION, {});
@@ -120,24 +124,41 @@ void RoutingReportManager::parseLogFile() {
           lineNr,
           TaskMessage{
               lineNr, MessageSeverity::INFO_MESSAGE, TIMING_INFO.cap(), {}});
+    else if (line.startsWith(STATISTIC_SECTION))
+      lineNr = parseStatisticsSection(in, lineNr);
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
+  m_circuitData = CreateLogicData();
+  m_bramData = CreateBramData();
+  m_dspData = CreateDspData();
+  m_ioData = CreateIOData();
+  m_clockData = CreateClockData();
+  designStatistics();
 
   logFile->close();
-  setFileParsed(true);
+  setFileTimeStamp(this->logFile());
 }
 
-QString RoutingReportManager::getTimingLogFileName() const {
-  return QString(ROUTING_TIMING_LOG);
+std::filesystem::path RoutingReportManager::logFile() const {
+  return logFilePath(ROUTING_LOG);
 }
 
-void RoutingReportManager::reset() {
+void RoutingReportManager::clean() {
+  AbstractReportManager::clean();
   m_messages.clear();
   m_circuitData.clear();
   m_histograms.clear();
   m_resourceData.clear();
   m_timingData.clear();
+  m_bramData.clear();
+  m_dspData.clear();
+  m_ioData.clear();
+  m_clockData.clear();
+}
+
+QString RoutingReportManager::getTimingLogFileName() const {
+  return QString(ROUTING_TIMING_LOG);
 }
 
 bool RoutingReportManager::isStatisticalTimingHistogram(const QString &line) {

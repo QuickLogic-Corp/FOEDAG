@@ -174,6 +174,7 @@ test/gui: run-cmake-debug
 	#$(XVFB) ./dbuild/bin/foedag --script tests/TestGui/gtkwave_cmds.tcl || (cat foedag.log; exit 1)
 	$(XVFB) ./dbuild/bin/foedag --replay tests/TestGui/gtkwave_open_bad_path.tcl && exit 1 || (echo "PASSED: Caught negative test")
 	$(XVFB) ./dbuild/bin/foedag --replay tests/TestGui/log_header.tcl
+	$(XVFB) ./dbuild/bin/programmer-gui_test --replay tests/TestGui/programmer_gui.tcl
 
 test/gui_mac: run-cmake-debug
 	$(XVFB) ./dbuild/bin/foedag --replay tests/TestGui/gui_start_stop.tcl
@@ -184,6 +185,7 @@ test/gui_mac: run-cmake-debug
 #	$(XVFB) ./dbuild/bin/newfile --replay tests/TestGui/gui_new_file.tcl
 
 test/batch: run-cmake-release
+	./build/bin/foedag --batch --script tests/TestBatch/test_simulation_options.tcl
 	./build/bin/foedag --batch --script tests/TestBatch/test_ip_generate.tcl
 	./build/bin/foedag --batch --script tests/Testcases/aes_decrypt_fpga/aes_decrypt.tcl
 	./build/bin/foedag --batch --script tests/TestGui/compiler_flow.tcl
@@ -196,13 +198,13 @@ test/batch: run-cmake-release
 	./build/bin/foedag --batch --script tests/Testcases/IPGenerate/test_ipgenerate_instances.tcl
 	./build/bin/foedag --batch --script tests/Testcases/IPGenerate/test_ipgenerate_modules.tcl
 	./build/bin/foedag --batch --script tests/Testcases/IPGenerate/test_ipgenerate_cache.tcl
-#	./build/bin/foedag --batch --script tests/Testcases/DesignQuery/test_parse_design_data.tcl
+	./build/bin/foedag --batch --script tests/Testcases/DesignQuery/test_parse_design_data.tcl
 	./build/bin/foedag --batch --script tests/Testcases/project_file/test.tcl
 	./build/bin/foedag --batch --script tests/Testcases/oneff_close/oneff.tcl
 	./build/bin/foedag --batch --script tests/TestBatch/test_ip_configure_load.tcl
 	./build/bin/foedag --batch --script tests/TestBatch/log_header.tcl
 	./build/bin/foedag --batch --script tests/Testcases/simulation_trivial/test.tcl
-
+	
 lib-only: run-cmake-release
 	cmake --build build --target foedag -j $(CPU_CORES)
 

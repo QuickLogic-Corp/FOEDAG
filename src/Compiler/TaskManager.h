@@ -119,11 +119,13 @@ class TaskManager : public QObject {
   void progress(int progress, int max, const QString &msg = {});
 
   void taskReportCreated(QString reportName);
+  void enableChanged();
 
  private slots:
   void runNext(FOEDAG::TaskStatus status);
 
  private:
+  void initCleanTasks();
   void run();
   void reset();
   void cleanDownStreamStatus(Task *t);
@@ -143,6 +145,7 @@ class TaskManager : public QObject {
   int m_taskCount{0};
   int counter{0};
   const DialogProvider *m_dialogProvider{nullptr};
+  Compiler *m_compiler{nullptr};
 };
 
 }  // namespace FOEDAG

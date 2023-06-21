@@ -20,16 +20,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "main_window.h"
 
+#include <QLabel>
+#include <QListView>
 #include <QTextStream>
 #include <QtWidgets>
 #include <fstream>
 
+#include "ChatGptWidget.h"
 #include "Compiler/Compiler.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TaskManager.h"
 #include "Compiler/TaskModel.h"
+#include "Compiler/TaskTableView.h"
+#include "CompressProject.h"
 #include "Console/DummyParser.h"
+#include "Console/FileNameParser.h"
 #include "Console/StreamBuffer.h"
 #include "Console/TclConsole.h"
 #include "Console/TclConsoleBuilder.h"
@@ -37,10 +43,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Console/TclErrorParser.h"
 #include "DesignRuns/runs_form.h"
 #include "DockWidget.h"
+#include "EditorSettings.h"
 #include "IpConfigurator/IpCatalogTree.h"
 #include "IpConfigurator/IpConfigWidget.h"
 #include "IpConfigurator/IpConfigurator.h"
 #include "IpConfigurator/IpConfiguratorCreator.h"
+#include "LicenseManagerWidget.h"
 #include "Main/CompilerNotifier.h"
 #include "Main/DialogProvider.h"
 #include "Main/Foedag.h"
@@ -64,6 +72,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TextEditor/text_editor_form.h"
 #include "Utils/FileUtils.h"
 #include "Utils/QtUtils.h"
+#include "Utils/StringUtils.h"
 #include "WidgetFactory.h"
 #include "foedag_version.h"
 
@@ -76,9 +85,10 @@ static constexpr const char* LICENSES_DIR{"licenses"};
 
 namespace {
 const QString RECENT_PROJECT_KEY{"recent/proj%1"};
+const QString EDITOR_KEY{"editors/editor%1"};
 const QString SHOW_WELCOMEPAGE_KEY{"showWelcomePage"};
 const QString SHOW_STOP_COMPILATION_MESSAGE_KEY{"showStopCompilationMessage"};
-const QString BITSTREAM_ENABLE_KEY{"bitstreamEnable"};
+const QString SHOW_MESSAGE_ON_EXIT_KEY{"showMessageOnExit"};
 constexpr uint RECENT_PROJECT_COUNT{10};
 constexpr uint RECENT_PROJECT_COUNT_WP{5};
 constexpr const char* WELCOME_PAGE_MENU_PROP{"showOnWelcomePage"};
@@ -107,6 +117,8 @@ MainWindow::MainWindow(Session* session)
   m_showWelcomePage = m_settings.value(SHOW_WELCOMEPAGE_KEY, true).toBool();
   m_askStopCompilation =
       m_settings.value(SHOW_STOP_COMPILATION_MESSAGE_KEY, true).toBool();
+  m_askShowMessageOnExit =
+      m_settings.value(SHOW_MESSAGE_ON_EXIT_KEY, true).toBool();
 
   centerWidget(*this);
 
@@ -193,11 +205,14 @@ void MainWindow::SetWindowTitle(const QString& filename, const QString& project,
   }
 }
 
-void MainWindow::CloseOpenedTabs() {
+bool MainWindow::CloseOpenedTabs() {
   auto tabWidget = TextEditorForm::Instance()->GetTabWidget();
-  while (tabWidget->count() != 0) {
-    tabWidget->tabCloseRequested(tabWidget->currentIndex());
+  while (tabWidget && (tabWidget->count() != 0)) {
+    if (!TextEditorForm::Instance()->TabCloseRequested(
+            tabWidget->currentIndex()))
+      return false;
   }
+  return true;
 }
 
 void MainWindow::ProgressVisible(bool visible) {
@@ -216,6 +231,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 
 void MainWindow::ScriptFinished() {
   ProgressVisible(false);
+  const QSignalBlocker signalBlocker{DesignFileWatcher::Instance()};
   DesignFileWatcher::Instance()->updateDesignFileWatchers(m_projectManager);
   saveSettings();
 }
@@ -228,11 +244,14 @@ void MainWindow::newFile() {
 }
 
 void MainWindow::newProjectDlg() {
-  newProjdialog->Reset();
-  newProjdialog->open();
+  if (lastProjectClosed()) {
+    newProjdialog->Reset();
+    newProjdialog->open();
+  }
 }
 
 void MainWindow::openExampleProject() {
+  if (!lastProjectClosed()) return;
   auto currentDir = GlobalSession->Context()->DataPath();
   std::filesystem::path examplesPath = currentDir / "examples";
   auto fileName = QFileDialog::getOpenFileName(
@@ -276,6 +295,7 @@ void MainWindow::openExampleProject() {
 }
 
 void MainWindow::openProjectDialog(const QString& dir) {
+  if (!lastProjectClosed()) return;
   QString fileName;
   fileName = QFileDialog::getOpenFileName(this, tr("Open Project"), dir,
                                           "FOEDAG Project File(*.ospr)");
@@ -283,12 +303,13 @@ void MainWindow::openProjectDialog(const QString& dir) {
 }
 
 void MainWindow::closeProject(bool force) {
+  if (!lastProjectClosed()) return;
   if (m_projectManager && m_projectManager->HasDesign()) {
     if (!force && !confirmCloseProject()) return;
+    ipConfiguratorAction->setChecked(false);
     forceStopCompilation();
     Project::Instance()->InitProject();
     newProjdialog->Reset();
-    CloseOpenedTabs();
     m_showWelcomePage ? showWelcomePage() : ReShowWindow({});
     newProjectAction->setEnabled(true);
     setStatusAndProgressText(QString{});
@@ -313,6 +334,109 @@ void MainWindow::newDesignCreated(const QString& design) {
     sourcesForm->ProjectSettingsActions()->setEnabled(!design.isEmpty());
   simulationMenu->setEnabled(!design.isEmpty());
   updateTaskTable();
+  compressProjectAction->setEnabled(!design.isEmpty());
+}
+
+void MainWindow::chatGpt(const QString& request, const QString& content) {
+  if (!m_progressVisible) m_progressBar->hide();
+  setStatusAndProgressText("ChatGPT: done");
+  auto reportName = "Chat GPT";
+  const bool reset{request.isEmpty()};
+  auto tabWidget = TextEditorForm::Instance()->GetTabWidget();
+  auto addItem = [this](const QString& request, const QString& content) {
+    QStandardItem* item = new QStandardItem();
+    item->setData("Chat GPT", ListViewDelegate::HeaderRole);
+    item->setData(content, ListViewDelegate::SubheaderRole);
+    if (m_chatgptModel) {
+      m_chatgptModel->insertRow(0, item);
+      item = new QStandardItem();
+      item->setData("User", ListViewDelegate::HeaderRole);
+      item->setData(request, ListViewDelegate::SubheaderRole);
+      m_chatgptModel->insertRow(0, item);
+    }
+  };
+  if (reset) {
+    if (m_chatgptModel) {
+      m_chatgptModel->clear();
+    }
+  }
+  for (int i = 0; i < tabWidget->count(); i++) {
+    if (tabWidget->tabText(i) == reportName) {
+      if (reset) {
+        tabWidget->removeTab(i);
+        return;
+      }
+      tabWidget->setCurrentIndex(i);
+      addItem(request, content);
+      return;
+    }
+  }
+
+  if (reset) return;
+
+  if (m_chatGptListView) {
+    tabWidget->addTab(m_chatGptListView, reportName);
+    tabWidget->setCurrentWidget(m_chatGptListView);
+    addItem(request, content);
+    return;
+  }
+
+  // tab doesn't exist yet
+  m_chatgptModel = new QStandardItemModel();
+
+  m_chatGptListView = new QListView;
+  m_chatGptListView->setItemDelegate(new ListViewDelegate{});
+  m_chatGptListView->setModel(m_chatgptModel);
+  m_chatGptListView->setEditTriggers(
+      QAbstractItemView::EditTrigger::NoEditTriggers);
+  m_chatGptListView->setResizeMode(QListView::ResizeMode::Adjust);
+  m_chatGptListView->setVerticalScrollMode(QListView::ScrollPerPixel);
+  m_chatGptListView->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(m_chatGptListView, &QListView::customContextMenuRequested, this,
+          [this](const QPoint& pos) {
+            QMenu menu{m_chatGptListView};
+            auto copy = new QAction{"Copy"};
+            connect(copy, &QAction::triggered, m_chatGptListView,
+                    [this, pos]() {
+                      auto index = m_chatGptListView->indexAt(pos);
+                      if (index.isValid()) {
+                        auto data = m_chatGptListView->model()->data(
+                            index, ListViewDelegate::SubheaderRole);
+                        QClipboard* clipboard = QGuiApplication::clipboard();
+                        clipboard->setText(data.toString());
+                      }
+                    });
+            menu.addAction(copy);
+            menu.exec(m_chatGptListView->mapToGlobal(pos));
+          });
+
+  QStandardItem* item = new QStandardItem();
+  item->setData("User", ListViewDelegate::HeaderRole);
+  item->setData(request, ListViewDelegate::SubheaderRole);
+  m_chatgptModel->appendRow(item);
+
+  item = new QStandardItem();
+  item->setData("Chat GPT", ListViewDelegate::HeaderRole);
+  item->setData(content, ListViewDelegate::SubheaderRole);
+  m_chatgptModel->appendRow(item);
+
+  tabWidget->addTab(m_chatGptListView, reportName);
+  tabWidget->setCurrentWidget(m_chatGptListView);
+
+  connect(tabWidget, &TabWidget::resized, this,
+          [this](const QSize& s) { m_chatGptListView->resize(s); });
+}
+
+void MainWindow::chatGptStatus(bool status) {
+  if (status) {
+    m_progressBar->setMaximum(0);
+    m_progressBar->setValue(0);
+    m_progressBar->show();
+    setStatusAndProgressText("ChatGPT: pending response");
+  } else {
+    if (!m_progressVisible) m_progressBar->hide();
+    setStatusAndProgressText("ChatGPT: failed");
+  }
 }
 
 void MainWindow::startStopButtonsState() {
@@ -322,6 +446,17 @@ void MainWindow::startStopButtonsState() {
   startSimAction->setEnabled(startEn);
   // Enable Stop action when there is something to stop
   stopAction->setEnabled(isRunning());
+  if (m_taskView) m_taskView->setViewDisabled(isRunning());
+  const QList<QAction*> actions =
+      QList<QAction*>{} << simulationMenu->actions() << projectMenu->actions()
+                        << QList<QAction*>{
+                               newProjectAction,     openProjectAction,
+                               openExampleAction,    closeProjectAction,
+                               ipConfiguratorAction, pinAssignmentAction};
+  for (auto action : actions) action->setDisabled(isRunning());
+  recentMenu->setDisabled(isRunning());
+  if (m_reportsDockWidget && m_reportsDockWidget->widget())
+    m_reportsDockWidget->widget()->setDisabled(isRunning());
 }
 
 DockWidget* MainWindow::PrepareTab(const QString& name, const QString& objName,
@@ -389,6 +524,9 @@ void MainWindow::openProject(const QString& project, bool delayedOpen,
 
   ReShowWindow(project);
   loadFile(project);
+  // need load settings again in case we have settings depends on the selected
+  // device. E.g. DSP or BRAM
+  reloadSettings();
   emit projectOpened();
 
   // this should be first in order to keep console visible.
@@ -436,7 +574,8 @@ void MainWindow::forceStopCompilation() {
 }
 
 void MainWindow::showMessagesTab() {
-  auto newWidget = new MessagesTabWidget(*m_taskManager);
+  auto newWidget = new MessagesTabWidget(*m_taskManager,
+                                         GlobalSession->Context()->DataPath());
 
   auto oldWidget = m_messagesDockWidget->widget();
   if (oldWidget) {
@@ -712,7 +851,7 @@ void MainWindow::createRecentMenu() {
     QString project = m_settings.value(key).toString();
     if (!project.isEmpty()) {
       QFileInfo info{project};
-      auto projAction = new QAction(info.baseName());
+      auto projAction = new QAction(info.absoluteFilePath());
       connect(projAction, &QAction::triggered, this,
               &MainWindow::recentProjectOpen);
       recentMenu->addAction(projAction);
@@ -773,15 +912,20 @@ void MainWindow::createMenus() {
   helpMenu->addAction(documentationAction);
   helpMenu->addAction(releaseNotesAction);
   helpMenu->addSeparator();
+  helpMenu->addAction(manageLicenseAction);
   helpMenu->addAction(licensesAction);
+#ifndef PRODUCTION_BUILD
+  helpMenu->addAction(compressProjectAction);
+#endif
 
   preferencesMenu->addAction(defualtProjectPathAction);
 #ifndef PRODUCTION_BUILD
   preferencesMenu->addAction(pinPlannerPinNameAction);
 #endif
+  preferencesMenu->addAction(editorSettingsAction);
   preferencesMenu->addAction(showWelcomePageAction);
   preferencesMenu->addAction(stopCompileMessageAction);
-  preferencesMenu->addAction(bitstreamAction);
+  preferencesMenu->addAction(showMessageOnExitAction);
 
   helpMenu->menuAction()->setProperty(WELCOME_PAGE_MENU_PROP,
                                       WelcomePageActionVisibility::FULL);
@@ -795,6 +939,9 @@ void MainWindow::createToolBars() {
   debugToolBar->addAction(startAction);
   debugToolBar->addAction(startSimAction);
   debugToolBar->addAction(stopAction);
+#ifndef PRODUCTION_BUILD
+  debugToolBar->addAction(programmerAction);
+#endif
 }
 
 void MainWindow::updateMenusVisibility(bool welcomePageShown) {
@@ -885,12 +1032,31 @@ void MainWindow::createActions() {
     w.exec();
   });
 
-  documentationAction = new QAction(tr("Documentation"), this);
+  documentationAction = new QAction(tr("User Guide"), this);
+  connect(documentationAction, &QAction::triggered, this,
+          &MainWindow::documentationClicked);
   releaseNotesAction = new QAction(tr("Release Notes"), this);
+  connect(releaseNotesAction, &QAction::triggered, this,
+          &MainWindow::releaseNodesClicked);
   licensesAction = new QAction(tr("Licenses"), this);
-
   connect(licensesAction, &QAction::triggered, this,
           &MainWindow::onShowLicenses);
+
+  manageLicenseAction = new QAction{tr("Manage license..."), this};
+  connect(manageLicenseAction, &QAction::triggered, this,
+          &MainWindow::manageLicense);
+
+  compressProjectAction = new QAction{tr("Save Diagnostics"), this};
+  connect(compressProjectAction, &QAction::triggered, this,
+          &MainWindow::compressProject);
+
+  programmerAction = new QAction{tr("Programmer"), this};
+  connect(programmerAction, &QAction::triggered, this, [this]() {
+    auto programmer = GlobalSession->Context()->ProgrammerGuiPath();
+    auto result = FileUtils::ExecuteSystemCommand(
+        programmer.string(), {}, nullptr, -1, {}, nullptr, true);
+    if (result.code != 0) m_compiler->Message(result.message);
+  });
 
   connect(exitAction, &QAction::triggered, qApp, [this]() {
     if (this->confirmExitProgram()) {
@@ -909,7 +1075,7 @@ void MainWindow::createActions() {
   ipConfiguratorAction = new QAction(tr("IP Configurator"), this);
   ipConfiguratorAction->setCheckable(true);
   ipConfiguratorAction->setEnabled(false);
-  connect(ipConfiguratorAction, &QAction::triggered, this,
+  connect(ipConfiguratorAction, &QAction::toggled, this,
           &MainWindow::ipConfiguratorActionTriggered);
 
   showWelcomePageAction = new QAction(tr("Show welcome page"), this);
@@ -926,6 +1092,10 @@ void MainWindow::createActions() {
   connect(pinPlannerPinNameAction, &QAction::triggered, this,
           &MainWindow::pinPlannerPinName);
 
+  editorSettingsAction = new QAction{tr("3rd party editors..."), this};
+  connect(editorSettingsAction, &QAction::triggered, this,
+          &MainWindow::editorSettings);
+
   stopCompileMessageAction =
       new QAction(tr("Show message on stop compilation"), this);
   stopCompileMessageAction->setCheckable(true);
@@ -933,12 +1103,11 @@ void MainWindow::createActions() {
   connect(stopCompileMessageAction, &QAction::toggled, this,
           &MainWindow::onShowStopMessage);
 
-  bitstreamAction = new QAction(tr("Enable/Disable bitstream"), this);
-  bitstreamAction->setCheckable(true);
-  connect(bitstreamAction, &QAction::toggled, this,
-          &MainWindow::bitstreamEnable);
-  bitstreamAction->setChecked(
-      m_settings.value(BITSTREAM_ENABLE_KEY, false).toBool());
+  showMessageOnExitAction = new QAction(tr("Show message on exit"), this);
+  showMessageOnExitAction->setCheckable(true);
+  showMessageOnExitAction->setChecked(m_askShowMessageOnExit);
+  connect(showMessageOnExitAction, &QAction::toggled, this,
+          &MainWindow::onShowMessageOnExit);
 
   simRtlAction = new QAction(tr("Simulate RTL"), this);
   connect(simRtlAction, &QAction::triggered, this, [this]() {
@@ -1011,7 +1180,7 @@ void MainWindow::ReShowWindow(QString strProject) {
 
   QDockWidget* sourceDockWidget = new DockWidget(tr("Source"), this);
   sourceDockWidget->setObjectName("sourcedockwidget");
-  sourcesForm = new SourcesForm(this);
+  sourcesForm = new SourcesForm(&m_settings, this);
   connect(
       sourcesForm, &SourcesForm::CloseProject, this,
       [this]() { closeProject(); }, Qt::QueuedConnection);
@@ -1019,6 +1188,8 @@ void MainWindow::ReShowWindow(QString strProject) {
           &MainWindow::openProjectSettings);
   sourceDockWidget->setWidget(sourcesForm);
   addDockWidget(Qt::LeftDockWidgetArea, sourceDockWidget);
+  // make fixed max width, because dock widgets layout breaks after file open
+  sourceDockWidget->setMaximumWidth(350);
   m_projectManager = sourcesForm->ProjManager();
   projectMenu->clear();
   sourcesForm->ProjectSettingsActions()->setEnabled(!strProject.isEmpty());
@@ -1050,12 +1221,18 @@ void MainWindow::ReShowWindow(QString strProject) {
           &MainWindow::handleRemoveIpRequested);
   connect(sourcesForm, &SourcesForm::IpDeleteRequested, this,
           &MainWindow::handleDeleteIpRequested);
+  connect(sourcesForm, &SourcesForm::IpSimulationRequested, this,
+          &MainWindow::handleSimulationIpRequested);
+  connect(sourcesForm, &SourcesForm::IpWaveFormRequest, this,
+          &MainWindow::handlewaveFormRequested);
 
   TextEditor* textEditor = new TextEditor(this);
   textEditor->RegisterCommands(GlobalSession);
   textEditor->setObjectName("textEditor");
   connect(sourcesForm, SIGNAL(OpenFile(QString)), textEditor,
           SLOT(SlotOpenFile(QString)));
+  connect(sourcesForm, SIGNAL(OpenFileWith(QString, int)), this,
+          SLOT(openFileWith(QString, int)));
   connect(textEditor, SIGNAL(CurrentFileChanged(QString)), sourcesForm,
           SLOT(SetCurrentFileItem(QString)));
   connect(textEditor, &TextEditor::FileChanged, this,
@@ -1078,7 +1255,7 @@ void MainWindow::ReShowWindow(QString strProject) {
   consoleDocWidget->setObjectName("consoledocwidget");
   m_dockConsole = consoleDocWidget;
 
-  StreamBuffer* buffer = new StreamBuffer;
+  TclConsoleBuffer* buffer = new TclConsoleBuffer{};
   auto tclConsole = std::make_unique<FOEDAG::TclConsole>(
       m_interpreter->getInterp(), buffer->getStream());
   FOEDAG::TclConsole* c = tclConsole.get();
@@ -1088,11 +1265,10 @@ void MainWindow::ReShowWindow(QString strProject) {
                             buffer, nullptr, &console);
   consoleDocWidget->setWidget(w);
   connect(console, &TclConsoleWidget::linkActivated, this,
-          [textEditor](const ErrorInfo& eInfo) {
-            textEditor->SlotOpenFileWithLine(eInfo.file, eInfo.line.toInt());
-          });
+          &MainWindow::openFileFromConsole);
   console->addParser(new DummyParser{});
   console->addParser(new TclErrorParser{});
+  console->addParser(new FileNameParser{});
   m_console = console;
 
   m_compiler->SetInterpreter(m_interpreter);
@@ -1104,8 +1280,14 @@ void MainWindow::ReShowWindow(QString strProject) {
   m_compiler->setGuiTclSync(tclCommandIntegration);
   connect(tclCommandIntegration, &TclCommandIntegration::newDesign, this,
           &MainWindow::newDesignCreated);
+  connect(tclCommandIntegration, &TclCommandIntegration::showChatGpt, this,
+          &MainWindow::chatGpt);
+  connect(tclCommandIntegration, &TclCommandIntegration::chatGptStatus, this,
+          &MainWindow::chatGptStatus);
   connect(tclCommandIntegration, &TclCommandIntegration::closeDesign, this,
           [this]() { closeProject(true); });
+  connect(tclCommandIntegration, &TclCommandIntegration::saveSettingsSignal,
+          this, [this]() { saveSettings(); });
 
   addDockWidget(Qt::BottomDockWidgetArea, consoleDocWidget);
 
@@ -1184,7 +1366,6 @@ void MainWindow::ReShowWindow(QString strProject) {
   updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
   updateViewMenu();
   updateTaskTable();
-  updateBitstream();
 }
 
 void MainWindow::clearDockWidgets() {
@@ -1228,6 +1409,10 @@ void MainWindow::reloadSettings() {
 
     // Load and merge all our json files
     settings->loadSettings(settingsFiles);
+    if (m_compiler) m_compiler->reloadSettings();
+
+    connect(settings, &Settings::sync, this, &MainWindow::saveSetting,
+            Qt::UniqueConnection);
   }
 }
 
@@ -1359,8 +1544,8 @@ void MainWindow::ipConfiguratorActionTriggered() {
       m_ipCatalogTree = ipsWidgets[0];
 
       // Update the IP Config widget when the Available IPs selection changes
-      QObject::connect(m_ipCatalogTree, &IpCatalogTree::itemSelectionChanged,
-                       this, &MainWindow::handleIpTreeSelectionChanged);
+      QObject::connect(m_ipCatalogTree, &IpCatalogTree::ipReady, this,
+                       &MainWindow::handleIpTreeSelectionChanged);
     }
 
     // update the console for input incase the IP system printed any messages
@@ -1408,9 +1593,29 @@ void MainWindow::handleIpTreeSelectionChanged() {
 void MainWindow::handleIpReConfigRequested(const QString& ipName,
                                            const QString& moduleName,
                                            const QStringList& paramList) {
+  if (m_ipConfigDockWidget) {
+    // remove old config widget
+    auto oldWidget = m_ipConfigDockWidget->widget();
+    if (oldWidget) delete m_ipConfigDockWidget->widget();
+  }
   IpConfigWidget* configWidget =
       new IpConfigWidget(this, ipName, moduleName, paramList);
-  replaceIpConfigDockWidget(configWidget);
+
+  // Listen for IpInstance selection changes in the source tree
+  QObject::connect(configWidget, &IpConfigWidget::ipInstancesUpdated, this,
+                   &MainWindow::updateSourceTree);
+
+  // If dock widget has already been created
+  if (m_ipConfigDockWidget) {
+    // set new config widget
+    m_ipConfigDockWidget->setWidget(configWidget);
+    m_ipConfigDockWidget->show();
+  } else {  // If dock widget hasn't been created
+    // Create and place new dockwidget
+    m_ipConfigDockWidget =
+        PrepareTab(tr("Configure IP"), "configureIpsWidget", configWidget,
+                   nullptr, Qt::RightDockWidgetArea);
+  }
 }
 
 void MainWindow::handleRemoveIpRequested(const QString& moduleName) {
@@ -1435,6 +1640,42 @@ void MainWindow::handleDeleteIpRequested(const QString& moduleName) {
   }
 
   updateSourceTree();
+}
+
+void MainWindow::handleSimulationIpRequested(const QString& moduleName) {
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+
+  if ((compiler = GlobalSession->GetCompiler()) &&
+      (ipGen = compiler->GetIPGenerator())) {
+    auto module = moduleName.toStdString();
+    auto [supported, message] = ipGen->IsSimulateIpSupported(module);
+    if (!supported) {
+      QMessageBox::critical(this, "IP Simulation",
+                            QString::fromStdString(message));
+      return;
+    }
+    ipGen->SimulateIp(module);
+  }
+  updateSourceTree();
+}
+
+void MainWindow::handlewaveFormRequested(const QString& moduleName) {
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+
+  if ((compiler = GlobalSession->GetCompiler()) &&
+      (ipGen = compiler->GetIPGenerator())) {
+    auto module = moduleName.toStdString();
+    auto [supported, message] = ipGen->IsSimulateIpSupported(module);
+    const QString title{"View waveform"};
+    if (!supported) {
+      QMessageBox::critical(this, title, QString::fromStdString(message));
+      return;
+    }
+    auto [ok, mes] = ipGen->OpenWaveForm(module);
+    if (!ok) QMessageBox::critical(this, title, QString::fromStdString(mes));
+  }
 }
 
 void MainWindow::resetIps() {
@@ -1467,10 +1708,10 @@ void MainWindow::updateViewMenu() {
 void MainWindow::updateTaskTable() {
   if (!m_taskManager) return;
   const bool isPostSynthPure{m_projectManager->projectType() == PostSynth};
-  m_taskManager->task(IP_GENERATE)->setEnable(!isPostSynthPure);
-  m_taskManager->task(ANALYSIS)->setEnable(!isPostSynthPure);
-  m_taskManager->task(SIMULATE_RTL)->setEnable(!isPostSynthPure);
-  m_taskManager->task(SYNTHESIS)->setEnable(!isPostSynthPure);
+  m_taskManager->task(IP_GENERATE)->setValid(!isPostSynthPure);
+  m_taskManager->task(ANALYSIS)->setValid(!isPostSynthPure);
+  m_taskManager->task(SIMULATE_RTL)->setValid(!isPostSynthPure);
+  m_taskManager->task(SYNTHESIS)->setValid(!isPostSynthPure);
   if (m_taskView && m_taskModel) {
     for (auto taskId : {IP_GENERATE, ANALYSIS, ANALYSIS_CLEAN, SIMULATE_RTL,
                         SIMULATE_RTL_CLEAN, SIMULATE_RTL_SETTINGS, SYNTHESIS,
@@ -1484,12 +1725,10 @@ void MainWindow::updateTaskTable() {
       m_taskView->setRowHidden(row, true);
     }
   }
-  m_taskManager->task(SIMULATE_BITSTREAM)->setEnable(false);
-  m_taskManager->task(POWER)->setEnable(false);
-}
-
-void MainWindow::updateBitstream() {
-  bitstreamEnable(bitstreamAction->isChecked());
+  m_taskManager->task(SIMULATE_BITSTREAM)->setValid(false);
+  m_taskManager->task(SIMULATE_BITSTREAM_CLEAN)->setValid(false);
+  m_taskManager->task(POWER)->setValid(false);
+  m_taskManager->task(POWER_CLEAN)->setValid(false);
 }
 
 void MainWindow::slotTabChanged(int index) {
@@ -1516,6 +1755,7 @@ void MainWindow::saveWelcomePageConfig() {
 }
 
 void MainWindow::recentProjectOpen() {
+  if (!lastProjectClosed()) return;
   auto action = qobject_cast<QAction*>(sender());
   auto project = std::find_if(m_recentProjectsActions.cbegin(),
                               m_recentProjectsActions.cend(),
@@ -1542,33 +1782,6 @@ void MainWindow::openProjectSettings() {
   newProjdialog->open();
 }
 
-void MainWindow::replaceIpConfigDockWidget(QWidget* newWidget) {
-  IpConfigWidget* configWidget = qobject_cast<IpConfigWidget*>(newWidget);
-  if (configWidget) {
-    // Listen for IpInstance selection changes in the source tree
-    QObject::connect(configWidget, &IpConfigWidget::ipInstancesUpdated, this,
-                     &MainWindow::updateSourceTree);
-  }
-
-  // If dock widget has already been created
-  if (m_ipConfigDockWidget) {
-    // remove old config widget
-    auto oldWidget = m_ipConfigDockWidget->widget();
-    if (oldWidget) {
-      delete m_ipConfigDockWidget->widget();
-    }
-
-    // set new config widget
-    m_ipConfigDockWidget->setWidget(newWidget);
-    m_ipConfigDockWidget->show();
-  } else {  // If dock widget hasn't been created
-    // Create and place new dockwidget
-    m_ipConfigDockWidget =
-        PrepareTab(tr("Configure IP"), "configureIpsWidget", newWidget, nullptr,
-                   Qt::RightDockWidgetArea);
-  }
-}
-
 bool MainWindow::confirmCloseProject() {
   return (QMessageBox::question(
               this, "Close Project?",
@@ -1576,9 +1789,10 @@ bool MainWindow::confirmCloseProject() {
               QMessageBox::No | QMessageBox::Yes) == QMessageBox::Yes);
 }
 bool MainWindow::confirmExitProgram() {
+  if (!lastProjectClosed()) return false;
+  if (!m_askShowMessageOnExit) return true;
   return (QMessageBox::question(
-              this, "Exit Program?",
-              tr("Are you sure you want to exit the program?\n"),
+              this, "Exit Program?", tr("Are you sure you want to exit?\n"),
               QMessageBox::No | QMessageBox::Yes) == QMessageBox::Yes);
 }
 
@@ -1613,13 +1827,90 @@ void MainWindow::saveSettings() {
     const auto tasks = m_taskManager->tasks();
     for (const Task* const t : tasks) {
       if (!t->settingsKey().isEmpty()) {
-        auto d = FOEDAG::createTaskDialog(t->settingsKey());
-        if (d) {
-          QDialogButtonBox* btnBox =
-              d->findChild<QDialogButtonBox*>(DlgBtnBoxName);
-          if (btnBox) btnBox->button(QDialogButtonBox::Ok)->click();
-        }
+        saveSetting(t->settingsKey());
       }
+    }
+  }
+}
+
+void MainWindow::saveSetting(const QString& setting) {
+  auto d = FOEDAG::createTaskDialog(setting);
+  if (d) {
+    QDialogButtonBox* btnBox = d->findChild<QDialogButtonBox*>(DlgBtnBoxName);
+    if (btnBox) btnBox->button(QDialogButtonBox::Ok)->click();
+  }
+}
+
+void MainWindow::openFileFromConsole(const ErrorInfo& eInfo) {
+  QString file{eInfo.file};
+  QFileInfo info{eInfo.file};
+  if (!info.exists()) {  // try to search in the project folder
+    info.setFile(m_projectManager->getProjectPath(), file);
+    if (info.exists()) file = info.absoluteFilePath();
+  }
+  auto textEditor = findChild<TextEditor*>("textEditor");
+  if (textEditor) textEditor->SlotOpenFileWithLine(file, eInfo.line.toInt());
+}
+
+void MainWindow::manageLicense() {
+  auto path = GlobalSession->Context()->DataPath() / "etc" / "config.json";
+  auto licPath{Settings::Config(path, "general", "license-path")};
+  LicenseManagerWidget license{licPath, this};
+  license.exec();
+}
+
+void MainWindow::compressProject() {
+  CompressProject cProject{m_projectManager->projectPath(), this};
+  cProject.exec();
+}
+
+void MainWindow::documentationClicked() {
+  auto path = GlobalSession->Context()->DataPath() / "etc" / "config.json";
+  auto userGuide{Settings::Config(path, "general", "user-guide")};
+  if (!userGuide.isEmpty()) QDesktopServices::openUrl(userGuide);
+}
+
+void MainWindow::releaseNodesClicked() {
+  auto path = GlobalSession->Context()->DataPath() / "etc" / "config.json";
+  auto releaseNotes{Settings::Config(path, "general", "release-notes")};
+  if (!releaseNotes.isEmpty()) QDesktopServices::openUrl(releaseNotes);
+}
+
+void MainWindow::openFileWith(QString file, int editor) {
+  auto editorStr =
+      m_settings.value(EDITOR_KEY.arg(QString::number(editor))).toString();
+  auto editorLine = QtUtils::StringSplit(editorStr, ';');
+  if (editorLine.count() > 1) {
+    auto command = editorLine.last();
+    auto commandArgs = QtUtils::StringSplit(command, ' ');
+    if (!commandArgs.isEmpty()) {
+      auto commandName = commandArgs.takeFirst().toStdString();
+      StringVector args{};
+      for (const auto& c : commandArgs) args.push_back(c.toStdString());
+      args.push_back(file.toStdString());
+      FileUtils::ExecuteSystemCommand(commandName, args, nullptr, -1, {},
+                                      nullptr, true);
+    }
+  }
+}
+
+void MainWindow::editorSettings() {
+  EditorSettings setting{this};
+  for (int i = 0; i < setting.editor().size(); i++) {
+    auto value =
+        m_settings.value(EDITOR_KEY.arg(QString::number(i))).toString();
+    auto valueSplitted = QtUtils::StringSplit(value, ';');
+    if (valueSplitted.size() == 2)
+      setting.setEditor(
+          std::make_pair(valueSplitted.first(), valueSplitted.last()), i);
+  }
+  auto accepted = setting.exec();
+  if (accepted) {
+    const auto& editors = setting.editor();
+    for (int i = 0; i < editors.size(); i++) {
+      m_settings.setValue(
+          EDITOR_KEY.arg(QString::number(i)),
+          QString{"%1;%2"}.arg(editors.at(i).first, editors.at(i).second));
     }
   }
 }
@@ -1631,6 +1922,12 @@ void MainWindow::setEnableSaveButtons(bool enable) {
 bool MainWindow::isEnableSaveButtons() const {
   if (!m_saveButtons.isEmpty()) return m_saveButtons.first()->isEnabled();
   return false;
+}
+
+bool MainWindow::lastProjectClosed() {
+  if (!m_projectManager) return true;
+  if (m_projectManager && !m_projectManager->HasDesign()) return true;
+  return CloseOpenedTabs();
 }
 
 void MainWindow::onShowWelcomePage(bool show) {
@@ -1649,11 +1946,9 @@ void MainWindow::onShowStopMessage(bool showStopCompilationMsg) {
   m_settings.setValue(SHOW_STOP_COMPILATION_MESSAGE_KEY, m_askStopCompilation);
 }
 
-void MainWindow::bitstreamEnable(bool enable) {
-  if (m_taskManager) {
-    m_taskManager->task(BITSTREAM)->setEnable(enable);
-  }
-  m_settings.setValue(BITSTREAM_ENABLE_KEY, enable);
+void MainWindow::onShowMessageOnExit(bool showMessage) {
+  m_askShowMessageOnExit = showMessage;
+  m_settings.setValue(SHOW_MESSAGE_ON_EXIT_KEY, m_askShowMessageOnExit);
 }
 
 void MainWindow::onShowLicenses() {

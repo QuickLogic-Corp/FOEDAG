@@ -40,6 +40,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Utils/StringUtils.h"
 
+std::vector<QProcess*> FOEDAG::FileUtils::m_processes{};
+
 namespace FOEDAG {
 
 bool FileUtils::FileExists(const std::filesystem::path& name) {
@@ -208,36 +210,75 @@ std::vector<std::filesystem::path> FileUtils::FindFileInDirs(
   return results;
 }
 
-int FileUtils::ExecuteSystemCommand(const std::string& command,
-                                    std::ostream* result) {
-  QProcess* m_process = new QProcess;
+std::filesystem::path FileUtils::FindFileByExtension(
+    const std::filesystem::path& path, const std::string& extension) {
+  if (FileUtils::FileExists(path)) {
+    for (const std::filesystem::path& entry :
+         std::filesystem::directory_iterator(path)) {
+      if (FileUtils::FileIsRegular(entry)) {
+        if (StringUtils::toLower(entry.extension().string()) ==
+            StringUtils::toLower(extension))
+          return entry;
+      }
+    }
+  }
+  return {};
+}
 
-  QObject::connect(m_process, &QProcess::readyReadStandardOutput,
-                   [result, m_process]() {
-                     result->write(m_process->readAllStandardOutput(),
-                                   m_process->bytesAvailable());
-                   });
+Return FileUtils::ExecuteSystemCommand(const std::string& command,
+                                       const std::vector<std::string>& args,
+                                       std::ostream* out, int timeout_ms,
+                                       const std::string& workingDir,
+                                       std::ostream* err, bool startDetached) {
+  QProcess process;
+  if (!workingDir.empty())
+    process.setWorkingDirectory(QString::fromStdString(workingDir));
 
-  QObject::connect(m_process, &QProcess::readyReadStandardError,
-                   [result, m_process]() {
-                     QByteArray data = m_process->readAllStandardError();
-                     result->write(data, data.size());
-                   });
+  std::ostream* errStream = err ? err : out;
 
-  QString cmd{command.c_str()};
-  QStringList args = cmd.split(" ");
-  QString program = args.first();
-  args.pop_front();  // remove program
-  m_process->start(program, args);
+  if (out) {
+    QObject::connect(
+        &process, &QProcess::readyReadStandardOutput, [out, &process]() {
+          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+        });
+  }
 
-  m_process->waitForFinished(-1);
+  if (errStream) {
+    QObject::connect(&process, &QProcess::readyReadStandardError,
+                     [errStream, &process]() {
+                       QByteArray data = process.readAllStandardError();
+                       errStream->write(data, data.size());
+                     });
+  }
 
-  auto status = m_process->exitStatus();
-  auto exitCode = m_process->exitCode();
-  delete m_process;
-  m_process = nullptr;
+  QString program = QString::fromStdString(command);
+  QStringList args_{};
+  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  if (startDetached) {
+    auto success = process.startDetached(program, args_);
+    return {success ? 0 : -1,
+            QString{"%1: Failed to start."}.arg(program).toStdString()};
+  } else {
+    m_processes.push_back(&process);
+    process.start(program, args_);
+  }
 
-  return (status == QProcess::NormalExit) ? exitCode : -1;
+  bool finished = process.waitForFinished(timeout_ms);
+  auto it = std::find(m_processes.begin(), m_processes.end(), &process);
+  if (it != m_processes.end()) m_processes.erase(it);
+
+  std::string message{};
+  if (!finished) {
+    message = process.errorString().toStdString();
+    if (errStream) (*errStream) << message << std::endl;
+  }
+
+  auto status = process.exitStatus();
+  auto exitCode = process.exitCode();
+  int returnStatus =
+      finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
+
+  return {returnStatus, {message}};
 }
 
 time_t FileUtils::Mtime(const std::filesystem::path& path) {
@@ -295,6 +336,10 @@ void FileUtils::printArgs(int argc, const char* argv[]) {
   qDebug() << res.c_str();
 }
 
+void FileUtils::terminateSystemCommand() {
+  for (auto pr : m_processes) pr->terminate();
+}
+
 bool FileUtils::removeFile(const std::string& file) noexcept {
   const std::filesystem::path path{file};
   return removeFile(path);
@@ -303,7 +348,7 @@ bool FileUtils::removeFile(const std::string& file) noexcept {
 bool FileUtils::removeFile(const std::filesystem::path& file) noexcept {
   if (!FileExists(file)) return false;
   std::error_code ec;
-  std::filesystem::remove(file, ec);
+  std::filesystem::remove_all(file, ec);
   return ec.value() == 0;
 }
 

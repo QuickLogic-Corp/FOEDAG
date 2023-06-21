@@ -141,59 +141,160 @@
                 "options": [
                     "Area",
                     "Delay",
-                    "Mixed",
-                    "None"
+                    "Mixed"
                 ],
                 "optionsLookup": [
                     "area",
                     "delay",
-                    "mixed",
+                    "mixed"
+                ],
+                "arg": "_SynthOpt_",
+                "default":"Mixed"
+            },
+            "effort_dropdown": {
+                "label": "Effort",
+                "widgetType": "dropdown",
+                "options": [
+                    "High",
+                    "Medium",
+                    "Low"
+                ],
+                "optionsLookup": [
+                    "high",
+                    "medium",
+                    "low"
+                ],
+                "arg": "effort",
+                "default":"High"
+            },
+            "fsm_encoding_dropdown": {
+                "label": "FSM Encoding",
+                "widgetType": "dropdown",
+                "options": [
+                    "Binary",
+                    "One Hot"
+                ],
+                "optionsLookup": [
+                    "binary",
+                    "onehot"
+                ],
+                "arg": "fsm_encoding",
+                "default":"One Hot"
+            },
+            "carry_dropdown": {
+                "label": "Carry",
+                "widgetType": "dropdown",
+                "options": [
+                    "All",
+                    "Auto",
+                    "None"
+                ],
+                "optionsLookup": [
+                    "all",
+                    "auto",
                     "none"
                 ],
-                "arg": "_SynthOpt_"
+                "arg": "carry",
+                "default":"Auto"
             },
-            "no_dsp_checkbox": {
-                "label": "No DSP Blocks",
-                "widgetType": "checkbox",
-                "arg": "no_dsp"
+            "netlist_lang_dropdown": {
+                "label": "Pnr netlist language",
+                "widgetType": "dropdown",
+                "options": [
+                    "Blif",
+                    "Edif",
+                    "Verilog",
+                    "VHDL"
+                ],
+                "optionsLookup": [
+                    "blif",
+                    "edif",
+                    "verilog",
+                    "vhdl"
+                ],
+                "default": "Verilog",
+                "arg": "netlist_lang"
             },
-            "no_bram_checkbox": {
-                "label": "No Block Ram",
+            "dsp_spinbox_ex": {
+                "label": "DSP limit",
+                "widgetType": "Spinbox",
+                "minVal": 0,
+                "maxVal": 0,
+                "stepVal": 1,
+                "arg": "dsp_limit"
+            },
+            "bram_spinbox_ex": {
+                "label": "Block RAM limit",
+                "widgetType": "Spinbox",
+                "minVal": 0,
+                "maxVal": 0,
+                "stepVal": 1,
+                "arg": "bram_limit"
+            },
+            "carry_chain_spinbox_ex": {
+                "label": "Carry chain limit",
+                "widgetType": "spinbox",
+                "minVal": 0,
+                "maxVal": 0,
+                "stepVal": 1,
+                "arg": "carry_chain_limit"
+            },
+            "fast_checkbox": {
+                "label": "Fast Synthesis",
                 "widgetType": "checkbox",
-                "arg": "no_bram"
+                "arg": "fast"
+            },
+            "no_flatten": {
+                "label": "No flatten",
+                "widgetType": "checkbox",
+                "arg": "no_flatten"
             },
             "_META_": {
                 "hidden": false,
                 "isSetting": true,
-                "tclArgKey": "Tasks_Synthesis"
+                "tclArgKey": "CompilerRs_Synthesis"
             }
         },
         "Packing": {
-	    "netlist_lang_dropdown": {
-		"label": "Pnr netlist language",
-		"widgetType": "dropdown",
-		"options": [
-		    "Blif",
-		    "EBlif",
-		    "Edif",
-		    "Verilog",
-		    "VHDL"
-		],
-		"optionsLookup": [
-		    "blif",
-		    "eblif",
-		    "edif",
-		    "verilog",
-		    "vhdl"
-		],
-		"default": "verilog",
-		"arg": "netlist_lang"
-	    },
-            "_META_": {
-                "hidden": false,
-                "isSetting": true,
-                "tclArgKey": "Tasks_packing"
-            }
+           "netlist_lang_dropdown": {
+              "label": "Pnr netlist language",
+              "widgetType": "dropdown",
+              "options": [
+                  "Blif",
+                  "Edif",
+                  "Verilog",
+                  "VHDL"
+              ],
+              "optionsLookup": [
+                  "blif",
+                  "edif",
+                  "verilog",
+                  "vhdl"
+              ],
+              "default": "Verilog",
+              "arg": "netlist_lang"
+          },
+          "clb_packing": {
+              "label": "CLB packing",
+              "options": [
+                  "Auto",
+                  "Dense",
+                  "Timing Driven"
+              ],
+              "optionsLookup": [
+                  "auto",
+                  "dense",
+                  "timing_driven"
+              ],
+              "widgetType": "dropdown",
+              "default" : "Auto",
+              "arg": "clb_packing"
+           },
+           "_META_": {
+              "hidden": false,
+              "isSetting": true,
+              "tclArgKey": "Tasks_packing"
+           }
         },
         "Placement": {
             "pin_selection_radiobtn": {
@@ -219,30 +320,8 @@
             }
         },
         "Routing": {
-            "routing_dropdown_ex": {
-                "label": "Dropdown Example",
-                "widgetType": "dropdown",
-                "options": [
-                    "option1",
-                    "option2",
-                    "option3"
-                ],
-                "default": "option1"
-            },
-            "routing_radiobuttons_horiz_ex": {
-                "label": "Radio Button Example (horizontal)",
-                "widgetType": "radiobuttons",
-                "options": [
-                    "b1",
-                    "b2",
-                    "b3"
-                ],
-                "layout": "horizontal",
-                "default": "b1",
-                "arg": "_routeOpt_"
-            },
             "_META_": {
-                "hidden": false,
+                "hidden": true,
                 "isSetting": true
             }
         },
@@ -287,7 +366,7 @@
                     "ghdl",
                     "icarus"
                 ],
-                "default": "verilator",
+                "default": "Icarus",
                 "arg": "rtl_sim_type"
             },
             "options_sim": {
@@ -307,6 +386,12 @@
                 "widgetType": "textedit",
                 "default": "",
                 "arg": "com_rtl_opt"
+            },
+            "options_run": {
+                "label": "Extra options:",
+                "widgetType": "textedit",
+                "default": "",
+                "arg": "run_rtl_opt"
             },
             "_META_": {
                 "hidden": false,
@@ -334,7 +419,7 @@
                     "ghdl",
                     "icarus"
                 ],
-                "default": "verilator",
+                "default": "Icarus",
                 "arg": "gate_sim_type"
             },
             "options_sim": {
@@ -354,6 +439,12 @@
                 "widgetType": "textedit",
                 "default": "",
                 "arg": "com_gate_opt"
+            },
+            "options_run": {
+                "label": "Extra options:",
+                "widgetType": "textedit",
+                "default": "",
+                "arg": "run_gate_opt"
             },
             "_META_": {
                 "hidden": false,
@@ -381,7 +472,7 @@
                     "ghdl",
                     "icarus"
                 ],
-                "default": "verilator",
+                "default": "Icarus",
                 "arg": "pnr_sim_type"
             },
             "options_sim": {
@@ -401,6 +492,12 @@
                 "widgetType": "textedit",
                 "default": "",
                 "arg": "com_pnr_opt"
+            },
+             "options_run": {
+                "label": "Extra options:",
+                "widgetType": "textedit",
+                "default": "",
+                "arg": "run_pnr_opt"
             },
             "_META_": {
                 "hidden": false,
@@ -428,7 +525,7 @@
                     "ghdl",
                     "icarus"
                 ],
-                "default": "verilator",
+                "default": "Icarus",
                 "arg": "bitstream_sim_type"
             },
             "options_sim": {
@@ -448,6 +545,12 @@
                 "widgetType": "textedit",
                 "default": "",
                 "arg": "com_bitstream_opt"
+            },
+            "options_run": {
+                "label": "Extra options:",
+                "widgetType": "textedit",
+                "default": "",
+                "arg": "run_bitstream_opt"
             },
             "_META_": {
                 "hidden": false,

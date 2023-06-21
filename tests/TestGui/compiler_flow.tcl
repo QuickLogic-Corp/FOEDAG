@@ -28,4 +28,5 @@ route
 sta
 power
 bitstream
+program_device -b bitstream.bit -c dummy.cfg -n 0
 exit

@@ -407,6 +407,7 @@ class ProjectManager : public QObject {
   int CreateSystemVerilogFile(QString strFile);
   int CreateVHDLFile(QString strFile);
   int CreateSDCFile(QString strFile);
+  int CreateCFile(const QString &strFile);
 
   int AddOrCreateFileToFileSet(const QString &strFileName,
                                bool isFileCopy = true);
@@ -424,9 +425,8 @@ class ProjectManager : public QObject {
   inline static const Suffixes m_designSuffixes{
       {"v", "sv", "vh", "svh", "vhd", "blif", "eblif"}};
   inline static const Suffixes m_constrSuffixes{{"sdc", "pin"}};
-  inline static const Suffixes m_simSuffixes{{"v", "sv", "cpp", "c", "cc",
-                                              "vhd"
-                                              "vhdl"}};
+  inline static const Suffixes m_simSuffixes{
+      {"v", "sv", "cpp", "c", "cc", "vhd", "vhdl"}};
 
  signals:
   void projectPathChanged();

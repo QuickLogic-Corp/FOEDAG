@@ -1,6 +1,7 @@
 #ifndef SOURCES_FORM_H
 #define SOURCES_FORM_H
 #include <QAction>
+#include <QSettings>
 #include <QTreeWidget>
 #include <QWidget>
 
@@ -36,7 +37,7 @@ class SourcesForm : public QWidget {
   Q_OBJECT
 
  public:
-  explicit SourcesForm(QWidget* parent = nullptr);
+  explicit SourcesForm(QSettings* settings, QWidget* parent = nullptr);
   ~SourcesForm();
 
   void InitSourcesForm();
@@ -49,6 +50,7 @@ class SourcesForm : public QWidget {
 
  signals:
   void OpenFile(QString);
+  void OpenFileWith(QString, int);
   void ShowProperty(const QString&);
   void ShowPropertyPanel();
   void CloseProject();
@@ -56,6 +58,8 @@ class SourcesForm : public QWidget {
                            const QStringList& paramList);
   void IpRemoveRequested(const QString& moduleName);
   void IpDeleteRequested(const QString& moduleName);
+  void IpSimulationRequested(const QString& moduleName);
+  void IpWaveFormRequest(const QString& moduleName);
   void OpenProjectSettings();
 
  private slots:
@@ -68,6 +72,7 @@ class SourcesForm : public QWidget {
   void SlotCreateSimSet();
   void SlotAddFile();
   void SlotOpenFile();
+  void SlotOpenFileWith(int editor);
   void SlotRemoveFileSet();
   void SlotRemoveFile();
   void SlotSetAsTarget();
@@ -77,6 +82,8 @@ class SourcesForm : public QWidget {
   void SlotReConfigureIp();
   void SlotRemoveIp();
   void SlotDeleteIp();
+  void SlotSimulateIp();
+  void SlotWaveForm();
 
  private:
   Ui::SourcesForm* ui;
@@ -96,9 +103,13 @@ class SourcesForm : public QWidget {
   QAction* m_actReconfigureIp;
   QAction* m_actRemoveIp;
   QAction* m_actDeleteIp;
+  QAction* m_simulateIp;
+  QAction* m_waveFormView;
   QAction* m_actProjectSettings;
+  QMenu* m_menuOpenFileWith;
 
   ProjectManager* m_projManager;
+  QSettings* m_setting{nullptr};
 
   void CreateActions();
   void CreateFolderHierachyTree();
@@ -112,6 +123,8 @@ class SourcesForm : public QWidget {
   void showAddFileDialog(GridType gridType);
   void AddIpInstanceTree(QTreeWidgetItem* topItem);
   QStringList SelectedIpModules() const;
+  QStringList SelectedFiles() const;
+  void initOpenWithMenu(QMenu* menu);
 };
 }  // namespace FOEDAG
 

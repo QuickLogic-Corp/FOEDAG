@@ -105,7 +105,11 @@ class Task : public QObject {
   void setValid(bool newValid);
 
   bool isEnable() const;
-  void setEnable(bool newEnable);
+  bool isEnableDefault() const;
+  void setEnable(bool newEnable, bool enableDefault = true);
+
+  Task *cleanTask() const;
+  void setCleanTask(Task *newClean);
 
  signals:
   /*!
@@ -126,9 +130,11 @@ class Task : public QObject {
   TaskType m_type{TaskType::Action};
   QVector<Task *> m_subTask;
   Task *m_parent{nullptr};
+  Task *m_clean{nullptr};
   bool m_valid{false};
   QString m_logFilePath{};
   bool m_enable{true};
+  bool m_enableDefault{true};
   CustomData m_customData{};
 };
 

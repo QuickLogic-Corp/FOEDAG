@@ -29,7 +29,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string_view>
 #include <vector>
 
+class QProcess;
+
 namespace FOEDAG {
+
+struct Return {
+  int code{};
+  std::string message{};
+};
 
 class FileUtils final {
  public:
@@ -62,8 +69,15 @@ class FileUtils final {
       const std::vector<std::filesystem::path>& searchPaths,
       bool caseInsensitive);
 
-  static int ExecuteSystemCommand(const std::string& command,
-                                  std::ostream* result);
+  static std::filesystem::path FindFileByExtension(
+      const std::filesystem::path& path, const std::string& extension);
+
+  static Return ExecuteSystemCommand(const std::string& command,
+                                     const std::vector<std::string>& args,
+                                     std::ostream* out, int timeout_ms = -1,
+                                     const std::string& workingDir = {},
+                                     std::ostream* err = nullptr,
+                                     bool startDetached = false);
 
   static time_t Mtime(const std::filesystem::path& path);
 
@@ -80,10 +94,14 @@ class FileUtils final {
   // for the debug purposes, this function prints arguments
   static void printArgs(int argc, const char* argv[]);
 
+  static void terminateSystemCommand();
+
  private:
   FileUtils() = delete;
   FileUtils(const FileUtils& orig) = delete;
   ~FileUtils() = delete;
+
+  static std::vector<QProcess*> m_processes;
 };
 
 };  // namespace FOEDAG

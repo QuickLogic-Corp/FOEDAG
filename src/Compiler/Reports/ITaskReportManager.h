@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <QMap>
+#include <QObject>
 #include <QStringList>
 #include <memory>
 
@@ -40,13 +41,61 @@ struct TaskMessage {
   QMap<int, TaskMessage> m_childMessages;
 };
 
+struct Logic {
+  uint clb{};
+  uint lut5{};
+  uint lut6{};
+  uint dff{};
+  uint latch{};
+  uint fa2Bits{};
+};
+
+struct Bram {
+  uint bram_18k{};
+  uint bram_36k{};
+};
+
+struct DSP {
+  uint dsp_9_10{};
+  uint dsp_18_20{};
+};
+
+struct IO {
+  uint io{};
+  uint inputs{};
+  uint outputs{};
+};
+
+struct Clock {
+  uint clock_num{};
+};
+
+struct Statistic {
+  uint wires{};
+  double avgFanout{};
+  double maxFanout{};
+  double avgLogicLvel{};
+  double maxLogicLvel{};
+  double fmax{};
+};
+
+struct Resources {
+  Logic logic{};
+  Bram bram{};
+  DSP dsp{};
+  Statistic stat{};
+  IO inouts{};
+  Clock clocks{};
+};
+
 class ITaskReport;
 
 /* Manager for task reports. It has to be implemented per compilation
  * task, as reports are task-specific. It knows how many reports are
  * available per task and can create reports.
  */
-class ITaskReportManager {
+class ITaskReportManager : public QObject {
+  Q_OBJECT
  public:
   virtual ~ITaskReportManager() = default;
 
@@ -59,6 +108,22 @@ class ITaskReportManager {
       const QString &reportId) = 0;
   // Returns retrieved from a log file messages per line number.
   virtual const Messages &getMessages() = 0;
+
+  QStringList suppressList() const { return m_suppressList; }
+  void setSuppressList(const QStringList &newSuppressList) {
+    m_suppressList = newSuppressList;
+  }
+
+  Resources usedResources() const { return m_usedRes; }
+  Resources availableResources() const { return m_availRes; }
+  void setAvailableResources(const Resources &res) { m_availRes = res; }
+
+ protected:
+  Resources m_usedRes{};
+  Resources m_availRes{};
+
+ private:
+  QStringList m_suppressList;
 };
 
 }  // namespace FOEDAG

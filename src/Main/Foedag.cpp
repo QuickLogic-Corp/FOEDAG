@@ -339,7 +339,7 @@ bool Foedag::initQmlGui() {
 
 bool Foedag::init(GUI_TYPE guiType) {
   if (m_cmdLine->PrintHelp()) {
-    m_compiler->Help(&std::cout);
+    m_compiler->Help(m_context, &std::cout);
     return false;
   }
   if (m_cmdLine->PrintVersion()) {
@@ -396,10 +396,13 @@ bool Foedag::initBatch() {
   if (mute) {
     std::cout.rdbuf(nullptr);
   } else {
-    auto logger =
-        new FileLoggerBuffer{commands->OutLogger(), std::cout.rdbuf()};
-    std::cout.rdbuf(logger);
-    std::cerr.rdbuf(logger);
+    BatchModeBuffer* outBuffer = new BatchModeBuffer{commands->OutLogger()};
+    auto tmp = std::cout.rdbuf(outBuffer);
+    outBuffer->getStream().rdbuf(tmp);
+
+    BatchModeBuffer* errBuffer = new BatchModeBuffer{commands->OutLogger()};
+    tmp = std::cerr.rdbuf(errBuffer);
+    errBuffer->getStream().rdbuf(tmp);
     m_tclChannelHandler = new FOEDAG::TclWorker(interpreter->getInterp(),
                                                 std::cout, &std::cerr, true);
   }
