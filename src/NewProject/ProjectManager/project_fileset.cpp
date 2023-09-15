@@ -1,4 +1,5 @@
 #include "project_fileset.h"
+#include <iostream>
 using namespace FOEDAG;
 
 #define PROJECT_OSRCDIR "$OSRCDIR"
@@ -40,14 +41,22 @@ QString ProjectFileSet::getDefaultUnitName() const {
 
 void ProjectFileSet::addFile(const QString &strFileName,
                              const QString &strFilePath) {
+  std::cout << "\n\n ProjectFileSet::addFile" << std::endl;
+  std::cout << strFileName.toStdString() << std::endl;
+  std::cout << strFilePath.toStdString() << std::endl;
   m_mapFiles.push_back(std::make_pair(strFileName, strFilePath));
 }
 
 void ProjectFileSet::addFiles(const QStringList &commands,
                               const QStringList &libs, const QStringList &files,
                               int language, const QString &gr) {
+  std::cout << "\n\n ProjectFileSet::addFiles" << std::endl;
   m_langMap.push_back(std::make_pair(CompilationUnit{language, gr}, files));
   m_commandsLibs.push_back(std::make_pair(commands, libs));
+  std::cout << "m_langMap entry added" << std::endl;
+  std::cout << "language: " << language << std::endl;
+  std::cout << "group: " << gr.toStdString() << std::endl;
+  std::cout << "files joined: " << (files.join(";")).toStdString() << std::endl;
 }
 
 QString ProjectFileSet::getFilePath(const QString &strFileName) {

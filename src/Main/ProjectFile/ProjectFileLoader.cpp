@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QFile>
 #include <QFileInfo>
 #include <QXmlStreamWriter>
+#include <iostream>
 
 #include "Compiler/CompilerDefines.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -132,6 +133,8 @@ QString FOEDAG::ProjectFileLoader::ProjectVersion(const QString &filename) {
 
 void ProjectFileLoader::Save() {
   if (!m_loadDone) return;
+  std::cout << "\n\n ProjectFileLoader::Save" << std::endl;
+
   QString tmpName = Project::Instance()->projectName();
   QString tmpPath = Project::Instance()->projectPath();
   QString xmlPath = tmpPath + "/" + tmpName + PROJECT_FILE_FORMAT;

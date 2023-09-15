@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
 
+#include <iostream>
 namespace FOEDAG {
 
 constexpr auto GENERIC_OPTION{"Option"};
@@ -56,6 +57,7 @@ ProjectManagerComponent::ProjectManagerComponent(ProjectManager* pManager,
 }
 
 void ProjectManagerComponent::Save(QXmlStreamWriter* writer) {
+  std::cout << "\n\n ProjectManagerComponent::Save" << std::endl;
   QXmlStreamWriter& stream = *writer;
   stream.writeStartElement(PROJECT_CONFIGURATION);
 
@@ -153,6 +155,9 @@ void ProjectManagerComponent::Save(QXmlStreamWriter* writer) {
     auto tmpFileMap = tmpFileSet->getMapFiles();
     for (auto iterfile = tmpFileMap.begin(); iterfile != tmpFileMap.end();
          ++iterfile) {
+      std::cout << "\n m_mapFiles entry" << std::endl;
+      std::cout << "iterfile->first: " << iterfile->first.toStdString() << std::endl;
+      std::cout << "iterfile->second: " << iterfile->second.toStdString() << std::endl;
       stream.writeStartElement(PROJECT_FILESET_FILE);
       stream.writeAttribute(PROJECT_PATH, iterfile->second);
       stream.writeEndElement();
@@ -161,6 +166,10 @@ void ProjectManagerComponent::Save(QXmlStreamWriter* writer) {
     auto libs = tmpFileSet->getLibraries();
     int index{0};
     for (auto it = langMap.cbegin(); it != langMap.cend(); ++it, index++) {
+      std::cout << "\n m_langMap entry" << std::endl;
+      std::cout << "it->first.language: " << it->first.language << std::endl;
+      std::cout << "it->first.group: " << it->first.group << std::endl;
+      std::cout << "it->second joined: " << (it->second.join(";")).toStdString() << std::endl;
       stream.writeStartElement(PROJECT_GROUP);
       stream.writeAttribute(PROJECT_GROUP_ID,
                             QString::number(it->first.language));

@@ -672,7 +672,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
                       expandedFile + std::string("\n"));
     std::ostringstream out;
     bool isFileCopy = true;
-    bool localToProject = true;
+    bool localToProject = false;
     if(compiler->copyFilesOnAdd() == false) {
       isFileCopy = false;
       localToProject = false;
@@ -2783,7 +2783,7 @@ int Compiler::add_files(Compiler* compiler, Tcl_Interp* interp, int argc,
   // check additionally, if user *does not* want to copy files from TCL script path to project dir?
   // user can set this using: `copy_files_on_add off` in the TCL script
   bool isFileCopy = true;
-  bool localToProject = true;
+  bool localToProject = false;
   if(compiler->copyFilesOnAdd() == false) {
     isFileCopy = false;
     localToProject = false;

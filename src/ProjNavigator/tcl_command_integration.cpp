@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #include <QDir>
 #include <QString>
+#include <iostream>
 
 #include "Compiler/CompilerDefines.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -155,6 +156,9 @@ bool TclCommandIntegration::TclAddDesignFiles(const QString &commands,
     out << "Command validation fail: internal error" << std::endl;
     return false;
   }
+
+  std::cout << "\n\nTclCommandIntegration::TclAddDesignFiles()" << std::endl;
+  std::cout << m_projManager->getDesignActiveFileSet().toStdString() << std::endl;
 
   const QString strSetName = m_projManager->getDesignActiveFileSet();
   m_projManager->setCurrentFileSet(strSetName);

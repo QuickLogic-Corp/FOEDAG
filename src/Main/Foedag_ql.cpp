@@ -463,12 +463,14 @@ bool Foedag::initBatch() {
   auto tcl_init = [](Tcl_Interp* interp) -> int {
     // --script <script>
     if (!GlobalSession->CmdLine()->Script().empty()) {
+      std::cout << "\n\n Foedag::initBatch() execute TCL script" << std::endl;
       int res =
           Tcl_EvalFile(interp, GlobalSession->CmdLine()->Script().c_str());
       if (res != TCL_OK) {
         GlobalSession->ReturnStatus(res);
         Tcl_EvalEx(interp, "puts $errorInfo", -1, 0);
       }
+      std::cout << "\n\n Foedag::initBatch() finish TCL script" << std::endl;
       GlobalSession->ProjectFileLoader()->Save();
       exit(GlobalSession->ReturnStatus());
     }
