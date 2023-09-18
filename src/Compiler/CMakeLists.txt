@@ -64,6 +64,7 @@ set (SRC_CPP_LIST
   Log.cpp
   Reports/AbstractReportManager.cpp
   Reports/DefaultTaskReport.cpp
+  Reports/DataReportWriter.cpp
   # Reports/RoutingReportManager.cpp
   # Reports/PackingReportManager.cpp
   # Reports/PlacementReportManager.cpp
@@ -96,6 +97,7 @@ set (SRC_H_INSTALL_LIST
   Log.h
   Reports/AbstractReportManager.h
   Reports/DefaultTaskReport.h
+  Reports/DataReportWriter.h
   Reports/IDataReport.h
   Reports/ITaskReport.h
   Reports/ITaskReportManager.h

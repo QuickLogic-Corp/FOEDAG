@@ -22,29 +22,26 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QString>
 
-#include "ITaskReport.h"
+#include <vector>
 
 namespace FOEDAG {
 
 class IDataReport;
 
-/* Given interface represents task report. It may consist
- * of multiple data reports and can be shown in multiple
- * tables.
- */
-class DefaultTaskReport : public ITaskReport {
- public:
-  DefaultTaskReport(ITaskReport::DataReports &&dataReports,
-                    const QString &name);
+class DataReportWriter {  
+  static constexpr int COLUMN_MARGIN = 4;
 
-  const ITaskReport::DataReports &getDataReports() const override;
-  const QString &getName() const override;
+  struct ColumnFormatting {
+    bool alignLeft = false;
+    int size = 0;
+  };
 
-  void saveToFile(const QString& root) const override;
+  public:
+    static bool write(const QString& filePath, const IDataReport& dataReport);
 
- private:
-  ITaskReport::DataReports m_dataReports;
-  QString m_name;
+  private:
+    static std::vector<ColumnFormatting> detectColumnFormatting(const IDataReport& dataReport);
+    static void write(std::ofstream& file, const IDataReport& dataReport, const std::vector<ColumnFormatting>&);
 };
 
 }  // namespace FOEDAG

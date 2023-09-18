@@ -41,5 +41,7 @@ class ITaskReport {
   virtual const DataReports &getDataReports() const = 0;
   // Returns report name
   virtual const QString &getName() const = 0;
+
+  virtual void saveToFile(const QString& root) const = 0;
 };
 }  // namespace FOEDAG
