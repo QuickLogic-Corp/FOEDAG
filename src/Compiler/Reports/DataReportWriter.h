@@ -33,7 +33,7 @@ class DataReportWriter {
 
   struct ColumnFormatting {
     bool alignLeft = false;
-    int size = 0;
+    int maxSize = 0;
   };
 
   public:

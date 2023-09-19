@@ -29,36 +29,41 @@ bool DataReportWriter::write(const QString& filePath, const IDataReport& dataRep
 
 std::vector<DataReportWriter::ColumnFormatting> DataReportWriter::detectColumnFormatting(const IDataReport& dataReport) 
 {
-  std::vector<ColumnFormatting> columnsFormat;
+  std::vector<ColumnFormatting> columnsFormatting;
   QList<QString> header;
-  int counter = 0;
   for (const ReportColumn& column: dataReport.getColumns()) {
     header << column.m_name;
-    columnsFormat.push_back(ColumnFormatting{static_cast<bool>(column.m_alignment & Qt::AlignLeft), column.m_name.size()});
-    counter++;
+    columnsFormatting.push_back(ColumnFormatting{static_cast<bool>(column.m_alignment & Qt::AlignLeft), column.m_name.size()});
   }
 
-  for (const QList<QString>& row: dataReport.getData()) {
-    for (int i=0; i<header.size(); ++i) {
-      if (i < row.size()) { // in some cases (seen in histogram), for some row we have number of cell is less than in header
-        if (row[i].size() > columnsFormat[i].size) {
-          columnsFormat[i].size = row[i].size();
+  for (int i=0; i<header.size(); ++i) {
+    for (const QList<QString>& row: dataReport.getData()) {
+      if ((i < row.size()) && (i < static_cast<int>(columnsFormatting.size()))) { // in some cases (seen in histogram), for some row we have number of cell is less than in header
+        QString currentCell{row[i]};
+        if (columnsFormatting[i].maxSize < currentCell.size()) {
+          columnsFormatting[i].maxSize = currentCell.size();
         }
       }
     }
   }
 
-  return columnsFormat;
+  return columnsFormatting;
 }
 
 void DataReportWriter::write(std::ofstream& file, const IDataReport& dataReport, const std::vector<ColumnFormatting>& columnsFormatting)
 {
     auto writeRowHelperFn = [](std::ofstream& file, const QList<QString>& row, std::vector<ColumnFormatting> columnsFormatting){
+      ColumnFormatting defaultColumnFormatting{false, 100};
+      ColumnFormatting& columnFormatting = defaultColumnFormatting;
       for (int i=0; i<row.size(); ++i) {
         QString cell = row[i];
-        const ColumnFormatting& columnFormatting = columnsFormatting[i];
+        if (i < static_cast<int>(columnsFormatting.size())) {
+          columnFormatting = columnsFormatting[i];
+        } else {
+          columnFormatting = defaultColumnFormatting;
+        }
 
-        int columnSize = columnFormatting.size + DataReportWriter::COLUMN_MARGIN;
+        int columnSize = columnFormatting.maxSize + DataReportWriter::COLUMN_MARGIN;
 
         if (columnFormatting.alignLeft) {
           file << std::setw(columnSize) << std::left << cell.toStdString();
