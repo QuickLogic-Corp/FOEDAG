@@ -12,14 +12,13 @@ bool DataReportWriter::write(const QString& filePath, const IDataReport& dataRep
 {
   bool status = false;
 
-  std::cout << "~~~ attempt to write to" << filePath.toStdString() << std::endl;
   std::ofstream file(filePath.toStdString());
   if (file.is_open()) {
     std::vector<ColumnFormatting> columnsFormat = detectColumnFormatting(dataReport);
     write(file, dataReport, columnsFormat);
     status = true;
   } else {
-    std::cout << "~~~ [ERROR] cannot open" << filePath.toStdString() << std::endl;
+    std::cout << "[ERROR] cannot open " << filePath.toStdString() << " for writing" << std::endl;
     status = false;
   }
 
