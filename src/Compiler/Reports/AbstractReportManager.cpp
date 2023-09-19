@@ -7,6 +7,7 @@
 
 #include "Compiler/TaskManager.h"
 #include "NewProject/ProjectManager/project.h"
+#include "ITaskReport.h"
 
 namespace {
 static constexpr const char *RESOURCES_SPLIT{"blocks of type:"};
@@ -307,5 +308,13 @@ bool AbstractReportManager::isStatisticalTimingLine(const QString &line) {
 bool AbstractReportManager::isStatisticalTimingHistogram(const QString &line) {
   return false;
 }
+
+ void AbstractReportManager::dumpReports(const QString& root)
+ {
+    for (const QString& reportId: getAvailableReportIds()) {
+      std::unique_ptr<ITaskReport> report = createReport(reportId);
+      report->saveToFile(root);
+    }
+ }
 
 }  // namespace FOEDAG

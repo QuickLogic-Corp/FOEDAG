@@ -2048,6 +2048,9 @@ bool Compiler::Compile(Action action) {
   if (task != TaskManager::invalid_id && m_taskManager) {
     m_taskManager->task(task)->setStatus(res ? TaskStatus::Success
                                              : TaskStatus::Fail);
+    if (res) {
+      m_taskManager->getReportManagerRegistry().getReportManager(task)->dumpReports(m_projManager->getProjectPath());
+    }
   }
   return res;
 }

@@ -59,6 +59,8 @@ class ITaskReportManager {
       const QString &reportId) = 0;
   // Returns retrieved from a log file messages per line number.
   virtual const Messages &getMessages() = 0;
+
+  virtual void dumpReports(const QString& root)  = 0;
 };
 
 }  // namespace FOEDAG
