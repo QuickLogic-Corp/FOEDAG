@@ -357,7 +357,6 @@ void FOEDAG::handleViewReportRequested(Compiler* compiler, const Task* task,
                                        ITaskReportManager& reportManager) {
   auto report = reportManager.createReport(reportId);
   if (!report) return;
-  report->saveToFile(compiler->ProjManager()->getProjectPath());
   openReportView(compiler, task, *report);
 }
 
