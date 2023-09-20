@@ -309,7 +309,7 @@ bool AbstractReportManager::isStatisticalTimingHistogram(const QString &line) {
   return false;
 }
 
- void AbstractReportManager::dumpReports(const QString& root)
+ void AbstractReportManager::saveReports(const QString& root)
  {
     for (const QString& reportId: getAvailableReportIds()) {
       std::unique_ptr<ITaskReport> report = createReport(reportId);

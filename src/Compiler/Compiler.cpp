@@ -2051,7 +2051,7 @@ bool Compiler::Compile(Action action) {
     if (res) {
       auto reportManager = m_taskManager->getReportManagerRegistry().getReportManager(task);
       if (reportManager) {
-        reportManager->dumpReports(m_projManager->getProjectPath());
+        reportManager->saveReports(m_projManager->getProjectPath());
       }
     }
   }

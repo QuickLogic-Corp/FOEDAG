@@ -43,7 +43,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
  public:
   AbstractReportManager(const TaskManager &taskManager);
 
-  void dumpReports(const QString& root) override final;
+  void saveReports(const QString& root) override final;
 
  protected:
   // Launches file parsing, if needed. Returns messages.
