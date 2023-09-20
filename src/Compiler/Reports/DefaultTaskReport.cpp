@@ -29,8 +29,15 @@ void DefaultTaskReport::saveToFile(const QString& root) const
   }
 
   for (const std::unique_ptr<IDataReport>& dataReport: m_dataReports) {
-    QString fileName{getName() + "_" + dataReport->getName() + ".rpt"};
-    fileName = fileName.replace(" ", "");
+    QString fileName{getName()};
+    if (!fileName.endsWith(dataReport->getName())) { // just to avoid duplicated tail in filename
+      fileName += "-" + dataReport->getName();
+    }
+    fileName += ".rpt";
+    fileName = fileName.replace(" - ", "-");
+    fileName = fileName.replace(" ", "_");
+    fileName = fileName.replace(":", "");
+    fileName = fileName.toLower();
 
     QString filePath{location.absolutePath() + "/" + fileName};
     
