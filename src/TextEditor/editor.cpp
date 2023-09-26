@@ -226,7 +226,7 @@ void Editor::InitToolBar() {
 }
 
 void Editor::InitScintilla(int iFileType) {
-  QFont font("Arial", 9, QFont::Normal);
+  QFont font("Arial", 10, QFont::Normal);
   m_scintilla->setFont(font);
   m_scintilla->setMarginWidth(0, 27 /*fontmetrics.width("0000")*/);
 
@@ -245,9 +245,12 @@ void Editor::InitScintilla(int iFileType) {
   } else if (FILE_TYPE_TCL == iFileType) {
     textLexer = new QsciLexerTCL(m_scintilla);
   }
+  else if (FILE_TYPE_JSON == iFileType) {
+    textLexer = new QsciLexerJSON(m_scintilla);
+  }
 
   if (FILE_TYPE_VERILOG == iFileType || FILE_TYPE_VHDL == iFileType ||
-      FILE_TYPE_TCL == iFileType) {
+      FILE_TYPE_TCL == iFileType || FILE_TYPE_JSON == iFileType) {
     m_scintilla->setLexer(textLexer);
 
     QsciAPIs *apis = new QsciAPIs(textLexer);

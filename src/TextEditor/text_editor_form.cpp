@@ -75,6 +75,8 @@ int TextEditorForm::OpenFile(const QString &strFileName) {
     filetype = FILE_TYPE_VHDL;
   } else if (suffix.compare(QString("tcl"), Qt::CaseInsensitive) == 0) {
     filetype = FILE_TYPE_TCL;
+  } else if (suffix.compare(QString("json"), Qt::CaseInsensitive) == 0) {
+    filetype = FILE_TYPE_JSON;
   } else {
     filetype = FILE_TYPE_UNKOWN;
   }

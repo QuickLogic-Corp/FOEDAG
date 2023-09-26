@@ -15,6 +15,7 @@
 #include "Qsci/qscilexertcl.h"
 #include "Qsci/qscilexerverilog.h"
 #include "Qsci/qscilexervhdl.h"
+#include "Qsci/qscilexerjson.h"
 
 namespace FOEDAG {
 
@@ -22,6 +23,7 @@ enum FileType {
   FILE_TYPE_VERILOG,
   FILE_TYPE_VHDL,
   FILE_TYPE_TCL,
+  FILE_TYPE_JSON,
   FILE_TYPE_UNKOWN
 };
 
