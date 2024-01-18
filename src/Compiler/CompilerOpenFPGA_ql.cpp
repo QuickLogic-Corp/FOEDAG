@@ -3216,6 +3216,11 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail");
   }
 
+  if( QLSettingsManager::getStringValue("vpr", "analysis", "skip_sync_clustering_and_routing_results") == "checked" ) {
+    vpr_options += std::string(" --skip_sync_clustering_and_routing_results on");
+  }
+
+
   // custom vpr command-line options, it is upto the user to ensure that the options are passed in correctly.
   if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
@@ -4648,6 +4653,13 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   if(!std::filesystem::exists(m_OpenFpgaBitstreamSettingFile, ec)) {
     m_OpenFpgaBitstreamSettingFile.clear();
   }
+
+  // this is optional:
+  m_OpenFpgaRepackConstraintsFile = 
+      std::filesystem::path(device_type_dir_path / std::string("repack_design_constraint.xml"));
+  if(!std::filesystem::exists(m_OpenFpgaRepackConstraintsFile, ec)) {
+    m_OpenFpgaRepackConstraintsFile.clear();
+  }
   
   m_OpenFpgaSimSettingFile = 
       std::filesystem::path(device_type_dir_path / std::string("fixed_sim_openfpga.xml"));
@@ -4679,6 +4691,10 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path bitstream_annotation_en_path = 
           std::filesystem::path(device_type_dir_path / std::string("bitstream_annotation.xml.en"));
     m_OpenFpgaBitstreamSettingFile = GenerateTempFilePath();
+
+    std::filesystem::path repack_constraints_en_path = 
+          std::filesystem::path(device_type_dir_path / std::string("repack_design_constraint.xml.en"));
+    m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
 
     std::filesystem::path fixed_sim_openfpga_en_path = 
           std::filesystem::path(device_type_dir_path / std::string("fixed_sim_openfpga.xml.en"));
@@ -4718,6 +4734,18 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     }
     else {
       m_OpenFpgaBitstreamSettingFile.clear();
+    }
+
+    // this is optional:
+    if(std::filesystem::exists(repack_constraints_en_path, ec)) {
+      if (!CRFileCryptProc::getInstance()->decryptFile(repack_constraints_en_path, m_OpenFpgaRepackConstraintsFile)) {
+        ErrorMessage("decryption failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
+    }
+    else {
+      m_OpenFpgaRepackConstraintsFile.clear();
     }
 
     if (!CRFileCryptProc::getInstance()->decryptFile(fixed_sim_openfpga_en_path, m_OpenFpgaSimSettingFile)) {
@@ -4909,9 +4937,17 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   result = ReplaceAll(result, "${READ_OPENFPGA_BITSTREAM_SETTING_COMMAND}",
                       read_openfpga_bitstream_setting_command);
 
-  result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS}",
-                      m_OpenFpgaRepackConstraintsFile.string());
-
+  // optional, so only if this file is available, else just 'repack' without constraints
+  std::string repack_design_constraints_command = "repack";
+  if(!m_OpenFpgaRepackConstraintsFile.empty()) {
+    // read_openfpga_bitstream_setting -f ${OPENFPGA_BITSTREAM_SETTING_FILE}
+    repack_design_constraints_command = 
+        std::string("repack --design_constraints ") + 
+        m_OpenFpgaRepackConstraintsFile.string();
+  }
+  result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
+                      repack_design_constraints_command);
+  
   // fabric_key is optional
   if (m_OpenFpgaFabricKeyFile.empty()) {
     result = ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}", "");
