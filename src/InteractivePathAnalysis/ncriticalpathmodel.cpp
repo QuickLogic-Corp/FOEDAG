@@ -2,7 +2,11 @@
 #include "ncriticalpathitem.h"
 #include "simplelogger.h"
 
+#include <QFile>
 #include <QList>
+#include <QRegularExpression>
+
+//#define DEBUG_DUMP_RECEIVED_CRIT_PATH_TO_FILE
 
 NCriticalPathModel::NCriticalPathModel(QObject *parent)
     : QAbstractItemModel(parent)
@@ -23,11 +27,25 @@ void NCriticalPathModel::clear()
     endResetModel();
     SimpleLogger::instance().debug("clear model finished");
 
+    m_inputNodes.clear();
+    m_outputNodes.clear();
+
     emit cleared();
 }
 
 void NCriticalPathModel::loadFromString(const QString& data)
 {
+#ifdef DEBUG_DUMP_RECEIVED_CRIT_PATH_TO_FILE
+    QFile file("received.report.dump.txt");
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        out << data;
+        file.close();
+    } else {
+        qWarning() << "cannot open file for writing";
+    }
+#endif
+
     QList<QString> lines_ = data.split("\n");
     std::vector<std::string> lines;
     lines.reserve(lines_.size());
@@ -206,8 +224,13 @@ void NCriticalPathModel::setupModelData(const std::vector<BlockPtr>& blocks)
             for (const Line& segment: segments) {
                 QString l(segment.line.c_str());
                 l = l.trimmed();
-                auto segmentRow = extractSegments(l);
-                NCriticalPathItem* newItem = new NCriticalPathItem(false, segmentRow, segment.role == Role::SEGMENT, pathItem);
+                auto segmentRow = extractRow(l);
+#ifdef ALLOW_CRITICAL_PATH_SEGMENS_SELECTION
+                bool isSelectable = (segment.role == Role::SEGMENT);
+#else
+                bool isSelectable = false;
+#endif
+                NCriticalPathItem* newItem = new NCriticalPathItem(false, segmentRow, isSelectable, pathItem);
                 insertNewItem(pathItem, newItem);
             }
 
@@ -268,43 +291,55 @@ void NCriticalPathModel::insertNewItem(NCriticalPathItem* parentItem, NCriticalP
     endInsertRows();
 }
 
-QVector<QVariant> NCriticalPathModel::extractSegments(QString l) const
+QVector<QVariant> NCriticalPathModel::extractRow(QString l) const
 {
-    l = l.replace("  ", " ");
+    l = l.trimmed();
+
+    // Using regular expressions to remove consecutive white spaces
+    static QRegularExpression regex("\\s+");
+    l = l.trimmed().replace(regex, " ");
+
+
     QList<QString> data = l.split(" ");
 
-    QString dig1;
-    QString dig2;
-    QList<QString> rest;
-    for (auto it = data.begin(); it != data.end(); ++it) {
+    QString column2;
+    QString column3;
+
+    for (auto it = data.rbegin(); it != data.rend(); ++it) {
         QString el = *it;
         el = el.trimmed();
-        if (el.isEmpty()) {
-            continue;
-        }
-        bool ok = false;
-        if (el == "Incr") {
-            dig1 = el;
-            continue;
-        }
         if (el == "Path") {
-            dig2 = el;
+            column3 = el;
             continue;
         }
+        if (el == "Incr") {
+            column2 = el;
+            continue;
+        }
+
+        bool ok;
         el.toDouble(&ok);
         if (ok) {
-            if (dig1.isEmpty()) {
-                dig1 = el;
-            } else if (dig2.isEmpty()) {
-                dig2 = el;
+            if (column3.isEmpty()) {
+                column3 = el;
+                continue;
+            }
+            if (column2.isEmpty()) {
+                column2 = el;
+                continue;
             }
         } else {
-            rest.append(el);
+            break;
         }
     }
-    if (!dig1.isEmpty() && dig2.isEmpty()) {
-        return {rest.join(" "), dig2, dig1};
-    } else {
-        return {rest.join(" "), dig1, dig2};
+
+    if (!column3.isEmpty() && (data.last() == column3)) {
+        data.pop_back();
     }
+    if (!column2.isEmpty() && (data.last() == column2)) {
+        data.pop_back();
+    }
+
+    QString column1{data.join(" ")};
+    return {column1, column2, column3};
 }
