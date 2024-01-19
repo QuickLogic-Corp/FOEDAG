@@ -5033,12 +5033,13 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
   Message("##################################################");
 
 
+  // This is only for QLF_K6N10 TSMC 16nm, and we are targeting GF 22nm in this branch.
   // With PR: https://github.com/QL-Proprietary/aurora2/pull/455 changes in the device architecture
   // bitstream generation is disabled, until we have changes required in OpenFPGA to support this.
-  Message("##################################################");
-  Message("Skipping Bitstream Generation as it is disabled in this version!");
-  Message("##################################################");
-  return true;
+  // Message("##################################################");
+  // Message("Skipping Bitstream Generation as it is disabled in this version!");
+  // Message("##################################################");
+  // return true;
 
 
   // if flat_routing is enabled in VPR, skip bitstream generation
