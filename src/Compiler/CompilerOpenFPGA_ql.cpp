@@ -2669,7 +2669,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
   }
 
+#if (AURORA_YOSYS_WITH_QL_PLUGINS == 1)
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("# [skipped] ql-qlf plugin load as using integrated plugin code in Yosys"));
+#else // #if (AURORA_YOSYS_WITH_QL_PLUGINS == 1)
   yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+#endif // #if (AURORA_YOSYS_WITH_QL_PLUGINS == 1)
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
