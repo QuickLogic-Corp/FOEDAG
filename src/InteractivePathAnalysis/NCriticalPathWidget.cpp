@@ -110,6 +110,7 @@ void NCriticalPathWidget::onFlatRoutingOnDetected()
 void NCriticalPathWidget::requestPathList(const QString& initiator)
 {
     if (m_gateIO.isConnected()) {
+        m_view->clear();
         m_gateIO.requestPathList(initiator);
         m_statusBar->setMessage(tr("Getting path list..."));
     } else {
