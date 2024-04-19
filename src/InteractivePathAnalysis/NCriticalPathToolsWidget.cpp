@@ -202,6 +202,7 @@ void NCriticalPathToolsWidget::resetConfigurationUI()
     m_cbDrawCritPathContour->setChecked(m_parameters->getIsDrawCriticalPathContourEnabled());
 }
 
+#define TEST_UPSTREWAM_VPR
 void NCriticalPathToolsWidget::tryRunPnRView()
 {
     if (m_vprProcess.isRunning()) {
@@ -219,6 +220,10 @@ void NCriticalPathToolsWidget::tryRunPnRView()
         int portNum = client::ServerFreePortDetector().detectAvailablePortNum();
         emit serverPortNumDetected(portNum);
 
+#ifdef TEST_UPSTREWAM_VPR
+        QString fullCmd = "vpr test_post_verilog_arch.xml unconnected.eblif --device 4x4 --timing_analysis on --constant_net_method route --clock_modeling ideal --exit_before_pack off --circuit_format eblif --absorb_buffer_luts off --route_chan_width 180 --flat_routing false --gen_post_synthesis_netlist on --post_synth_netlist_unconn_inputs gnd --post_synth_netlist_unconn_outputs unconnected --timing_report_npaths 100 --timing_report_detail netlist --allow_dangling_combinational_nodes on --analysis --server --port 60556 --disp on";
+  
+#else // TEST_UPSTREWAM_VPR
         QString fullCmd = vprBaseCommand();
 #ifdef _WIN32
         // under WIN32, running the analysis stage alone causes issues, hence we call the
@@ -229,7 +234,7 @@ void NCriticalPathToolsWidget::tryRunPnRView()
         fullCmd += " --server";
         fullCmd += QString(" --port %1").arg(portNum);
         fullCmd += " --disp on";
-
+#endif // TEST_UPSTREWAM_VPR
         m_vprProcess.start(fullCmd);
     }
 }
