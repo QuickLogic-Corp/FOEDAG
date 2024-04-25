@@ -3150,11 +3150,20 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   }
   // ---------------------------------------------------------------- sdc_file --
 
+  const std::string rrGraphFileName{FOEDAG::QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph")};
 
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
-    vpr_options += std::string(" --write_rr_graph") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph");
+  if( !rrGraphFileName.empty() ) {
+    if ( QFile::exists(ProjManager()->getProjectPath() + "/" + rrGraphFileName.c_str()) ) {
+//#ifdef USE_RR_GRAPH_SHARING_OPTIMIZATION
+      vpr_options += std::string(" --read_rr_graph") +
+                    std::string(" ") +
+                    rrGraphFileName;
+//#endif // #ifdef USE_RR_GRAPH_SHARING_OPTIMIZATION
+    } else {
+      vpr_options += std::string(" --write_rr_graph") +
+                    std::string(" ") +
+                    rrGraphFileName;
+    }
   }
 
   // parse vpr netlist options
