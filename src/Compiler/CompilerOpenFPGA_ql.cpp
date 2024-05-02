@@ -3153,7 +3153,9 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   const std::string rrGraphFileName{FOEDAG::QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph")};
 
   if( !rrGraphFileName.empty() ) {
-    if ( QFile::exists(ProjManager()->getProjectPath() + "/" + rrGraphFileName.c_str()) ) {
+    const QString rrGraphFilePath{ProjManager()->getProjectPath() + "/" + rrGraphFileName.c_str()};
+    qInfo() << "~~~ rrGraphFilePath=" << rrGraphFilePath << (QFile::exists(rrGraphFilePath) ? "exists" : "not exists");
+    if ( QFile::exists(rrGraphFilePath) ) {
 //#ifdef USE_RR_GRAPH_SHARING_OPTIMIZATION
       vpr_options += std::string(" --read_rr_graph") +
                     std::string(" ") +
