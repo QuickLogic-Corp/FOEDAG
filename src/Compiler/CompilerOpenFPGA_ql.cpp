@@ -3151,20 +3151,29 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   // ---------------------------------------------------------------- sdc_file --
 
   const std::string rrGraphFileName{FOEDAG::QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph")};
+  const std::string routerLookaheadFileName{"router_lookahead.bin"};
 
   if( !rrGraphFileName.empty() ) {
-    const QString rrGraphFilePath{ProjManager()->getProjectPath() + "/" + rrGraphFileName.c_str()};
-    qInfo() << "~~~ rrGraphFilePath=" << rrGraphFilePath << (QFile::exists(rrGraphFilePath) ? "exists" : "not exists");
-    if ( QFile::exists(rrGraphFilePath) ) {
-//#ifdef USE_RR_GRAPH_SHARING_OPTIMIZATION
+    if ( QFile::exists(ProjManager()->getProjectPath() + "/" + rrGraphFileName.c_str()) ) {
       vpr_options += std::string(" --read_rr_graph") +
-                    std::string(" ") +
-                    rrGraphFileName;
-//#endif // #ifdef USE_RR_GRAPH_SHARING_OPTIMIZATION
+                     std::string(" ") +
+                     rrGraphFileName;
     } else {
       vpr_options += std::string(" --write_rr_graph") +
-                    std::string(" ") +
-                    rrGraphFileName;
+                     std::string(" ") +
+                     rrGraphFileName;
+    }
+  }
+
+  if( !rrGraphFileName.empty() ) {
+    if ( QFile::exists(ProjManager()->getProjectPath() + "/" + routerLookaheadFileName.c_str()) ) {
+      vpr_options += std::string(" --read_router_lookahead") +
+                     std::string(" ") +
+                     routerLookaheadFileName;
+    } else {
+      vpr_options += std::string(" --write_router_lookahead") +
+                     std::string(" ") +
+                     routerLookaheadFileName;
     }
   }
 
