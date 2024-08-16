@@ -839,6 +839,7 @@ bool MainWindow::saveConstraintFile() {
 
 void MainWindow::loadFile(const QString& file) {
   if (m_projectFileLoader) {
+    TaskStatusWatcher::Instance()->reset();
     m_projectFileLoader->Load(file);
     if (sourcesForm) sourcesForm->InitSourcesForm();
     updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));

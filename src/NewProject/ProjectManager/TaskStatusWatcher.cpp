@@ -10,6 +10,12 @@ TaskStatusWatcher* TaskStatusWatcher::Instance() {
   return &watcher;
 }
 
+void TaskStatusWatcher::reset()
+{
+  m_isSynthResultDirty = false;
+  m_isDesignChangedFirstTime = true;
+}
+
 void TaskStatusWatcher::onTaskDone(uint taskId, TaskStatus status)
 {
   if (taskId == SYNTHESIS) {

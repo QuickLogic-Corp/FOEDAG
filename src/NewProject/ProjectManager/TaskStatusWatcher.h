@@ -12,6 +12,8 @@ class TaskStatusWatcher : public QObject {
  public:
   static TaskStatusWatcher *Instance();
 
+  void reset();
+
   bool isSynthResultDirty() const { return m_isSynthResultDirty; }
 
 signals:
