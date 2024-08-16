@@ -1957,6 +1957,7 @@ void MainWindow::pinAssignmentActionTriggered() {
     if (filepath_pin_table_csv.empty()) {
       QMessageBox::critical(this, "missing pin map csv file",
                             QString::fromStdString(error));
+      pinAssignmentAction->setChecked(false);
       return;
     }
     data.pinMapFile = QString::fromStdString(filepath_pin_table_csv.string());
