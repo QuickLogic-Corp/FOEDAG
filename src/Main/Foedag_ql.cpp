@@ -186,16 +186,20 @@ Foedag::Foedag(FOEDAG::CommandLine* cmdLine, MainWindowBuilder* mainWinBuilder,
     m_context->BinaryPath(exeDirPath);
     std::filesystem::path installDir = exeDirPath.parent_path();
     
+    // removing this, because there are other stuff, such as scripts/ and files
+    // which are indirectly derived from the DataPath() API value, and these
+    // will break if the DataPath() is set to some path outside the Aurora installation!!
+    // this needs to be fixed in the future, but for now, we will leave it alone.
     // [1] prefer to take the datapath from environment variable, if set:
-    if (m_context->DataPath().empty()) {
-      const char* const path_device_data = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
-      if (path_device_data != nullptr) {
-        std::filesystem::path dataDir = std::string(path_device_data);
-        if(FileUtils::FileExists(dataDir)) {
-          m_context->DataPath(dataDir);
-        }
-      }
-    }
+    // if (m_context->DataPath().empty()) {
+    //   const char* const path_device_data = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
+    //   if (path_device_data != nullptr) {
+    //     std::filesystem::path dataDir = std::string(path_device_data);
+    //     if(FileUtils::FileExists(dataDir)) {
+    //       m_context->DataPath(dataDir);
+    //     }
+    //   }
+    // }
 
     // [2] check convention, if we have device_data dir in the installation directory:
     if (m_context->DataPath().empty()) {

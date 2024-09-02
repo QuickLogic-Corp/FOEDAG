@@ -874,6 +874,16 @@ void QLDeviceManager::parseDeviceData() {
 
   std::error_code ec;
 
+  // allow user to override the root device data path using
+  // an environment variable: TODOKKDEVICEDATADIR
+  // const char* const path_device_data = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
+  // if (path_device_data != nullptr) {
+  //   std::filesystem::path dataDir = std::string(path_device_data);
+  //   if(FileUtils::FileExists(dataDir)) {
+  //     m_context->DataPath(dataDir);
+  //   }
+  // }
+
   // get to the device_data dir path of the installation
   std::filesystem::path root_device_data_dir_path = 
       GlobalSession->Context()->DataPath();
