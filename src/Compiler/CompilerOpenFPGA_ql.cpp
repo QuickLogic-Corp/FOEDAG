@@ -670,6 +670,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("verific_parser", verific_parser, this, 0);
 
+#if UPSTREAM_UNUSED
   auto target_device = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
@@ -695,6 +696,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_OK;
   };
   interp->registerCmd("target_device", target_device, this, 0);
+#endif // #if UPSTREAM_UNUSED
   
   auto synthesis_type = [](void* clientData, Tcl_Interp* interp, int argc,
                            const char* argv[]) -> int {
@@ -844,6 +846,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("encrypt_device", encrypt_device, this, 0);
 
+#if AURORA_DEPRECATED
   auto generate_fpga_io_map = [](void* clientData, Tcl_Interp* interp, int argc,
                                     const char* argv[]) -> int {
 
@@ -974,7 +977,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     // we can work with vpr.xml or vpr.xml.en files
     std::string vpr_xml_pattern = "vpr\\.xml.*";
     std::filesystem::path device_data_dir_path = 
-        std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+        std::filesystem::path(QLDeviceManager::getInstance()->deviceDataRootDirPath() /
                               family /
                               foundry /
                               node);
@@ -1370,6 +1373,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_OK;
   };
   interp->registerCmd("generate_fpga_io_map", generate_fpga_io_map, this, 0);
+#endif // #if AURORA_DEPRECATED
 
   auto list_devices = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
@@ -3190,12 +3194,6 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
   QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
-  std::filesystem::path device_type_dir_path = 
-      std::filesystem::path(GetSession()->Context()->DataPath() /
-                            device_target.device_variant.family /
-                            device_target.device_variant.foundry /
-                            device_target.device_variant.node);
-  
   m_architectureFile = 
       QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
   if(m_architectureFile.empty()) {
@@ -3210,7 +3208,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     m_architectureFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                            device_target.device_variant.family +
                                                            "_" +
                                                            device_target.device_variant.foundry +
@@ -4588,21 +4586,6 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
   QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
-  std::filesystem::path device_type_dir_path = 
-      std::filesystem::path(GetSession()->Context()->DataPath() /
-                            device_target.device_variant.family /
-                            device_target.device_variant.foundry /
-                            device_target.device_variant.node);
-  
-  std::filesystem::path device_variant_dir_path =
-      std::filesystem::path(GetSession()->Context()->DataPath() /
-                            device_target.device_variant.family /
-                            device_target.device_variant.foundry /
-                            device_target.device_variant.node /
-                            device_target.device_variant.voltage_threshold /
-                            device_target.device_variant.p_v_t_corner);
-
-
   std::error_code ec;
 
 
@@ -4621,7 +4604,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     m_OpenFpgaArchitectureFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                            device_target.device_variant.family +
                                                            "_" +
                                                            device_target.device_variant.foundry +
@@ -4657,7 +4640,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     m_OpenFpgaBitstreamSettingFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                            device_target.device_variant.family +
                                                            "_" +
                                                            device_target.device_variant.foundry +
@@ -4693,7 +4676,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                            device_target.device_variant.family +
                                                            "_" +
                                                            device_target.device_variant.foundry +
@@ -4729,7 +4712,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     m_OpenFpgaSimSettingFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                            device_target.device_variant.family +
                                                            "_" +
                                                            device_target.device_variant.foundry +
@@ -4762,7 +4745,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       m_OpenFpgaFabricKeyFile = GenerateTempFilePath();
 
       m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                             device_target.device_variant.family +
                                                             "_" +
                                                             device_target.device_variant.foundry +
@@ -5422,6 +5405,7 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
   bool status = true;
+#if UPSTREAM_UNUSED
   std::filesystem::path datapath = GetSession()->Context()->DataPath();
   std::filesystem::path devicefile =
       datapath / std::string("etc") / std::string("device.xml");
@@ -5555,7 +5539,7 @@ bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
     ErrorMessage("Incorrect device: " + deviceName + "\n");
     status = false;
   }
-#if UPSTREAM_UNUSED
+
   if (!LicenseDevice(deviceName)) {
     ErrorMessage("Device is not licensed: " + deviceName + "\n");
     status = false;

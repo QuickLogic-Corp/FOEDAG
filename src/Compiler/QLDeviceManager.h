@@ -145,7 +145,9 @@ class QLDeviceManager : public QObject {
   // device files access API to have a uniform way of getting the required files
   public:
 
-  bool deviceFileIsEncrypted(std::filesystem::path);
+  std::filesystem::path deviceDataRootDirPath();
+
+  bool deviceFileIsEncrypted(std::filesystem::path filepath);
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());

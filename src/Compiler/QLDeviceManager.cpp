@@ -874,19 +874,9 @@ void QLDeviceManager::parseDeviceData() {
 
   std::error_code ec;
 
-  // allow user to override the root device data path using
-  // an environment variable: TODOKKDEVICEDATADIR
-  // const char* const path_device_data = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
-  // if (path_device_data != nullptr) {
-  //   std::filesystem::path dataDir = std::string(path_device_data);
-  //   if(FileUtils::FileExists(dataDir)) {
-  //     m_context->DataPath(dataDir);
-  //   }
-  // }
-
   // get to the device_data dir path of the installation
   std::filesystem::path root_device_data_dir_path = 
-      GlobalSession->Context()->DataPath();
+     deviceDataRootDirPath();
 
   // clear the list before parsing
   device_list.clear();
@@ -985,7 +975,7 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
 
   // get to the device_data dir path of the installation
   std::filesystem::path root_device_data_dir_path = 
-     GlobalSession->Context()->DataPath();
+     deviceDataRootDirPath();
 
   // calculate the device_data dir path for specified device
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node;
@@ -1199,7 +1189,7 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
   std::vector<QLDeviceVariantLayout> device_variant_layouts = {};
   
   std::filesystem::path root_device_data_dir_path = 
-      GlobalSession->Context()->DataPath();
+      deviceDataRootDirPath();
   
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node;
 
@@ -1493,13 +1483,13 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
 {
   std::filesystem::path architectureFile;
   std::filesystem::path device_type_dir_path =
-      std::filesystem::path(GlobalSession->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_variant.family /
                             device_variant.foundry /
                             device_variant.node);
 
   std::filesystem::path device_variant_dir_path =
-      std::filesystem::path(GlobalSession->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_variant.family /
                             device_variant.foundry /
                             device_variant.node /
@@ -2099,7 +2089,7 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
     // [1] check if installation already has the device added and inform the user accordingly.
     //     (device data dir for this device already exists)
     std::filesystem::path target_device_data_dir_path = 
-        std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+        std::filesystem::path(deviceDataRootDirPath() /
                               family /
                               foundry /
                               node);
@@ -2145,6 +2135,37 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
   }
 
 
+ std::filesystem::path QLDeviceManager::deviceDataRootDirPath() {
+
+  std::filesystem::path root_device_data_dir_path;
+
+  // allow user to override the root device data path using an env variable.
+  // read env var
+  const char* const path_device_data_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
+
+  if (path_device_data_env_str != nullptr) {
+
+    // convert to std::filesystem::path and check if the path exists
+    root_device_data_dir_path = std::string(path_device_data_env_str);
+
+    if(!FileUtils::FileExists(root_device_data_dir_path)) {
+
+      root_device_data_dir_path.clear();
+    }
+  }
+
+  // if we did not get the path from the env var
+  if(root_device_data_dir_path.empty()) {
+
+    // use the device_data dir path of the installation
+    root_device_data_dir_path = 
+        GlobalSession->Context()->DataPath();
+  }
+
+  return root_device_data_dir_path;
+}
+
+
 bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
 
   if(filepath.extension() == ".en") {
@@ -2159,7 +2180,7 @@ bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
 
 std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_target) {
 
-  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
   std::filesystem::path device_type_dir_path;
 
@@ -2168,7 +2189,7 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
   }
 
   device_type_dir_path = 
-      std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node);
@@ -2179,7 +2200,7 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
 
 std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget device_target) {
 
-  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
   std::filesystem::path device_variant_dir_path;
 
@@ -2188,7 +2209,7 @@ std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget devic
   }
 
   device_variant_dir_path =
-      std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /
