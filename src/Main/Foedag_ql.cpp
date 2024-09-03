@@ -186,6 +186,12 @@ Foedag::Foedag(FOEDAG::CommandLine* cmdLine, MainWindowBuilder* mainWinBuilder,
     m_context->BinaryPath(exeDirPath);
     std::filesystem::path installDir = exeDirPath.parent_path();
     
+    // for generic usage (not specific to device-data) use the DataPath()
+    // API which will always be 'install_dir_path'/device_data/
+    // this is used as reference to derive other installation paths.
+    // for device-data specific usage, use the QLDeviceManager::getInstance()->deviceDataRootDirPath()
+    // API instead.
+
     // removing this, because there are other stuff, such as scripts/ and files
     // which are indirectly derived from the DataPath() API value, and these
     // will break if the DataPath() is set to some path outside the Aurora installation!!
