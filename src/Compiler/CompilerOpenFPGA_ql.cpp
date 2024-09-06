@@ -2343,6 +2343,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 
       // copy the source file to the target file path:
       //  std::cout << "copying:" << relative_file_path << std::endl;
+      // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
+      if(FileUtils::FileExists(target_file_path_yosys_share)) {
+        std::filesystem::remove(target_file_path_yosys_share);
+      }
       std::filesystem::copy_file(source_file_path,
                                   target_file_path_yosys_share,
                                   std::filesystem::copy_options::overwrite_existing,
@@ -2389,6 +2393,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 
       // copy the source file to the target file path:
       // std::cout << "copying:" << relative_file_path << std::endl;
+      // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
+      if(FileUtils::FileExists(target_file_path_tabby_share)) {
+        std::filesystem::remove(target_file_path_tabby_share);
+      }
       std::filesystem::copy_file(source_file_path,
                                   target_file_path_tabby_share,
                                   std::filesystem::copy_options::overwrite_existing,
