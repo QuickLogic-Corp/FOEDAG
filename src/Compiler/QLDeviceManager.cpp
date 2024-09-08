@@ -1763,12 +1763,12 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             continue;
           }
 
-          //  to skip '/examples/' or '\examples\' ? skip in future
-          // if (std::regex_match(dir_entry.path().string(),
-          //                       std::regex(R"(.+[\/\\]examples[\/\\].*)",
-          //                       std::regex::icase))) {
-          //   continue;
-          // }
+          // include all files in 'examples/' for copy
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]examples[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
 
           // we want xml files for encryption
           if (std::regex_match(dir_entry.path().filename().string(),
