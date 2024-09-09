@@ -2159,6 +2159,218 @@ bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
 }
 
 
+bool QLDeviceManager::deviceSetupYosysModels(QLDeviceTarget device_target) {
+
+  // backward compatibility:
+  // if device_data is v2.7.1 or older:
+  // copy the yosys files (*.v/*.sv/*.txt/) from devicetypedir()
+  // to: share/yosys/quicklogic/qlf_k6n10f in installation, and tabbycad dirs.
+  //
+  // else, if v2.8.0 or newer:
+  // copy the yosys/ dir files in the same structure from the device data
+  // to share/yosys/ dir in both installation and tabbycad dirs.
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::error_code ec;
+  std::filesystem::path device_yosys_dir_path;
+  std::filesystem::path target_yosys_share_dir_path;
+  std::filesystem::path target_tabby_share_dir_path;
+
+  if(!isDeviceTargetValid(device_target)) {
+    if(isDeviceTargetValid(this->device_target)) {
+      device_target = this->device_target;
+    }
+    else {
+      return false;
+    }
+  }
+
+  std::filesystem::path device_target_config_json_filepath =
+      deviceTypeDirPath(device_target) / std::string("config.json");
+
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("YOSYS_DIR")  ) {
+
+      json_value = device_target_config_json["YOSYS_DIR"].get<std::string>();
+      device_yosys_dir_path =
+        deviceTypeDirPath(device_target) / json_value;
+    }
+    else {
+
+    device_yosys_dir_path =
+        deviceTypeDirPath(device_target) / std::string("yosys");
+    }
+  }
+  else {
+
+    device_yosys_dir_path =
+        deviceTypeDirPath(device_target);
+  }
+
+  std::vector<std::filesystem::path> source_device_data_file_list_to_copy;
+  for (const std::filesystem::directory_entry& dir_entry :
+      std::filesystem::recursive_directory_iterator(device_yosys_dir_path,
+                                                    std::filesystem::directory_options::skip_permission_denied,
+                                                    ec))
+  {
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed listing contents of ") +  device_yosys_dir_path.string());
+      return false;
+    }
+
+    if(dir_entry.is_regular_file(ec)) {
+
+        // include verilog files for copy (cells_sim.v etc.)
+        if (std::regex_match(dir_entry.path().filename().string(),
+                              std::regex(".+\\.v",
+                              std::regex::icase))) {
+          source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+        }
+
+        // include system verilog files for copy (cells_sim.sv etc.)
+        if (std::regex_match(dir_entry.path().filename().string(),
+                              std::regex(".+\\.sv",
+                              std::regex::icase))) {
+          source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+        }
+
+        // include txt files for copy (brams.txt etc.)
+        if (std::regex_match(dir_entry.path().filename().string(),
+                              std::regex(".+\\.txt",
+                              std::regex::icase))) {
+          source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+        }
+    }
+
+    if(ec) {
+      compiler->ErrorMessage(std::string("error while checking: ") +  dir_entry.path().string());
+      return false;
+    }
+  }
+
+  for(std::filesystem::path source_file_path : source_device_data_file_list_to_copy) {
+
+    // get the file path, relative to the source_device_data_dir_path
+    std::filesystem::path relative_file_path = 
+        std::filesystem::relative(source_file_path,
+                                  device_yosys_dir_path,
+                                  ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to create relative path: ") + source_file_path.string());
+      return false;
+    }
+
+    if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+      target_yosys_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("share") /
+                                                      std::string("yosys");
+    }
+    else {
+
+      target_yosys_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("share") /
+                                                      std::string("yosys") /
+                                                      std::string("quicklogic") /
+                                                      std::string("qlf_k6n10f");
+    }
+
+
+    // add the relative file path to the target_yosys_share_dir_path
+    std::filesystem::path target_file_path_yosys_share = 
+        target_yosys_share_dir_path / relative_file_path;
+
+    // ensure that the target file's parent dir is created if not existing:
+    std::filesystem::create_directories(target_file_path_yosys_share.parent_path(),
+                                        ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to create directory: ") + target_file_path_yosys_share.parent_path().string());
+      return false;
+    }
+
+    // copy the source file to the target file path:
+    //  std::cout << "copying:" << relative_file_path << std::endl;
+    // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
+    if(FileUtils::FileExists(target_file_path_yosys_share)) {
+      std::filesystem::remove(target_file_path_yosys_share);
+    }
+    std::filesystem::copy_file(source_file_path,
+                                target_file_path_yosys_share,
+                                std::filesystem::copy_options::overwrite_existing,
+                                ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to copy: ") + source_file_path.string());
+      return false;
+    }
+
+    // same for tabbycad share/yosys/ dir
+
+    if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+      target_tabby_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("tabby") /
+                                                      std::string("share") /
+                                                      std::string("yosys");
+    }
+    else {
+
+      target_tabby_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("tabby") /
+                                                      std::string("share") /
+                                                      std::string("yosys") /
+                                                      std::string("quicklogic") /
+                                                      std::string("qlf_k6n10f");
+    }
+
+    // add the relative file path to the target_yosys_share_dir_path
+    std::filesystem::path target_file_path_tabby_share = 
+        target_tabby_share_dir_path / relative_file_path;
+
+    // ensure that the target file's parent dir is created if not existing:
+    std::filesystem::create_directories(target_file_path_tabby_share.parent_path(),
+                                        ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to create directory: ") + target_file_path_tabby_share.parent_path().string());
+      return false;
+    }
+
+    // copy the source file to the target file path:
+    // std::cout << "copying:" << relative_file_path << std::endl;
+    // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
+    if(FileUtils::FileExists(target_file_path_tabby_share)) {
+      std::filesystem::remove(target_file_path_tabby_share);
+    }
+    std::filesystem::copy_file(source_file_path,
+                                target_file_path_tabby_share,
+                                std::filesystem::copy_options::overwrite_existing,
+                                ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to copy: ") + source_file_path.string());
+      return false;
+    }
+
+  }
+
+  return true;
+}
+
+
 std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_target) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());

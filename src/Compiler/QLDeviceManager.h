@@ -146,6 +146,8 @@ class QLDeviceManager : public QObject {
   public:
 
   bool deviceFileIsEncrypted(std::filesystem::path);
+
+  bool deviceSetupYosysModels(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
