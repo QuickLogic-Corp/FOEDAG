@@ -416,7 +416,7 @@ std::string ProjectManager::projectName() const {
   return Project::Instance()->projectName().toStdString();
 }
 
-QString ProjectManager::getProjectPath() const {
+QString ProjectManager::getProjectPath() {
   return Project::Instance()->projectPath();
 }
 
@@ -425,6 +425,11 @@ std::string ProjectManager::projectPath() const {
 }
 
 bool ProjectManager::HasDesign() const { return !getProjectName().isEmpty(); }
+
+bool ProjectManager::isPathRelativeToProject(const QString& relPathCandidate)
+{
+  return QFileInfo(getProjectPath(), relPathCandidate).exists();
+}
 
 int ProjectManager::setProjectType(int strType) {
   int ret = 0;
@@ -635,6 +640,7 @@ int ProjectManager::setDesignFile(const QString& strFileName, bool isFileCopy,
                          Project::Instance()->projectName(), m_currentFileSet);
     fileInfo.setFile(path, strFileName);
   }
+
   QString suffix = fileInfo.suffix();
   if (fileInfo.isDir()) {
     QStringList fileList = getAllChildFiles(strFileName);
@@ -2096,8 +2102,7 @@ void ProjectManager::AddFiles(const ProjectOptions::FileData& fileData,
       for (const filedata& fdata : noGroupFiles) {
         auto libraries = fdata.m_workLibrary;
         auto command = libraries.isEmpty() ? QString() : "-work";
-
-        if (LocalToProject == fdata.m_filePath) {
+        if ((LocalToProject == fdata.m_filePath) || isPathRelativeToProject(fdata.m_filePath + "/" + fdata.m_fileName)) {
           addFileFunction(command, libraries, fdata.m_fileName,
                           fdata.m_language, QString{}, false, true);
         } else {
