@@ -640,7 +640,6 @@ int ProjectManager::setDesignFile(const QString& strFileName, bool isFileCopy,
                          Project::Instance()->projectName(), m_currentFileSet);
     fileInfo.setFile(path, strFileName);
   }
-
   QString suffix = fileInfo.suffix();
   if (fileInfo.isDir()) {
     QStringList fileList = getAllChildFiles(strFileName);
