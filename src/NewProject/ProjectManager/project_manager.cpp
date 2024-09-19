@@ -2103,6 +2103,7 @@ void ProjectManager::AddFiles(const ProjectOptions::FileData& fileData,
       for (const filedata& fdata : noGroupFiles) {
         auto libraries = fdata.m_workLibrary;
         auto command = libraries.isEmpty() ? QString() : "-work";
+
         if (LocalToProject == fdata.m_filePath) {
           addFileFunction(command, libraries, fdata.m_fileName,
                           fdata.m_language, QString{}, false, true);
