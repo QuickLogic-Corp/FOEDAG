@@ -547,7 +547,7 @@ void MainWindow::openProject(const QString& project, bool delayedOpen,
     return;
   }
 
-  if (!closeProject(/*force*/true, /*skipWelcomePage*/true)) {
+  if (!closeProject(/*force*/false, /*skipWelcomePage*/true)) {
     return;
   }
 
