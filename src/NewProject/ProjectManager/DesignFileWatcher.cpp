@@ -41,6 +41,8 @@ void DesignFileWatcher::init() {
   m_fileWatcher = new QFileSystemWatcher{};
   QObject::connect(m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
                    &DesignFileWatcher::designFilesChanged);
+  QObject::connect(m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
+                   &DesignFileWatcher::designFileContentChanged);
 }
 
 void DesignFileWatcher::emitDesignCreated() { emit designCreated(); }
