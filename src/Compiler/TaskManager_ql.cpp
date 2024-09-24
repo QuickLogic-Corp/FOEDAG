@@ -343,7 +343,7 @@ void TaskManager::runNext(TaskStatus status) {
                     QString("%1 Running").arg(t->title()));
     return;
   } else {
-    emit doneDetalied(taskId(t), t->status());
+    emit taskDone(taskId(t), t->status());
   }
 
   QString statusStr{"Complete"};
