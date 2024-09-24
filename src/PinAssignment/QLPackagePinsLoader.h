@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QVector>
 #include <QMap>
+#include <QSet>
 
 #include "PackagePinsLoader.h"
 
@@ -17,13 +18,16 @@ class QLPackagePinsLoader : public PackagePinsLoader {
 
  public:
   QLPackagePinsLoader(PackagePinsModel *model, QObject *parent = nullptr);
-  std::pair<bool, QString> load(const QString &fileName) override final;
+  std::pair<bool, QString> load(const QString& pinTableFilePath) override final;
+  void validateIOMap(const QString& ioMapFilePath) override final;
 
 private:
   void initHeader();
   void parseHeader(const QString &header);
+  void checkContent();
 
   QMap<QString, int> m_header;
+  QSet<QString> m_portNames;
 };
 
 }  // namespace FOEDAG

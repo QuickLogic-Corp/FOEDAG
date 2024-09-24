@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "PackagePinsLoader.h"
 #include "PortsLoader.h"
 #else
+#include "Compiler/QLDeviceManager.h"
 #include "QLPackagePinsLoader.h"
 #include "QLPortsLoader.h"
 #include "PcfObserver.h"
@@ -64,6 +65,7 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
   if (!ok) qWarning() << message;
 
   PackagePinsLoader *loader{FindPackagePinLoader(data.target)};
+  loader->validateIOMap(QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile().c_str());
 
 #ifdef UPSTREAM_PINPLANNER
   loader->loadHeader(packagePinHeaderFile(data.context));

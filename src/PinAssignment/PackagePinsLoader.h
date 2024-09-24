@@ -34,6 +34,9 @@ class PackagePinsLoader : public QObject {
   PackagePinsLoader(PackagePinsModel *model, QObject *parent = nullptr);
   virtual std::pair<bool, QString> load(const QString &fileName);
   virtual std::pair<bool, QString> loadHeader(const QString &fileName);
+#ifndef UPSTREAM_PINPLANNER
+  virtual void validateIOMap(const QString& ioMapFilePath) {}
+#endif
 
   void setModel(PackagePinsModel *model);
 

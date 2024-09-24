@@ -5,6 +5,7 @@
 
 #include <QSet>
 #include <QRegularExpression>
+#include <QXmlStreamReader>
 #include <QDebug>
 
 namespace FOEDAG {
@@ -41,10 +42,12 @@ void QLPackagePinsLoader::parseHeader(const QString &header)
   }
 }
 
-std::pair<bool, QString> QLPackagePinsLoader::load(const QString &fileName) {
+std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePath) {
+  m_portNames.clear();
+
   initHeader();
 
-  const auto &[success, content] = getFileContent(fileName);
+  const auto &[success, content] = getFileContent(pinTableFilePath);
   if (!success) return std::make_pair(success, content);
 
 #ifdef UPSTREAM_PINPLANNER
@@ -55,13 +58,13 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString &fileName) {
   parseHeader(lines.takeFirst());
 
   if (!m_header.contains(COLUMN_ORIENTATION)) {
-    return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_ORIENTATION).arg(fileName));
+    return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_ORIENTATION).arg(pinTableFilePath));
   }
   if (!m_header.contains(COLUMN_MAPPED_PIN)) {
-    return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_MAPPED_PIN).arg(fileName));
+    return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_MAPPED_PIN).arg(pinTableFilePath));
   }
   if (!m_header.contains(COLUMN_PORT_NAME)) {
-    return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_PORT_NAME).arg(fileName));
+    return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_PORT_NAME).arg(pinTableFilePath));
   }
 
   const int columnOrientationIndex = m_header.value(COLUMN_ORIENTATION);
@@ -123,6 +126,7 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString &fileName) {
       QString dir;
       if (data.size() >= columnPortNameIndex) {
         QString portName = data.at(columnPortNameIndex);
+        m_portNames.insert(portName);
         if (!portName.isEmpty()) {
           if (portName.contains(inputPattern)) {
             dir = IODirection::INPUT;
@@ -147,6 +151,54 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString &fileName) {
   m_model->initListModel();
 
   return std::make_pair(true, QString{});
+}
+
+void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
+{
+  qInfo() << "~~~ioMapFilePath" << ioMapFilePath;
+  QFile file(ioMapFilePath);
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    qDebug() << "Failed to open the file." << ioMapFilePath;
+    return;
+  }
+
+  QMap<QString, QString> locations;
+  QList<QString> errors;
+
+  QXmlStreamReader xmlReader(&file);
+
+  while (!xmlReader.atEnd() && !xmlReader.hasError()) {
+    QXmlStreamReader::TokenType token = xmlReader.readNext();
+    if (token == QXmlStreamReader::StartElement) {
+      if (xmlReader.name() == "io") {
+        QString pad = xmlReader.attributes().value("pad").toString();
+        QString x = xmlReader.attributes().value("x").toString();
+        QString y = xmlReader.attributes().value("y").toString();
+        QString z = xmlReader.attributes().value("z").toString();
+
+        QString location = QString("%1:%2:%3").arg(x).arg(y).arg(z);
+        if (!locations.contains(location)) {
+          locations[location] = pad;
+        } else {
+          errors.append(QString("attempt use location %1 for pad %2, but already used by pad %3").arg(location).arg(pad).arg(locations.value(location)));
+        }
+      }
+    }
+  }
+
+  if (xmlReader.hasError()) {
+    qDebug() << ioMapFilePath << "contains XML error: " << xmlReader.errorString();
+  }
+
+  file.close();
+
+  for (const QString& error: errors) {
+    qDebug() << "~~~ error:" << error;
+  }
+
+  if (errors.isEmpty()) {
+    qDebug() << "~~~ iomap ok";
+  }
 }
 
 }  // namespace FOEDAG
