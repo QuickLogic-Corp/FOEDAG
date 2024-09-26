@@ -27,7 +27,7 @@ private:
   void checkContent();
 
   QMap<QString, int> m_header;
-  QSet<QString> m_portNames;
+  QMap<QString, QString> m_pinToPortMap;
 };
 
 }  // namespace FOEDAG

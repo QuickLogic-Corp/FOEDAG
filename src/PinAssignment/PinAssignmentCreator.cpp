@@ -65,7 +65,6 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
   if (!ok) qWarning() << message;
 
   PackagePinsLoader *loader{FindPackagePinLoader(data.target)};
-  loader->validateIOMap(QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile().c_str());
 
 #ifdef UPSTREAM_PINPLANNER
   loader->loadHeader(packagePinHeaderFile(data.context));
@@ -87,7 +86,8 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
 #endif
 
   loader->load(fileName);
-
+  loader->validateIOMap(QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile().c_str());
+  
   auto portsView = new PortsView(m_baseModel);
   connect(portsView, &PortsView::selectionHasChanged, this,
           &PinAssignmentCreator::changed);

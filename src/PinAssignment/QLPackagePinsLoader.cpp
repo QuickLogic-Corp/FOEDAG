@@ -43,7 +43,7 @@ void QLPackagePinsLoader::parseHeader(const QString &header)
 }
 
 std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePath) {
-  m_portNames.clear();
+  m_pinToPortMap.clear();
 
   initHeader();
 
@@ -126,7 +126,7 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
       QString dir;
       if (data.size() >= columnPortNameIndex) {
         QString portName = data.at(columnPortNameIndex);
-        m_portNames.insert(portName);
+        m_pinToPortMap[portName] = pinName;
         if (!portName.isEmpty()) {
           if (portName.contains(inputPattern)) {
             dir = IODirection::INPUT;
@@ -150,18 +150,21 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
   }
   m_model->initListModel();
 
+  qInfo() << "~~~ 000 m_pinToPortMap=" << m_pinToPortMap.size();
   return std::make_pair(true, QString{});
 }
 
 void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
 {
-  qInfo() << "~~~ioMapFilePath" << ioMapFilePath;
+  qInfo() << "~~~ ioMapFilePath=" << ioMapFilePath;
+  qInfo() << "~~~ m_pinToPortMap=" << m_pinToPortMap.size();
   QFile file(ioMapFilePath);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
     qDebug() << "Failed to open the file." << ioMapFilePath;
     return;
   }
 
+  QSet<QString> pads;
   QMap<QString, QString> locations;
   QList<QString> errors;
 
@@ -176,11 +179,20 @@ void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
         QString y = xmlReader.attributes().value("y").toString();
         QString z = xmlReader.attributes().value("z").toString();
 
-        QString location = QString("%1:%2:%3").arg(x).arg(y).arg(z);
-        if (!locations.contains(location)) {
-          locations[location] = pad;
+        pads.insert(pad);
+
+        if (m_pinToPortMap.contains(pad)) {
+          QString location = QString("%1:%2:%3").arg(x).arg(y).arg(z);
+          //qInfo() << "~~~ process location=" << location << "for pad=" << pad;
+          if (!locations.contains(location)) {
+            locations[location] = pad;
+          } else {
+            QString msg{QString("attempt use location %1 for pad %2, but already used by pad %3").arg(location).arg(pad).arg(locations.value(location))};
+            //qInfo() << "~~~ error" << msg;
+            errors.append(msg);
+          }
         } else {
-          errors.append(QString("attempt use location %1 for pad %2, but already used by pad %3").arg(location).arg(pad).arg(locations.value(location)));
+          qInfo() << "~~~ pad" << pad << "is not in m_pinToPortMap" << m_pinToPortMap.size();
         }
       }
     }
@@ -195,6 +207,7 @@ void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
   for (const QString& error: errors) {
     qDebug() << "~~~ error:" << error;
   }
+  qDebug() << "~~~ total errors num:" << errors.size() << "locations:" << locations.size() << "pads:" << pads.size();
 
   if (errors.isEmpty()) {
     qDebug() << "~~~ iomap ok";
