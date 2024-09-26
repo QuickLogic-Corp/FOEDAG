@@ -78,24 +78,28 @@ QList<PcfLineFrame> PcfObserver::parsePcfFile(const QString& filePath)
 
   QFile file{filePath};
   if (file.open(QFile::ReadOnly)) {
-    QList<QString> lines = QtUtils::StringSplit(QString{file.readAll()}, '\n');
+    QTextStream in(&file);
     int lineCount = 1;
-    for (const QString& line: lines) {
-      PcfLineFrame frame;
-      frame.lineNum = lineCount;
-      frame.line = line;
-      QList<QString> elements = QtUtils::StringSplit(line, ' ');
-      if (elements.size() > 0) {
-        frame.cmd = elements.at(0);
-      }
-      if (elements.size() > 1) {
-        frame.port = elements.at(1);
-      }
-      if (elements.size() > 2) {
-        frame.pin = elements.at(2);
-      }
+    while (!in.atEnd()) {
+      QString line{in.readLine()};
 
-      lineFrames.append(frame);
+      if (!line.isEmpty()) {
+        PcfLineFrame frame;
+        frame.lineNum = lineCount;
+        frame.line = line;
+        QList<QString> elements = QtUtils::StringSplit(line, ' ');
+        if (elements.size() > 0) {
+          frame.cmd = elements.at(0);
+        }
+        if (elements.size() > 1) {
+          frame.port = elements.at(1);
+        }
+        if (elements.size() > 2) {
+          frame.pin = elements.at(2);
+        }
+
+        lineFrames.append(frame);
+      }
 
       lineCount++;
     }
