@@ -3157,13 +3157,13 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   }
 
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-    vpr_options += std::string(" --flat_routing true");
+    vpr_options += std::string(" --flat_routing on");
     // if flat_routing is enabled, increase maximum router iterations to give flat router enough
     // time to converage to a legal routing solution
     vpr_options += std::string(" --max_router_iterations 100");
   }
   else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
-    vpr_options += std::string(" --flat_routing false");
+    vpr_options += std::string(" --flat_routing off");
   }
 
   // parse vpr analysis options
