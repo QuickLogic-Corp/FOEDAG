@@ -1840,7 +1840,7 @@ void MainWindow::ReShowWindow(QString strProject) {
           [this, console]() { startStopButtonsState(); });
 
 #ifndef UPSTREAM_PINPLANNER
-  connect(m_taskManager, &TaskManager::doneDetalied, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
+  connect(m_taskManager, &TaskManager::taskDone, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
 #endif
 
   sourcesForm->InitSourcesForm();
