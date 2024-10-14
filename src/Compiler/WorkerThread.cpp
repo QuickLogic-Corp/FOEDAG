@@ -30,8 +30,12 @@ using namespace FOEDAG;
 std::set<WorkerThread*> ThreadPool::threads;
 
 WorkerThread::WorkerThread(const std::string& threadName,
-                           Compiler::Action action, Compiler* compiler)
-    : m_threadName(threadName), m_action(action), m_compiler(compiler) {
+                           Compiler::Action action, Compiler* compiler,
+                           const std::function<void(int)>& postRunTask)
+    : m_threadName(threadName),
+      m_action(action),
+      m_compiler(compiler),
+      m_postRunTask(postRunTask) {
   ThreadPool::threads.insert(this);
 }
 
@@ -41,12 +45,10 @@ bool WorkerThread::start() {
   bool result = true;
   m_compiler->start();
   QEventLoop* eventLoop{nullptr};
-  const bool processEvents = m_compiler->GetSession()->CmdLine()->WithQt() ||
-                             m_compiler->GetSession()->CmdLine()->WithQml();
+  const bool processEvents = isGui();
   if (processEvents) eventLoop = new QEventLoop;
   m_thread = new std::thread([&, eventLoop] {
     result = m_compiler->Compile(m_action);
-    m_compiler->finish();
     if (eventLoop) eventLoop->quit();
   });
   if (eventLoop)
@@ -54,6 +56,8 @@ bool WorkerThread::start() {
   else
     m_thread->join();  // batch mode
   delete eventLoop;
+  if (m_postRunTask && result) m_postRunTask(static_cast<int>(m_action));
+  m_compiler->finish();
   return result;
 }
 
@@ -62,4 +66,10 @@ bool WorkerThread::stop() {
   delete m_thread;
   m_thread = nullptr;
   return true;
+}
+
+bool WorkerThread::isGui() const {
+  const bool processEvents = m_compiler->GetSession()->CmdLine()->WithQt() ||
+                             m_compiler->GetSession()->CmdLine()->WithQml();
+  return processEvents;
 }
