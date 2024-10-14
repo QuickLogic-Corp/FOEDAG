@@ -22,8 +22,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QTreeWidgetItem>
 
+#include "IPGenerate/IPCatalog.h"
+#include "IPGenerate/IPCatalogBuilder.h"
 #include "MainWindow/Session.h"
-#include "Utils/FileUtils.h"
 
 extern FOEDAG::Session* GlobalSession;
 
@@ -47,8 +48,12 @@ bool tclCmdExists(const QString& cmdName) {
 
 IpCatalogTree::IpCatalogTree(QWidget* parent /*nullptr*/)
     : QTreeWidget(parent) {
-  this->setHeaderLabel("Available IPs");
+  this->setHeaderLabel("Available");
   refresh();
+  connect(this, &QTreeWidget::itemSelectionChanged, this,
+          &IpCatalogTree::itemSelectionHasChanged);
+  connect(this, &QTreeWidget::itemDoubleClicked, this,
+          &IpCatalogTree::openIpSettings);
 }
 
 void IpCatalogTree::refresh() {
@@ -66,11 +71,12 @@ void IpCatalogTree::refresh() {
   if (ips != prevIpCatalogResults) {
     this->clear();
     // Add a tree entry for each IP name
-    for (auto ip : ips) {
+    for (const auto& ip : std::as_const(ips)) {
       QTreeWidgetItem* item = new QTreeWidgetItem();
       item->setText(0, ip);
       this->addTopLevelItem(item);
     }
+    sortItems(0, Qt::SortOrder::AscendingOrder);
     prevIpCatalogResults = ips;
   }
 }
@@ -92,15 +98,27 @@ QStringList IpCatalogTree::getAvailableIPs(
 }
 
 void IpCatalogTree::loadIps(const std::vector<std::filesystem::path>& paths) {
-  if (tclCmdExists("add_litex_ip_catalog")) {
-    for (auto path : paths) {
-      if (std::filesystem::exists(path)) {
-        QString cmd =
-            QString("add_litex_ip_catalog {%1}")
-                .arg(QString::fromStdString(path.lexically_normal().string()));
-        int ok = TCL_ERROR;
-        GlobalSession->TclInterp()->evalCmd(cmd.toStdString(), &ok);
-      }
+  for (const auto& path : paths) {
+    if (std::filesystem::exists(path)) {
+      GlobalSession->GetCompiler()->BuildLiteXIPCatalog(path.lexically_normal(),
+                                                        true);
     }
   }
+}
+
+void IpCatalogTree::itemSelectionHasChanged() {
+  auto selected = selectedItems();
+  if (!selected.isEmpty()) {
+    auto ip = selected.first()->text(0);
+    auto def =
+        GlobalSession->GetCompiler()->GetIPGenerator()->Catalog()->Definition(
+            ip.toStdString());
+    if (def && !def->Valid()) {
+      IPCatalogBuilder builder{GlobalSession->GetCompiler()};
+      builder.buildLiteXIPFromGenerator(
+          GlobalSession->GetCompiler()->GetIPGenerator()->Catalog(),
+          def->FilePath());
+    }
+  }
+  emit ipReady();
 }

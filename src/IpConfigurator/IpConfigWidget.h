@@ -36,37 +36,24 @@ class IpConfigWidget : public QWidget {
 
  public:
   explicit IpConfigWidget(QWidget* parent = nullptr,
-                          const QString& requestedIpName = "",
-                          const QString& moduleName = "",
-                          const QStringList& instanceValueArgs = {});
-
- signals:
-  void ipInstancesUpdated();
-
- public slots:
-  void updateOutputPath();
-  void handleCheckBoxChanged(const QString& customId, QCheckBox* widget);
-  void checkDependencies();
+                          const QString& requestedIpName = QString{},
+                          const QString& moduleName = QString{});
 
  private:
-  void AddDialogControls(QBoxLayout* layout);
-  void AddIpToProject(const QString& cmd);
+  void generateDetailedInformation();
+  void Generate(const QString& outputPath = {});
   void CreateParamFields();
-  void CreateOutputFields();
-  void updateMetaLabel(VLNV info);
-  std::vector<FOEDAG::IPDefinition*> getDefinitions();
+  void updateMetaLabel(const IPDetails& details);
+  static std::vector<FOEDAG::IPDefinition*> getDefinitions();
 
-  QGroupBox paramsBox{"Parameters", this};
-  QGroupBox outputBox{"Output", this};
-  QLabel metaLabel;
-  QLineEdit moduleEdit;
-  QLineEdit outputPath;
-  QPushButton generateBtn;
+  QGroupBox* m_paramsBox{nullptr};
+  QLabel m_metaLabel;
+  QString m_moduleName{};
 
-  QString m_baseDirDefault;
-  QString m_requestedIpName;
-  QStringList m_instanceValueArgs;
+  const std::filesystem::path m_baseDirDefault;
+  const QString m_requestedIpName;
   VLNV m_meta;
+  IPDetails m_details;
 };
 
 }  // namespace FOEDAG

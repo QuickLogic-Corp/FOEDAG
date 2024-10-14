@@ -33,6 +33,13 @@ class IpCatalogTree : public QTreeWidget {
   void refresh();
   static void loadIps(const std::vector<std::filesystem::path>& paths);
 
+ signals:
+  void ipReady();
+  void openIpSettings();
+
+ private slots:
+  void itemSelectionHasChanged();
+
  private:
   QStringList prevIpCatalogResults;
 
