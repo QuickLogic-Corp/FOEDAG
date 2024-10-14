@@ -19,15 +19,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifdef _WIN32
-#include <Windows.h>
-#include <direct.h>
-#include <process.h>
-#else
-#include <stdlib.h>
-#include <sys/param.h>
-#include <unistd.h>
-#endif
+#include "IPGenerate/IPCatalogBuilder.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -42,14 +34,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <thread>
 
 #include "Compiler/Log.h"
-#include "Compiler/TclInterpreterHandler.h"
 #include "Compiler/WorkerThread.h"
-#include "IPGenerate/IPCatalogBuilder.h"
 #include "MainWindow/Session.h"
 #include "Utils/FileUtils.h"
-#include "Utils/ProcessUtils.h"
 #include "Utils/StringUtils.h"
 #include "nlohmann_json/json.hpp"
+
 using json = nlohmann::ordered_json;
 
 extern FOEDAG::Session* GlobalSession;
@@ -74,7 +64,8 @@ void buildMockUpIPDef(IPCatalog* catalog) {
 }
 
 bool IPCatalogBuilder::buildLiteXCatalog(
-    IPCatalog* catalog, const std::filesystem::path& litexIPgenPath) {
+    IPCatalog* catalog, const std::filesystem::path& litexIPgenPath,
+    bool namesOnly) {
   bool result = true;
   if (FileUtils::FileExists(litexIPgenPath)) {
     int foundCount = 0;
@@ -92,7 +83,8 @@ bool IPCatalogBuilder::buildLiteXCatalog(
       if (exec_name.find("__init__.py") != std::string::npos) continue;
       if (exec_name.find("_gen.py") != std::string::npos) {
         foundCount++;
-        bool res = buildLiteXIPFromGenerator(catalog, entry);
+        bool res = namesOnly ? buildLiteXIPFromGeneratorInternal(catalog, entry)
+                             : buildLiteXIPFromGenerator(catalog, entry);
         if (res == false) {
           result = false;
         }
@@ -141,8 +133,6 @@ std::vector<std::string> JsonArrayToStringVector(
 
 bool IPCatalogBuilder::buildLiteXIPFromGenerator(
     IPCatalog* catalog, const std::filesystem::path& pythonConverterScript) {
-  bool result = true;
-
   // Find path to litex enabled python interpreter
   std::filesystem::path pythonPath = IPCatalog::getPythonPath();
   if (pythonPath.empty()) {
@@ -170,16 +160,24 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
   std::ostringstream help;
   std::string command = pythonPath.string() + " " +
                         pythonConverterScript.string() + " --json-template";
-  if (FileUtils::ExecuteSystemCommand(command, &help)) {
+  StringVector args{pythonConverterScript.string(), "--json-template"};
+  if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help).code) {
     m_compiler->ErrorMessage("IP Catalog, no IP information for " +
                              pythonConverterScript.string() + "\n" +
                              help.str());
     return false;
   }
 
+  return buildLiteXIPFromJson(catalog, pythonConverterScript, help.str(),
+                              command);
+}
+
+bool IPCatalogBuilder::buildLiteXIPFromJson(
+    IPCatalog* catalog, const std::filesystem::path& pythonConverterScript,
+    const std::string& jsonStr, const std::string& command) {
   // Treat command's output as json and parse it
   std::stringstream buffer;
-  buffer << help.str();
+  buffer << jsonStr;
   json jopts;
   try {
     jopts = json::parse(buffer);
@@ -189,6 +187,7 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
                       "\tgenCmd: " + command + "\n" +
                       "\treturned json: " + buffer.str();
     m_compiler->ErrorMessage(msg);
+    return false;
   }
 
   // Error out if empty json was returned
@@ -218,17 +217,18 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
   std::vector<Connector*> connections;
 
   auto params = jopts.value("parameters", json::array());
-  for (auto param : params) {
-    auto paramName = param.value("parameter", "");
+  for (const auto& param : params) {
+    auto paramName = param.value("parameter", std::string{});
     auto title = param.value("title", paramName);
     auto options = param.value("options", json::array());
     auto range = param.value("range", json::array());
-    auto type = param.value("type", "");
-    auto description = param.value("description", "");
+    auto type = param.value("type", std::string{});
+    auto description = param.value("description", std::string{});
+    auto disable = param.value("disable", std::string{});
 
     std::string defaultVal{};
     try {
-      defaultVal = param.value("default", "");
+      defaultVal = param.value("default", std::string{});
     } catch (json::type_error& error) {
       // Default value has potential to be passed non-string values so we'll
       // check for it here
@@ -247,7 +247,7 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
     if (dependency.is_string()) {
       deps.push_back(dependency.get<std::string>());
     } else if (dependency.is_array()) {
-      for (auto dep : dependency) {
+      for (const auto& dep : dependency) {
         deps.push_back(dep.get<std::string>());
       }
     }
@@ -272,16 +272,53 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
     parameter->SetDependencies(JsonArrayToStringVector(deps));
     parameter->SetRange(JsonArrayToStringVector(range));
     parameter->SetDescription(description);
+    parameter->SetDisable(disable);
 
     parameters.push_back(parameter);
   }
 
   // get default build_name which is used during ip configuration
-  std::string build_name = jopts.value("build_name", "");
+  std::string build_name = jopts.value("build_name", std::string{});
+
+  auto def = catalog->Definition(IPName);
+  if (def) {
+    def->apply(IPDefinition::IPType::LiteXGenerator, IPName, build_name,
+               pythonConverterScript, connections, parameters);
+    def->Valid(true);
+  } else {
+    IPDefinition* def = new IPDefinition(
+        IPDefinition::IPType::LiteXGenerator, IPName, build_name,
+        pythonConverterScript, connections, parameters);
+    catalog->addIP(def);
+  }
+  return true;
+}
+
+bool IPCatalogBuilder::buildLiteXIPFromGeneratorInternal(
+    IPCatalog* catalog, const std::filesystem::path& pythonConverterScript) {
+  bool result = true;
+
+  std::ostringstream help;
+  std::string command;
+
+  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
+  std::string basename = basepath.string();
+  std::string IPName = rtrim(basename, '.');
+
+  // Remove _gen from IPName
+  std::string suffix = "_gen";
+  if (StringUtils::endsWith(IPName, suffix)) {
+    IPName.erase(IPName.length() - suffix.length());
+  }
+
+  // Add version number to IPName
+  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
+  IPName += "_" + info.version;
 
   IPDefinition* def =
-      new IPDefinition(IPDefinition::IPType::LiteXGenerator, IPName, build_name,
-                       pythonConverterScript, connections, parameters);
+      new IPDefinition(IPDefinition::IPType::LiteXGenerator, IPName,
+                       std::string{}, pythonConverterScript, {}, {});
+  def->Valid(false);
   catalog->addIP(def);
   return result;
 }
