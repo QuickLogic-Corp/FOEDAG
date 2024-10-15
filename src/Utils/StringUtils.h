@@ -33,6 +33,13 @@ namespace FOEDAG {
 
 using StringVector = std::vector<std::string>;
 
+template <class T>
+std::vector<T>& operator+=(std::vector<T>& stringVector,
+                           const std::vector<T>& other) {
+  for (const auto& val : other) stringVector.push_back(val);
+  return stringVector;
+}
+
 class StringUtils final {
  public:
   // Splits the input string with respect to given separator.

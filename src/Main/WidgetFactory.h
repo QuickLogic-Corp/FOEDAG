@@ -81,6 +81,7 @@ QComboBox* createComboBox(
 QLineEdit* createLineEdit(
     const QString& objectName, const QString& text = "",
     std::function<void(QLineEdit*, const QString&)> onChange = nullptr);
+    void validateLineEdit(QLineEdit* lineEdit);
 QTextEdit* createTextEdit(
     const QString& objectName, const QString& text = "",
     std::function<void(QTextEdit*, const QString&)> onChange = nullptr);
@@ -107,9 +108,11 @@ class WidgetFactoryDependencyNotifier : public QObject {
 
  public:
   static WidgetFactoryDependencyNotifier* Instance();
+  void emitEditorChanged(QWidget* widget);
 
  signals:
   void checkboxChanged(const QString& customId, QCheckBox* widget);
+  void editorChanged(const QString& customId, QWidget* widget);
 };
 
 }  // namespace FOEDAG

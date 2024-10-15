@@ -47,6 +47,7 @@ set (SRC_CPP_LIST
   ProcessUtils.cpp
   QtUtils.cpp
   LogUtils.cpp
+  JsonWriter.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -56,6 +57,7 @@ set (SRC_H_INSTALL_LIST
   sequential_map.h
   QtUtils.h
   LogUtils.h
+  JsonWriter.h
 )
 
 set (SRC_H_LIST

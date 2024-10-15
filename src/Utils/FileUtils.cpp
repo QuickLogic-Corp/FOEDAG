@@ -42,6 +42,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
+std::vector<QProcess*> FileUtils::m_processes{};
+
 bool FileUtils::FileExists(const std::filesystem::path& name) {
   std::error_code ec;
   return std::filesystem::exists(name, ec);
@@ -216,6 +218,21 @@ std::vector<std::filesystem::path> FileUtils::FindFileInDirs(
   return results;
 }
 
+std::filesystem::path FileUtils::FindFileByExtension(
+    const std::filesystem::path& path, const std::string& extension) {
+  if (FileUtils::FileExists(path)) {
+    for (const std::filesystem::path& entry :
+         std::filesystem::directory_iterator(path)) {
+      if (FileUtils::FileIsRegular(entry)) {
+        if (StringUtils::toLower(entry.extension().string()) ==
+            StringUtils::toLower(extension))
+          return entry;
+      }
+    }
+  }
+  return {};
+}
+
 int FileUtils::ExecuteSystemCommand(const std::string& command,
                                     std::ostream* result) {
   QProcess* m_process = new QProcess;
@@ -255,6 +272,62 @@ time_t FileUtils::Mtime(const std::filesystem::path& path) {
     return -1;
   }
   return statbuf.st_mtime;
+}
+
+Return FileUtils::ExecuteSystemCommand(const std::string& command,
+                                       const std::vector<std::string>& args,
+                                       std::ostream* out, int timeout_ms,
+                                       const std::string& workingDir,
+                                       std::ostream* err, bool startDetached) {
+  QProcess process;
+  if (!workingDir.empty())
+    process.setWorkingDirectory(QString::fromStdString(workingDir));
+
+  std::ostream* errStream = err ? err : out;
+
+  if (out) {
+    QObject::connect(
+        &process, &QProcess::readyReadStandardOutput, [out, &process]() {
+          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+        });
+  }
+
+  if (errStream) {
+    QObject::connect(&process, &QProcess::readyReadStandardError,
+                     [errStream, &process]() {
+                       QByteArray data = process.readAllStandardError();
+                       errStream->write(data, data.size());
+                     });
+  }
+
+  QString program = QString::fromStdString(command);
+  QStringList args_{};
+  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  if (startDetached) {
+    auto success = process.startDetached(program, args_);
+    return {success ? 0 : -1,
+            QString{"%1: Failed to start."}.arg(program).toStdString()};
+  } else {
+    m_processes.push_back(&process);
+    process.start(program, args_);
+  }
+
+  bool finished = process.waitForFinished(timeout_ms);
+  auto it = std::find(m_processes.begin(), m_processes.end(), &process);
+  if (it != m_processes.end()) m_processes.erase(it);
+
+  std::string message{};
+  if (!finished) {
+    message = process.errorString().toStdString();
+    if (errStream) (*errStream) << message << std::endl;
+  }
+
+  auto status = process.exitStatus();
+  auto exitCode = process.exitCode();
+  int returnStatus =
+      finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
+
+  return {returnStatus, {message}};
 }
 
 bool FileUtils::IsUptoDate(const std::string& sourceFile,

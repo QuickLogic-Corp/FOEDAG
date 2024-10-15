@@ -35,6 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
 
+#include <QDebug>
+
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };
@@ -123,6 +125,10 @@ class CompilerOpenFPGA_ql : public Compiler {
 
   std::pair<std::filesystem::path, std::string> findCurrentDevicePinTableCsv() const;
 
+  std::filesystem::path archFilePath() { 
+    qWarning() << "using hardcoded path in CompilerOpenFPGA_ql::archFilePath()";
+      return "/home/work/workspace/repos/aurora2/device_data/examples/add_device/QLF_K6N10_TSMC_40nm_default/vpr.xml"; 
+    }
   std::filesystem::path GenerateTempFilePath();
   int CleanTempFiles();
   void CleanScripts();
