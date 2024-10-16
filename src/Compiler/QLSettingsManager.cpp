@@ -838,7 +838,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   // and we have to 'reset' the settings from the template JSON for the new device-type
 
   std::filesystem::path root_device_data_dir_path = 
-      GlobalSession->Context()->DataPath();
+      QLDeviceManager::getInstance()->deviceDataRootDirPath();
   
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family_updated / foundry_updated / node_updated;
 

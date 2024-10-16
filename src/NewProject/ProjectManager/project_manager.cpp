@@ -635,6 +635,11 @@ int ProjectManager::setDesignFile(const QString& strFileName, bool isFileCopy,
                          Project::Instance()->projectName(), m_currentFileSet);
     fileInfo.setFile(path, strFileName);
   }
+  QFileInfo localPathFileInfoCandidate;
+  if (!fileInfo.exists() && fileInfo.isRelative()) {
+    localPathFileInfoCandidate.setFile(getProjectPath(), strFileName);
+  }
+
   QString suffix = fileInfo.suffix();
   if (fileInfo.isDir()) {
     QStringList fileList = getAllChildFiles(strFileName);
@@ -643,6 +648,8 @@ int ProjectManager::setDesignFile(const QString& strFileName, bool isFileCopy,
     }
   } else if (fileInfo.exists()) {
     ret = AddOrCreateFileToFileSet(strFileName, isFileCopy);
+  } else if (localPathFileInfoCandidate.exists()) {
+    ret = AddOrCreateFileToFileSet(localPathFileInfoCandidate.filePath(), isFileCopy);
   } else {
     if (strFileName.contains("/")) {
       if (m_designSuffixes.TestSuffix(suffix)) {
