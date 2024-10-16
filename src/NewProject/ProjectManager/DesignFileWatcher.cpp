@@ -41,6 +41,11 @@ void DesignFileWatcher::init() {
   m_fileWatcher = new QFileSystemWatcher{};
   QObject::connect(m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
                    &DesignFileWatcher::designFilesChanged);
+
+  // The signal designFileContentChanged notifies explicitly on design file content changes.
+  // Note: designFilesChanged cannot be used because it also notifies on the setFiles event.
+  QObject::connect(m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
+                   &DesignFileWatcher::designFileContentChanged);
 }
 
 void DesignFileWatcher::emitDesignCreated() { emit designCreated(); }
