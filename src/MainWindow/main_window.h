@@ -69,7 +69,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void newProjectDlg();
   void openProjectDialog(const QString& dir = QString{});
   void openExampleProject();
-  bool closeProject(bool force = false);
+  bool closeProject(bool force = false, bool skipWelcomePage = false);
   void openFileSlot();
   void openFilePath(const QString& filePath);
   void newDesignCreated(const QString& design);
