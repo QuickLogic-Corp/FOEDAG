@@ -126,7 +126,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::pair<std::filesystem::path, std::string> findCurrentDevicePinTableCsv() const;
 
   std::filesystem::path archFilePath() { 
-    qWarning() << "using hardcoded path in CompilerOpenFPGA_ql::archFilePath()";
+    qCritical() << "~~~ use hardcoded path in CompilerOpenFPGA_ql::archFilePath()";
       return "/home/work/workspace/repos/aurora2/device_data/examples/add_device/QLF_K6N10_TSMC_40nm_default/vpr.xml"; 
     }
   std::filesystem::path GenerateTempFilePath();

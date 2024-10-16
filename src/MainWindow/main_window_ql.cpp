@@ -2120,9 +2120,13 @@ void MainWindow::ipConfiguratorActionTriggered() {
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
-    m_availableIpsgDockWidget = PrepareTab(tr("IPs"), "availableIpsWidget",
-                                           creator.GetAvailableIpsWidget(),
-                                           nullptr, Qt::RightDockWidgetArea);
+    auto availableIpsgDockWidget = PrepareTab(
+        tr("IP Index"), "availableIpsWidget", creator.GetAvailableIpsWidget(),
+        nullptr, Qt::RightDockWidgetArea);
+    connect(availableIpsgDockWidget, &DockWidget::closed, ipConfiguratorAction,
+            &QAction::trigger);
+
+    m_availableIpsgDockWidget = availableIpsgDockWidget;
 
     // Get the actual IpCatalogTree
     auto ipsWidgets = m_availableIpsgDockWidget->findChildren<IpCatalogTree*>();
@@ -2130,8 +2134,10 @@ void MainWindow::ipConfiguratorActionTriggered() {
       m_ipCatalogTree = ipsWidgets[0];
 
       // Update the IP Config widget when the Available IPs selection changes
-      QObject::connect(m_ipCatalogTree, &IpCatalogTree::itemSelectionChanged,
-                       this, &MainWindow::handleIpTreeSelectionChanged);
+      connect(m_ipCatalogTree, &IpCatalogTree::ipReady, this,
+              &MainWindow::handleIpTreeSelectionChanged);
+      connect(m_ipCatalogTree, &IpCatalogTree::openIpSettings, this,
+              [this]() { openIpConfigurationDialog({}, {}, {}); });
     }
 
     // update the console for input incase the IP system printed any messages
@@ -2192,8 +2198,6 @@ void MainWindow::openIpConfigurationDialog(const QString& ipName,
       deviceFile = Config::Instance()->customDeviceXml();
     if (deviceFile.empty()) deviceFile = Config::Instance()->deviceXml();
   #endif
-    assert(false);
-    exit(1);
     DeviceParameters deviceInfo{
         QString::fromStdString(m_projectManager->getTargetDevice()),
         deviceFile};
@@ -2261,7 +2265,7 @@ void MainWindow::resetIps() {
 
 void MainWindow::updateViewMenu() {
   viewMenu->clear();
-  // viewMenu->addAction(ipConfiguratorAction);
+  viewMenu->addAction(ipConfiguratorAction);
   viewMenu->addAction(pinAssignmentAction);
   const QList<QDockWidget*> dockwidgets = findChildren<QDockWidget*>();
   if (!dockwidgets.empty()) {

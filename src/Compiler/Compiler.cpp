@@ -346,6 +346,8 @@ tcl_interp_clone
 
 bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
                                    bool namesOnly) {
+  qCritical() << "~~~ use hardcoded path for litexPath";
+  litexPath = "/home/work/workspace/repos/aurora2/build/foedag/foedag-gh/share/foedag";
   if (m_IPGenerator == nullptr) {
     IPCatalog* catalog = new IPCatalog();
     SetIPGenerator(new IPGenerator(catalog, this));

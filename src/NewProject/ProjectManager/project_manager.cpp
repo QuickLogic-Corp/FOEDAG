@@ -427,7 +427,7 @@ std::string ProjectManager::projectPath() const {
 
 std::filesystem::path ProjectManager::projectIPsPath(
     const std::string& projectPath) {
-  qWarning() << "hardcoded ProjectManager::projectIPsPath";
+  qCritical() << "~~~ hardcoded ProjectManager::projectIPsPath";
   return "/home/work/workspace/repos/Raptor/IP_Catalog/rapidsilicon/ip/";
   // return projectBasePath(projectPath) / "IPs";
 }
