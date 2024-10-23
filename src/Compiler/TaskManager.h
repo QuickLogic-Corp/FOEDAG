@@ -118,7 +118,10 @@ class TaskManager : public QObject {
    */
   void done();
 
-  void doneDetalied(uint id, TaskStatus status);
+  /*!
+   * \brief taskDone. Emits when task is done.
+   */
+  void taskDone(uint id, TaskStatus status);
 
   /*!
    * \brief progress

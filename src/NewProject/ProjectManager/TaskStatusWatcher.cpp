@@ -24,12 +24,8 @@ void TaskStatusWatcher::onTaskDone(uint taskId, TaskStatus status)
 
 void TaskStatusWatcher::onDesignFilesChanged()
 {
-  if (!m_isDesignChangedFirstTime) {
-    m_isSynthResultDirty = true;
-    emit synthResultDirty();
-  } else {
-    m_isDesignChangedFirstTime = false;
-  }
+  m_isSynthResultDirty = true;
+  emit synthResultDirty();
 }
 
 }  // namespace FOEDAG

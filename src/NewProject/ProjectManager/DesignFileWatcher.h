@@ -37,6 +37,7 @@ class DesignFileWatcher : public QObject {
 
  signals:
   void designFilesChanged();
+  void designFileContentChanged();
   void designCreated();
 
  private:
