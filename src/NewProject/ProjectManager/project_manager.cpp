@@ -425,11 +425,16 @@ std::string ProjectManager::projectPath() const {
   return getProjectPath().toStdString();
 }
 
+std::filesystem::path ProjectManager::projectBasePath(
+    const std::string& projectPath) {
+  fs::path base{fs::path{projectPath}};
+  base /= "run_1";
+  return base;
+}
+
 std::filesystem::path ProjectManager::projectIPsPath(
     const std::string& projectPath) {
-  qCritical() << "~~~ hardcoded ProjectManager::projectIPsPath";
-  return "/home/work/workspace/repos/Raptor/IP_Catalog/rapidsilicon/ip/";
-  // return projectBasePath(projectPath) / "IPs";
+    return projectBasePath(projectPath) / "IPs";
 }
 
 bool ProjectManager::HasDesign() const { return !getProjectName().isEmpty(); }

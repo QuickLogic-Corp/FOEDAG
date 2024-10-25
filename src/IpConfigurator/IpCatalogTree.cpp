@@ -60,8 +60,11 @@ void IpCatalogTree::refresh() {
   // TODO @skyler-rs AUG-2022 In future updates we plan to allow a user
   // catalog path. This path should be loaded in addition to the default
   std::filesystem::path UserCatalogPath = std::filesystem::path("");
-  std::filesystem::path IpCatalogPath =
-      GlobalSession->Context()->DataPath() / "IP_Catalog";
+  #ifdef UPSTREAM_IP_GENERATOR
+      std::filesystem::path IpCatalogPath = GlobalSession->Context()->DataPath() / "IP_Catalog";
+  #else
+      std::filesystem::path IpCatalogPath = GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
+  #endif
   std::vector<std::filesystem::path> IpPaths{IpCatalogPath, UserCatalogPath};
 
   QStringList ips;
