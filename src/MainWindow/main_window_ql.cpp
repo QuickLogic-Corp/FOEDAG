@@ -2191,7 +2191,7 @@ void MainWindow::openIpConfigurationDialog(const QString& ipName,
   }
   if (!name.isEmpty()) {    
   #ifndef IPCONFIG_UPSTREAM
-    std::filesystem::path deviceFile = static_cast<CompilerOpenFPGA_ql*>(m_compiler)->archFilePath();
+    std::filesystem::path deviceFile = QLDeviceManager::getInstance()->deviceVariantDirPath() / "vpr.xml.en";
   #else
     sdd::filesystem::path deviceFile = m_compiler->DeviceFile();
     if (m_compiler->DeviceFileLocal())
