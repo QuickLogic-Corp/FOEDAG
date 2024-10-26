@@ -41,6 +41,7 @@ enum Language {
   VERILOG_1995,
   VERILOG_2001,
   VERILOG_NETLIST,
+  VERILOG_MAPPED_NETLIST,
   SYSTEMVERILOG_2005,
   SYSTEMVERILOG_2009,
   SYSTEMVERILOG_2012,
@@ -53,7 +54,7 @@ enum Language {
 };
 }  // namespace Design
 
-Design::Language FromFileType(const QString &type, bool postSynth = false);
+Design::Language FromFileType(const QString &type, int projType = 0);
 
 // ID of the tasks shouln't be changed since they save to file
 static constexpr uint IP_GENERATE{0};
