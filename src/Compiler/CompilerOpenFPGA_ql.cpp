@@ -124,7 +124,7 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
             "with <name> name"
          << std::endl;
   (*out) << "   close_design     : Close current design" << std::endl;
-  (*out) << "               <project type> : rtl, gate-level" << std::endl;
+  (*out) << "               <project type> : rtl, gate-level, post-map" << std::endl;
   (*out) << "   open_project <file>        : Opens a project in started "
             "upfront GUI"
          << std::endl;
@@ -2726,6 +2726,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosys_options += " -use_dsp_cfg_params";
   }
 
+  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == Synplify) {
+
+    yosys_options += " -synplify";
+  }
+
   // TODO: trim yosys_options at the front
   yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
 
@@ -3034,11 +3039,21 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "route", "route_chan_width");
   }
 
+  if( !QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
+    vpr_options += std::string(" --max_router_iterations") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations");
+  }
+
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
     vpr_options += std::string(" --flat_routing on");
-    // if flat_routing is enabled, increase maximum router iterations to give flat router enough
-    // time to converage to a legal routing solution
-    vpr_options += std::string(" --max_router_iterations 100");
+    if( QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
+      // if flat_routing is enabled, and user has not specified the max_router_iterations
+      // then, increase maximum router iterations to a good default, to give flat router enough
+      // time to converage to a legal routing solution
+      vpr_options += std::string(" --max_router_iterations 100");
+    }
+    // otherwise, user specified max_router_iterations is honored.
   }
   else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
     vpr_options += std::string(" --flat_routing off");
@@ -3076,7 +3091,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail");
   }
 
-  // custom vpr command-line options, it is upto the user to ensure that the options are passed in correctly.
+  // custom vpr command-line options for *all* stages
+  // it is upto the user to ensure that the options are passed in correctly.
   if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str");
@@ -3299,6 +3315,17 @@ bool CompilerOpenFPGA_ql::Packing() {
     ErrorMessage("Base VPR Command is empty!");
     return false;
   }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
   command += std::string(" ") + 
              std::string("--pack");
 
@@ -3614,6 +3641,17 @@ bool CompilerOpenFPGA_ql::Placement() {
     ErrorMessage("Base VPR Command is empty!");
     return false;
   }
+
+  // custom vpr command-line options for place stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
   command += std::string(" ") + 
              std::string("--place");
 
@@ -3767,6 +3805,17 @@ bool CompilerOpenFPGA_ql::Route() {
     ErrorMessage("Base VPR Command is empty!");
     return false;
   }
+
+  // custom vpr command-line options for route stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
   command += std::string(" ") + 
              std::string("--route");
 
@@ -4020,6 +4069,17 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
         ErrorMessage("Base VPR Command is empty!");
         return false;
     }
+
+    // custom vpr command-line options for analysis stage
+    // it is upto the user to ensure that the options are passed in correctly.
+    if( !QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str").empty() ) {
+      // first, trim the entire string to eliminate any extra whitespace in the front and the back
+      std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
+      vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      // add the options string to the end of the vpr options with one whitespace separator
+      vpr_options += std::string(" ") + vpr_custom_options_string;
+    }
+
     taCommand += vpr_options +
     #ifdef _WIN32
     // under WIN32, running the analysis stage along causes issues, hence we call the
