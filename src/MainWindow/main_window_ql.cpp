@@ -235,13 +235,16 @@ MainWindow::MainWindow(Session* session)
           this, &MainWindow::onDesignFilesChanged);
   connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designCreated,
           this, &MainWindow::onDesignCreated);
-
+#ifndef UPSTREAM_PINPLANNER
+  connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designFileContentChanged,
+          TaskStatusWatcher::Instance(), &TaskStatusWatcher::onDesignFilesChanged);
   connect(TaskStatusWatcher::Instance(), &TaskStatusWatcher::synthSucceeded, this, [this](){
     if (m_pinAssignmentCreator) {
       m_pinAssignmentCreator->forceNextPcfFileCheck();
     }
     refreshPinPlanner();
   });
+#endif
 }
 
 void MainWindow::Tcl_NewProject(int argc, const char* argv[]) {
@@ -299,7 +302,7 @@ void MainWindow::newFile() {
 }
 
 void MainWindow::newProjectDlg() {
-  if (!closeProject()) return;
+  if (!closeProject(/*force*/false, /*skipWelcomePage*/true)) return;
   newProjdialog->Reset();
   newProjdialog->open();
 }
@@ -354,21 +357,30 @@ void MainWindow::openProjectDialog(const QString& dir) {
   if (!fileName.isEmpty()) openProject(fileName, false, false);
 }
 
-bool MainWindow::closeProject(bool force) {
+bool MainWindow::closeProject(bool force, bool skipWelcomePage) {
   if (m_projectManager && m_projectManager->HasDesign()) {
     if (!force && !confirmCloseProject()) {
       return false;
     }
+
+    TaskStatusWatcher::Instance()->reset();
     GlobalSession->CmdLine()->Clear();
     CompilerOpenFPGA_ql* compiler_ql = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
     if (compiler_ql) {
       compiler_ql->CleanScripts();
     }
+
     forceStopCompilation();
     Project::Instance()->InitProject();
     newProjdialog->Reset();
     CloseOpenedTabs();
-    m_showWelcomePage ? showWelcomePage() : ReShowWindow({});
+
+    if (skipWelcomePage) {
+      ReShowWindow({});
+    } else {
+      m_showWelcomePage ? showWelcomePage() : ReShowWindow({});
+    }
+
     setStatusAndProgressText(QString{});
     if (m_taskManager) {
       m_taskManager->reset();
@@ -540,6 +552,10 @@ void MainWindow::openProject(const QString& project, bool delayedOpen,
     return;
   }
 
+  if (!closeProject(/*force*/false, /*skipWelcomePage*/true)) {
+    return;
+  }
+
   ReShowWindow(project);
   loadFile(project);
   emit projectOpened();
@@ -549,12 +565,6 @@ void MainWindow::openProject(const QString& project, bool delayedOpen,
   m_dockConsole->setVisible(true);
   showMessagesTab();
   showReportsTab();
-
-  GlobalSession->CmdLine()->Clear();
-  CompilerOpenFPGA_ql* compiler_ql = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
-  if (compiler_ql) {
-    compiler_ql->CleanScripts();
-  }
 
   if (run) startProject(false);
   setStatusAndProgressText(QString{});
@@ -779,9 +789,6 @@ void MainWindow::popRecentSetting() {
 void MainWindow::onDesignFilesChanged() {
   QString msg = "Design files changed. Recompile might be needed.";
   setStatusAndProgressText(msg);
-#ifndef UPSTREAM_PINPLANNER
-  TaskStatusWatcher::Instance()->onDesignFilesChanged();
-#endif
 }
 
 void MainWindow::onDesignCreated() {
@@ -1851,7 +1858,7 @@ void MainWindow::ReShowWindow(QString strProject) {
           [this, console]() { startStopButtonsState(); });
 
 #ifndef UPSTREAM_PINPLANNER
-  connect(m_taskManager, &TaskManager::doneDetalied, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
+  connect(m_taskManager, &TaskManager::taskDone, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
 #endif
 
   sourcesForm->InitSourcesForm();
