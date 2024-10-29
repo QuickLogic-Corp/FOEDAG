@@ -110,6 +110,7 @@ class Compiler {
   void SetOutStream(std::ostream* out) { m_out = out; };
   void SetErrStream(std::ostream* err) { m_err = err; };
   std::ostream* GetOutStream() { return m_out; }
+  std::ostream* GetErrStream() { return m_err; }
   void SetTclInterpreterHandler(TclInterpreterHandler* tclInterpreterHandler);
   void SetSession(Session* session) { m_session = session; }
   Session* GetSession() const { return m_session; }
@@ -150,7 +151,8 @@ class Compiler {
   void SetSimulator(Simulator* simulator) { m_simulator = simulator; }
   Simulator* GetSimulator();
 
-  bool BuildLiteXIPCatalog(std::filesystem::path litexPath);
+  bool BuildLiteXIPCatalog(std::filesystem::path litexPath,
+                           bool namesOnly = false);
   bool HasIPInstances();
   bool HasIPDefinitions();
 

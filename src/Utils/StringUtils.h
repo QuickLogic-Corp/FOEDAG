@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define FOEDAG_STRINGUTILS_H
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <sstream>
 #include <string>
@@ -30,6 +31,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 
 namespace FOEDAG {
+
+namespace fs = std::filesystem;
+using StringVector = std::vector<std::string>;
+
+template <class T>
+std::vector<T>& operator+=(std::vector<T>& stringVector,
+                           const std::vector<T>& other) {
+  for (const auto& val : other) stringVector.push_back(val);
+  return stringVector;
+}
 
 class StringUtils final {
  public:

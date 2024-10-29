@@ -18,6 +18,8 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef IPCATALOG_H
+#define IPCATALOG_H
 
 #include <filesystem>
 #include <fstream>
@@ -26,8 +28,29 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 
-#ifndef IPCATALOG_H
-#define IPCATALOG_H
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || \
+    defined(_MSC_VER) || defined(__CYGWIN__)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#ifndef __GNUC__
+#include <direct.h>
+#endif
+#include <process.h>
+#ifndef __SIZEOF_INT__
+#define __SIZEOF_INT__ sizeof(int)
+#endif
+#else
+#include <stdlib.h>
+#include <sys/param.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 namespace FOEDAG {
 
@@ -210,6 +233,9 @@ class IPParameter : public Value {
   Type GetType() const { return Type::ParamIpVal; }
   ParamType GetParamType() const { return m_paramType; }
 
+  void SetDisable(const std::string& d) { m_disable = d; }
+  std::string Disabled() const { return m_disable; }
+
  private:
   // This type supports multiple types other than uint32_t and therefore uses
   // strings at all times, this getter is made private to make it less accesible
@@ -225,6 +251,7 @@ class IPParameter : public Value {
   std::vector<std::string> m_dependencies{};
   std::vector<std::string> m_options{};
   std::vector<std::string> m_range{};
+  std::string m_disable{false};
 };
 
 class IPDefinition {
@@ -241,6 +268,18 @@ class IPDefinition {
         m_filePath(filePath),
         m_connections(connections),
         m_parameters(parameters){};
+  void apply(IPType type, const std::string& name,
+             const std::string& build_name,
+             const std::filesystem::path& filePath,
+             const std::vector<Connector*>& connections,
+             const std::vector<Value*>& parameters) {
+    m_type = type;
+    m_name = name;
+    m_build_name = build_name;
+    m_filePath = filePath;
+    m_connections = connections;
+    m_parameters = parameters;
+  }
   ~IPDefinition() {}
   IPType Type() const { return m_type; }
   const std::string& Name() const { return m_name; }
@@ -248,6 +287,8 @@ class IPDefinition {
   const std::vector<Connector*>& Connections() const { return m_connections; }
   const std::filesystem::path FilePath() const { return m_filePath; }
   const std::vector<Value*> Parameters() const { return m_parameters; }
+  bool Valid() const { return m_valid; }
+  void Valid(bool valid) { m_valid = valid; }
 
  private:
   IPType m_type;
@@ -256,6 +297,7 @@ class IPDefinition {
   std::filesystem::path m_filePath;
   std::vector<Connector*> m_connections;
   std::vector<Value*> m_parameters;
+  bool m_valid{true};
 };
 
 class IPInstance {
@@ -278,6 +320,9 @@ class IPInstance {
   const std::string& ModuleName() { return m_moduleName; }
   const std::filesystem::path OutputFile() { return m_outputFile; }
 
+  bool Generated() const { return m_generated; }
+  void Generated(bool generated) { m_generated = generated; }
+
  private:
   std::string m_ipname;
   std::string m_version;
@@ -285,6 +330,7 @@ class IPInstance {
   std::vector<SParameter> m_parameters;
   std::string m_moduleName;
   std::filesystem::path m_outputFile;
+  bool m_generated{false};
 };
 
 class IPCatalog {
@@ -309,7 +355,15 @@ struct VLNV {
   std::string version;
 };
 
+struct IPDetails {
+  std::string name;
+  std::string version;
+  std::string interface_str;
+  std::string description;
+};
+
 VLNV getIpInfoFromPath(std::filesystem::path path);
+IPDetails readIpDetails(const std::filesystem::path& path);
 
 }  // namespace FOEDAG
 

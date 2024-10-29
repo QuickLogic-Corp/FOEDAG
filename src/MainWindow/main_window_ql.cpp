@@ -49,6 +49,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Main/ProjectFile/ProjectFileLoader.h"
 #include "Main/licenseviewer.h"
 #include "MainWindow/DockWidget.h"
+#include "IpConfigurator/IPDialogBox.h"
+#include "IpConfigurator/IpCatalogTree.h"
+#include "IpConfigurator/IpConfigWidget.h"
+#include "IpConfigurator/IpConfigurator.h"
+#include "IpConfigurator/IpConfiguratorCreator.h"
 #include "MainWindow/Session.h"
 #include "MainWindow/WelcomePageWidget.h"
 #include "MessagesTabWidget.h"
@@ -1705,12 +1710,25 @@ void MainWindow::ReShowWindow(QString strProject) {
   addDockWidget(Qt::LeftDockWidgetArea, propertiesDockWidget);
   propertiesDockWidget->hide();
   connect(sourcesForm, &SourcesForm::IpReconfigRequested, this,
-          &MainWindow::handleIpReConfigRequested);
+          &MainWindow::openIpConfigurationDialog);
   connect(sourcesForm, &SourcesForm::IpRemoveRequested, this,
           &MainWindow::handleRemoveIpRequested);
   connect(sourcesForm, &SourcesForm::IpDeleteRequested, this,
           &MainWindow::handleDeleteIpRequested);
-
+  // ref
+  // connect(sourcesForm, &SourcesForm::IpReconfigRequested, this,
+  //         &MainWindow::openIpConfigurationDialog);
+  // connect(sourcesForm, &SourcesForm::IpRemoveRequested, this,
+  //         &MainWindow::handleRemoveIpRequested);
+  // connect(sourcesForm, &SourcesForm::IpDeleteRequested, this,
+  //         &MainWindow::handleDeleteIpRequested);
+  // connect(sourcesForm, &SourcesForm::IpSimulationRequested, this,
+  //         &MainWindow::handleSimulationIpRequested);
+  // connect(sourcesForm, &SourcesForm::IpWaveFormRequest, this,
+  //         &MainWindow::handlewaveFormRequested);
+  // connect(sourcesForm, &SourcesForm::IpAddToDesignRequest, this,
+  //         &MainWindow::handleIpAddToDesignRequested);
+  // ref
   TextEditor* textEditor = new TextEditor(this);
   textEditor->RegisterCommands(GlobalSession);
   textEditor->setObjectName("textEditor");
@@ -2109,9 +2127,13 @@ void MainWindow::ipConfiguratorActionTriggered() {
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
-    m_availableIpsgDockWidget = PrepareTab(tr("IPs"), "availableIpsWidget",
-                                           creator.GetAvailableIpsWidget(),
-                                           nullptr, Qt::RightDockWidgetArea);
+    auto availableIpsgDockWidget = PrepareTab(
+        tr("IP Index"), "availableIpsWidget", creator.GetAvailableIpsWidget(),
+        nullptr, Qt::RightDockWidgetArea);
+    connect(availableIpsgDockWidget, &DockWidget::closed, ipConfiguratorAction,
+            &QAction::trigger);
+
+    m_availableIpsgDockWidget = availableIpsgDockWidget;
 
     // Get the actual IpCatalogTree
     auto ipsWidgets = m_availableIpsgDockWidget->findChildren<IpCatalogTree*>();
@@ -2119,8 +2141,10 @@ void MainWindow::ipConfiguratorActionTriggered() {
       m_ipCatalogTree = ipsWidgets[0];
 
       // Update the IP Config widget when the Available IPs selection changes
-      QObject::connect(m_ipCatalogTree, &IpCatalogTree::itemSelectionChanged,
-                       this, &MainWindow::handleIpTreeSelectionChanged);
+      connect(m_ipCatalogTree, &IpCatalogTree::ipReady, this,
+              &MainWindow::handleIpTreeSelectionChanged);
+      connect(m_ipCatalogTree, &IpCatalogTree::openIpSettings, this,
+              [this]() { openIpConfigurationDialog({}, {}, {}); });
     }
 
     // update the console for input incase the IP system printed any messages
@@ -2159,17 +2183,57 @@ void MainWindow::handleIpTreeSelectionChanged() {
       // Create a new config widget for the selected IP
       // Note: passing null for the last 2 args causes a configure instead of a
       // re-configure
-      handleIpReConfigRequested(items[0]->text(0), {}, {});
+      handleIpReConfigRequested(items[0]->text(0), {});
     }
   }
 }
 
-void MainWindow::handleIpReConfigRequested(const QString& ipName,
+void MainWindow::openIpConfigurationDialog(const QString& ipName,
                                            const QString& moduleName,
                                            const QStringList& paramList) {
-  IpConfigWidget* configWidget =
-      new IpConfigWidget(this, ipName, moduleName, paramList);
-  replaceIpConfigDockWidget(configWidget);
+  QString name{ipName};
+  if (name.isEmpty()) {
+    auto items = m_ipCatalogTree->selectedItems();
+    if (items.count() > 0) name = items[0]->text(0);
+  }
+  if (!name.isEmpty()) {    
+  #ifndef IPCONFIG_UPSTREAM
+    std::filesystem::path deviceFile = QLDeviceManager::getInstance()->deviceVariantDirPath() / "vpr.xml.en";
+  #else
+    sdd::filesystem::path deviceFile = m_compiler->DeviceFile();
+    if (m_compiler->DeviceFileLocal())
+      deviceFile = Config::Instance()->customDeviceXml();
+    if (deviceFile.empty()) deviceFile = Config::Instance()->deviceXml();
+  #endif
+    DeviceParameters deviceInfo{
+        QString::fromStdString(m_projectManager->getTargetDevice()),
+        deviceFile};
+    IPDialogBox ipDialogBox{deviceInfo, this, name, moduleName, paramList};
+    auto result = ipDialogBox.exec();
+    if (result == QDialog::Accepted) updateSourceTree();
+  }
+}
+
+void MainWindow::handleIpReConfigRequested(const QString& ipName,
+                                           const QString& moduleName) {
+  if (m_ipConfigDockWidget) {
+    // remove old config widget
+    auto oldWidget = m_ipConfigDockWidget->widget();
+    if (oldWidget) delete m_ipConfigDockWidget->widget();
+  }
+  IpConfigWidget* configWidget = new IpConfigWidget(this, ipName, moduleName);
+
+  // If dock widget has already been created
+  if (m_ipConfigDockWidget) {
+    // set new config widget
+    m_ipConfigDockWidget->setWidget(configWidget);
+    m_ipConfigDockWidget->show();
+  } else {  // If dock widget hasn't been created
+    // Create and place new dockwidget
+    m_ipConfigDockWidget =
+        PrepareTab(configWidget->windowTitle(), "configureIpsWidget",
+                   configWidget, nullptr, Qt::RightDockWidgetArea);
+  }
 }
 
 void MainWindow::handleRemoveIpRequested(const QString& moduleName) {
@@ -2208,7 +2272,7 @@ void MainWindow::resetIps() {
 
 void MainWindow::updateViewMenu() {
   viewMenu->clear();
-  // viewMenu->addAction(ipConfiguratorAction);
+  viewMenu->addAction(ipConfiguratorAction);
   viewMenu->addAction(pinAssignmentAction);
   const QList<QDockWidget*> dockwidgets = findChildren<QDockWidget*>();
   if (!dockwidgets.empty()) {
@@ -2299,32 +2363,32 @@ void MainWindow::openProjectSettings() {
   newProjdialog->open();
 }
 
-void MainWindow::replaceIpConfigDockWidget(QWidget* newWidget) {
-  IpConfigWidget* configWidget = qobject_cast<IpConfigWidget*>(newWidget);
-  if (configWidget) {
-    // Listen for IpInstance selection changes in the source tree
-    QObject::connect(configWidget, &IpConfigWidget::ipInstancesUpdated, this,
-                     &MainWindow::updateSourceTree);
-  }
+// void MainWindow::replaceIpConfigDockWidget(QWidget* newWidget) {
+//   IpConfigWidget* configWidget = qobject_cast<IpConfigWidget*>(newWidget);
+//   if (configWidget) {
+//     // Listen for IpInstance selection changes in the source tree
+//     QObject::connect(configWidget, &IpConfigWidget::ipInstancesUpdated, this,
+//                      &MainWindow::updateSourceTree);
+//   }
 
-  // If dock widget has already been created
-  if (m_ipConfigDockWidget) {
-    // remove old config widget
-    auto oldWidget = m_ipConfigDockWidget->widget();
-    if (oldWidget) {
-      delete m_ipConfigDockWidget->widget();
-    }
+//   // If dock widget has already been created
+//   if (m_ipConfigDockWidget) {
+//     // remove old config widget
+//     auto oldWidget = m_ipConfigDockWidget->widget();
+//     if (oldWidget) {
+//       delete m_ipConfigDockWidget->widget();
+//     }
 
-    // set new config widget
-    m_ipConfigDockWidget->setWidget(newWidget);
-    m_ipConfigDockWidget->show();
-  } else {  // If dock widget hasn't been created
-    // Create and place new dockwidget
-    m_ipConfigDockWidget =
-        PrepareTab(tr("Configure IP"), "configureIpsWidget", newWidget, nullptr,
-                   Qt::RightDockWidgetArea);
-  }
-}
+//     // set new config widget
+//     m_ipConfigDockWidget->setWidget(newWidget);
+//     m_ipConfigDockWidget->show();
+//   } else {  // If dock widget hasn't been created
+//     // Create and place new dockwidget
+//     m_ipConfigDockWidget =
+//         PrepareTab(tr("Configure IP"), "configureIpsWidget", newWidget, nullptr,
+//                    Qt::RightDockWidgetArea);
+//   }
+// }
 
 bool MainWindow::confirmCloseProject() {
   return (QMessageBox::question(

@@ -104,9 +104,11 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
  public slots:
   void updateSourceTree();
   void handleIpTreeSelectionChanged();
+  void openIpConfigurationDialog(const QString& ipName = {},
+                                 const QString& moduleName = {},
+                                 const QStringList& paramList = {});
   void handleIpReConfigRequested(const QString& ipName,
-                                 const QString& moduleName,
-                                 const QStringList& paramList);
+                                 const QString& moduleName);
   void handleRemoveIpRequested(const QString& moduleName);
   void handleDeleteIpRequested(const QString& moduleName);
   void resetIps();

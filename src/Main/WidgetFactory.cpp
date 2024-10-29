@@ -50,6 +50,10 @@ WidgetFactoryDependencyNotifier* WidgetFactoryDependencyNotifier::Instance() {
   return factoryNotifier();
 }
 
+void WidgetFactoryDependencyNotifier::emitEditorChanged(QWidget* widget) {
+  emit editorChanged(widget->property("customId").toString(), widget);
+}
+
 static tclArgFnMap TclArgFnLookup;
 
 // This lookup provides tcl setters/getters based off a QString. When settings
@@ -1359,6 +1363,21 @@ QLineEdit* FOEDAG::createLineEdit(
   }
 
   return widget;
+}
+
+void FOEDAG::validateLineEdit(QLineEdit* lineEdit) {
+  QPalette palette;
+  // assume property is valid until we find otherwise
+  lineEdit->setProperty("invalid", {});
+  // Change text to red if the input is invalid
+  if (lineEdit->hasAcceptableInput()) {
+    palette.setColor(QPalette::Text, Qt::black);
+  } else {
+    palette.setColor(QPalette::Text, Qt::red);
+    // Mark field as invalid for downstream logic
+    lineEdit->setProperty("invalid", true);
+  }
+  lineEdit->setPalette(palette);
 }
 
 QTextEdit* FOEDAG::createTextEdit(
