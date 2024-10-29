@@ -1581,59 +1581,24 @@ std::filesystem::path CompilerOpenFPGA_ql::copyLog(
 
   return dest;
 }
+
 bool CompilerOpenFPGA_ql::IPGenerate() {
-  if (!ProjManager()->HasDesign() && !CreateDesign("noname")) return false;
+   if (!m_projManager->HasDesign()) {
+    ErrorMessage("No design specified");
+    return false;
+  }
 #if UPSTREAM_UNUSED
   if (!HasTargetDevice()) return false;
+#endif
   if (!HasIPInstances()) {
     // No instances configured, no-op w/o error
     return true;
   }
-#endif // #if UPSTREAM_UNUSED
   PERF_LOG("IPGenerate has started");
   Message("##################################################");
   Message("IP generation for design: " + ProjManager()->projectName());
   Message("##################################################");
-#if UPSTREAM_UNUSED
   bool status = GetIPGenerator()->Generate();
-#endif // #if UPSTREAM_UNUSED
-  bool status = true;
-// this is only an example of using python process - as this is not needed currently, it
-// is disabled.
-//   // placeholder for ipgenerate process ++
-
-//   // use script from project dir:
-//   //std::filesystem::path python_script_path = std::filesystem::path(std::filesystem::current_path() / std::string("example.py"));
-//   // use script from scripts dir: try getting from environment variable
-//   const char* const path_scripts = std::getenv("AURORA2_SCRIPTS_DIR"); // this is from setup.sh
-//   std::filesystem::path scriptsDir;
-//   std::error_code ec;
-//   if (path_scripts != nullptr) {
-//     std::filesystem::path dirpath = std::string(path_scripts);
-//     if (std::filesystem::exists(dirpath, ec)) {
-//       scriptsDir = dirpath;
-//     }
-//   }
-
-//   // proceed if we have a valid scripts directory
-//   if (!scriptsDir.empty()) {
-//     std::filesystem::path python_script_path =
-//         std::filesystem::path(scriptsDir / std::string("example.py"));
-//     std::string command = std::string("python3") + std::string(" ") +
-//                           python_script_path.string() + std::string(" ") +
-//                           std::string("IPGenerate") + std::string(" ") +
-//                           m_projManager->projectName();
-
-//     int status = ExecuteAndMonitorSystemCommand(command);
-//     CleanTempFiles();
-//     if (status) {
-//       ErrorMessage("Design " + m_projManager->projectName() +
-//                    " IP generation failed!");
-//       return false;
-//     }
-//   }
-//   // placeholder for ipgenerate process --
-
   if (status) {
     Message("Design " + m_projManager->projectName() + " IPs are generated");
     m_state = State::IPGenerated;
