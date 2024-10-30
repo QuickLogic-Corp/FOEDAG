@@ -134,6 +134,8 @@ class Compiler {
   TaskManager* GetTaskManager() const;
   Constraints* getConstraints() { return m_constraints; }
   void setGuiTclSync(TclCommandIntegration* tclCommands);
+  TclCommandIntegration* GuiTclSync() const;
+
   virtual void Help(std::ostream* out);
   virtual void Version(std::ostream* out);
   virtual void Message(const std::string& message) const;
@@ -146,7 +148,7 @@ class Compiler {
   std::string GetMessagePrefix() const;
   void SetUseVerific(bool on) { m_useVerific = on; }
 
-  void SetIPGenerator(IPGenerator* generator) { m_IPGenerator = generator; }
+  void SetIPGenerator(IPGenerator* generator);
   IPGenerator* GetIPGenerator() { return m_IPGenerator; }
   void SetSimulator(Simulator* simulator) { m_simulator = simulator; }
   Simulator* GetSimulator();

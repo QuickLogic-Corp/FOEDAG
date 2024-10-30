@@ -27,6 +27,8 @@ namespace FOEDAG {
 
 class ProjectManager;
 class SourcesForm;
+class IPGenerator;
+
 class TclCommandIntegration : public QObject {
   Q_OBJECT
  public:
@@ -38,8 +40,13 @@ class TclCommandIntegration : public QObject {
                                  std::ostream &out);
   bool TclAddOrCreateDesignFiles(const QString &files, int lang,
                                  std::ostream &out);
+  // [[deprecated]] // old API is left as a backward compatibility
   bool TclAddDesignFiles(const QString &commands, const QString &libs,
                          const QString &files, int lang, bool isFileCopy, bool localToProject, std::ostream &out);
+  // the new API is used only for IP Generator functionality
+  bool TclAddDesignFiles(const std::string &commands, const std::string &libs,
+                        const std::vector<std::string> &files, int lang,
+                        std::ostream &out);
   bool TclAddSimulationFiles(const QString &commands, const QString &libs,
                              const QString &files, int lang, bool isFileCopy, bool localToProject, std::ostream &out);
   bool TclAddOrCreateConstrFiles(const QString &file, std::ostream &out);
@@ -52,7 +59,11 @@ class TclCommandIntegration : public QObject {
   bool TclCloseProject();
   bool TclClearSimulationFiles(std::ostream &out);
 
+  bool TclAddIpToDesign(const std::string &ipName, std::ostream &out);
+
   ProjectManager *GetProjectManager();
+
+  void setIPGenerator(IPGenerator *gen);
 
  signals:
   void newDesign(const QString &);
@@ -69,6 +80,7 @@ class TclCommandIntegration : public QObject {
  private:
   ProjectManager *m_projManager;
   SourcesForm *m_form;
+  IPGenerator *m_IPGenerator{nullptr};
 };
 
 }  // namespace FOEDAG

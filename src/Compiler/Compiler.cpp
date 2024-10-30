@@ -225,7 +225,7 @@ Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
   if (m_tclInterpreterHandler) m_tclInterpreterHandler->setCompiler(this);
   SetConstraints(new Constraints{this});
   IPCatalog* catalog = new IPCatalog();
-  m_IPGenerator = new IPGenerator(catalog, this);
+  SetIPGenerator(new IPGenerator(catalog, this));
   m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
 }
 
@@ -240,6 +240,15 @@ Compiler::~Compiler() {
   delete m_tclCmdIntegration;
   delete m_IPGenerator;
   delete m_simulator;
+}
+
+void Compiler::SetIPGenerator(IPGenerator* generator)
+{
+  if (m_IPGenerator) {
+    delete m_IPGenerator;
+  }
+  m_IPGenerator = generator;
+  if (m_tclCmdIntegration) m_tclCmdIntegration->setIPGenerator(m_IPGenerator);
 }
 
 std::string Compiler::GetMessagePrefix() const {
@@ -349,6 +358,7 @@ bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
   if (m_IPGenerator == nullptr) {
     IPCatalog* catalog = new IPCatalog();
     SetIPGenerator(new IPGenerator(catalog, this));
+    
   }
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
@@ -1751,6 +1761,27 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   };
   interp->registerCmd("wave_refresh", wave_refresh, this, nullptr);
 
+  auto ip_add_to_design = [](void* clientData, Tcl_Interp* interp, int argc,
+                             const char* argv[]) -> int {
+    Compiler* compiler = (Compiler*)clientData;
+    if (compiler && compiler->GuiTclSync()) {
+      if (argc < 2) {
+        compiler->ErrorMessage("IP name missed.");
+        return TCL_ERROR;
+      }
+      for (int i = 1; i < argc; i++) {
+        std::stringstream out;
+        const std::string ipName = argv[i];
+        if (!compiler->GuiTclSync()->TclAddIpToDesign(ipName, out)) {
+          compiler->ErrorMessage(out.str());
+          return TCL_ERROR;
+        }
+      }
+    }
+    return TCL_OK;
+  };
+  interp->registerCmd("ip_add_to_design", ip_add_to_design, this, nullptr);
+
   return true;
 }
 
@@ -2355,8 +2386,14 @@ TaskManager* Compiler::GetTaskManager() const { return m_taskManager; }
 
 void Compiler::setGuiTclSync(TclCommandIntegration* tclCommands) {
   m_tclCmdIntegration = tclCommands;
-  if (m_tclCmdIntegration)
+  if (m_tclCmdIntegration) {
     m_projManager = m_tclCmdIntegration->GetProjectManager();
+    m_tclCmdIntegration->setIPGenerator(GetIPGenerator());
+  }
+}
+
+TclCommandIntegration* Compiler::GuiTclSync() const {
+  return m_tclCmdIntegration;
 }
 
 bool Compiler::IPGenerate() {

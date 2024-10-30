@@ -25,9 +25,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 #include "Compiler/CompilerDefines.h"
+#include "IPGenerate/IPGenerator.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/sources_form.h"
 #include "Utils/QtUtils.h"
+#include "Utils/StringUtils.h"
 
 namespace FOEDAG {
 
@@ -161,6 +163,29 @@ bool TclCommandIntegration::TclAddDesignFiles(const QString &commands,
   const auto ret = m_projManager->addDesignFiles(
       commands, libs, files, lang, m_projManager->getDefaulUnitName(), isFileCopy,
       localToProject);
+  if (ProjectManager::EC_Success != ret.code) {
+    error(ret.code, ret.message, out);
+    return false;
+  }
+
+  update();
+  return true;
+}
+
+bool TclCommandIntegration::TclAddDesignFiles(
+    const std::string &commands, const std::string &libs,
+    const std::vector<std::string> &files, int lang, std::ostream &out) {
+  if (!validate()) {
+    out << "Command validation fail: internal error" << std::endl;
+    return false;
+  }
+
+  const QString strSetName = m_projManager->getDesignActiveFileSet();
+  m_projManager->setCurrentFileSet(strSetName);
+  const auto ret = m_projManager->addDesignFiles(
+      QString::fromStdString(commands), QString::fromStdString(libs),
+      QtUtils::ToQStringList(files).join(' '), lang, m_projManager->getDefaulUnitName(),
+      false, false);
   if (ProjectManager::EC_Success != ret.code) {
     error(ret.code, ret.message, out);
     return false;
@@ -342,8 +367,56 @@ bool TclCommandIntegration::TclClearSimulationFiles(std::ostream &out) {
   return true;
 }
 
+bool TclCommandIntegration::TclAddIpToDesign(const std::string &ipName,
+                                             std::ostream &out) {
+  if (!validate()) {
+    out << "Command validation fail: internal error\n";
+    return false;
+  }
+  if (m_projManager->projectType() != RTL) {
+    out << "Wrong project type. IP can be added to RTL project only\n";
+    return false;
+  }
+  if (m_IPGenerator) {
+    auto currentDesignFiles = m_projManager->getDesignFiles();
+    auto inst = m_IPGenerator->GetIPInstance(ipName);
+    if (!inst) {
+      out << "No IP generated with name " << ipName << "\n";
+      return false;
+    }
+    std::unordered_map<Design::Language, StringVector> languageFiles{};
+    for (const auto &file : m_IPGenerator->GetDesignFiles(inst)) {
+      auto found = std::find_if(
+          currentDesignFiles.cbegin(), currentDesignFiles.cend(),
+          [&file](const QString &designFile) {
+            return designFile.contains(QString::fromStdString(file.string()));
+          });
+      if (found != currentDesignFiles.cend()) {
+        out << "File(s) already exists in design\n";
+        return false;
+      }
+      auto extension = QString::fromStdString(file.extension().string());
+      auto fileType = FromFileType(extension.mid(1), false);
+      languageFiles[fileType].push_back(file.string());
+    }
+    for (const auto &[lang, files] : languageFiles) {
+      if (!TclAddDesignFiles(std::string{}, std::string{}, files, lang, out))
+        return false;
+    }
+  } else {
+    out << "Command validation fail: IPGenerator is missing";
+    return false;
+  }
+  update();
+  return true;
+}
+
 ProjectManager *TclCommandIntegration::GetProjectManager() {
   return m_projManager;
+}
+
+void TclCommandIntegration::setIPGenerator(IPGenerator *gen) {
+  m_IPGenerator = gen;
 }
 
 void TclCommandIntegration::createNewDesign(const QString &projName,
