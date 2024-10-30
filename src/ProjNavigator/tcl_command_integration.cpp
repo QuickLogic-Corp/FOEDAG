@@ -172,29 +172,6 @@ bool TclCommandIntegration::TclAddDesignFiles(const QString &commands,
   return true;
 }
 
-bool TclCommandIntegration::TclAddDesignFiles(
-    const std::string &commands, const std::string &libs,
-    const std::vector<std::string> &files, int lang, std::ostream &out) {
-  if (!validate()) {
-    out << "Command validation fail: internal error" << std::endl;
-    return false;
-  }
-
-  const QString strSetName = m_projManager->getDesignActiveFileSet();
-  m_projManager->setCurrentFileSet(strSetName);
-  const auto ret = m_projManager->addDesignFiles(
-      QString::fromStdString(commands), QString::fromStdString(libs),
-      QtUtils::ToQStringList(files).join(' '), lang, m_projManager->getDefaulUnitName(),
-      false, false);
-  if (ProjectManager::EC_Success != ret.code) {
-    error(ret.code, ret.message, out);
-    return false;
-  }
-
-  update();
-  return true;
-}
-
 bool TclCommandIntegration::TclAddSimulationFiles(const QString &commands,
                                                   const QString &libs,
                                                   const QString &files,
@@ -400,7 +377,7 @@ bool TclCommandIntegration::TclAddIpToDesign(const std::string &ipName,
       languageFiles[fileType].push_back(file.string());
     }
     for (const auto &[lang, files] : languageFiles) {
-      if (!TclAddDesignFiles(std::string{}, std::string{}, files, lang, out))
+      if (!TclAddDesignFiles(QString{}, QString{}, QString::fromStdString(StringUtils::join(files, " ")), lang, true, true, out))
         return false;
     }
   } else {

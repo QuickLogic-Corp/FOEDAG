@@ -40,13 +40,8 @@ class TclCommandIntegration : public QObject {
                                  std::ostream &out);
   bool TclAddOrCreateDesignFiles(const QString &files, int lang,
                                  std::ostream &out);
-  // [[deprecated]] // old API is left as a backward compatibility
   bool TclAddDesignFiles(const QString &commands, const QString &libs,
                          const QString &files, int lang, bool isFileCopy, bool localToProject, std::ostream &out);
-  // the new API is used only for IP Generator functionality
-  bool TclAddDesignFiles(const std::string &commands, const std::string &libs,
-                        const std::vector<std::string> &files, int lang,
-                        std::ostream &out);
   bool TclAddSimulationFiles(const QString &commands, const QString &libs,
                              const QString &files, int lang, bool isFileCopy, bool localToProject, std::ostream &out);
   bool TclAddOrCreateConstrFiles(const QString &file, std::ostream &out);
