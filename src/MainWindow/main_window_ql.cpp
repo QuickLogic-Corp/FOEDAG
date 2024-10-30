@@ -74,6 +74,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TextEditor/text_editor_form.h"
 #include "Utils/FileUtils.h"
 #include "Utils/QtUtils.h"
+#include "Utils/StringUtils.h"
 #include "WidgetFactory.h"
 #include "foedag_version.h"
 #include "Compiler/QLSettingsManager.h"
@@ -1715,20 +1716,13 @@ void MainWindow::ReShowWindow(QString strProject) {
           &MainWindow::handleRemoveIpRequested);
   connect(sourcesForm, &SourcesForm::IpDeleteRequested, this,
           &MainWindow::handleDeleteIpRequested);
-  // ref
-  // connect(sourcesForm, &SourcesForm::IpReconfigRequested, this,
-  //         &MainWindow::openIpConfigurationDialog);
-  // connect(sourcesForm, &SourcesForm::IpRemoveRequested, this,
-  //         &MainWindow::handleRemoveIpRequested);
-  // connect(sourcesForm, &SourcesForm::IpDeleteRequested, this,
-  //         &MainWindow::handleDeleteIpRequested);
-  // connect(sourcesForm, &SourcesForm::IpSimulationRequested, this,
-  //         &MainWindow::handleSimulationIpRequested);
-  // connect(sourcesForm, &SourcesForm::IpWaveFormRequest, this,
-  //         &MainWindow::handlewaveFormRequested);
-  // connect(sourcesForm, &SourcesForm::IpAddToDesignRequest, this,
-  //         &MainWindow::handleIpAddToDesignRequested);
-  // ref
+  connect(sourcesForm, &SourcesForm::IpSimulationRequested, this,
+          &MainWindow::handleSimulationIpRequested);
+  connect(sourcesForm, &SourcesForm::IpWaveFormRequest, this,
+          &MainWindow::handlewaveFormRequested);
+  connect(sourcesForm, &SourcesForm::IpAddToDesignRequest, this,
+          &MainWindow::handleIpAddToDesignRequested);
+  
   TextEditor* textEditor = new TextEditor(this);
   textEditor->RegisterCommands(GlobalSession);
   textEditor->setObjectName("textEditor");
@@ -2258,6 +2252,48 @@ void MainWindow::handleDeleteIpRequested(const QString& moduleName) {
   }
 
   updateSourceTree();
+}
+
+
+void MainWindow::handleSimulationIpRequested(const QString& moduleName) {
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+
+  if ((compiler = GlobalSession->GetCompiler()) &&
+      (ipGen = compiler->GetIPGenerator())) {
+    auto module = moduleName.toStdString();
+    auto [supported, message] = ipGen->IsSimulateIpSupported(module);
+    if (!supported) {
+      QMessageBox::critical(this, "IP Simulation",
+                            QString::fromStdString(message));
+      return;
+    }
+    ipGen->SimulateIp(module);
+  }
+  updateSourceTree();
+}
+
+void MainWindow::handlewaveFormRequested(const QString& moduleName) {
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+
+  if ((compiler = GlobalSession->GetCompiler()) &&
+      (ipGen = compiler->GetIPGenerator())) {
+    auto module = moduleName.toStdString();
+    auto [supported, message] = ipGen->IsSimulateIpSupported(module);
+    const QString title{"View waveform"};
+    if (!supported) {
+      QMessageBox::critical(this, title, QString::fromStdString(message));
+      return;
+    }
+    auto [ok, mes] = ipGen->OpenWaveForm(module);
+    if (!ok) QMessageBox::critical(this, title, QString::fromStdString(mes));
+  }
+}
+
+void MainWindow::handleIpAddToDesignRequested(const QString& moduleName) {
+  m_interpreter->evalCmd(
+      StringUtils::format("ip_add_to_design %", moduleName.toStdString()));
 }
 
 void MainWindow::resetIps() {

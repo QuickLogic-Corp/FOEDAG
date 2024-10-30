@@ -161,6 +161,10 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
     } else if (SRC_TREE_IP_INST_ITEM == strPropertyRole) {
       menu->addAction(m_actRefresh);
       menu->addSeparator();
+      menu->addAction(m_simulateIp);
+      menu->addAction(m_waveFormView);
+      menu->addAction(m_actAddIpToProject);
+      menu->addSeparator();
       menu->addAction(m_actReconfigureIp);
       menu->addAction(m_actRemoveIp);
       menu->addAction(m_actDeleteIp);
@@ -463,6 +467,26 @@ void SourcesForm::SlotDeleteIp() {
   }
 }
 
+void SourcesForm::SlotSimulateIp() {
+  for (auto moduleName : SelectedIpModules()) {
+    emit IpSimulationRequested(moduleName);
+  }
+}
+
+void SourcesForm::SlotWaveForm() {
+  const auto selectedIpModules{SelectedIpModules()};
+  for (const auto &moduleName : selectedIpModules) {
+    emit IpWaveFormRequest(moduleName);
+  }
+}
+
+void SourcesForm::SlotAddIPToDesign() {
+  const auto selectedIpModules{SelectedIpModules()};
+  for (const auto &moduleName : selectedIpModules) {
+    emit IpAddToDesignRequest(moduleName);
+  }
+}
+
 void SourcesForm::CreateActions() {
   m_actRefresh = new QAction(tr("Refresh Hierarchy"), m_treeSrcHierachy);
   connect(m_actRefresh, SIGNAL(triggered()), this,
@@ -524,9 +548,23 @@ void SourcesForm::CreateActions() {
       "files.");
   connect(m_actDeleteIp, &QAction::triggered, this, &SourcesForm::SlotDeleteIp);
 
+  m_simulateIp = new QAction{tr("Simulate IP"), m_treeSrcHierachy};
+  m_simulateIp->setToolTip("Start simulation of selected IP");
+  connect(m_simulateIp, &QAction::triggered, this,
+          &SourcesForm::SlotSimulateIp);
+
+  m_waveFormView = new QAction{tr("View waveform"), m_treeSrcHierachy};
+  m_waveFormView->setToolTip("View waveform");
+  connect(m_waveFormView, &QAction::triggered, this,
+          &SourcesForm::SlotWaveForm);
+
   m_actProjectSettings = new QAction(tr("Project settings"), m_treeSrcHierachy);
   connect(m_actProjectSettings, &QAction::triggered, this,
           &SourcesForm::OpenProjectSettings);
+
+  m_actAddIpToProject = new QAction(tr("Add IP to Design"), m_treeSrcHierachy);
+  connect(m_actAddIpToProject, &QAction::triggered, this,
+          &SourcesForm::SlotAddIPToDesign);
 }
 
 void SourcesForm::UpdateSrcHierachyTree() {
@@ -752,7 +790,6 @@ void SourcesForm::AddIpInstanceTree(QTreeWidgetItem *topItem) {
       QDirIterator it(srcDirStr, QDir::Files);
       while (it.hasNext()) {
         QFile file(it.next());
-
         QTreeWidgetItem *itemFile = new QTreeWidgetItem(itemIp);
         QFileInfo info(file);
         itemFile->setText(0, info.fileName());
