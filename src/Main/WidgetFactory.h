@@ -46,6 +46,21 @@ using tclArgFnMap = std::map<std::string, tclArgFns>;
 #define WF_DASH "_TclArgDash_"
 
 namespace FOEDAG {
+
+/*!
+ * \brief The LineEdit class
+ * This class will emit editingFinished() even if input is not accepted.
+ */
+class LineEdit : public QLineEdit {
+ public:
+  LineEdit(QWidget* parent = nullptr);
+
+ protected:
+  void focusOutEvent(QFocusEvent* e) override;
+  void keyPressEvent(QKeyEvent* event) override;
+};
+
+constexpr bool addUnsetDefault{false};
 QString convertAll(const QString& str);
 QString restoreAll(const QString& str);
 void initTclArgFns();
@@ -76,7 +91,8 @@ QWidget* createContainerWidget(QWidget* widget,
                                const QString& label = QString());
 QComboBox* createComboBox(
     const QString& objectName, const QStringList& options,
-    const QString& selectedValue = "", bool addUnset = true,
+    const QStringList& lookup, const QString& selectedValue = "",
+    bool addUnset = addUnsetDefault,
     std::function<void(QComboBox*, const QString&)> onChange = nullptr);
 QLineEdit* createLineEdit(
     const QString& objectName, const QString& text = "",
