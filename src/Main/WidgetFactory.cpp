@@ -821,6 +821,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       std::function<void(QLineEdit*, const QString&)> handleChange =
           [arg](QLineEdit* ptr, const QString& val) {
             QString userVal = ptr->text();
+            ptr->setProperty("value", userVal);
             json changeJson;
             changeJson["userValue"] = userVal.toStdString();
             storeJsonPatch(ptr, changeJson);
@@ -832,6 +833,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + userVal;
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create our widget
@@ -955,6 +957,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       std::function<void(QTextEdit*, const QString&)> handleChange =
           [arg](QTextEdit* ptr, const QString& val) {
             QString userVal = ptr->toPlainText();
+            ptr->setProperty("value", userVal);
 
             json changeJson;
             changeJson["userValue"] = userVal.toStdString();
@@ -967,6 +970,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + userVal;
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create our widget
@@ -1004,6 +1008,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             json changeJson;
             QString userVal = ptr->currentText();
             changeJson["userValue"] = userVal.toStdString();
+            ptr->setProperty("value", ptr->currentText());
             storeJsonPatch(ptr, changeJson);
 
             ptr->setProperty("tclArg", {});  // clear previous vals
@@ -1013,6 +1018,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
                                lookupStr(comboOptions, comboLookup, userVal);
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Determine if this combobox should add <unset> option
@@ -1051,6 +1057,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             json changeJson;
             changeJson["userValue"] = ptr->value();
             storeJsonPatch(ptr, changeJson);
+            ptr->setProperty("value", ptr->value());
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a tcl arg/value string if an arg was provided
@@ -1058,6 +1065,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + QString::number(ptr->value());
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create Widget
@@ -1092,6 +1100,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             json changeJson;
             changeJson["userValue"] = ptr->value();
             storeJsonPatch(ptr, changeJson);
+            ptr->setProperty("value", ptr->value());
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a tcl arg/value string if an arg was provided
@@ -1099,6 +1108,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + QString::number(ptr->value());
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create Widget
@@ -1147,6 +1157,8 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               WIDGET_DBG_PRINT("radiobutton handleChange - Storing Tcl Arg:  " +
                                argStr.toStdString() + "\n");
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(
+                btnPtr);
           };
 
       // Create radiobuttons in a QButtonGroup
@@ -1220,6 +1232,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             changeJson["userValue"] =
                 QMetaEnum::fromType<Qt::CheckState>().valueToKey(val);
             storeJsonPatch(ptr, changeJson);
+            ptr->setProperty("value", ptr->checkState());
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a switch style tcl arg if this is checked
@@ -1228,8 +1241,11 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               WIDGET_DBG_PRINT("checkbox handleChange - Storing Tcl Arg:  -" +
                                arg.toStdString() + "\n");
             }
+	    // OLD: left for backward compatibility
             emit WidgetFactoryDependencyNotifier::Instance()->checkboxChanged(
                 ptr->property("customId").toString(), ptr);
+	    // OLD
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create Widget
