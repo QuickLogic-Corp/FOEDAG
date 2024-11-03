@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ProjNavigator/sources_form.h"
 #include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
+#include "Utils/FileUtils.h"
 
 namespace FOEDAG {
 
@@ -363,11 +364,22 @@ bool TclCommandIntegration::TclAddIpToDesign(const std::string &ipName,
     }
     std::unordered_map<Design::Language, StringVector> languageFiles{};
     for (const auto &file : m_IPGenerator->GetDesignFiles(inst)) {
+#ifdef UPSTREAM_UNUSED
       auto found = std::find_if(
           currentDesignFiles.cbegin(), currentDesignFiles.cend(),
           [&file](const QString &designFile) {
             return designFile.contains(QString::fromStdString(file.string()));
           });
+#else
+      // due to copy functionality we cannot rely on full path comparison between ip and design files,
+      // so we do a filename presence check only
+      auto found = std::find_if(
+          currentDesignFiles.cbegin(), currentDesignFiles.cend(),
+          [&file](const QString &designFile) {
+            QString fileName = QString::fromStdString(FileUtils::Basename(file));
+            return designFile.endsWith(fileName);
+          });
+#endif
       if (found != currentDesignFiles.cend()) {
         out << "File(s) already exists in design\n";
         return false;
