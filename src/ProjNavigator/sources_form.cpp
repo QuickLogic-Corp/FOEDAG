@@ -162,7 +162,9 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
       menu->addAction(m_actRefresh);
       menu->addSeparator();
       menu->addAction(m_simulateIp);
+#ifdef UPSTREAM_UNUSED
       menu->addAction(m_waveFormView);
+#endif
       menu->addAction(m_actAddIpToProject);
       menu->addSeparator();
       menu->addAction(m_actReconfigureIp);
