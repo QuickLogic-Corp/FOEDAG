@@ -2759,53 +2759,80 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
     device_target = this->device_target;
   }
 
-  // use the device specific repack design contraint file, and note that we may have
-  // unencrypted (first priority) or encrypted file
+  // 1. check if we have a repack_design_constraint.xml file in the project (generated) directory (unencrypted only)
+  // 2. check if we have a repack_design_constraint.xml file in the TCL script directory (unencrypted only)
+  // 3. use the device specific repack design contraint file, and note that we may have
+  //    unencrypted (first priority) or encrypted file
 
-  // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+  std::string repack_design_constraint_file_name = "repack_design_constraint.xml";
 
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
-    // get json value
-    std::string json_value;
-    if( device_target_config_json.contains("REPACK_DESIGN_CONSTRAINT")  ) {
-
-      json_value = device_target_config_json["REPACK_DESIGN_CONSTRAINT"].get<std::string>();
-    }
-    // check for unencrypted file
-    repack_design_constraint_file_path = 
-        deviceTypeDirPath(device_target) / json_value;
-    if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-
-      // check for encrypted file
-      repack_design_constraint_file_path += ".en";
-      if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-
-        compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
-        return empty_path;
-      }
-    }
+  // 1. project path check
+  std::filesystem::path project_path = std::filesystem::path(compiler->ProjManager()->projectPath());
+  repack_design_constraint_file_path = project_path / repack_design_constraint_file_name;
+  if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+    repack_design_constraint_file_path.clear();
   }
-  // else, we assume that this is a legacy device data directory (< v2.8.0)
-  else {
-    // check for unencrypted file
-    repack_design_constraint_file_path = 
-        std::filesystem::path(deviceTypeDirPath(device_target) / std::string("repack_design_constraint.xml"));
-    if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-      // check for encrypted file
-      repack_design_constraint_file_path += ".en";
-      if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-
-        compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
-        return empty_path;
-      }
+  // 2. tcl script dir path check
+  if(repack_design_constraint_file_path.empty()) {
+    if(settings_manager != nullptr) {
+      std::filesystem::path tcl_script_dir_path = settings_manager->getTCLScriptDirPath();
+        if(!tcl_script_dir_path.empty()) {
+          repack_design_constraint_file_path = tcl_script_dir_path / repack_design_constraint_file_name;
+          if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+            repack_design_constraint_file_path.clear();
+          }
+        }
     }
   }
 
-  // std::cout << "[zyxw]" << "using repack design contraint file: " << repack_design_constraint_file_path.string() << std::endl;
+  // 3. device data dir path check
+  if(repack_design_constraint_file_path.empty()) {
+    // use config.json if it exists
+    std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+    if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+      std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+      json device_target_config_json = json::parse(device_target_config_json_ifstream);
+      // get json value
+      std::string json_value;
+      if( device_target_config_json.contains("REPACK_DESIGN_CONSTRAINT")  ) {
+
+        json_value = device_target_config_json["REPACK_DESIGN_CONSTRAINT"].get<std::string>();
+      }
+      // check for unencrypted file
+      repack_design_constraint_file_path = 
+          deviceTypeDirPath(device_target) / json_value;
+      if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+        // check for encrypted file
+        repack_design_constraint_file_path += ".en";
+        if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          return empty_path;
+        }
+      }
+    }
+    // else, we assume that this is a legacy device data directory (< v2.8.0)
+    else {
+      // check for unencrypted file
+      repack_design_constraint_file_path = 
+          std::filesystem::path(deviceTypeDirPath(device_target) / repack_design_constraint_file_name);
+      if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+        // check for encrypted file
+        repack_design_constraint_file_path += ".en";
+        if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          return empty_path;
+        }
+      }
+    }
+  }
+
+  std::cout << "[zyxw]" << "using repack design contraint file: " << repack_design_constraint_file_path.string() << std::endl;
 
   return repack_design_constraint_file_path;
 }
