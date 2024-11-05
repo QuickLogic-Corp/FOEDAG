@@ -2832,7 +2832,7 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
     }
   }
 
-  std::cout << "[zyxw]" << "using repack design contraint file: " << repack_design_constraint_file_path.string() << std::endl;
+  // std::cout << "[zyxw]" << "using repack design contraint file: " << repack_design_constraint_file_path.string() << std::endl;
 
   return repack_design_constraint_file_path;
 }
