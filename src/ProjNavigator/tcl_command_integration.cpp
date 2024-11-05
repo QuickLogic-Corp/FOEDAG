@@ -376,7 +376,7 @@ bool TclCommandIntegration::TclAddIpToDesign(const std::string &ipName,
       auto found = std::find_if(
           currentDesignFiles.cbegin(), currentDesignFiles.cend(),
           [&file](const QString &designFile) {
-            QString fileName = QString::fromStdString(FileUtils::Basename(file));
+            QString fileName = QString::fromStdString(FileUtils::Basename(file).string());
             return designFile.endsWith(fileName);
           });
 #endif
