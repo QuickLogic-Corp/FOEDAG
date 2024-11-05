@@ -2399,33 +2399,6 @@ void MainWindow::openProjectSettings() {
   newProjdialog->open();
 }
 
-// void MainWindow::replaceIpConfigDockWidget(QWidget* newWidget) {
-//   IpConfigWidget* configWidget = qobject_cast<IpConfigWidget*>(newWidget);
-//   if (configWidget) {
-//     // Listen for IpInstance selection changes in the source tree
-//     QObject::connect(configWidget, &IpConfigWidget::ipInstancesUpdated, this,
-//                      &MainWindow::updateSourceTree);
-//   }
-
-//   // If dock widget has already been created
-//   if (m_ipConfigDockWidget) {
-//     // remove old config widget
-//     auto oldWidget = m_ipConfigDockWidget->widget();
-//     if (oldWidget) {
-//       delete m_ipConfigDockWidget->widget();
-//     }
-
-//     // set new config widget
-//     m_ipConfigDockWidget->setWidget(newWidget);
-//     m_ipConfigDockWidget->show();
-//   } else {  // If dock widget hasn't been created
-//     // Create and place new dockwidget
-//     m_ipConfigDockWidget =
-//         PrepareTab(tr("Configure IP"), "configureIpsWidget", newWidget, nullptr,
-//                    Qt::RightDockWidgetArea);
-//   }
-// }
-
 bool MainWindow::confirmCloseProject() {
   return (QMessageBox::question(
               this, "Close Project?",
