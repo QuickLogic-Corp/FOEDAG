@@ -1770,6 +1770,18 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
+          // include rr_graph.bin and router_lookahead.bin files for copy
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*rr_graph\\.bin",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*router_lookahead\\.bin",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
           // we want xml files for encryption
           if (std::regex_match(dir_entry.path().filename().string(),
                                 std::regex(".+\\.xml",
@@ -1782,6 +1794,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
               source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
               continue;
             }
+            source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
+          }
+
+          // we want capnp files for encryption (router_lookahead.capnp)
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                std::regex(".+\\.capnp",
+                                std::regex::icase))) {
             source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
           }
 
@@ -3357,17 +3376,83 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAIOMapFile(QLDeviceTarget de
 
 std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget device_target) {
 
-  std::filesystem::path empty_path;
-  return empty_path;
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
+  std::filesystem::path empty_path;
+  std::filesystem::path vpr_rr_graph_file_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // use the device specific rr_graph file, and note that we will have bin files (should we support xml?)
+
+  // use config.json if it exists
+  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("CORNER_RRGRAPH_BIN") ) {
+
+      json_value = device_target_config_json["CORNER_RRGRAPH_BIN"].get<std::string>();
+    }
+    // check for unencrypted file
+    vpr_rr_graph_file_path = 
+        deviceVariantDirPath(device_target) / json_value;
+    if(!FileUtils::FileExists(vpr_rr_graph_file_path)) {
+
+        compiler->Message("Cannot find device vpr rr_graph file: " + vpr_rr_graph_file_path.string());
+        vpr_rr_graph_file_path.clear();
+    }
+  }
+
+  // std::cout << "[zyxw]" << "using vpr rr_graph file: " << vpr_rr_graph_file_path.string() << std::endl;
+
+  return vpr_rr_graph_file_path;
 }
 
 
 std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarget device_target) {
 
-  std::filesystem::path empty_path;
-  return empty_path;
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
+  std::filesystem::path empty_path;
+  std::filesystem::path vpr_router_lookahead_file_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // use the device specific router_lookahead file, and note that we will have bin files (should we support xml?)
+
+  // use config.json if it exists
+  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("CORNER_ROUTER_LOOKAHEAD_BIN") ) {
+
+      json_value = device_target_config_json["CORNER_ROUTER_LOOKAHEAD_BIN"].get<std::string>();
+    }
+
+    vpr_router_lookahead_file_path = 
+        deviceVariantDirPath(device_target) / json_value;
+    if(!FileUtils::FileExists(vpr_router_lookahead_file_path)) {
+
+        compiler->Message("Cannot find device vpr router_lookahead file: " + vpr_router_lookahead_file_path.string());
+        vpr_router_lookahead_file_path.clear();
+    }
+  }
+
+  // std::cout << "[zyxw]" << "using vpr router_lookahead file: " << vpr_router_lookahead_file_path.string() << std::endl;
+
+  return vpr_router_lookahead_file_path;
 }
 
 
@@ -3376,7 +3461,6 @@ std::vector<std::string> QLDeviceManager::deviceCorners(QLDeviceTarget device_ta
 
   std::vector<std::string> corners;
   return corners;
-
 }
 
 
@@ -3384,7 +3468,6 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceCornerPowerDataFiles(Q
 
   std::vector<std::filesystem::path> corner_power_data_filepaths;
   return corner_power_data_filepaths;
-
 }
 
 } // namespace FOEDAG

@@ -3144,6 +3144,21 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
   QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
+  // use rr_graph and router_lookahead files, if available in the device data:
+  std::filesystem::path rr_graph_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRRGraphFile();
+
+  std::filesystem::path router_lookahead_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile();
+
+  if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
+    vpr_options +=  " --read_rr_graph " +
+                    rr_graph_file_path.string() +
+                    " --read_router_lookahead " +
+                    router_lookahead_file_path.string();
+  }
+
+
   m_architectureFile = 
       QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
   if(m_architectureFile.empty()) {
