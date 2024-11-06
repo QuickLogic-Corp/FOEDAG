@@ -149,6 +149,8 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
   this->foundrynode.clear();
   this->foundry.clear();
   this->node.clear();
+  this->devicenames.clear();
+  this->devicename.clear();
   this->voltage_thresholds.clear();
   this->voltage_threshold.clear();
   this->p_v_t_corners.clear();
@@ -191,8 +193,10 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
   devicetypeGroupBox->setLayout(devicetypeGroupBoxLayout);
   QHBoxLayout* dlg_familylayout = new QHBoxLayout();
   QHBoxLayout* dlg_foundrynodelayout = new QHBoxLayout();
+  QHBoxLayout* dlg_devicenamelayout = new QHBoxLayout();
   devicetypeGroupBoxLayout->addLayout(dlg_familylayout);
   devicetypeGroupBoxLayout->addLayout(dlg_foundrynodelayout);
+  devicetypeGroupBoxLayout->addLayout(dlg_devicenamelayout);
   QGroupBox *devicevariantGroupBox = new QGroupBox(tr("Device Variant"));
   QVBoxLayout* devicevariantGroupBoxLayout =  new QVBoxLayout();
   devicevariantGroupBox->setLayout(devicevariantGroupBoxLayout);
@@ -220,17 +224,20 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
 
   QLabel* m_combobox_family_label = new QLabel("Family");
   QLabel* m_combobox_foundry_node_label = new QLabel("Foundry-Node");
+  QLabel* m_combobox_devicename_label = new QLabel("Device");
   QLabel* m_combobox_voltage_threshold_label = new QLabel("Voltage Threshold");
   QLabel* m_combobox_p_v_t_corner_label = new QLabel("Corner");
   QLabel* m_combobox_layout_label = new QLabel("Layout");
   m_combobox_family = new QComboBox();
   m_combobox_foundry_node = new QComboBox();
+  m_combobox_devicename = new QComboBox();
   m_combobox_voltage_threshold = new QComboBox();
   m_combobox_p_v_t_corner = new QComboBox();
   m_combobox_layout = new QComboBox();
   m_device_resources_label = new QLabel();
   m_combobox_family->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   m_combobox_foundry_node->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+  m_combobox_devicename->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   m_combobox_voltage_threshold->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   m_combobox_p_v_t_corner->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   m_combobox_layout->setSizeAdjustPolicy(QComboBox::AdjustToContents);
@@ -269,6 +276,12 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
                         this->foundrynodeChanged(currentText);
                         } );
 
+  QObject::connect( m_combobox_devicename, &QComboBox::currentTextChanged, 
+                    [this](const QString& currentText){
+                        // std::cout << "lambda-oncurrentTextChanged-m_combobox_devicename: " << currentText.toStdString() << std::endl;
+                        this->devicenameChanged(currentText);
+                        } );
+
   QObject::connect( m_combobox_voltage_threshold, &QComboBox::currentTextChanged, 
                     [this](const QString& currentText){
                         // std::cout << "lambda-oncurrentTextChanged-m_combobox_voltage_threshold: " << currentText.toStdString() << std::endl;
@@ -292,6 +305,9 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
 
   dlg_foundrynodelayout->addWidget(m_combobox_foundry_node_label);
   dlg_foundrynodelayout->addWidget(m_combobox_foundry_node);
+
+  dlg_devicenamelayout->addWidget(m_combobox_devicename_label);
+  dlg_devicenamelayout->addWidget(m_combobox_devicename);
 
   dlg_voltage_thresholdlayout->addWidget(m_combobox_voltage_threshold_label);
   dlg_voltage_thresholdlayout->addWidget(m_combobox_voltage_threshold);
@@ -362,12 +378,13 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
 QLDeviceVariantLayout* QLDeviceManager::findDeviceLayoutVariantPtr(const std::string& family, 
                                                                    const std::string& foundry,
                                                                    const std::string& node,
+                                                                   const std::string& devicename,
                                                                    const std::string& voltage_threshold,
                                                                    const std::string& p_v_t_corner,
                                                                    const std::string& layoutName)
 {
   for (QLDeviceType& device: this->device_list) {
-    if ((device.family == family) && (device.foundry == foundry) && (device.node == node)) {
+    if ((device.family == family) && (device.foundry == foundry) && (device.node == node) && (device.devicename == devicename)) {
       for (QLDeviceVariant& device_variant: device.device_variants) {
         if ((device_variant.voltage_threshold == voltage_threshold) && (device_variant.p_v_t_corner == p_v_t_corner)) {
           for (QLDeviceVariantLayout& layout: device_variant.device_variant_layouts) {
@@ -445,7 +462,7 @@ void QLDeviceManager::familyChanged(const QString& family_qstring)
 void QLDeviceManager::foundrynodeChanged(const QString& foundrynode_qstring)
 {
 
-  // when 'foundry - node' changes, repopulate all the 'voltage_threshold' entries accordingly
+  // when 'foundry - node' changes, repopulate all the 'devicenames' entries accordingly
 
   // std::cout << "foundrynodechanged: " << foundrynode_qstring.toStdString() << std::endl;
 
@@ -453,6 +470,50 @@ void QLDeviceManager::foundrynodeChanged(const QString& foundrynode_qstring)
   std::vector<std::string> foundrynode_vector = convertFromFoundryNode(foundrynode);
   foundry = foundrynode_vector[0];
   node = foundrynode_vector[1];
+  devicenames.clear();
+  singularity.clear();
+  m_combobox_devicename->blockSignals(true);
+  m_combobox_devicename->clear();
+
+  for (QLDeviceType device: this->device_list) {
+    if (device.family == family) {
+      std::string _foundrynode = convertToFoundryNode(device.foundry, device.node);
+      if (_foundrynode == foundrynode) {
+        // ensure that the item being added has not been added before using std::set
+        // for performance reasons, keeping a vector as final container for future need of sorting.
+        if(singularity.insert(device.devicename).second == true) {
+          devicenames.push_back(device.devicename);
+        }
+      }
+    }
+  }
+
+  for (std::string _devicename: devicenames) {
+    m_combobox_devicename->addItem(QString::fromStdString(_devicename));
+  }
+
+  m_combobox_devicename->setCurrentIndex(-1);
+  m_combobox_devicename->blockSignals(false);
+
+  if(currentDeviceTargetUpdateInProgress) {
+    int index = m_combobox_devicename->findText(QString::fromStdString(device_target.device_variant.devicename));
+    // std::cout << "m_combobox_devicename index" << index << std::endl;
+    m_combobox_devicename->setCurrentIndex(index);
+  }
+  else {
+    m_combobox_devicename->setCurrentIndex(0);
+  }
+}
+
+
+void QLDeviceManager::devicenameChanged(const QString& devicename_qstring)
+{
+
+  // when 'devicename' changes, repopulate all the 'voltage_threshold' entries accordingly
+
+  // std::cout << "devicenameChanged: " << devicename_qstring.toStdString() << std::endl;
+
+  devicename = devicename_qstring.toStdString();
   voltage_thresholds.clear();
   singularity.clear();
   m_combobox_voltage_threshold->blockSignals(true);
@@ -462,11 +523,13 @@ void QLDeviceManager::foundrynodeChanged(const QString& foundrynode_qstring)
     if (device.family == family) {
       std::string _foundrynode = convertToFoundryNode(device.foundry, device.node);
       if (_foundrynode == foundrynode) {
-        for (QLDeviceVariant variant : device.device_variants) {
-          // ensure that the item being added has not been added before using std::set
-          // for performance reasons, keeping a vector as final container for future need of sorting.
-          if(singularity.insert(variant.voltage_threshold).second == true) {
-            voltage_thresholds.push_back(variant.voltage_threshold);
+        if (device.devicename == devicename) {
+          for (QLDeviceVariant variant : device.device_variants) {
+            // ensure that the item being added has not been added before using std::set
+            // for performance reasons, keeping a vector as final container for future need of sorting.
+            if(singularity.insert(variant.voltage_threshold).second == true) {
+              voltage_thresholds.push_back(variant.voltage_threshold);
+            }
           }
         }
       }
@@ -508,12 +571,14 @@ void QLDeviceManager::voltage_thresholdChanged(const QString& voltage_threshold_
     if (device.family == family) {
       std::string _foundrynode = convertToFoundryNode(device.foundry, device.node);
       if (_foundrynode == foundrynode) {
-        for (QLDeviceVariant variant : device.device_variants) {
-          if (variant.voltage_threshold == voltage_threshold) {
-            // ensure that the item being added has not been added before using std::set
-            // for performance reasons, keeping a vector as final container for future need of sorting.
-            if(singularity.insert(variant.p_v_t_corner).second == true) {
-              p_v_t_corners.push_back(variant.p_v_t_corner);
+        if (device.devicename == devicename) {
+          for (QLDeviceVariant variant : device.device_variants) {
+            if (variant.voltage_threshold == voltage_threshold) {
+              // ensure that the item being added has not been added before using std::set
+              // for performance reasons, keeping a vector as final container for future need of sorting.
+              if(singularity.insert(variant.p_v_t_corner).second == true) {
+                p_v_t_corners.push_back(variant.p_v_t_corner);
+              }
             }
           }
         }
@@ -556,14 +621,16 @@ void QLDeviceManager::p_v_t_cornerChanged(const QString& p_v_t_corner_qstring)
     if (device.family == family) {
       std::string _foundrynode = convertToFoundryNode(device.foundry, device.node);
       if (_foundrynode == foundrynode) {
-        for (QLDeviceVariant variant : device.device_variants) {
-          if (variant.voltage_threshold == voltage_threshold) {
-            if(variant.p_v_t_corner == p_v_t_corner) {
-              for(QLDeviceVariantLayout _layout : variant.device_variant_layouts) {
-                // ensure that the item being added has not been added before using std::set
-                // for performance reasons, keeping a vector as final container for future need of sorting.
-                if(singularity.insert(_layout.name).second == true) {
-                  layouts.push_back(_layout.name);
+        if (device.devicename == devicename) {
+          for (QLDeviceVariant variant : device.device_variants) {
+            if (variant.voltage_threshold == voltage_threshold) {
+              if(variant.p_v_t_corner == p_v_t_corner) {
+                for(QLDeviceVariantLayout _layout : variant.device_variant_layouts) {
+                  // ensure that the item being added has not been added before using std::set
+                  // for performance reasons, keeping a vector as final container for future need of sorting.
+                  if(singularity.insert(_layout.name).second == true) {
+                    layouts.push_back(_layout.name);
+                  }
                 }
               }
             }
@@ -610,6 +677,7 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
   QLDeviceTarget _device_target = convertToDeviceTarget(family,
                                                         foundry,
                                                         node,
+                                                        devicename,
                                                         voltage_threshold,
                                                         p_v_t_corner,
                                                         layout);
@@ -623,6 +691,7 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
     // std::cout << " >> [family]              " << device_target.device_variant.family << std::endl;
     // std::cout << " >> [foundry]             " << device_target.device_variant.foundry << std::endl;
     // std::cout << " >> [node]                " << device_target.device_variant.node << std::endl;
+    // std::cout << " >> [devicename]          " << device_target.device_variant.devicename << std::endl;
     // std::cout << " >> [voltage_threshold]   " << device_target.device_variant.voltage_threshold << std::endl;
     // std::cout << " >> [p_v_t_corner]        " << device_target.device_variant.p_v_t_corner << std::endl;
     // std::cout << " >> [layout name]         " << device_target.device_variant_layout.name << std::endl;
@@ -824,7 +893,7 @@ void QLDeviceManager::collectDeviceVariantAvailableResources(const QLDeviceVaria
 
     if (exitCode == 0) {
       for (const std::shared_ptr<LayoutInfoHelper>& layoutInfo: layoutsInfo) {
-        QLDeviceVariantLayout* device_layout = findDeviceLayoutVariantPtr(device_variant.family, device_variant.foundry, device_variant.node, device_variant.voltage_threshold, device_variant.p_v_t_corner, layoutInfo->name);
+        QLDeviceVariantLayout* device_layout = findDeviceLayoutVariantPtr(device_variant.family, device_variant.foundry, device_variant.node, device_variant.devicename, device_variant.voltage_threshold, device_variant.p_v_t_corner, layoutInfo->name);
         if (device_layout) {
           device_layout->bram = layoutInfo->bram;
           device_layout->dsp = layoutInfo->dsp;
@@ -871,6 +940,7 @@ void QLDeviceManager::parseDeviceData() {
   std::string family;
   std::string foundry;
   std::string node;
+  std::string devicename;
 
   std::error_code ec;
 
@@ -910,30 +980,43 @@ void QLDeviceManager::parseDeviceData() {
 
             if(dir_entry_node.is_directory()) {
             
-              // we would see devices at this level
+              // we would see devicenames at this level
               node = dir_entry_node.path().filename().string();
 
-              // get all the device_variants for this device:
-              std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
-                                                                                foundry,
-                                                                                node);
+              // look at the directories inside the 'node' dir for 'devicename' entries
+              for (const std::filesystem::directory_entry& dir_entry_devicename : 
+                              std::filesystem::directory_iterator(dir_entry_node.path())) {
 
-              if(device_variants.empty()) {
-                // display error, but continue with other devices.
-                std::cout << "error in parsing variants for device: " + family + "_" + foundry + "_" + node +"\n" << std::endl;
-              }
-              else {
+                if(dir_entry_devicename.is_directory()) {
+                
+                  // we would see devices at this level
+                  devicename = dir_entry_devicename.path().filename().string();
 
-                QLDeviceType device;
-                device.family = family;
-                device.foundry = foundry;
-                device.node = node;
-                device.device_variants = device_variants;
+                  // get all the device_variants for this device:
+                  std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+                                                                                    foundry,
+                                                                                    node,
+                                                                                    devicename);
 
-                for (const auto& device_variant: device.device_variants) {
-                  collectDeviceVariantAvailableResources(device_variant);
+                  if(device_variants.empty()) {
+                    // display error, but continue with other devices.
+                    std::cout << "error in parsing variants for device: " + family + "_" + foundry + "_" + node + "_" + devicename + "\n" << std::endl;
+                  }
+                  else {
+
+                    QLDeviceType device;
+                    device.family = family;
+                    device.foundry = foundry;
+                    device.node = node;
+                    device.devicename = devicename;
+                    device.device_variants = device_variants;
+
+                    for (const auto& device_variant: device.device_variants) {
+                      collectDeviceVariantAvailableResources(device_variant);
+                    }
+                    device_list.push_back(device);
+                  }
                 }
-                device_list.push_back(device);
               }
             }
           }
@@ -943,24 +1026,35 @@ void QLDeviceManager::parseDeviceData() {
   }
 
   // DEBUG
+  // std::cout << "============ DEBUG++ ============" << std::endl;
   // for (QLDeviceType device: device_list) {
-  //     std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node << std::endl;
+  //     std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
   //     for (QLDeviceVariant variant: device.device_variants) {
-  //       std::cout << "  Variant: " + variant.family + " " + variant.foundry + " " + variant.node + " " + variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
+  //       std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
   //       for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
-  //         std::cout << "    " + layout.name + " " + std::to_string(layout.width) + " " + std::to_string(layout.height) << std::endl;
+  //         std::cout <<  "    layout_name:" + layout.name + "\n" +
+  //                       "              w:" + std::to_string(layout.width) + "\n" +
+  //                       "              h:" + std::to_string(layout.height) //+ "\n" +
+  //                       // "            clb:" + std::to_string(layout.clb) + "\n" +
+  //                       // "             io:" + std::to_string(layout.io) + "\n" +
+  //                       // "           bram:" + std::to_string(layout.bram) + "\n" +
+  //                       // "            dsp:" + std::to_string(layout.dsp)
+  //                       << std::endl;
   //       }
   //     }
   //     std::cout << "\n" << std::endl;
   // }
+  // std::cout << "============ DEBUG-- ============" << std::endl;
   //DEBUG
 }
 
 
-std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
+std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirectory(
     std::string family,
     std::string foundry,
-    std::string node) {
+    std::string node,
+    std::string devicename,
+    std::filesystem::path device_data_dir_path) {
 
   // prep an empty list of device variants for the current 'device'
   std::vector<QLDeviceVariant> device_variants;
@@ -968,18 +1062,12 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
   // std::string device_string = DeviceString(family,
   //                                          foundry,
   //                                          node,
+  //                                          devicename,
   //                                          "",
   //                                          "",
   //                                          "");
   // std::cout << "parsing variants for: " + device_string << std::endl;
 
-  // get to the device_data dir path of the installation
-  std::filesystem::path root_device_data_dir_path = 
-     deviceDataRootDirPath();
-
-  // calculate the device_data dir path for specified device
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node;
-  // std::cout << "device_data dir: " + device_data_dir_path.string() << std::endl;
 
   // [1] check for valid path
   // convert to canonical path, which will also check that the path exists.
@@ -992,6 +1080,7 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
     std::cout << "path: " + device_data_dir_path.string() << std::endl;
     return device_variants;
   }
+
 
   // [2] check dir structure of the device_data_dir_path
   // [2][a] atleast one set of vpr.xml and openfpga.xml files should exist.
@@ -1129,6 +1218,7 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
     device_variant.family = family;
     device_variant.foundry = foundry;
     device_variant.node = node;
+    device_variant.devicename = devicename;
     device_variant.voltage_threshold = voltage_threshold;
     device_variant.p_v_t_corner = p_v_t_corner;
 
@@ -1136,6 +1226,7 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
     device_variant.device_variant_layouts = listDeviceVariantLayouts(family,
                                                                      foundry,
                                                                      node,
+                                                                     devicename,
                                                                      voltage_threshold,
                                                                      p_v_t_corner);
 
@@ -1143,47 +1234,34 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
     device_variants.push_back(device_variant);
   }
 
-  // sort the devices found - this needs custom sort function or < overloading for QLDeviceVariant, TODO.
-  // std::sort(device_variants.begin(),device_variants.end());
-
-  // debug prints
-  // std::cout << std::endl;
-  // std::cout << "device variants parsed:" << std::endl;
-  // std::cout << "<family>,<foundry>,<node>,[voltage_threshold],[p_v_t_corner]" << std::endl;
-  // int index = 1;
-  // for (auto device_variant: device_variants) {
-  //   std::cout << index << ". " << device_variant << std::endl;
-  //   index++;
-  // }
-  // std::cout << std::endl;
-
-  // [2][c] check other required and optional XML files for the device:
-  // required:
-  // std::filesystem::path fixed_sim_openfpga_xml = 
-  //     device_data_dir_path_c / "aurora" / "fixed_sim_openfpga.xml";
-  // std::filesystem::path fixed_sim_openfpga_xml_en = 
-  //     device_data_dir_path_c / "aurora" / "fixed_sim_openfpga.xml.en";
-  // if(!std::filesystem::exists(fixed_sim_openfpga_xml) &&
-  //    !std::filesystem::exists(fixed_sim_openfpga_xml_en)) {
-  //   std::cout << "fixed_sim_openfpga.xml not found in source_device_data_dir_path!!!" << std::endl;
-  //   return device_variants;
-  // }
-
-  // optional: not checking these for now, if needed we can add in later.
-  //std::filesystem::path bitstream_annotation_xml = 
-  //    source_device_data_dir_path_c / std::string("aurora") / "bitstream_annotation.xml";
-  //std::filesystem::path repack_design_constraint_xml = 
-  //    source_device_data_dir_path_c / std::string("aurora") / "repack_design_constraint.xml";
-  //std::filesystem::path fabric_key_xml = 
-  //    source_device_data_dir_path_c / std::string("aurora") / "fabric_key.xml";
-
   return device_variants;
+}
+
+
+std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
+    std::string family,
+    std::string foundry,
+    std::string node,
+    std::string devicename) {
+
+  // get to the device_data dir path of the installation
+  std::filesystem::path root_device_data_dir_path = 
+     deviceDataRootDirPath();
+
+  // calculate the device_data dir path for specified device
+  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
+  // std::cout << "device_data dir: " + device_data_dir_path.string() << std::endl;
+
+  // query the variants from this path:
+  return listDeviceVariantsInDeviceDirectory(family, foundry, node, devicename, device_data_dir_path);
+
 }
 
 
 std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std::string family,
                                                                              std::string foundry,
                                                                              std::string node,
+                                                                             std::string devicename,
                                                                              std::string voltage_threshold,
                                                                              std::string p_v_t_corner) {
   std::vector<QLDeviceVariantLayout> device_variant_layouts = {};
@@ -1191,7 +1269,7 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
   std::filesystem::path root_device_data_dir_path = 
       deviceDataRootDirPath();
   
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node;
+  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
 
   std::filesystem::path device_variant_dir = device_data_dir_path / voltage_threshold / p_v_t_corner;
 
@@ -1312,12 +1390,13 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
 std::string QLDeviceManager::DeviceString(std::string family,
                                           std::string foundry,
                                           std::string node,
+                                          std::string devicename,
                                           std::string voltage_threshold,
                                           std::string p_v_t_corner,
                                           std::string layout_name) {
 
   // form the string representation of the device
-  std::string device_string = family + "_" + foundry + "_" + node;
+  std::string device_string = family + "_" + foundry + "_" + node + "_" + devicename;
 
   if(!voltage_threshold.empty() && !p_v_t_corner.empty()) {
     device_string += "_" + voltage_threshold + "_" + p_v_t_corner;
@@ -1334,13 +1413,14 @@ std::string QLDeviceManager::DeviceString(std::string family,
 bool QLDeviceManager::DeviceExists(std::string family,
                                    std::string foundry,
                                    std::string node,
+                                   std::string devicename,
                                    std::string voltage_threshold,
                                    std::string p_v_t_corner,
                                    std::string layout_name) {
 
   // form the string representation of the device
   std::string device_string = 
-      DeviceString(family,foundry,node,voltage_threshold,p_v_t_corner,layout_name);
+      DeviceString(family,foundry,node,devicename,voltage_threshold,p_v_t_corner,layout_name);
 
   return DeviceExists(device_string);
 }
@@ -1367,6 +1447,7 @@ bool QLDeviceManager::DeviceExists(QLDeviceTarget device_target) {
         if(device_target.device_variant.family            == device_variant.family &&
            device_target.device_variant.foundry           == device_variant.foundry &&
            device_target.device_variant.node              == device_variant.node &&
+           device_target.device_variant.devicename        == device_variant.devicename &&
            device_target.device_variant.voltage_threshold == device_variant.voltage_threshold &&
            device_target.device_variant.p_v_t_corner      == device_variant.p_v_t_corner &&
            device_target.device_variant_layout.name       == device_variant_layout.name) {
@@ -1384,13 +1465,14 @@ bool QLDeviceManager::DeviceExists(QLDeviceTarget device_target) {
 QLDeviceTarget QLDeviceManager::convertToDeviceTarget(std::string family,
                                                 std::string foundry,
                                                 std::string node,
+                                                std::string devicename,
                                                 std::string voltage_threshold,
                                                 std::string p_v_t_corner,
                                                 std::string layout_name) {
 
   // form the string representation of the device
   std::string device_string = 
-      DeviceString(family,foundry,node,voltage_threshold,p_v_t_corner,layout_name);
+      DeviceString(family,foundry,node,devicename,voltage_threshold,p_v_t_corner,layout_name);
 
   return convertToDeviceTarget(device_string);
 }
@@ -1408,6 +1490,7 @@ QLDeviceTarget QLDeviceManager::convertToDeviceTarget(std::string device_string)
         std::string current_device_string = DeviceString(device_variant.family,
                                                          device_variant.foundry,
                                                          device_variant.node,
+                                                         device_variant.devicename,
                                                          device_variant.voltage_threshold,
                                                          device_variant.p_v_t_corner,
                                                          device_variant_layout.name);
@@ -1428,6 +1511,7 @@ bool QLDeviceManager::isDeviceTargetValid(QLDeviceTarget device_target) {
   if(!device_target.device_variant.family.empty() && 
      !device_target.device_variant.foundry.empty() && 
      !device_target.device_variant.node.empty() && 
+     !device_target.device_variant.devicename.empty() && 
      !device_target.device_variant.voltage_threshold.empty() && 
      !device_target.device_variant.p_v_t_corner.empty() && 
      !device_target.device_variant_layout.name.empty()) {
@@ -1440,13 +1524,14 @@ bool QLDeviceManager::isDeviceTargetValid(QLDeviceTarget device_target) {
 void QLDeviceManager::setCurrentDeviceTarget(std::string family,
                                              std::string foundry,
                                              std::string node,
+                                             std::string devicename,
                                              std::string voltage_threshold,
                                              std::string p_v_t_corner,
                                              std::string layout_name) {
 
   // form the string representation of the device
   std::string device_string = 
-      DeviceString(family,foundry,node,voltage_threshold,p_v_t_corner,layout_name);
+      DeviceString(family,foundry,node,devicename,voltage_threshold,p_v_t_corner,layout_name);
   
   setCurrentDeviceTarget(device_string);
 }
@@ -1486,13 +1571,15 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
       std::filesystem::path(deviceDataRootDirPath() /
                             device_variant.family /
                             device_variant.foundry /
-                            device_variant.node);
+                            device_variant.node /
+                            device_variant.devicename);
 
   std::filesystem::path device_variant_dir_path =
       std::filesystem::path(deviceDataRootDirPath() /
                             device_variant.family /
                             device_variant.foundry /
                             device_variant.node /
+                            device_variant.devicename /
                             device_variant.voltage_threshold /
                             device_variant.p_v_t_corner);
 
@@ -1618,6 +1705,7 @@ std::string QLDeviceManager::convertToDeviceString(QLDeviceTarget device_target)
     device_string = DeviceString(device_target.device_variant.family ,
                                  device_target.device_variant.foundry,
                                  device_target.device_variant.node,
+                                 device_target.device_variant.devicename,
                                  device_target.device_variant.voltage_threshold,
                                  device_target.device_variant.p_v_t_corner,
                                  device_target.device_variant_layout.name);
@@ -1630,12 +1718,12 @@ std::string QLDeviceManager::convertToDeviceString(QLDeviceTarget device_target)
 // encryptDevice-> take input device data -> produce encrypted version
 // addDevice -> call encryptDevice -> take encrypted version -> copy into aurora installation
 
-int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std::string node,
+int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                                      std::string device_data_source, std::string device_data_target) {
 
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
-    // encrypt_device <family> <foundry> <node> <source_device_data_dir_path> <target_device_data_dir_path>
+    // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> <target_device_data_dir_path>
     // 1. ensure that the structure in the <source_device_data_dir_path> reflects 
     //      required structure, as specified in the document: <TODO>
     //    basically, all the required files should exist, in the right hierarchy,
@@ -1643,7 +1731,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // 2. encrypt all the files in the <source_device_data_dir_path> in place
     // 3. copy over all the encrypted files & cryption db
     //      from: <source_device_data_dir_path>
-    //      to: <INSTALLATION> / device_data / <family> / <foundry> / <node>
+    //      to: <INSTALLATION> / device_data / <family> / <foundry> / <node> / <devicename>
     //      and clean up all the encrypted files & cryption db from the <source_device_data_dir_path>
 
 
@@ -1652,6 +1740,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     std::string device = QLDeviceManager::getInstance()->DeviceString(family,
                                                                       foundry,
                                                                       node,
+                                                                      devicename,
                                                                       "",
                                                                       "",
                                                                       "");
@@ -1683,6 +1772,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // std::cout << "family: " << family << std::endl;
     // std::cout << "foundry: " << foundry << std::endl;
     // std::cout << "node: " << node << std::endl;
+    // std::cout << "devicename: " << devicename << std::endl;
     // std::cout << "source_device_data_dir_path: " << source_device_data_dir_path_c << std::endl;
     // std::cout << "force: " << std::string(force?"true":"false") << std::endl;
     // std::cout << std::endl;
@@ -1705,11 +1795,12 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
 
     // [2] check dir structure of the source_device_data_dir_path of the device to be added
     // and return the list of device_variants if everything is ok.
-    std::vector<std::string> device_variants;
-    device_variants = compiler->list_device_variants(family,
-                                                     foundry,
-                                                     node,
-                                                     source_device_data_dir_path_c);
+    std::vector<QLDeviceVariant> device_variants;
+    device_variants = listDeviceVariantsInDeviceDirectory(family,
+                                                          foundry,
+                                                          node,
+                                                          devicename,
+                                                          source_device_data_dir_path_c);
 
     if(device_variants.empty()) {
       compiler->ErrorMessage(std::string("error parsing device_data in: ") +
@@ -1717,26 +1808,19 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
         return -1;
     }
     else {
-      // save std::ios settings.
-      std::ios ios_default_state(nullptr);
-      ios_default_state.copyfmt(std::cout);
-
-      std::cout << std::endl;
-      std::cout << "device variants parsed:" << std::endl;
-      std::cout << "<family>,<foundry>,<node>,[voltage_threshold],[p_v_t_corner]" << std::endl;
-      int index = 1;
-      for (auto device_variant: device_variants) {
-        std::cout << std::setw(4)
-                  << std::setfill(' ')
-                  << index;
-        // restore cout state
-        std::cout.copyfmt(ios_default_state);
-        std::cout << ". " 
-                  << device_variant 
-                  << std::endl;
-        index++;
+      for (QLDeviceVariant variant: device_variants) {
+        std::cout << "  variant: " +  variant.family + " " + variant.foundry + " " + variant.node + " " + variant.devicename + " " + variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
+        for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
+          std::cout <<  "    layout_name:" + layout.name + "\n" +
+                        "              w:" + std::to_string(layout.width) + "\n" +
+                        "              h:" + std::to_string(layout.height) //+ "\n" +
+                        // "            clb:" + std::to_string(layout.clb) + "\n" +
+                        // "             io:" + std::to_string(layout.io) + "\n" +
+                        // "           bram:" + std::to_string(layout.bram) + "\n" +
+                        // "            dsp:" + std::to_string(layout.dsp)
+                        << std::endl;
+        }
       }
-      std::cout << std::endl;
     }
 
     // collect the list of every filepath in the source_device_data_dir that we want to encrypt.
@@ -2073,13 +2157,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
   }
 
 
-int QLDeviceManager::addDevice(std::string family, std::string foundry, std::string node,
+int QLDeviceManager::addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                                  std::string device_data_source, bool force) {
 
-    // add_device <family> <foundry> <node> <source_device_data_dir_path> [force]
+    // add_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [force]
     // this will perform the steps:
     // 1. check if the 'device' already exists in the installation
-    //      check if the '<INSTALLATION> / device_data / <family> / <foundry> / <node>' dir path
+    //      check if the '<INSTALLATION> / device_data / <family> / <foundry> / <node> / <devicename>' dir path
     //        already exists in installation
     //      if it already exists, we will display an error, and stop.
     //      if 'force' has been specified, we will push out a warning, but proceed further.
@@ -2093,6 +2177,7 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
     std::string device = QLDeviceManager::getInstance()->DeviceString(family,
                                                                       foundry,
                                                                       node,
+                                                                      devicename,
                                                                       "",
                                                                       "",
                                                                       "");
@@ -2113,6 +2198,7 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
     // std::cout << "family: " << family << std::endl;
     // std::cout << "foundry: " << foundry << std::endl;
     // std::cout << "node: " << node << std::endl;
+    // std::cout << "devicename: " << devicename << std::endl;
     // std::cout << "source_device_data_dir_path: " << source_device_data_dir_path_c << std::endl;
     // std::cout << "force: " << std::string(force?"true":"false") << std::endl;
     // std::cout << std::endl;
@@ -2123,7 +2209,8 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
         std::filesystem::path(deviceDataRootDirPath() /
                               family /
                               foundry /
-                              node);
+                              node /
+                              devicename);
 
     if (std::filesystem::exists(target_device_data_dir_path, ec)) {
       if(force) {
@@ -2140,7 +2227,7 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
         compiler->Message("target path: " + target_device_data_dir_path.string());
         compiler->Message("Please specify 'force' to overwrite the target device dir with new files.");
         compiler->Message("Please enter command in the format:\n"
-                          "    add_device <family> <foundry> <node> <source_device_data_dir_path> [force]");
+                          "    add_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [force]");
         compiler->Message("\n");
         return -1;
       }
@@ -2152,7 +2239,7 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
         //Message("\n");
     }
 
-    int status = encryptDevice(family, foundry, node,
+    int status = encryptDevice(family, foundry, node, devicename,
                                device_data_source, target_device_data_dir_path.string());
 
     if(status == 0) {
@@ -2435,7 +2522,8 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
       std::filesystem::path(deviceDataRootDirPath() /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
-                            device_target.device_variant.node);
+                            device_target.device_variant.node /
+                            device_target.device_variant.devicename);
   
   return device_type_dir_path;
 }
@@ -2456,6 +2544,7 @@ std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget devic
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /
+                            device_target.device_variant.devicename /
                             device_target.device_variant.voltage_threshold /
                             device_target.device_variant.p_v_t_corner);
 

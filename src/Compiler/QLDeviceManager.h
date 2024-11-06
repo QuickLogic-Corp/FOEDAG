@@ -47,6 +47,7 @@ class QLDeviceVariant {
     std::string family;
     std::string foundry;
     std::string node;
+    std::string devicename;
     std::string voltage_threshold;
     std::string p_v_t_corner;
     std::vector<QLDeviceVariantLayout> device_variant_layouts;
@@ -57,6 +58,7 @@ class QLDeviceType {
     std::string family;
     std::string foundry;
     std::string node;
+    std::string devicename;
     std::vector<QLDeviceVariant> device_variants;
     std::filesystem::path device_root_path;
 };
@@ -81,6 +83,7 @@ class QLDeviceManager : public QObject {
   QLDeviceVariantLayout* findDeviceLayoutVariantPtr(const std::string& family, 
                                                     const std::string& foundry,
                                                     const std::string& node,
+                                                    const std::string& devicename,
                                                     const std::string& voltage_threshold,
                                                     const std::string& p_v_t_corner,
                                                     const std::string& layoutName);
@@ -92,27 +95,36 @@ class QLDeviceManager : public QObject {
   QWidget* createDeviceSelectionWidget(bool newProjectMode);
   void giveupDeviceSelectionWidget();
   void parseDeviceData();
-  int addDevice(std::string family, std::string foundry, std::string node,
+  int addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                 std::string device_data_source, bool force);
-  int encryptDevice(std::string family, std::string foundry, std::string node,
+  int encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                     std::string device_data_source, std::string device_data_target);
   std::vector<QLDeviceVariant> listDeviceVariants(std::string family,
                                                  std::string foundry,
-                                                 std::string node);
+                                                 std::string node,
+                                                 std::string devicename);
+  std::vector<QLDeviceVariant> listDeviceVariantsInDeviceDirectory(std::string family,
+                                                 std::string foundry,
+                                                 std::string node,
+                                                 std::string devicename,
+                                                 std::filesystem::path device_data_dir_path);
   std::vector<QLDeviceVariantLayout> listDeviceVariantLayouts(std::string family,
                                                             std::string foundry,
                                                             std::string node,
+                                                            std::string devicename,
                                                             std::string voltage_threshold,
                                                             std::string p_v_t_corner);
   std::string DeviceString(std::string family,
                            std::string foundry,
                            std::string node,
+                           std::string devicename,
                            std::string voltage_threshold,
                            std::string p_v_t_corner,
                            std::string layout_name);
   bool DeviceExists(std::string family,
                     std::string foundry,
                     std::string node,
+                    std::string devicename,
                     std::string voltage_threshold,
                     std::string p_v_t_corner,
                     std::string layout_name);
@@ -121,6 +133,7 @@ class QLDeviceManager : public QObject {
   QLDeviceTarget convertToDeviceTarget(std::string family,
                                  std::string foundry,
                                  std::string node,
+                                 std::string devicename,
                                  std::string voltage_threshold,
                                  std::string p_v_t_corner,
                                  std::string layout_name);
@@ -130,6 +143,7 @@ class QLDeviceManager : public QObject {
   void setCurrentDeviceTarget(std::string family,
                               std::string foundry,
                               std::string node,
+                              std::string devicename,
                               std::string voltage_threshold,
                               std::string p_v_t_corner,
                               std::string layout_name);
@@ -180,6 +194,7 @@ class QLDeviceManager : public QObject {
  void triggerUIUpdate();
  void familyChanged(const QString& family_qstring);
  void foundrynodeChanged(const QString& foundrynode_qstring);
+ void devicenameChanged(const QString& devicename_qstring);
  void voltage_thresholdChanged(const QString& voltagetheshold_qstring);
  void p_v_t_cornerChanged(const QString& p_v_t_corner_qstring);
  void layoutChanged(const QString& layout_qstring);
@@ -218,6 +233,8 @@ class QLDeviceManager : public QObject {
   std::string foundrynode;
   std::string foundry;
   std::string node;
+  std::vector <std::string> devicenames;
+  std::string devicename;
   std::vector <std::string> voltage_thresholds;
   std::string voltage_threshold;
   std::vector <std::string> p_v_t_corners;
@@ -228,6 +245,7 @@ class QLDeviceManager : public QObject {
   
   QComboBox* m_combobox_family;
   QComboBox* m_combobox_foundry_node;
+  QComboBox* m_combobox_devicename;
   QComboBox* m_combobox_voltage_threshold;
   QComboBox* m_combobox_p_v_t_corner;
   QComboBox* m_combobox_layout;
