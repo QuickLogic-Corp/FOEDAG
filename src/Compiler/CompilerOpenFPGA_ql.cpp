@@ -2731,6 +2731,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosys_options += " -synplify";
   }
 
+  std::string device_data_path_yosys((QLDeviceManager::getInstance()->deviceTypeDirPath()).string() + "/yosys/quicklogic/");
+  yosys_options += " -lib_path " + device_data_path_yosys;
+
   // TODO: trim yosys_options at the front
   yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
 
