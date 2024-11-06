@@ -43,7 +43,7 @@ void QLPackagePinsLoader::parseHeader(const QString &header)
 }
 
 std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePath) {
-  m_pinToPortMap.clear();
+  m_portToPinMap.clear();
 
   initHeader();
 
@@ -120,17 +120,17 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
       }
       uniquePins.insert(pinName);
 
-      static const QRegularExpression inputPattern{"[A-Z0-9]+_A2F\\[\\d+\\]"};
-      static const QRegularExpression outputPattern{"[A-Z0-9]+_F2A\\[\\d+\\]"};
+      static const QRegularExpression inputPortPattern{"[A-Z0-9]+_A2F\\[\\d+\\]"};
+      static const QRegularExpression outputPortPattern{"[A-Z0-9]+_F2A\\[\\d+\\]"};
 
       QString dir;
       if (data.size() >= columnPortNameIndex) {
         QString portName = data.at(columnPortNameIndex);
-        m_pinToPortMap[portName] = pinName;
+        m_portToPinMap[portName] = pinName;
         if (!portName.isEmpty()) {
-          if (portName.contains(inputPattern)) {
+          if (portName.contains(inputPortPattern)) {
             dir = IODirection::INPUT;
-          } else if (portName.contains(outputPattern)) {
+          } else if (portName.contains(outputPortPattern)) {
             dir = IODirection::OUTPUT;
           }
         }
@@ -150,23 +150,21 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
   }
   m_model->initListModel();
 
-  qInfo() << "~~~ 000 m_pinToPortMap=" << m_pinToPortMap.size();
+  qInfo() << "~~~ 000 m_portToPinMap=" << m_portToPinMap.size();
   return std::make_pair(true, QString{});
 }
 
 void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
 {
   qInfo() << "~~~ ioMapFilePath=" << ioMapFilePath;
-  qInfo() << "~~~ m_pinToPortMap=" << m_pinToPortMap.size();
+  qInfo() << "~~~ m_portToPinMap=" << m_portToPinMap.size();
   QFile file(ioMapFilePath);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
     qDebug() << "Failed to open the file." << ioMapFilePath;
     return;
   }
 
-  QSet<QString> pads;
-  QMap<QString, QString> locations;
-  QList<QString> errors;
+  QMap<QString, QString> pinToLocationMap;
 
   QXmlStreamReader xmlReader(&file);
 
@@ -174,25 +172,17 @@ void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
     QXmlStreamReader::TokenType token = xmlReader.readNext();
     if (token == QXmlStreamReader::StartElement) {
       if (xmlReader.name() == "io") {
-        QString pad = xmlReader.attributes().value("pad").toString();
+        QString port = xmlReader.attributes().value("pad").toString();
         QString x = xmlReader.attributes().value("x").toString();
         QString y = xmlReader.attributes().value("y").toString();
         QString z = xmlReader.attributes().value("z").toString();
 
-        pads.insert(pad);
-
-        if (m_pinToPortMap.contains(pad)) {
+        if (m_portToPinMap.contains(port)) {
           QString location = QString("%1:%2:%3").arg(x).arg(y).arg(z);
-          //qInfo() << "~~~ process location=" << location << "for pad=" << pad;
-          if (!locations.contains(location)) {
-            locations[location] = pad;
-          } else {
-            QString msg{QString("attempt use location %1 for pad %2, but already used by pad %3").arg(location).arg(pad).arg(locations.value(location))};
-            //qInfo() << "~~~ error" << msg;
-            errors.append(msg);
-          }
+          QString pin{m_portToPinMap.value(port)};
+          pinToLocationMap[pin] = location;
         } else {
-          qInfo() << "~~~ pad" << pad << "is not in m_pinToPortMap" << m_pinToPortMap.size();
+          qInfo() << "~~~ port" << port << "is not in m_portToPinMap" << m_portToPinMap.size();
         }
       }
     }
@@ -204,13 +194,15 @@ void QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
 
   file.close();
 
-  for (const QString& error: errors) {
-    qDebug() << "~~~ error:" << error;
-  }
-  qDebug() << "~~~ total errors num:" << errors.size() << "locations:" << locations.size() << "pads:" << pads.size();
-
-  if (errors.isEmpty()) {
+  LocationCollisionDetector detector{pinToLocationMap};
+  QMap<QString, QList<QString>> overlappedLocationToPinsMap = detector.overlappedLocationToPinsMap();
+  if (overlappedLocationToPinsMap.empty()) {
     qDebug() << "~~~ iomap ok";
+  } else {
+    for (auto it = overlappedLocationToPinsMap.begin(); it != overlappedLocationToPinsMap.end(); ++it) {
+      qDebug() << "location" << it.key() << "has collisions for pads:" << it.value();
+    }
+    qDebug() << "~~~ total errors num:" << overlappedLocationToPinsMap.size();
   }
 }
 
