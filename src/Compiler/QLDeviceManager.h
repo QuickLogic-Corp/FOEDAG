@@ -145,7 +145,10 @@ class QLDeviceManager : public QObject {
   // device files access API to have a uniform way of getting the required files
   public:
 
-  bool deviceFileIsEncrypted(std::filesystem::path);
+  bool deviceSetupYosysModels(QLDeviceTarget device_target = QLDeviceTarget());
+  std::filesystem::path deviceDataRootDirPath();
+
+  bool deviceFileIsEncrypted(std::filesystem::path filepath);
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
@@ -166,8 +169,8 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceOpenFPGAPinTableFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAIOMapFile(QLDeviceTarget device_target = QLDeviceTarget());
 
-  std::filesystem::path deviceVPRRRGraphFile(QLDeviceTarget device_target);
-  std::filesystem::path deviceVPRRouterLookaheadFile(QLDeviceTarget device_target);
+  std::filesystem::path deviceVPRRRGraphFile(QLDeviceTarget device_target = QLDeviceTarget());
+  std::filesystem::path deviceVPRRouterLookaheadFile(QLDeviceTarget device_target = QLDeviceTarget());
 
   // future use (not file access APIs, but used together with them)
   std::vector<std::string> deviceCorners(QLDeviceTarget device_target);

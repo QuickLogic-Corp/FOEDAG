@@ -876,7 +876,7 @@ void QLDeviceManager::parseDeviceData() {
 
   // get to the device_data dir path of the installation
   std::filesystem::path root_device_data_dir_path = 
-      GlobalSession->Context()->DataPath();
+     deviceDataRootDirPath();
 
   // clear the list before parsing
   device_list.clear();
@@ -975,7 +975,7 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
 
   // get to the device_data dir path of the installation
   std::filesystem::path root_device_data_dir_path = 
-     GlobalSession->Context()->DataPath();
+     deviceDataRootDirPath();
 
   // calculate the device_data dir path for specified device
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node;
@@ -1189,7 +1189,7 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
   std::vector<QLDeviceVariantLayout> device_variant_layouts = {};
   
   std::filesystem::path root_device_data_dir_path = 
-      GlobalSession->Context()->DataPath();
+      deviceDataRootDirPath();
   
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node;
 
@@ -1483,13 +1483,13 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
 {
   std::filesystem::path architectureFile;
   std::filesystem::path device_type_dir_path =
-      std::filesystem::path(GlobalSession->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_variant.family /
                             device_variant.foundry /
                             device_variant.node);
 
   std::filesystem::path device_variant_dir_path =
-      std::filesystem::path(GlobalSession->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_variant.family /
                             device_variant.foundry /
                             device_variant.node /
@@ -1763,12 +1763,24 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             continue;
           }
 
-          //  to skip '/examples/' or '\examples\' ? skip in future
-          // if (std::regex_match(dir_entry.path().string(),
-          //                       std::regex(R"(.+[\/\\]examples[\/\\].*)",
-          //                       std::regex::icase))) {
-          //   continue;
-          // }
+          // include all files in 'examples/' for copy
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]examples[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
+          // include rr_graph.bin and router_lookahead.bin files for copy
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*rr_graph\\.bin",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*router_lookahead\\.bin",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
 
           // we want xml files for encryption
           if (std::regex_match(dir_entry.path().filename().string(),
@@ -1782,6 +1794,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
               source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
               continue;
             }
+            source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
+          }
+
+          // we want capnp files for encryption (router_lookahead.capnp)
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                std::regex(".+\\.capnp",
+                                std::regex::icase))) {
             source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
           }
 
@@ -2101,7 +2120,7 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
     // [1] check if installation already has the device added and inform the user accordingly.
     //     (device data dir for this device already exists)
     std::filesystem::path target_device_data_dir_path = 
-        std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+        std::filesystem::path(deviceDataRootDirPath() /
                               family /
                               foundry /
                               node);
@@ -2147,6 +2166,37 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
   }
 
 
+ std::filesystem::path QLDeviceManager::deviceDataRootDirPath() {
+
+  std::filesystem::path root_device_data_dir_path;
+
+  // allow user to override the root device data path using an env variable.
+  // read env var
+  const char* const path_device_data_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
+
+  if (path_device_data_env_str != nullptr) {
+
+    // convert to std::filesystem::path and check if the path exists
+    root_device_data_dir_path = std::string(path_device_data_env_str);
+
+    if(!FileUtils::FileExists(root_device_data_dir_path)) {
+
+      root_device_data_dir_path.clear();
+    }
+  }
+
+  // if we did not get the path from the env var
+  if(root_device_data_dir_path.empty()) {
+
+    // use the device_data dir path of the installation
+    root_device_data_dir_path = 
+        GlobalSession->Context()->DataPath();
+  }
+
+  return root_device_data_dir_path;
+}
+
+
 bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
 
   if(filepath.extension() == ".en") {
@@ -2159,9 +2209,221 @@ bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
 }
 
 
-std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_target) {
+bool QLDeviceManager::deviceSetupYosysModels(QLDeviceTarget device_target) {
+
+  // backward compatibility:
+  // if device_data is v2.7.1 or older:
+  // copy the yosys files (*.v/*.sv/*.txt/) from devicetypedir()
+  // to: share/yosys/quicklogic/qlf_k6n10f in installation, and tabbycad dirs.
+  //
+  // else, if v2.8.0 or newer:
+  // copy the yosys/ dir files in the same structure from the device data
+  // to share/yosys/ dir in both installation and tabbycad dirs.
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::error_code ec;
+  std::filesystem::path device_yosys_dir_path;
+  std::filesystem::path target_yosys_share_dir_path;
+  std::filesystem::path target_tabby_share_dir_path;
+
+  if(!isDeviceTargetValid(device_target)) {
+    if(isDeviceTargetValid(this->device_target)) {
+      device_target = this->device_target;
+    }
+    else {
+      return false;
+    }
+  }
+
+  std::filesystem::path device_target_config_json_filepath =
+      deviceTypeDirPath(device_target) / std::string("config.json");
+
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("YOSYS_DIR")  ) {
+
+      json_value = device_target_config_json["YOSYS_DIR"].get<std::string>();
+      device_yosys_dir_path =
+        deviceTypeDirPath(device_target) / json_value;
+    }
+    else {
+
+    device_yosys_dir_path =
+        deviceTypeDirPath(device_target) / std::string("yosys");
+    }
+  }
+  else {
+
+    device_yosys_dir_path =
+        deviceTypeDirPath(device_target);
+  }
+
+  std::vector<std::filesystem::path> source_device_data_file_list_to_copy;
+  for (const std::filesystem::directory_entry& dir_entry :
+      std::filesystem::recursive_directory_iterator(device_yosys_dir_path,
+                                                    std::filesystem::directory_options::skip_permission_denied,
+                                                    ec))
+  {
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed listing contents of ") +  device_yosys_dir_path.string());
+      return false;
+    }
+
+    if(dir_entry.is_regular_file(ec)) {
+
+        // include verilog files for copy (cells_sim.v etc.)
+        if (std::regex_match(dir_entry.path().filename().string(),
+                              std::regex(".+\\.v",
+                              std::regex::icase))) {
+          source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+        }
+
+        // include system verilog files for copy (cells_sim.sv etc.)
+        if (std::regex_match(dir_entry.path().filename().string(),
+                              std::regex(".+\\.sv",
+                              std::regex::icase))) {
+          source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+        }
+
+        // include txt files for copy (brams.txt etc.)
+        if (std::regex_match(dir_entry.path().filename().string(),
+                              std::regex(".+\\.txt",
+                              std::regex::icase))) {
+          source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+        }
+    }
+
+    if(ec) {
+      compiler->ErrorMessage(std::string("error while checking: ") +  dir_entry.path().string());
+      return false;
+    }
+  }
+
+  for(std::filesystem::path source_file_path : source_device_data_file_list_to_copy) {
+
+    // get the file path, relative to the source_device_data_dir_path
+    std::filesystem::path relative_file_path = 
+        std::filesystem::relative(source_file_path,
+                                  device_yosys_dir_path,
+                                  ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to create relative path: ") + source_file_path.string());
+      return false;
+    }
+
+    if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+      target_yosys_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("share") /
+                                                      std::string("yosys");
+    }
+    else {
+
+      target_yosys_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("share") /
+                                                      std::string("yosys") /
+                                                      std::string("quicklogic") /
+                                                      std::string("qlf_k6n10f");
+    }
+
+
+    // add the relative file path to the target_yosys_share_dir_path
+    std::filesystem::path target_file_path_yosys_share = 
+        target_yosys_share_dir_path / relative_file_path;
+
+    // ensure that the target file's parent dir is created if not existing:
+    std::filesystem::create_directories(target_file_path_yosys_share.parent_path(),
+                                        ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to create directory: ") + target_file_path_yosys_share.parent_path().string());
+      return false;
+    }
+
+    // copy the source file to the target file path:
+    //  std::cout << "copying:" << relative_file_path << std::endl;
+    // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
+    if(FileUtils::FileExists(target_file_path_yosys_share)) {
+      std::filesystem::remove(target_file_path_yosys_share);
+    }
+    std::filesystem::copy_file(source_file_path,
+                                target_file_path_yosys_share,
+                                std::filesystem::copy_options::overwrite_existing,
+                                ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to copy: ") + source_file_path.string());
+      return false;
+    }
+
+    // same for tabbycad share/yosys/ dir
+
+    if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+      target_tabby_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("tabby") /
+                                                      std::string("share") /
+                                                      std::string("yosys");
+    }
+    else {
+
+      target_tabby_share_dir_path = compiler->GetSession()->Context()->DataPath() /
+                                                      std::string("..") /
+                                                      std::string("tabby") /
+                                                      std::string("share") /
+                                                      std::string("yosys") /
+                                                      std::string("quicklogic") /
+                                                      std::string("qlf_k6n10f");
+    }
+
+    // add the relative file path to the target_yosys_share_dir_path
+    std::filesystem::path target_file_path_tabby_share = 
+        target_tabby_share_dir_path / relative_file_path;
+
+    // ensure that the target file's parent dir is created if not existing:
+    std::filesystem::create_directories(target_file_path_tabby_share.parent_path(),
+                                        ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to create directory: ") + target_file_path_tabby_share.parent_path().string());
+      return false;
+    }
+
+    // copy the source file to the target file path:
+    // std::cout << "copying:" << relative_file_path << std::endl;
+    // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
+    if(FileUtils::FileExists(target_file_path_tabby_share)) {
+      std::filesystem::remove(target_file_path_tabby_share);
+    }
+    std::filesystem::copy_file(source_file_path,
+                                target_file_path_tabby_share,
+                                std::filesystem::copy_options::overwrite_existing,
+                                ec);
+    if(ec) {
+      // error
+      compiler->ErrorMessage(std::string("failed to copy: ") + source_file_path.string());
+      return false;
+    }
+
+  }
+
+  return true;
+}
+
+
+std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_target) {
+
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
   std::filesystem::path device_type_dir_path;
 
@@ -2170,7 +2432,7 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
   }
 
   device_type_dir_path = 
-      std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node);
@@ -2181,7 +2443,7 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
 
 std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget device_target) {
 
-  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
   std::filesystem::path device_variant_dir_path;
 
@@ -2190,7 +2452,7 @@ std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget devic
   }
 
   device_variant_dir_path =
-      std::filesystem::path(compiler->GetSession()->Context()->DataPath() /
+      std::filesystem::path(deviceDataRootDirPath() /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /
@@ -2516,48 +2778,75 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
     device_target = this->device_target;
   }
 
-  // use the device specific repack design contraint file, and note that we may have
-  // unencrypted (first priority) or encrypted file
+  // 1. check if we have a repack_design_constraint.xml file in the project (generated) directory (unencrypted only)
+  // 2. check if we have a repack_design_constraint.xml file in the TCL script directory (unencrypted only)
+  // 3. use the device specific repack design contraint file, and note that we may have
+  //    unencrypted (first priority) or encrypted file
 
-  // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+  std::string repack_design_constraint_file_name = "repack_design_constraint.xml";
 
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
-    // get json value
-    std::string json_value;
-    if( device_target_config_json.contains("REPACK_DESIGN_CONSTRAINT")  ) {
+  // 1. project path check
+  std::filesystem::path project_path = std::filesystem::path(compiler->ProjManager()->projectPath());
+  repack_design_constraint_file_path = project_path / repack_design_constraint_file_name;
+  if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+    repack_design_constraint_file_path.clear();
+  }
 
-      json_value = device_target_config_json["REPACK_DESIGN_CONSTRAINT"].get<std::string>();
-    }
-    // check for unencrypted file
-    repack_design_constraint_file_path = 
-        deviceTypeDirPath(device_target) / json_value;
-    if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-
-      // check for encrypted file
-      repack_design_constraint_file_path += ".en";
-      if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-
-        compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
-        return empty_path;
-      }
+  // 2. tcl script dir path check
+  if(repack_design_constraint_file_path.empty()) {
+    if(settings_manager != nullptr) {
+      std::filesystem::path tcl_script_dir_path = settings_manager->getTCLScriptDirPath();
+        if(!tcl_script_dir_path.empty()) {
+          repack_design_constraint_file_path = tcl_script_dir_path / repack_design_constraint_file_name;
+          if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+            repack_design_constraint_file_path.clear();
+          }
+        }
     }
   }
-  // else, we assume that this is a legacy device data directory (< v2.8.0)
-  else {
-    // check for unencrypted file
-    repack_design_constraint_file_path = 
-        std::filesystem::path(deviceTypeDirPath(device_target) / std::string("repack_design_constraint.xml"));
-    if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-      // check for encrypted file
-      repack_design_constraint_file_path += ".en";
+  // 3. device data dir path check
+  if(repack_design_constraint_file_path.empty()) {
+    // use config.json if it exists
+    std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+    if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+      std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+      json device_target_config_json = json::parse(device_target_config_json_ifstream);
+      // get json value
+      std::string json_value;
+      if( device_target_config_json.contains("REPACK_DESIGN_CONSTRAINT")  ) {
+
+        json_value = device_target_config_json["REPACK_DESIGN_CONSTRAINT"].get<std::string>();
+      }
+      // check for unencrypted file
+      repack_design_constraint_file_path = 
+          deviceTypeDirPath(device_target) / json_value;
       if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-        compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
-        return empty_path;
+        // check for encrypted file
+        repack_design_constraint_file_path += ".en";
+        if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          return empty_path;
+        }
+      }
+    }
+    // else, we assume that this is a legacy device data directory (< v2.8.0)
+    else {
+      // check for unencrypted file
+      repack_design_constraint_file_path = 
+          std::filesystem::path(deviceTypeDirPath(device_target) / repack_design_constraint_file_name);
+      if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+        // check for encrypted file
+        repack_design_constraint_file_path += ".en";
+        if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+
+          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          return empty_path;
+        }
       }
     }
   }
@@ -3087,17 +3376,83 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAIOMapFile(QLDeviceTarget de
 
 std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget device_target) {
 
-  std::filesystem::path empty_path;
-  return empty_path;
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
+  std::filesystem::path empty_path;
+  std::filesystem::path vpr_rr_graph_file_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // use the device specific rr_graph file, and note that we will have bin files (should we support xml?)
+
+  // use config.json if it exists
+  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("CORNER_RRGRAPH_BIN") ) {
+
+      json_value = device_target_config_json["CORNER_RRGRAPH_BIN"].get<std::string>();
+    }
+    // check for unencrypted file
+    vpr_rr_graph_file_path = 
+        deviceVariantDirPath(device_target) / json_value;
+    if(!FileUtils::FileExists(vpr_rr_graph_file_path)) {
+
+        compiler->Message("Cannot find device vpr rr_graph file: " + vpr_rr_graph_file_path.string());
+        vpr_rr_graph_file_path.clear();
+    }
+  }
+
+  // std::cout << "[zyxw]" << "using vpr rr_graph file: " << vpr_rr_graph_file_path.string() << std::endl;
+
+  return vpr_rr_graph_file_path;
 }
 
 
 std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarget device_target) {
 
-  std::filesystem::path empty_path;
-  return empty_path;
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
+  std::filesystem::path empty_path;
+  std::filesystem::path vpr_router_lookahead_file_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // use the device specific router_lookahead file, and note that we will have bin files (should we support xml?)
+
+  // use config.json if it exists
+  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("CORNER_ROUTER_LOOKAHEAD_BIN") ) {
+
+      json_value = device_target_config_json["CORNER_ROUTER_LOOKAHEAD_BIN"].get<std::string>();
+    }
+
+    vpr_router_lookahead_file_path = 
+        deviceVariantDirPath(device_target) / json_value;
+    if(!FileUtils::FileExists(vpr_router_lookahead_file_path)) {
+
+        compiler->Message("Cannot find device vpr router_lookahead file: " + vpr_router_lookahead_file_path.string());
+        vpr_router_lookahead_file_path.clear();
+    }
+  }
+
+  // std::cout << "[zyxw]" << "using vpr router_lookahead file: " << vpr_router_lookahead_file_path.string() << std::endl;
+
+  return vpr_router_lookahead_file_path;
 }
 
 
@@ -3106,7 +3461,6 @@ std::vector<std::string> QLDeviceManager::deviceCorners(QLDeviceTarget device_ta
 
   std::vector<std::string> corners;
   return corners;
-
 }
 
 
@@ -3114,7 +3468,6 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceCornerPowerDataFiles(Q
 
   std::vector<std::filesystem::path> corner_power_data_filepaths;
   return corner_power_data_filepaths;
-
 }
 
 } // namespace FOEDAG

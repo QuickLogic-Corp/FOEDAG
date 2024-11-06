@@ -342,6 +342,8 @@ void TaskManager::runNext(TaskStatus status) {
       emit progress(counter, m_taskCount,
                     QString("%1 Running").arg(t->title()));
     return;
+  } else {
+    emit taskDone(taskId(t), t->status());
   }
 
   QString statusStr{"Complete"};
@@ -360,7 +362,6 @@ void TaskManager::runNext(TaskStatus status) {
 
   if (m_runStack.isEmpty()) {
     emit done();
-    emit doneDetalied(taskId(t), t->status());
   }
 }
 
