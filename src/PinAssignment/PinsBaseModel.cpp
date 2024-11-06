@@ -25,6 +25,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QSet>
 #endif
 
+#define RESOLVE_LOCATION_COLLISIONS
+
 namespace FOEDAG {
 
 PinsBaseModel::PinsBaseModel(QObject *parent) : QObject(parent) {}
@@ -56,6 +58,16 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
     return;
   }
 
+#ifdef RESOLVE_LOCATION_COLLISIONS
+  if (m_collisionDetector) {
+    QSet<QString> pinsToReset = m_collisionDetector->getOverlappedPins(pin);
+    auto connections = findConnectionsForPins(pinsToReset);
+    for (const auto& connection: connections) {
+      emit portAssignmentChanged(connection.port, {}, connection.index);
+    }
+  }
+#endif // RESOLVE_LOCATION_COLLISIONS
+
   if (pin.isEmpty()) {
     auto values = m_pinsMap.value(port);
     m_pinsMap.remove(port);
@@ -79,6 +91,21 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
     invalidate();
 #endif
   }
+}
+
+QList<PinsBaseModel::ConnectionFrame> PinsBaseModel::findConnectionsForPins(const QSet<QString>& pins)
+{
+  QList<PinsBaseModel::ConnectionFrame> connections;
+  for (auto it = m_pinsMap.begin(); it != m_pinsMap.end(); ++it) {
+    QString port = it.key();
+    const auto& [pin, index] = it.value();
+    if (pins.contains(pin)) {
+      PinsBaseModel::ConnectionFrame connection{port, pin, index};
+      connections.append(connection);
+    }
+  }
+
+  return connections;
 }
 #endif
 

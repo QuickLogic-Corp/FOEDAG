@@ -22,7 +22,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QObject>
 #include <QStringList>
 #include <QVector>
+#include <QSet>
 
+#include "LocationCollisionDetector.h"
 #include "PackagePinsModel.h"
 #include "PortsModel.h"
 
@@ -31,6 +33,12 @@ namespace FOEDAG {
 class PinsBaseModel : public QObject {
   Q_OBJECT
 
+  struct ConnectionFrame {
+    QString port;
+    QString pin;
+    int index;
+  };
+  
  public:
   PinsBaseModel(QObject *parent = nullptr);
 
@@ -57,6 +65,14 @@ class PinsBaseModel : public QObject {
   PortsModel *m_portsModel;
 
 #ifndef UPSTREAM_PINPLANNER
+  QList<ConnectionFrame> findConnectionsForPins(const QSet<QString>& pins);
+#endif
+
+#ifndef UPSTREAM_PINPLANNER
+public:
+  void setCollisionDetector(const LocationCollisionDetectorPtr& detector) { m_collisionDetector = detector; }
+private:
+  LocationCollisionDetectorPtr m_collisionDetector;
 #ifdef PINPLANNER_EXCLUDE_USED_ITEMS
   void invalidate();
   void invalidatePortsModel(const QSet<QString>& busyPorts);

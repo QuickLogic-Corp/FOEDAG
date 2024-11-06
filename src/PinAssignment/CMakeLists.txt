@@ -50,6 +50,7 @@ set (SRC_CPP_LIST
   PortsModel.cpp
   PackagePinsLoader.cpp
   QLPackagePinsLoader.cpp
+  LocationCollisionDetector.cpp
   PortsLoader.cpp
   QLPortsLoader.cpp
   BufferedComboBox.cpp
@@ -73,6 +74,7 @@ set (SRC_H_LIST
   PortsModel.h
   PackagePinsLoader.h
   QLPackagePinsLoader.h
+  LocationCollisionDetector.h
   PortsLoader.h
   QLPortsLoader.h
   BufferedComboBox.h

@@ -86,8 +86,11 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
 #endif
 
   loader->load(fileName);
-  loader->validateIOMap(QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile().c_str());
-  
+
+  QLPackagePinsLoader* qlLoader = static_cast<QLPackagePinsLoader*>(loader);
+  auto collisionDetector = qlLoader->validateIOMap(QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile().c_str());
+  m_baseModel->setCollisionDetector(collisionDetector);
+
   auto portsView = new PortsView(m_baseModel);
   connect(portsView, &PortsView::selectionHasChanged, this,
           &PinAssignmentCreator::changed);
