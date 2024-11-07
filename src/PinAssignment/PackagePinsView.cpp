@@ -104,6 +104,9 @@ PackagePinsView::PackagePinsView(PinsBaseModel *model, QWidget *parent)
           &PackagePinsView::modeChanged);
   connect(model->packagePinModel(), &PackagePinsModel::internalPinHasChanged,
           this, &PackagePinsView::internalPinChanged);
+#else
+  connect(model, &PinsBaseModel::portAssignmentRemoved, this,
+          &PackagePinsView::portAssignmentRemoved);
 #endif
   connect(model, &PinsBaseModel::portAssignmentChanged, this,
           &PackagePinsView::portAssignmentChanged);
@@ -482,6 +485,16 @@ void PackagePinsView::portAssignmentChanged(const QString &port,
   else
     SetPort(pin, QString{}, row);
 }
+
+void PackagePinsView::portAssignmentRemoved(const QString& port) {
+  for (auto it{m_allCombo.cbegin()}; it != m_allCombo.cend(); it++) {
+    if (it.key()->currentText() == port) {
+      it.key()->setCurrentIndex(0);
+      break;
+    }
+  }
+}
+
 
 #ifdef UPSTREAM_PINPLANNER
 QTreeWidgetItem *PackagePinsView::CreateNewLine(QTreeWidgetItem *parent) {

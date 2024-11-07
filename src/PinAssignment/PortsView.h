@@ -49,14 +49,15 @@ class PortsView : public PinAssignmentBaseView {
 #endif
   QString getPinSelection(const QModelIndex &index) const;
 
- private slots:
- #ifdef UPSTREAM_PINPLANNER
+private slots:
+#ifdef UPSTREAM_PINPLANNER
   void modeChanged(const QString &pin, const QString &mode);
   void intPinChanged(const QString &port, const QString &intPin);
 #endif
   void portAssignmentChanged(const QString &port, const QString &pin, int row);
 
 #ifndef UPSTREAM_PINPLANNER
+  void pinAssignmentRemoved(const QString &pin);
 private:
   QTreeWidgetItem *m_topLevel = nullptr;
 #endif

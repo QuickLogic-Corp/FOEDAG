@@ -83,6 +83,9 @@ PortsView::PortsView(PinsBaseModel *model, QWidget *parent)
           &PortsView::modeChanged);
   connect(model->packagePinModel(), &PackagePinsModel::internalPinHasChanged,
           this, &PortsView::intPinChanged);
+#else
+  connect(model, &PinsBaseModel::pinAssignmentRemoved, this,
+          &PortsView::pinAssignmentRemoved);
 #endif
   connect(model, &PinsBaseModel::portAssignmentChanged, this,
           &PortsView::portAssignmentChanged);
@@ -177,6 +180,7 @@ void PortsView::packagePinSelectionHasChanged(const QModelIndex &index) {
 #endif
       auto port = item->text(PortName);
       int index = m_model->getIndex(pin);
+
       m_blockUpdate = true;
 #ifdef UPSTREAM_PINPLANNER // to fix https://github.com/QL-Proprietary/aurora2/issues/705
       if (!prevPin.isEmpty()) m_model->update(QString{}, prevPin, -1);
@@ -372,5 +376,16 @@ void PortsView::portAssignmentChanged(const QString &port, const QString &pin,
   else
     SetPin(port, QString{});
 }
+
+#ifndef UPSTREAM_PINPLANNER
+void PortsView::pinAssignmentRemoved(const QString &pin) {
+  for (auto it{m_allCombo.cbegin()}; it != m_allCombo.cend(); it++) {
+    if (it.key()->currentText() == pin) {
+      it.key()->setCurrentIndex(0);
+      break;
+    }
+  }
+}
+#endif
 
 }  // namespace FOEDAG

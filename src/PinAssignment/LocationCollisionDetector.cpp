@@ -1,5 +1,4 @@
 #include "LocationCollisionDetector.h"
-
 namespace FOEDAG {
 
 LocationCollisionDetector::LocationCollisionDetector(const QMap<QString, QString>& pinToLocationMap) {
@@ -7,17 +6,21 @@ LocationCollisionDetector::LocationCollisionDetector(const QMap<QString, QString
   for (auto it = pinToLocationMap.begin(); it != pinToLocationMap.end(); ++it) {
     QString pin{it.key()};
     QString location{it.value()};
+
     if (!locationToPinsMap.contains(location)) {
       locationToPinsMap[location] = QSet<QString>();
-    } else {
-      m_overlappedPinToLocationMap[pin] = location;
     }
     locationToPinsMap[location].insert(pin);
   }
 
   for (auto it = locationToPinsMap.begin(); it != locationToPinsMap.end(); ++it) {
     if (it.value().size() > 1) {
-      m_overlappedLocationToPinsMap[it.key()] = it.value();
+      QString location{it.key()};
+      QSet<QString> pins{it.value()};
+      m_overlappedLocationToPinsMap[location] = pins;
+      for (const QString& pin: pins) {
+        m_overlappedPinToLocationMap[pin] = location;
+      }
     }
   }
 }
@@ -27,9 +30,6 @@ QSet<QString> LocationCollisionDetector::getOverlappedPins(const QString& pin) {
   if (m_overlappedPinToLocationMap.contains(pin)) {
     QString location{m_overlappedPinToLocationMap.value(pin)};
     overlappedPins = m_overlappedLocationToPinsMap.value(location);
-  }
-  if (!overlappedPins.isEmpty()) {
-    overlappedPins.remove(pin); // to not discard current connection
   }
   return overlappedPins;
 }

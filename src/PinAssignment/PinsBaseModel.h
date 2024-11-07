@@ -58,6 +58,11 @@ class PinsBaseModel : public QObject {
 
  signals:
   void portAssignmentChanged(const QString &port, const QString &pin, int row);
+#ifndef UPSTREAM_PINPLANNER
+  // it's hard to use portAssignmentChanged without making regressions, so let's add new signals to fix problem in isolation.
+  void portAssignmentRemoved(const QString &port);
+  void pinAssignmentRemoved(const QString &pin);
+#endif
 
  private:
   QMap<QString, std::pair<QString, int>> m_pinsMap;  // key - port, value - pin

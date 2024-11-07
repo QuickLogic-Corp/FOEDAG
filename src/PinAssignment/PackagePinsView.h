@@ -67,6 +67,7 @@ private slots:
   void internalPinChanged(const QString &port, const QString &intPin);
 #endif
   void portAssignmentChanged(const QString &port, const QString &pin, int row);
+  void portAssignmentRemoved(const QString &port);
 #ifdef UPSTREAM_PINPLANNER
   QTreeWidgetItem *CreateNewLine(QTreeWidgetItem *parent);
 #endif
