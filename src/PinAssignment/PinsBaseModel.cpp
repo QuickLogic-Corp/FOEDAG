@@ -65,7 +65,7 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
       pinsToReset.remove(pin); // to not discard current connection
       auto connections = findConnectionsForPins(pinsToReset);
       for (const auto& connection: connections) {
-        qWarning() << "Conflicting pin usage detected: Two different pins are attempting to occupy the same location."
+        qWarning() << "WARNING: Conflicting pin usage detected: Two different pins are attempting to occupy the same location."
                   << "The existing connection at port" << connection.port
                   << "and pin" << connection.pin
                   << "will be cleared to free up the location for the new pin" << pin;
