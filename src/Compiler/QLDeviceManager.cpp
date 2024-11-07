@@ -1301,7 +1301,7 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
 
     std::filesystem::path m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName(device_data_dir_path.string(),
-                                                          family + "_" + foundry + "_" + node);
+                                                           DeviceTypeString(family,foundry,node,devicename));
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       std::cout << "load cryptdb failed!" << std::endl;
@@ -1407,6 +1407,18 @@ std::string QLDeviceManager::DeviceString(std::string family,
   }
 
   return device_string;
+}
+
+
+std::string QLDeviceManager::DeviceTypeString(std::string family,
+                                              std::string foundry,
+                                              std::string node,
+                                              std::string devicename) {
+
+  // form the string representation of the devicetype
+  std::string device_type_string = family + "_" + foundry + "_" + node + "_" + devicename;
+
+  return device_type_string;
 }
 
 
@@ -1614,7 +1626,7 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
     }
   }
 
-  //Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_variant) );
+  //Message( std::string("Using vpr.xml for: ") + convertToDeviceString(device_variant) );
   return architectureFile;
 }
 
@@ -1700,20 +1712,42 @@ std::string QLDeviceManager::convertToDeviceString(QLDeviceTarget device_target)
   // form the string representation of the device
   std::string device_string;
 
-  if(isDeviceTargetValid(device_target)) {
-
-    device_string = DeviceString(device_target.device_variant.family ,
-                                 device_target.device_variant.foundry,
-                                 device_target.device_variant.node,
-                                 device_target.device_variant.devicename,
-                                 device_target.device_variant.voltage_threshold,
-                                 device_target.device_variant.p_v_t_corner,
-                                 device_target.device_variant_layout.name);
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
   }
+
+
+  device_string = DeviceString(device_target.device_variant.family,
+                                device_target.device_variant.foundry,
+                                device_target.device_variant.node,
+                                device_target.device_variant.devicename,
+                                device_target.device_variant.voltage_threshold,
+                                device_target.device_variant.p_v_t_corner,
+                                device_target.device_variant_layout.name);
 
   return device_string;
 
 }
+
+
+std::string QLDeviceManager::convertToDeviceTypeString(QLDeviceTarget device_target) {
+
+  // form the string representation of the devicetype
+  std::string device_type_string;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+
+  device_type_string = DeviceTypeString(device_target.device_variant.family,
+                                device_target.device_variant.foundry,
+                                device_target.device_variant.node,
+                                device_target.device_variant.devicename);
+
+  return device_type_string;
+}
+
 
 // encryptDevice-> take input device data -> produce encrypted version
 // addDevice -> call encryptDevice -> take encrypted version -> copy into aurora installation
@@ -1737,13 +1771,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
 
     std::filesystem::path source_device_data_dir_path = device_data_source;
 
-    std::string device = QLDeviceManager::getInstance()->DeviceString(family,
-                                                                      foundry,
-                                                                      node,
-                                                                      devicename,
-                                                                      "",
-                                                                      "",
-                                                                      "");
+    std::string device = DeviceString(family,
+                                      foundry,
+                                      node,
+                                      devicename,
+                                      "",
+                                      "",
+                                      "");
 
     // convert to canonical path, which will also check that the path exists.
     std::error_code ec;
@@ -1975,7 +2009,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // save cryptdb
     string cryptdb_path_str;
     if (!CRFileCryptProc::getInstance()->saveCryptKeyDB(source_device_data_dir_path_c.string(), 
-                                                        family + "_" + foundry + "_" + node,
+                                                        DeviceTypeString(family,foundry,node,devicename),
                                                         cryptdb_path_str)) {
         compiler->ErrorMessage("cryptdb save failed!");
         return -1;

@@ -121,6 +121,10 @@ class QLDeviceManager : public QObject {
                            std::string voltage_threshold,
                            std::string p_v_t_corner,
                            std::string layout_name);
+  std::string DeviceTypeString(std::string family,
+                              std::string foundry,
+                              std::string node,
+                              std::string devicename);
   bool DeviceExists(std::string family,
                     std::string foundry,
                     std::string node,
@@ -138,7 +142,8 @@ class QLDeviceManager : public QObject {
                                  std::string p_v_t_corner,
                                  std::string layout_name);
   QLDeviceTarget convertToDeviceTarget(std::string device_string);
-  std::string convertToDeviceString(QLDeviceTarget device_target);
+  std::string convertToDeviceString(QLDeviceTarget device_target = QLDeviceTarget());
+  std::string convertToDeviceTypeString(QLDeviceTarget device_target = QLDeviceTarget());
   bool isDeviceTargetValid(QLDeviceTarget device_target);
   void setCurrentDeviceTarget(std::string family,
                               std::string foundry,

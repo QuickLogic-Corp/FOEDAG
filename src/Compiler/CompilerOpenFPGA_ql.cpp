@@ -2647,11 +2647,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4087,11 +4083,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4123,11 +4115,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4159,11 +4147,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4195,11 +4179,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4228,11 +4208,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
       m_cryptdbPath = 
           CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            device_target.device_variant.family +
-                                                            "_" +
-                                                            device_target.device_variant.foundry +
-                                                            "_" +
-                                                            device_target.device_variant.node);
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
       if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
         Message("load cryptdb failed!");
