@@ -196,7 +196,7 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
   if (!overlappedLocationToPinsMap.isEmpty()) {
     qWarning() << ioMapFilePath << "contains mapping issues";
     for (auto it = overlappedLocationToPinsMap.begin(); it != overlappedLocationToPinsMap.end(); ++it) {
-      qWarning() << "The following pins" << it.value() << "share the same location:" << it.key(); 
+      qWarning() << "The following pins:" << QStringList(it.value().toList()).join(", ") << "share the same location:" << it.key();
     }
   }
 
