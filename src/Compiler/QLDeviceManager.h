@@ -163,6 +163,8 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceDataRootDirPath();
 
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
+
+  std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());

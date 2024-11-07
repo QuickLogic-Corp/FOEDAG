@@ -2508,6 +2508,37 @@ bool QLDeviceManager::deviceSetupYosysModels(QLDeviceTarget device_target) {
 }
 
 
+// v2.10+: read in and keep the config JSON populated, and other API use the JSON.
+std::filesystem::path QLDeviceManager::deviceConfigJSONPath(QLDeviceTarget device_target) {
+
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path device_config_json_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  device_config_json_path = deviceTypeDirPath(device_target) / std::string("config.json");
+
+  if(FileUtils::FileExists(device_config_json_path)) {
+
+    // check the json file for the versions: 
+    // CONFIG_FILE_VERSION >= v2.9.0 (reflects min compat with aurora version)
+    // DEVICE_DATA_VERSION >= v2.0.0 (reflects structure change)
+    // if they don't match expectations, we declare compatible config.json is not found
+    // TODO.
+  }
+  else {
+
+    // file does not exist!
+    device_config_json_path.clear();
+  }
+
+  return device_config_json_path;
+}
+
+
 std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_target) {
 
   // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
@@ -3475,20 +3506,75 @@ std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget devic
   }
 
   // use the device specific rr_graph file, and note that we will have bin files (should we support xml?)
+  //
+  // note that we will have a special handling case here, because we still want to support
+  // having multiple layouts in the same device (atleast for tsmc16) and it doesn't break
+  // use-cases where we have decided that one device = one layout going forward.
+  //
+  // also, the rr_graph depends on the layout, as well as the channelwidth, so include both parameters in search
+  //
+  // so, we will not rely **only** on the 'config.json', but will actually do:
+  // 1. find rr_graph file as : "<vt>/<corner>/<layoutname>_rr_graph_<channelwidth>.bin"
+  // 2. else, find rr_graph file as : "<vt>/<corner>/<layoutname>_rr_graph.bin" (default channel width for current device is *assumed*)
+  // 3. else, find rr_graph as "<vt>/<corner>/filename-from-json-value" (use config.json name)
 
-  // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+  // check for config.json (it should exist at v2.9.0+)
+  std::filesystem::path device_target_config_json_filepath = 
+      deviceConfigJSONPath(device_target);
+  if(device_target_config_json_filepath.empty()) {
 
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
-    // get json value
-    std::string json_value;
-    if( device_target_config_json.contains("CORNER_RRGRAPH_BIN") ) {
+    compiler->ErrorMessage("no compatible 'config.json' found in device data, cannot use this device!");
+    return empty_path;
+  }
 
-      json_value = device_target_config_json["CORNER_RRGRAPH_BIN"].get<std::string>();
+
+  // read config JSON and get the value
+  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // get json value
+  std::string json_value;
+  if( device_target_config_json.contains("CORNER_RRGRAPH_BIN") ) {
+
+    json_value = device_target_config_json["CORNER_RRGRAPH_BIN"].get<std::string>();
+  }
+
+
+  // 1. check for specific layout and channelwidth
+  // (**not** using the json value): <layoutname>_rr_graph_<channelwidth>.bin
+  // get current channelwidth from JSON settings:
+  std::string route_chan_width;
+  if( !QLSettingsManager::getStringValue("vpr", "route", "route_chan_width").empty() ) {
+
+    route_chan_width = QLSettingsManager::getStringValue("vpr", "route", "route_chan_width");
+  }
+  vpr_rr_graph_file_path = 
+      deviceVariantDirPath(device_target) /
+      std::string(device_target.device_variant_layout.name + "_rr_graph" + "_" + route_chan_width +".bin");
+
+  if(!FileUtils::FileExists(vpr_rr_graph_file_path)) {
+
+    vpr_rr_graph_file_path.clear();
+  }
+
+
+  // 2. check for specific layout
+  // (**not** using the json value): <layoutname>_rr_graph.bin
+  if(vpr_rr_graph_file_path.empty()) {
+
+    vpr_rr_graph_file_path = 
+        deviceVariantDirPath(device_target) /
+        std::string(device_target.device_variant_layout.name + "_rr_graph.bin");
+
+    if(!FileUtils::FileExists(vpr_rr_graph_file_path)) {
+
+      vpr_rr_graph_file_path.clear();
     }
-    // check for unencrypted file
+  }
+
+
+  // 3. check for filename as in config.json from the device
+  if(vpr_rr_graph_file_path.empty()) {
+
     vpr_rr_graph_file_path = 
         deviceVariantDirPath(device_target) / json_value;
     if(!FileUtils::FileExists(vpr_rr_graph_file_path)) {
@@ -3496,6 +3582,13 @@ std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget devic
         compiler->Message("Cannot find device vpr rr_graph file: " + vpr_rr_graph_file_path.string());
         vpr_rr_graph_file_path.clear();
     }
+  }
+
+  if(vpr_rr_graph_file_path.empty()) {
+    compiler->Message("Cannot find device vpr rr_graph file: " + vpr_rr_graph_file_path.string());
+  }
+  else {
+    compiler->Message("Using device vpr rr_graph file: " + vpr_rr_graph_file_path.string());
   }
 
   // std::cout << "[zyxw]" << "using vpr rr_graph file: " << vpr_rr_graph_file_path.string() << std::endl;
@@ -3516,27 +3609,88 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
   }
 
   // use the device specific router_lookahead file, and note that we will have bin files (should we support xml?)
+  //
+  // note that we will have a special handling case here, because we still want to support
+  // having multiple layouts in the same device (atleast for tsmc16) and it doesn't break
+  // use-cases where we have decided that one device = one layout going forward.
+  //
+  // also, the router_lookahead depends on the layout, as well as the channelwidth, so include both parameters in search
+  //
+  // so, we will not rely **only** on the 'config.json', but will actually do:
+  // 1. find router_lookahead file as : "<vt>/<corner>/<layoutname>_router_lookahead_<channelwidth>.bin"
+  // 2. else, find router_lookahead file as : "<vt>/<corner>/<layoutname>_router_lookahead.bin" (default channel width for current device is *assumed*)
+  // 3. else, find router_lookahead as "<vt>/<corner>/filename-from-json-value" (use config.json name)
 
-  // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+  // check for config.json (it should exist at v2.9.0+)
+  std::filesystem::path device_target_config_json_filepath = 
+      deviceConfigJSONPath(device_target);
+  if(device_target_config_json_filepath.empty()) {
 
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
-    // get json value
-    std::string json_value;
-    if( device_target_config_json.contains("CORNER_ROUTER_LOOKAHEAD_BIN") ) {
+    compiler->ErrorMessage("no compatible 'config.json' found in device data, cannot use this device!");
+    return empty_path;
+  }
 
-      json_value = device_target_config_json["CORNER_ROUTER_LOOKAHEAD_BIN"].get<std::string>();
+
+  // read config JSON and get the value
+  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // get json value
+  std::string json_value;
+  if( device_target_config_json.contains("CORNER_ROUTER_LOOKAHEAD_BIN") ) {
+
+    json_value = device_target_config_json["CORNER_ROUTER_LOOKAHEAD_BIN"].get<std::string>();
+  }
+
+
+  // 1. check for specific layout and channelwidth
+  // (**not** using the json value): <layoutname>_router_lookahead_<channelwidth>.bin
+  // get current channelwidth from JSON settings:
+  std::string route_chan_width;
+  if( !QLSettingsManager::getStringValue("vpr", "route", "route_chan_width").empty() ) {
+
+    route_chan_width = QLSettingsManager::getStringValue("vpr", "route", "route_chan_width");
+  }
+  vpr_router_lookahead_file_path = 
+      deviceVariantDirPath(device_target) /
+      std::string(device_target.device_variant_layout.name + "_router_lookahead" + "_" + route_chan_width +".bin");
+
+  if(!FileUtils::FileExists(vpr_router_lookahead_file_path)) {
+
+    vpr_router_lookahead_file_path.clear();
+  }
+
+
+  // 2. check for specific layout
+  // (**not** using the json value): <layoutname>_router_lookahead.bin
+  if(vpr_router_lookahead_file_path.empty()) {
+
+    vpr_router_lookahead_file_path = 
+        deviceVariantDirPath(device_target) /
+        std::string(device_target.device_variant_layout.name + "_router_lookahead.bin");
+
+    if(!FileUtils::FileExists(vpr_router_lookahead_file_path)) {
+
+      vpr_router_lookahead_file_path.clear();
     }
+  }
+
+
+  // 3. check for filename as in config.json from the device
+  if(vpr_router_lookahead_file_path.empty()) {
 
     vpr_router_lookahead_file_path = 
         deviceVariantDirPath(device_target) / json_value;
     if(!FileUtils::FileExists(vpr_router_lookahead_file_path)) {
 
-        compiler->Message("Cannot find device vpr router_lookahead file: " + vpr_router_lookahead_file_path.string());
         vpr_router_lookahead_file_path.clear();
     }
+  }
+
+  if(vpr_router_lookahead_file_path.empty()) {
+    compiler->Message("Cannot find device vpr router_lookahead file: " + vpr_router_lookahead_file_path.string());
+  }
+  else {
+    compiler->Message("Using device vpr router_lookahead file: " + vpr_router_lookahead_file_path.string());
   }
 
   // std::cout << "[zyxw]" << "using vpr router_lookahead file: " << vpr_router_lookahead_file_path.string() << std::endl;
