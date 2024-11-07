@@ -11,6 +11,7 @@
 #include "PackagePinsLoader.h"
 
 namespace FOEDAG {
+
 class QLPackagePinsLoader : public PackagePinsLoader {
   const QString COLUMN_ORIENTATION = "orientation";
   const QString COLUMN_PORT_NAME = "port_name";
