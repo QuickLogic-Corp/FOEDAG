@@ -150,14 +150,11 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
   }
   m_model->initListModel();
 
-  qInfo() << "~~~ 000 m_portToPinMap=" << m_portToPinMap.size();
   return std::make_pair(true, QString{});
 }
 
 LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
 {
-  qInfo() << "~~~ ioMapFilePath=" << ioMapFilePath;
-  qInfo() << "~~~ m_portToPinMap=" << m_portToPinMap.size();
   QFile file(ioMapFilePath);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
     qDebug() << "Failed to open the file." << ioMapFilePath;
@@ -182,7 +179,7 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
           QString pin{m_portToPinMap.value(port)};
           pinToLocationMap[pin] = location;
         } else {
-          qInfo() << "~~~ port" << port << "is not in m_portToPinMap" << m_portToPinMap.size();
+          //qInfo() << "port" << port << "is not in m_portToPinMap" << m_portToPinMap.size();
         }
       }
     }
@@ -196,13 +193,11 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
 
   LocationCollisionDetectorPtr collisionDetector = std::make_shared<LocationCollisionDetector>(pinToLocationMap);
   QMap<QString, QSet<QString>> overlappedLocationToPinsMap = collisionDetector->overlappedLocationToPinsMap();
-  if (overlappedLocationToPinsMap.isEmpty()) {
-    qDebug() << "~~~ iomap ok";
-  } else {
+  if (!overlappedLocationToPinsMap.isEmpty()) {
+    qWarning() << ioMapFilePath << "contains mapping issues";
     for (auto it = overlappedLocationToPinsMap.begin(); it != overlappedLocationToPinsMap.end(); ++it) {
-      qDebug() << "location" << it.key() << "has collisions for pins:" << it.value();
+      qWarning() << "The following pins" << it.value() << "share the same location:" << it.key(); 
     }
-    qDebug() << "~~~ total errors num:" << overlappedLocationToPinsMap.size();
   }
 
   return collisionDetector;
