@@ -860,6 +860,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
         std::cout << device_variant.family << ","
                   << device_variant.foundry << ","
                   << device_variant.node << ","
+                  << device_variant.devicename << ","
                   << device_variant.voltage_threshold << ","
                   << device_variant.p_v_t_corner << ","
                   << device_variant_layout.name << std::endl;
@@ -1581,12 +1582,14 @@ bool CompilerOpenFPGA_ql::Analyze() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -1718,12 +1721,14 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -2375,12 +2380,14 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -3404,12 +3411,14 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -3680,12 +3689,14 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -4049,12 +4060,14 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -4495,12 +4508,14 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -4656,12 +4671,14 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);

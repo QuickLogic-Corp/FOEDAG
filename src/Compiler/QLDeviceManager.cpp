@@ -1613,7 +1613,9 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
                                                            "_" +
                                                            device_variant.foundry +
                                                            "_" +
-                                                           device_variant.node);
+                                                           device_variant.node +
+                                                           "_" +
+                                                           device_variant.devicename);
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
       std::cout << "load cryptdb failed!" << std::endl;
