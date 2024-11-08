@@ -2216,26 +2216,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
 
-  // if user has explicitly asked us *not* to copy the yosys files 
-  // as per the device target, then skip the copy section below.
-  // we assume, that the user know that the share/yosys/ dir contents
-  // are already setup correctly for the device target being used
-  // a quick way to do this from the user side would be to just run
-  // a project/example without the --noyosyscopy file once, and then
-  // use multiple projects (in parallel) with the --noyosyscopy flag passed in
-  // subsequently.
-  if(GetSession()->CmdLine()->NoYosysCopy()) {
-    // skip the section copying yosys share files required
-    // for the device target
-  }
-  else {
-    // copy the yosys shared files (device models) to the yosys and tabbycad
-    // dirs in the install.
-    bool yosysSetupStatus = QLDeviceManager::getInstance()->deviceSetupYosysModels();
-    if(yosysSetupStatus == false) {
-      return false;
-    }
-  }
 
   // init synthesis script from the right location according to the selected device.
   std::string yosysScript = InitSynthesisScript();

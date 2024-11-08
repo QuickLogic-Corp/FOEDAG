@@ -91,8 +91,6 @@ void CommandLine::processArgs() {
       m_version = true;
     } else if (token == "--mute") {
       m_mute = true;
-    } else if (token == "--noyosyscopy") {
-      m_noyosyscopy = true;
     } else {
       std::cout << "ERROR Unknown command line option: " << m_argv[i]
                 << std::endl;
@@ -118,5 +116,4 @@ void CommandLine::Clear()
   m_version = false;
   m_useVerific = false;
   m_mute = false;
-  m_noyosyscopy = false;
 }
