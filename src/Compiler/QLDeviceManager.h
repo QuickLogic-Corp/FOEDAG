@@ -145,7 +145,6 @@ class QLDeviceManager : public QObject {
   // device files access API to have a uniform way of getting the required files
   public:
 
-  bool deviceSetupYosysModels(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceDataRootDirPath();
 
   bool deviceFileIsEncrypted(std::filesystem::path filepath);

@@ -1397,57 +1397,6 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
 
-  // helper cmd to setup yosys for a device without running a testcase for that device.
-  auto setup_yosys = [](void* clientData, Tcl_Interp* interp, int argc,
-                          const char* argv[]) -> int {
-
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-
-    // args = family, foundry, node (later devicename == codename-release-version) to be added.
-    if (argc != 7 && argc != 8) {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    setup_yosys <family> <foundry> <node> <vt> <corner> <layout> [devicename]");
-      return TCL_ERROR;
-    }
-
-    // parse args
-    std::string family = std::string(argv[1]);
-    std::string foundry = std::string(argv[2]);
-    std::string node = std::string(argv[3]);
-    std::string voltage_threshold = std::string(argv[4]);
-    std::string p_v_t_corner = std::string(argv[5]);
-    std::string layout_name = std::string(argv[6]);
-    // std::string devicename;
-    // if(argc == 8) {
-    //   devicename = std::string(argv[7]);
-    // }
-
-    QLDeviceTarget deviceTarget = 
-        QLDeviceManager::getInstance(true)->convertToDeviceTarget(family,
-                                                                  foundry,
-                                                                  node,
-                                                                  voltage_threshold,
-                                                                  p_v_t_corner,
-                                                                  layout_name);
-
-    bool yosysSetupStatus = 
-        QLDeviceManager::getInstance(true)->deviceSetupYosysModels(deviceTarget);
-
-    if(yosysSetupStatus == false) {
-      compiler->ErrorMessage("setup yosys for device failed: " + 
-                                family + "," +
-                                foundry + "," +
-                                node + "," +
-                                voltage_threshold + "," +
-                                p_v_t_corner + "," +
-                                layout_name);
-      return TCL_ERROR;
-    }
-
-    return TCL_OK;
-  };
-  interp->registerCmd("setup_yosys", setup_yosys, this, 0);
-
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.
   auto route_and_sta = [](void* clientData, Tcl_Interp* interp, int argc,
@@ -2731,7 +2680,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosys_options += " -synplify";
   }
 
-  std::string device_data_path_yosys((QLDeviceManager::getInstance()->deviceTypeDirPath()).string() + "/yosys/quicklogic/");
+  // pass in the path to the device specific yosys libraries directly.
+  std::string device_data_path_yosys = 
+      (QLDeviceManager::getInstance()->deviceTypeDirPath()).string() +
+      std::string("/yosys/quicklogic/");
   yosys_options += " -lib_path " + device_data_path_yosys;
 
   // TODO: trim yosys_options at the front
