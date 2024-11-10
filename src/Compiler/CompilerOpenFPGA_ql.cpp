@@ -872,56 +872,6 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
 
-  // helper cmd to setup yosys for a device without running a testcase for that device.
-  auto setup_yosys = [](void* clientData, Tcl_Interp* interp, int argc,
-                          const char* argv[]) -> int {
-
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-
-    // args = family, foundry, node (later devicename == codename-release-version) to be added.
-    if (argc != 7 && argc != 8) {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    setup_yosys <family> <foundry> <node> <devicename> <vt> <corner> <layout>");
-      return TCL_ERROR;
-    }
-
-    // parse args
-    std::string family = std::string(argv[1]);
-    std::string foundry = std::string(argv[2]);
-    std::string node = std::string(argv[3]);
-    std::string devicename = std::string(argv[4]);
-    std::string voltage_threshold = std::string(argv[5]);
-    std::string p_v_t_corner = std::string(argv[6]);
-    std::string layout_name = std::string(argv[7]);
-
-    QLDeviceTarget deviceTarget = 
-        QLDeviceManager::getInstance(true)->convertToDeviceTarget(family,
-                                                                  foundry,
-                                                                  node,
-                                                                  devicename,
-                                                                  voltage_threshold,
-                                                                  p_v_t_corner,
-                                                                  layout_name);
-
-    bool yosysSetupStatus = 
-        QLDeviceManager::getInstance(true)->deviceSetupYosysModels(deviceTarget);
-
-    if(yosysSetupStatus == false) {
-      compiler->ErrorMessage("setup yosys for device failed: " + 
-                                family + "," +
-                                foundry + "," +
-                                node + "," +
-                                devicename + "," +
-                                voltage_threshold + "," +
-                                p_v_t_corner + "," +
-                                layout_name);
-      return TCL_ERROR;
-    }
-
-    return TCL_OK;
-  };
-  interp->registerCmd("setup_yosys", setup_yosys, this, 0);
-
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.
   auto route_and_sta = [](void* clientData, Tcl_Interp* interp, int argc,
@@ -1745,26 +1695,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
 
-  // if user has explicitly asked us *not* to copy the yosys files 
-  // as per the device target, then skip the copy section below.
-  // we assume, that the user know that the share/yosys/ dir contents
-  // are already setup correctly for the device target being used
-  // a quick way to do this from the user side would be to just run
-  // a project/example without the --noyosyscopy file once, and then
-  // use multiple projects (in parallel) with the --noyosyscopy flag passed in
-  // subsequently.
-  if(GetSession()->CmdLine()->NoYosysCopy()) {
-    // skip the section copying yosys share files required
-    // for the device target
-  }
-  else {
-    // copy the yosys shared files (device models) to the yosys and tabbycad
-    // dirs in the install.
-    bool yosysSetupStatus = QLDeviceManager::getInstance()->deviceSetupYosysModels();
-    if(yosysSetupStatus == false) {
-      return false;
-    }
-  }
 
   // init synthesis script from the right location according to the selected device.
   std::string yosysScript = InitSynthesisScript();
@@ -2208,6 +2138,12 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 
     yosys_options += " -synplify";
   }
+
+  // pass in the path to the device specific yosys libraries directly.
+  std::string device_data_path_yosys = 
+      (QLDeviceManager::getInstance()->deviceTypeDirPath()).string() +
+      std::string("/yosys/quicklogic/");
+  yosys_options += " -lib_path " + device_data_path_yosys;
 
   // TODO: trim yosys_options at the front
   yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
