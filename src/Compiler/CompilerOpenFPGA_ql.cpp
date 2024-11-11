@@ -750,10 +750,10 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
 
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
 
-    // add_device <family> <foundry> <node> <source_device_data_dir_path> [force]
+    // add_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [force]
     // this will perform the steps:
     // 1. check if the 'device' already exists in the installation
-    //      check if the '<INSTALLATION> / device_data / <family> / <foundry> / <node>' dir path
+    //      check if the '<INSTALLATION> / device_data / <family> / <foundry> / <node> / <devicename>' dir path
     //        already exists in installation
     //      if it already exists, we will display an error, and stop.
     //      if 'force' has been specified, we will push out a warning, but proceed further.
@@ -764,13 +764,13 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     // 3. encrypt all the files in the <source_device_data_dir_path> in place
     // 4. copy over all the encrypted files & cryption db
     //      from: <source_device_data_dir_path>
-    //      to: <INSTALLATION> / device_data / <family> / <foundry> / <node>
+    //      to: <INSTALLATION> / device_data / <family> / <foundry> / <node> / <devicename>
     //      and clean up all the encrypted files & cryption db from the <source_device_data_dir_path>
 
-    // check args: 5 or 6(if force is specified)
-    if (argc != 5 && argc != 6) {
+    // check args: 6 or 7(if force is specified)
+    if (argc != 6 && argc != 7) {
       compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    encrypt <family> <foundry> <node> <source_device_data_dir_path> [force]");
+                             "    encrypt <family> <foundry> <node> <devicename> <source_device_data_dir_path> [force]");
       return TCL_ERROR;
     }
 
@@ -778,22 +778,23 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     std::string family = std::string(argv[1]);
     std::string foundry = std::string(argv[2]);
     std::string node = std::string(argv[3]);
-    std::string source_device_data_dir_path = argv[4];
+    std::string devicename = std::string(argv[4]);
+    std::string source_device_data_dir_path = argv[5];
     bool force = false;
-    if(argc == 6) {
-      if( compiler->ToLower(std::string(argv[5])).compare("force") == 0 ) {
+    if(argc == 7) {
+      if( compiler->ToLower(std::string(argv[6])).compare("force") == 0 ) {
         force = true;
       }
     }
 
-    int status = QLDeviceManager::getInstance()->addDevice(family, foundry, node, source_device_data_dir_path, force);
+    int status = QLDeviceManager::getInstance()->addDevice(family, foundry, node, devicename, source_device_data_dir_path, force);
 
     if(status == 0) {
-      compiler->Message("\ndevice added ok: " + family + "," + foundry + "," + node);
+      compiler->Message("\ndevice added ok: " + family + "," + foundry + "," + node + "," + devicename);
       return TCL_OK;
     }
 
-    compiler->Message("\nadd device failed: " + family + "," + foundry + "," + node);
+    compiler->Message("\nadd device failed: " + family + "," + foundry + "," + node + "," + devicename);
     return TCL_ERROR;
   };
   interp->registerCmd("add_device", add_device, this, 0);
@@ -803,7 +804,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
 
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
 
-    // encrypt_device <family> <foundry> <node> <source_device_data_dir_path> [target_device_data_dir_path]
+    // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [target_device_data_dir_path]
     // this will perform the steps:
     // 1. ensure that the structure in the <source_device_data_dir_path> reflects 
     //      required structure, as specified in the document: <TODO>
@@ -817,10 +818,10 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     //    if target path is not specified, default is a new dir created at same level as source_device_data_dir_path
     //    with the same name + "_en" added.
 
-    // check args: 5 or 6(if target is specified)
-    if (argc != 5 && argc != 6) {
+    // check args: 6 or 7(if target is specified)
+    if (argc != 6 && argc != 7) {
       compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    encrypt_device <family> <foundry> <node> <source_device_data_dir_path> [target_device_data_dir_path]");
+                             "    encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [target_device_data_dir_path]");
       return TCL_ERROR;
     }
 
@@ -828,552 +829,25 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     std::string family = std::string(argv[1]);
     std::string foundry = std::string(argv[2]);
     std::string node = std::string(argv[3]);
-    std::string source_device_data_dir_path = argv[4];
+    std::string devicename = std::string(argv[4]);
+    std::string source_device_data_dir_path = argv[5];
     std::string target_device_data_dir_path;
-    if(argc == 6) {
-      target_device_data_dir_path = argv[5];
+    if(argc == 7) {
+      target_device_data_dir_path = argv[6];
     }
 
-    int status = QLDeviceManager::getInstance()->encryptDevice(family, foundry, node, source_device_data_dir_path, target_device_data_dir_path);
+    int status = QLDeviceManager::getInstance()->encryptDevice(family, foundry, node, devicename, source_device_data_dir_path, target_device_data_dir_path);
 
     if(status == 0) {
-      compiler->Message("\ndevice encrypted ok: " + family + "," + foundry + "," + node);
+      compiler->Message("\ndevice encrypted ok: " + family + "," + foundry + "," + node + "," + devicename);
       return TCL_OK;
     }
 
-    compiler->Message("\nencrypt device failed: " + family + "," + foundry + "," + node);
+    compiler->Message("\nencrypt device failed: " + family + "," + foundry + "," + node + "," + devicename);
     return TCL_ERROR;
   };
   interp->registerCmd("encrypt_device", encrypt_device, this, 0);
 
-#if AURORA_DEPRECATED
-  auto generate_fpga_io_map = [](void* clientData, Tcl_Interp* interp, int argc,
-                                    const char* argv[]) -> int {
-
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-
-    // theory: 
-    // we want to generate the FPGA IO MAP XML file for every layout available
-    //    in the VPR architecture file(s)
-    // to do this, we need to use OpenFPGA which provides the option to do so, but
-    //    it requires that we run the full flow (yosys+vpr+openfpga) to generate this.
-    // so, we use a very simple and2 design, and for every layout that exists in the
-    //    vpr.xml (of each device variant) run the aurora flow for that layout.
-    // then, we take the generated fpga io map xml and copy it into the device data.
-    // so, we would be running the aurora flow for and2 for NxL times,
-    //    where N=number of device_variants, L=number of fixed_layouts
-    //
-    // implementation notes:
-    // iterate through all the 'vpr.xml' files in the device data dir:
-    // we know family, foundry, node
-    // vpr.xml -> dir = p_v_t_corner (best/worst etc.)
-    // vpr.xml -> dir -> parent = voltage_threshold (ulvt/lvt etc.)
-    // then, parse vpr.xml for the list of the 'fixed_layout' elements avaialble.
-    // for each fixed_layout:
-    //    generate the and2.json from the template with device settings(family, foundry...)
-    //    run aurora --batch --script and2.tcl to run regular flow to generate fpga_io_map xml
-    //    grab the _fpga_io_map.xml file generated, and copy into the device_data dir
-    //
-    // now, this has a redundancy:
-    // multiple vpr files, may have the same layout, so we would be repeating it unnecessarily!!
-    // current "worst case" assumption: each device variant may have different layout!
-    //  so, we need the io map for every variant + layout.
-    // if we know that ALL VPR XML variant files have the SAME LAYOUTs, we can just process
-    // the first VPR XML that we find, and be done with it.
-    // This is a reasonable ask, as we control the layouts in the XML files.
-    // how about a customer? different pvtcorner/thresholds should not need to have different
-    // fixed_layouts?
-    // <TODO>, if needed we will simplify as above.
-
-
-    // generate_fpga_io_map <family> <foundry> <node> [source_device_data_dir_path] [force] [size]
-    // this will perform the steps:
-    // 1. check the expected fpga_io_map.xml files, and if any are missing
-    //    by default, it will only generate the files if they are missing.
-    //    to force regeneration of all xml files, use "force"
-    // 2. the generated xml files are placed into device_data/family/foundry/node/fpga_io_map directory
-    // 3. if [source_device_data_dir_path] is specified, the files are also placed into [source_device_data_dir_path]/fpga_io_map directory
-
-    // check args:4 or 5 or 6(if source_device_data_dir_path/force is specified)
-    if (argc != 4 && argc != 5 && argc != 6) {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    generate_fpga_io_map <family> <foundry> <node> [source_device_data_dir_path] [force]");
-      return TCL_ERROR;
-    }
-
-    // parse args
-    std::string family = std::string(argv[1]);
-    std::string foundry = std::string(argv[2]);
-    std::string node = std::string(argv[3]);
-    std::filesystem::path source_device_data_dir_path;
-    bool force = false;
-    if(argc == 4) {
-      // no force
-      // no source_device_data_dir_path
-      // ok.
-    }
-    else if(argc == 5) {
-      // argv[4] can be either force, or source_device_data_dir_path:
-      if( compiler->ToLower(std::string(argv[4])).compare("force") == 0 ) {
-        force = true;
-      }
-      else {
-        source_device_data_dir_path = argv[4];
-      }
-    }
-    else if(argc == 6) {
-      // then argv[4] MUST be source_device_data_dir_path
-      // and argv[5] MUST be 'force'
-      if( compiler->ToLower(std::string(argv[4])).compare("force") == 0 ) {
-        compiler->ErrorMessage("\"force\" must be the last option!");
-        compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    generate_fpga_io_map <family> <foundry> <node> [source_device_data_dir_path] [force]");
-        return TCL_ERROR;
-      }
-      else {
-        source_device_data_dir_path = argv[4];
-      }
-      
-      if( compiler->ToLower(std::string(argv[5])).compare("force") == 0 ) {
-        force = true;
-      }
-      else {
-        compiler->ErrorMessage("\"force\" must be the last option!");
-        compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    generate_fpga_io_map <family> <foundry> <node> [source_device_data_dir_path] [force]");
-        return TCL_ERROR;
-      }
-    }
-    else {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    generate_fpga_io_map <family> <foundry> <node> [source_device_data_dir_path] [force]");
-      return TCL_ERROR;
-    }
-
-    std::error_code ec;
-    std::filesystem::path source_device_data_dir_path_c;
-    if(!source_device_data_dir_path.empty()) {
-      // convert to canonical path, which will also check that the path exists.
-      source_device_data_dir_path_c = 
-              std::filesystem::canonical(source_device_data_dir_path, ec);
-      if(ec) {
-        // error
-        compiler->ErrorMessage("Please check if the path specified exists!");
-        compiler->ErrorMessage("path: " + source_device_data_dir_path.string());
-        return TCL_ERROR;
-      }
-    }
-
-    // debug prints
-    // std::cout << std::endl;
-    // std::cout << "family: " << family << std::endl;
-    // std::cout << "foundry: " << foundry << std::endl;
-    // std::cout << "node: " << node << std::endl;
-    // std::cout << "source_device_data_dir_path: " << source_device_data_dir_path_c << std::endl;
-    // std::cout << "force: " << std::string(force?"true":"false") << std::endl;
-    // std::cout << std::endl;
-
-    // collect the list of every filepath in the device_data directory that we want to use further
-    // we can work with vpr.xml or vpr.xml.en files
-    std::string vpr_xml_pattern = "vpr\\.xml.*";
-    std::filesystem::path device_data_dir_path = 
-        std::filesystem::path(QLDeviceManager::getInstance()->deviceDataRootDirPath() /
-                              family /
-                              foundry /
-                              node);
-
-    std::vector<std::filesystem::path> device_data_file_list;
-    for (const std::filesystem::directory_entry& dir_entry :
-        std::filesystem::recursive_directory_iterator(device_data_dir_path,
-                                                      std::filesystem::directory_options::skip_permission_denied,
-                                                      ec))
-    {
-      if(ec) {
-        // error
-        compiler->ErrorMessage(std::string("failed listing contents of ") +  device_data_dir_path.string());
-        return TCL_ERROR;
-      }
-
-      if(dir_entry.is_regular_file(ec)) {
-          // we want vpr.xml files:
-          if (std::regex_match(dir_entry.path().filename().string(), 
-                                std::regex(vpr_xml_pattern, 
-                                std::regex::icase))) {
-            device_data_file_list.push_back(dir_entry.path().string());
-          }
-      }
-
-      if(ec) {
-        compiler->ErrorMessage(std::string("error while checking: ") +  dir_entry.path().string());
-        return TCL_ERROR;
-      }
-    }
-
-    // for each vpr.xml, get all the "fixed_layout" elements
-    // for each "fixed_layout" element, generate the fpga_io_map xml file.
-    for(std::filesystem::path source_file_path : device_data_file_list) {
-      // we already have family, foundry, node from inputs.
-      // get the p_v_t_corner and voltage_threshold
-      std::string p_v_t_corner;
-      std::string voltage_threshold;
-      if(std::filesystem::equivalent(source_file_path.parent_path(), device_data_dir_path)) {
-        // this means that the vpr.xml is inside the source_device_data_path itself, so this is the
-        // "default" variant and does not have any p_v_t_corner or voltage_threshold defined.
-      }
-      else {
-        // get the dir-name component of the path, this is the p_v_t_corner
-        p_v_t_corner = source_file_path.parent_path().filename().string();
-      
-        // get the dir-name component of the parent of the parent of the path, this is the voltage_threshold
-        voltage_threshold = source_file_path.parent_path().parent_path().filename().string();
-      }
-
-      std::filesystem::path vpr_xml_filepath;
-      // if the file is encrypted, we need to decrypt it first
-      if(source_file_path.filename() == "vpr.xml.en") {
-        vpr_xml_filepath = compiler->GenerateTempFilePath();
-
-        std::filesystem::path m_cryptdbPath = 
-            CRFileCryptProc::getInstance()->getCryptDBFileName(device_data_dir_path.string(),
-                                                              family + "_" + foundry + "_" + node);
-
-        if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-          compiler->Message("load cryptdb failed!");
-          compiler->CleanTempFiles();
-          return TCL_ERROR;
-        }
-
-        if (!CRFileCryptProc::getInstance()->decryptFile(source_file_path, vpr_xml_filepath)) {
-          compiler->ErrorMessage("decryption failed!");
-          compiler->CleanTempFiles();
-          return TCL_ERROR;
-        }
-      }
-      else if(source_file_path.filename() == "vpr.xml") {
-        vpr_xml_filepath = source_file_path;
-      }
-      else {
-        // should never get here.
-        compiler->CleanTempFiles();
-        return TCL_ERROR;
-      }
-
-      // open file with Qt
-      // qDebug() << "vpr xml" << QString::fromStdString(vpr_xml_filepath.string());
-      QFile file(vpr_xml_filepath.string().c_str());
-      if (!file.open(QFile::ReadOnly)) {
-        compiler->ErrorMessage("Cannot open file: " + vpr_xml_filepath.string());
-        compiler->CleanTempFiles();
-        return TCL_ERROR;
-      }
-
-      // parse as XML with Qt
-      QDomDocument doc;
-      if (!doc.setContent(&file)) {
-        file.close();
-        compiler->ErrorMessage("Incorrect file: " + vpr_xml_filepath.string());
-        compiler->CleanTempFiles();
-        return TCL_ERROR;
-      }
-      file.close();
-      compiler->CleanTempFiles(); // the file is not needed anymore.
-
-      // get all "fixed_layout" tag elements
-      QStringList listOfFixedLayout;
-      QDomNodeList nodes = doc.elementsByTagName("fixed_layout");
-      for(int i = 0; i < nodes.count(); i++) {
-          QDomNode node = nodes.at(i);
-          if(node.isElement()) {
-              // get the "name" attribute for the "fixed_layout" tag element
-              QString fixed_layout_value = node.toElement().attribute("name", "notfound");
-              listOfFixedLayout.append(fixed_layout_value);
-          }
-      }
-
-      // dir path to store the fpga_io_map xml files:
-      std::filesystem::path device_data_fpga_io_map_dir_path = 
-          device_data_dir_path / "fpga_io_map";
-
-      // ensure that the dir path to store the fpga_io_map xml is created if not existing:
-      std::filesystem::create_directories(device_data_fpga_io_map_dir_path,
-                                          ec);
-      if(ec) {
-        // error
-        compiler->ErrorMessage(std::string("failed to create directory: ") + device_data_fpga_io_map_dir_path.string());
-        return TCL_ERROR;
-      }
-
-      // same for dir path to store the fpga_io_map xml files in source device data dir if specified:
-      std::filesystem::path source_device_data_fpga_io_map_dir_path;
-      if(!source_device_data_dir_path_c.empty()) {
-        source_device_data_fpga_io_map_dir_path = 
-            source_device_data_dir_path_c / "fpga_io_map";
-
-        // ensure that the dir path to store the fpga_io_map xml is created if not existing:
-        std::filesystem::create_directories(source_device_data_fpga_io_map_dir_path,
-                                            ec);
-        if(ec) {
-          // error
-          compiler->ErrorMessage(std::string("failed to create directory: ") + source_device_data_fpga_io_map_dir_path.string());
-          return TCL_ERROR;
-        }
-      }
-
-      // we don't need this yet.
-      // std::filesystem::path current_design_dir = std::filesystem::current_path();
-      // qDebug() << "current_design_dir: " << QString::fromStdString(current_design_dir.string());
-
-      std::filesystem::path current_working_dir = compiler->m_projManager->projectPath();
-      // qDebug() << "current_working_dir: " << QString::fromStdString(current_working_dir.string());
-
-      // reference design to use for the fpga_io_map xml generation
-      // this is guarnateed to be present in the scripts/and2/ path (refer CMakeLists.txt)
-      std::filesystem::path source_and2_design_dir = compiler->GetSession()->Context()->DataPath() /
-                                                      std::filesystem::path("..") /
-                                                      std::filesystem::path("scripts") /
-                                                      std::filesystem::path("and2");
-      // qDebug() << "source_and2_design_dir: " << QString::fromStdString(source_and2_design_dir.string());
-
-      // we need to copy the "and2/" dir **content** as is into the current working directory
-      std::filesystem::path target_and2_design_dir = current_working_dir;
-      // ensure that the dir path to store the and2/ files is created if not existing:
-      std::filesystem::create_directories(target_and2_design_dir,
-                                          ec);
-
-      // copy the "and2" dir **content** from source(scripts/) into the current project path,
-      // because, when foedag actually executes a command, it will first change dir
-      // to the current project path (working directory), and then execute it.
-      // the command that we want to execute would be "aurora --batch --script and2.tcl"
-      // so "and2" content should be present in the project path itself.
-      for (const std::filesystem::directory_entry& dir_entry :
-          std::filesystem::directory_iterator(source_and2_design_dir,
-                                              std::filesystem::directory_options::skip_permission_denied,
-                                              ec))
-      {
-        if(ec) {
-          // error
-          compiler->ErrorMessage(std::string("failed listing contents of ") +  source_and2_design_dir.string());
-          return TCL_ERROR;
-        }
-        if(dir_entry.is_regular_file(ec)) {
-
-          // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
-          if(FileUtils::FileExists(std::filesystem::path(target_and2_design_dir / dir_entry.path().filename()))) {
-            std::filesystem::remove(target_and2_design_dir / dir_entry.path().filename());
-          }
-          std::filesystem::copy_file(dir_entry.path().string(),
-                                      target_and2_design_dir / dir_entry.path().filename(),
-                                      std::filesystem::copy_options::overwrite_existing,
-                                      ec);
-          if(ec) {
-            std::cout << "error number : " << ec.value() << "\n"
-                      << "     message : " << ec.message() << "\n"
-                      << "    category : " << ec.category().name() << "\n"
-                      << std::endl;
-            // error
-            compiler->ErrorMessage(std::string("failed to copy: ") + dir_entry.path().string() + "\n" +
-                                    std::string("to: ") + target_and2_design_dir.string());
-            return TCL_ERROR;
-          }
-        }
-      }
-
-      // qDebug() << QString::fromStdString(family);
-      // qDebug() << QString::fromStdString(foundry);
-      // qDebug() << QString::fromStdString(node);
-      // qDebug() << QString::fromStdString(voltage_threshold);
-      // qDebug() << QString::fromStdString(p_v_t_corner);
-      for(QString fixed_layout_value: listOfFixedLayout) {
-
-        // qDebug() << fixed_layout_value;
-        compiler->Message(std::string("\n>>>> processing: ") +
-                          QLDeviceManager::getInstance()->DeviceString(family, foundry, node, voltage_threshold, p_v_t_corner, "") +
-                          "," +
-                          fixed_layout_value.toStdString() +
-                          std::string("\n"));
-
-        // testing
-        //if(fixed_layout_value == QString("base")) continue; // exclude filter
-        // if( (fixed_layout_value != QString("4x4")) &&
-        //     (fixed_layout_value != QString("8x8"))) continue; // include filter
-        // if(fixed_layout_value != QString("76x76")) continue; // include filter
-        // if(!voltage_threshold.empty() && !p_v_t_corner.empty()) continue; // include filter
-
-        // form the expected device_data_fpga_io_map file name
-        std::string device_data_fpga_io_map_filename = family +
-                                                        std::string("_") +
-                                                        foundry +
-                                                        std::string("_") +
-                                                        node;
-        if(!voltage_threshold.empty()) {
-          device_data_fpga_io_map_filename += std::string("_") +
-                                              voltage_threshold;
-        }
-        if(!p_v_t_corner.empty()) {
-          device_data_fpga_io_map_filename += std::string("_") +
-                                              p_v_t_corner;
-        }
-        device_data_fpga_io_map_filename += std::string("_") +
-                                        fixed_layout_value.toStdString() +
-                                        std::string("_fpga_io_map.xml");
-        
-        // fpga_io_map xml should finally be here in the device data dir
-        std::filesystem::path device_data_fpga_io_map_filepath = device_data_fpga_io_map_dir_path / device_data_fpga_io_map_filename;
-        // qDebug() << "device_data_fpga_io_map_filepath: " << QString::fromStdString(device_data_fpga_io_map_filepath.string());
-
-        // fpga_io_map xml can also be output to the 'source' device data for future use if specified:
-        std::filesystem::path source_device_data_fpga_io_map_filepath;
-        if(!source_device_data_fpga_io_map_dir_path.empty()) {
-          source_device_data_fpga_io_map_filepath = 
-              source_device_data_fpga_io_map_dir_path / device_data_fpga_io_map_filename;
-        }
-
-        if(FileUtils::FileExists(device_data_fpga_io_map_filepath)) {
-          // the fpga_io_map xml seems to be already generated and present, so skip this fixed_layout combo.
-          // if we really need to regenerate the xml files, add the 'force' option!
-          if(force) {
-            compiler->Message("\nWARNING: The fpga_io_map xml already exists.");
-            compiler->Message(std::string("device_data_fpga_io_map_filename:") +
-                              std::string("\n    ") +
-                              device_data_fpga_io_map_filename);
-            compiler->Message(std::string("target device_data_fpga_io_map_filepath:") +
-                              std::string("\n    ") +
-                              device_data_fpga_io_map_filepath.string());
-            compiler->Message("'force' has been specified, this will overwrite the fpga_io_map xml.");
-            compiler->Message("\n");
-          }
-          else {
-            compiler->Message("\n");
-            compiler->Message("\nWARNING: The fpga_io_map xml already exists, skip this layout!");
-            compiler->Message(std::string("device_data_fpga_io_map_filename:") +
-                              std::string("\n    ") +
-                              device_data_fpga_io_map_filename);
-            compiler->Message(std::string("target device_data_fpga_io_map_filepath:") +
-                              std::string("\n    ") +
-                              device_data_fpga_io_map_filepath.string());
-            compiler->Message("Please specify 'force' to overwrite the fpga_io_map xml.");
-            compiler->Message("Please enter command in the format:\n"
-                              "    generate_fpga_io_map <family> <foundry> <node> [source_device_data_dir_path] [force]");
-            compiler->Message("\n");
-            continue; // with the next 'fixed_layout'
-          }
-        }
-        else {
-            compiler->Message("\nNew fpga_io_map xml will be generated.");
-            compiler->Message(std::string("device_data_fpga_io_map_filename:") +
-                              std::string("\n    ") +
-                              device_data_fpga_io_map_filename);
-            compiler->Message(std::string("target device_data_fpga_io_map_filepath:") +
-                              std::string("\n    ") +
-                              device_data_fpga_io_map_filepath.string());
-            compiler->Message("\n");
-        }
-
-        // fpga_io_map xml will be generated using and2 design after aurora flow here
-        // the extra "and2" in the path below is because, again, foedag will change to 
-        // the corresponding "working_directory" when actually executing the command.
-        std::filesystem::path and2_fpga_io_map_filepath = target_and2_design_dir / "and2" / device_data_fpga_io_map_filename;
-        // qDebug() << "and2_fpga_io_map_filepath: " << QString::fromStdString(and2_fpga_io_map_filepath.string());
-
-        // read "and2" project json template
-        std::filesystem::path and2_json_template = target_and2_design_dir / "and2.json.in";
-        // qDebug() << "and2_json_template: " << QString::fromStdString(and2_json_template.string());
-        std::ifstream stream(and2_json_template.string());
-        if (!stream.good()) {
-          compiler->ErrorMessage("Cannot find and2_json_template: " +
-                                std::string(and2_json_template.string()));
-          return TCL_ERROR;
-        }
-        std::string and2_json_content((std::istreambuf_iterator<char>(stream)),
-                                      std::istreambuf_iterator<char>());
-        stream.close();
-
-        // qDebug() << "\n\n\n";
-        // qDebug() << QString::fromStdString(and2_json_content);
-        // qDebug() << "\n\n\n";
-
-        // update json content with actual variable values of current device and layout (size)
-        and2_json_content = compiler->ReplaceAll(and2_json_content, "${DEVICE_FAMILY}", family);
-        and2_json_content = compiler->ReplaceAll(and2_json_content, "${DEVICE_FOUNDRY}", foundry);
-        and2_json_content = compiler->ReplaceAll(and2_json_content, "${DEVICE_NODE}", node);
-        and2_json_content = compiler->ReplaceAll(and2_json_content, "${DEVICE_VOLTAGE_THRESHOLD}", voltage_threshold);
-        and2_json_content = compiler->ReplaceAll(and2_json_content, "${DEVICE_P_V_T_CORNER}", p_v_t_corner);
-        and2_json_content = compiler->ReplaceAll(and2_json_content, "${DEVICE_SIZE}", fixed_layout_value.toStdString());
-        
-        // now save updated json file
-        std::filesystem::path and2_json = target_and2_design_dir / "and2.json";
-        std::ofstream ofs(and2_json.string());
-        ofs << and2_json_content;
-        ofs.close();
-
-        // invoke aurora flow for the and2 design, using the updated json
-        std::string command = std::string("aurora") +
-                                std::string(" --batch") +
-                                std::string(" --mute") +
-                                std::string(" --script") +
-                                std::string(" ") +
-                                std::string("and2.tcl");
-        int status = compiler->ExecuteAndMonitorSystemCommand(command);
-        compiler->CleanTempFiles();
-        if (status) {
-          compiler->Message("oops! aurora2 flow to generate fpga_io_map failed!");
-          std::filesystem::remove(and2_json);
-          return TCL_ERROR;
-        }
-
-        // copy generated fpga io map from the and2 dir into the device data dir.
-        // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
-        if(FileUtils::FileExists(device_data_fpga_io_map_filepath)) {
-          std::filesystem::remove(device_data_fpga_io_map_filepath);
-        }
-        std::filesystem::copy_file(and2_fpga_io_map_filepath,
-                                    device_data_fpga_io_map_filepath,
-                                    std::filesystem::copy_options::overwrite_existing,
-                                    ec);
-        if(ec) {
-          std::cout << "error number : " << ec.value() << "\n"
-                    << "     message : " << ec.message() << "\n"
-                    << "    category : " << ec.category().name() << "\n"
-                    << std::endl;
-          // error
-          compiler->ErrorMessage(std::string("failed to copy: ") + and2_fpga_io_map_filepath.string() + "\n" +
-                                  std::string("to: ") + device_data_fpga_io_map_filepath.string());
-          return TCL_ERROR;
-        }
-
-        // also copy the fpga io map xml to the source device data dir if specified:
-        if(!source_device_data_fpga_io_map_filepath.empty()) {
-          // copy generated fpga io map from the and2 dir into the 'source' device data dir.
-          // MinGW g++ bug? overwrite_existing, still throws error if it exists? hence the check below.
-          if(FileUtils::FileExists(source_device_data_fpga_io_map_filepath)) {
-            std::filesystem::remove(source_device_data_fpga_io_map_filepath);
-          }
-          std::filesystem::copy_file(and2_fpga_io_map_filepath,
-                                      source_device_data_fpga_io_map_filepath,
-                                      std::filesystem::copy_options::overwrite_existing,
-                                      ec);
-          if(ec) {
-            std::cout << "error number : " << ec.value() << "\n"
-                      << "     message : " << ec.message() << "\n"
-                      << "    category : " << ec.category().name() << "\n"
-                      << std::endl;
-            // error
-            compiler->ErrorMessage(std::string("failed to copy: ") + and2_fpga_io_map_filepath.string() + "\n" +
-                                    std::string("to: ") + source_device_data_fpga_io_map_filepath.string());
-            return TCL_ERROR;
-          }
-        }
-
-        // finally delete the generated json for this combo.
-        std::filesystem::remove(and2_json);
-      }
-      // qDebug() << "\n\n";
-    }
-
-    return TCL_OK;
-  };
-  interp->registerCmd("generate_fpga_io_map", generate_fpga_io_map, this, 0);
-#endif // #if AURORA_DEPRECATED
 
   auto list_devices = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
@@ -1386,6 +860,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
         std::cout << device_variant.family << ","
                   << device_variant.foundry << ","
                   << device_variant.node << ","
+                  << device_variant.devicename << ","
                   << device_variant.voltage_threshold << ","
                   << device_variant.p_v_t_corner << ","
                   << device_variant_layout.name << std::endl;
@@ -1396,57 +871,6 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   return TCL_OK;
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
-
-  // helper cmd to setup yosys for a device without running a testcase for that device.
-  auto setup_yosys = [](void* clientData, Tcl_Interp* interp, int argc,
-                          const char* argv[]) -> int {
-
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-
-    // args = family, foundry, node (later devicename == codename-release-version) to be added.
-    if (argc != 7 && argc != 8) {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    setup_yosys <family> <foundry> <node> <vt> <corner> <layout> [devicename]");
-      return TCL_ERROR;
-    }
-
-    // parse args
-    std::string family = std::string(argv[1]);
-    std::string foundry = std::string(argv[2]);
-    std::string node = std::string(argv[3]);
-    std::string voltage_threshold = std::string(argv[4]);
-    std::string p_v_t_corner = std::string(argv[5]);
-    std::string layout_name = std::string(argv[6]);
-    // std::string devicename;
-    // if(argc == 8) {
-    //   devicename = std::string(argv[7]);
-    // }
-
-    QLDeviceTarget deviceTarget = 
-        QLDeviceManager::getInstance(true)->convertToDeviceTarget(family,
-                                                                  foundry,
-                                                                  node,
-                                                                  voltage_threshold,
-                                                                  p_v_t_corner,
-                                                                  layout_name);
-
-    bool yosysSetupStatus = 
-        QLDeviceManager::getInstance(true)->deviceSetupYosysModels(deviceTarget);
-
-    if(yosysSetupStatus == false) {
-      compiler->ErrorMessage("setup yosys for device failed: " + 
-                                family + "," +
-                                foundry + "," +
-                                node + "," +
-                                voltage_threshold + "," +
-                                p_v_t_corner + "," +
-                                layout_name);
-      return TCL_ERROR;
-    }
-
-    return TCL_OK;
-  };
-  interp->registerCmd("setup_yosys", setup_yosys, this, 0);
 
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.
@@ -2108,12 +1532,14 @@ bool CompilerOpenFPGA_ql::Analyze() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -2245,12 +1671,14 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -2267,26 +1695,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
 
-  // if user has explicitly asked us *not* to copy the yosys files 
-  // as per the device target, then skip the copy section below.
-  // we assume, that the user know that the share/yosys/ dir contents
-  // are already setup correctly for the device target being used
-  // a quick way to do this from the user side would be to just run
-  // a project/example without the --noyosyscopy file once, and then
-  // use multiple projects (in parallel) with the --noyosyscopy flag passed in
-  // subsequently.
-  if(GetSession()->CmdLine()->NoYosysCopy()) {
-    // skip the section copying yosys share files required
-    // for the device target
-  }
-  else {
-    // copy the yosys shared files (device models) to the yosys and tabbycad
-    // dirs in the install.
-    bool yosysSetupStatus = QLDeviceManager::getInstance()->deviceSetupYosysModels();
-    if(yosysSetupStatus == false) {
-      return false;
-    }
-  }
 
   // init synthesis script from the right location according to the selected device.
   std::string yosysScript = InitSynthesisScript();
@@ -2731,6 +2139,12 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosys_options += " -synplify";
   }
 
+  // pass in the path to the device specific yosys libraries directly.
+  std::string device_data_path_yosys = 
+      (QLDeviceManager::getInstance()->deviceTypeDirPath()).string() +
+      std::string("/yosys/quicklogic/");
+  yosys_options += " -lib_path " + device_data_path_yosys;
+
   // TODO: trim yosys_options at the front
   yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
 
@@ -2902,12 +2316,14 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -3174,11 +2590,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -3935,12 +3347,14 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -4211,12 +3625,14 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -4580,12 +3996,14 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -4614,11 +4032,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4650,11 +4064,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4686,11 +4096,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4722,11 +4128,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
     m_cryptdbPath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           device_target.device_variant.family +
-                                                           "_" +
-                                                           device_target.device_variant.foundry +
-                                                           "_" +
-                                                           device_target.device_variant.node);
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -4755,11 +4157,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
       m_cryptdbPath = 
           CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            device_target.device_variant.family +
-                                                            "_" +
-                                                            device_target.device_variant.foundry +
-                                                            "_" +
-                                                            device_target.device_variant.node);
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
       if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
         Message("load cryptdb failed!");
@@ -5046,12 +4444,14 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -5207,12 +4607,14 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
     std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
     Message("family: " + family);
     Message("foundry: " + foundry);
     Message("node: " + node);
+    Message("devicename: " + devicename);
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
@@ -5684,231 +5086,6 @@ int CompilerOpenFPGA_ql::CleanTempFiles() {
 void CompilerOpenFPGA_ql::CleanScripts() {
   m_yosysScript = "";
   m_openFPGAScript = "";
-}
-
-// should we use a reference or return vector by value?
-// https://stackoverflow.com/a/15704602
-std::vector<std::string> CompilerOpenFPGA_ql::list_device_variants(
-    std::string family,
-    std::string foundry,
-    std::string node,
-    std::filesystem::path device_data_dir_path) {
-
-  std::string device = QLDeviceManager::getInstance()->DeviceString(family,
-                                                                    foundry,
-                                                                    node,
-                                                                    "",
-                                                                    "",
-                                                                    "");
-  Message("parsing device: " + device);
-
-  std::vector<std::string> empty_list_of_devices = {};
-
-  // [1] check for valid path
-  // convert to canonical path, which will also check that the path exists.
-  std::error_code ec;
-  std::filesystem::path device_data_dir_path_c = 
-          std::filesystem::canonical(device_data_dir_path, ec);
-  if(ec) {
-    // error
-    ErrorMessage("Please check if the path specified exists!");
-    ErrorMessage("path: " + device_data_dir_path.string());
-    return empty_list_of_devices;
-  }
-
-  // [2] check dir structure of the device_data_dir_path
-  // [2][a] atleast one set of vpr.xml and openfpga.xml files should exist.
-  // [2][b] all xmls sets should be in one of the following:
-  //          - device_data_dir_path (DEFAULT device)
-  //          - device_data_dir_path/<ANY_DIR_NAME_VT>/<ANY_DIR_NAME_PVT_CORNER> (device_variants)
-  //        <ANY_DIR_NAME_VT>(s) represent the Cell Threshold Voltage(s)
-  //        <ANY_DIR_NAME_PVT_CORNER>(s) represent the PVT Corner(s) 
-  // [2][c] check that we have all the (other)required XML files for the device
-  
-  // [2][a] search for all vpr.xml/openfpga.xml files, and check the dir paths:
-  std::vector<std::filesystem::path> vpr_xml_files;
-  std::vector<std::filesystem::path> openfpga_xml_files;
-  for (const std::filesystem::directory_entry& dir_entry :
-      std::filesystem::recursive_directory_iterator(device_data_dir_path_c,
-                                                    std::filesystem::directory_options::skip_permission_denied,
-                                                    ec)) {
-    if(ec) {
-      ErrorMessage(std::string("failed listing contents of ") +
-                              device_data_dir_path_c.string());
-      return empty_list_of_devices;
-    }
-
-    if(dir_entry.is_regular_file(ec)) {
-
-      // this will match both .xml and .xml.en(encrypted) files
-      std::string vpr_xml_pattern = "vpr\\.xml.*";
-      std::string openfpga_xml_pattern = "openfpga\\.xml.*";
-      
-      if (std::regex_match(dir_entry.path().filename().string(),
-                            std::regex(vpr_xml_pattern,
-                              std::regex::icase))) {
-        vpr_xml_files.push_back(dir_entry.path().string());
-      }
-      if (std::regex_match(dir_entry.path().filename().string(),
-                            std::regex(openfpga_xml_pattern,
-                              std::regex::icase))) {
-        openfpga_xml_files.push_back(dir_entry.path().string());
-      }
-    }
-
-    if(ec) {
-      ErrorMessage(std::string("error while checking: ") +  dir_entry.path().string());
-      return empty_list_of_devices;
-    }
-  }
-
-  // sort the entries for easier processing
-  std::sort(vpr_xml_files.begin(),vpr_xml_files.end());
-  std::sort(openfpga_xml_files.begin(),openfpga_xml_files.end());
-
-  // check that we have atleast one set.
-  if(vpr_xml_files.size() == 0) {
-    ErrorMessage("No VPR XML files were found in the source device data dir !");
-    return empty_list_of_devices;
-  }
-  if(openfpga_xml_files.size() == 0) {
-    ErrorMessage("No OPENFPGA XML files were found in the source device data dir !");
-    return empty_list_of_devices;
-  }
-
-  // check that we have the same number of entries for both vpr.xml and openfpga.xml
-  // as they should be travelling in pairs.
-  if(vpr_xml_files.size() != openfpga_xml_files.size()) {
-    ErrorMessage("Mismatched number of VPR XML(s) w.r.t OPENFPGA XML(s) !");
-    return empty_list_of_devices;
-  }
-
-  // [2][b] gather all the 'parent' dirs of the XMLs, and check that they are in the expected hierarchy
-  std::vector<std::filesystem::path> vpr_xml_file_parent_dirs;
-  std::vector<std::filesystem::path> openfpga_xml_file_parent_dirs;
-  for(std::filesystem::path xmlpath : vpr_xml_files) {
-    vpr_xml_file_parent_dirs.push_back(xmlpath.parent_path());
-  }
-  for(std::filesystem::path xmlpath : openfpga_xml_files) {
-    openfpga_xml_file_parent_dirs.push_back(xmlpath.parent_path());
-  }
-
-  // sort the entries for easier processing
-  std::sort(vpr_xml_file_parent_dirs.begin(),vpr_xml_file_parent_dirs.end());
-  std::sort(openfpga_xml_file_parent_dirs.begin(),openfpga_xml_file_parent_dirs.end());
-
-  // check that we have the same set of dir paths for both XMLs, as they travel in pairs.
-  // redundant?
-  if(vpr_xml_file_parent_dirs != openfpga_xml_file_parent_dirs) {
-    ErrorMessage("Mismatched number of VPR XML(s) w.r.t OPENFPGA XML(s) !");
-    return empty_list_of_devices;
-  }
-  // now we can take any one of the file_dirs vector for further steps as they are the same.
-
-  // debug prints
-  // std::cout << "vpr xmls" << std::endl;
-  // for(auto path : vpr_xml_files) std::cout << path << std::endl;
-  // std::cout << std::endl;
-  // std::cout << "openfpga xmls" << std::endl;
-  // for(auto path : openfpga_xml_files) std::cout << path << std::endl;
-  // std::cout << std::endl;
-  // std::cout << "vpr xml dirs" << std::endl;
-  // for(auto path : vpr_xml_file_parent_dirs) std::cout << path << std::endl;
-  // std::cout << std::endl;
-  // std::cout << "openfpga xml dirs" << std::endl;
-  // for(auto path : openfpga_xml_file_parent_dirs) std::cout << path << std::endl;
-  // std::cout << std::endl;
-
-  // now that the dir paths for both xml(s) are identical vectors, take one of them.
-  // each dir *should be* one of:
-  // - source_device_data_dir_path ('default' XMLs not belonging to any device variant)
-  // - source_device_data_dir_path/<voltage_threshold>/<p_v_t_corner> (for variants)
-  //          <voltage_threshold> should be one of LVT, RVT, ULVT
-  //          <p_v_t_corner> can be any name, usually something like TYPICAL, BEST, WORST ...
-  // from this vector, we can deduce all of the possible device variants, and check correctness of hierarchy
-  std::vector<std::string> device_variants;
-  for (std::filesystem::path dirpath: vpr_xml_file_parent_dirs) {
-
-    // canonicalize to remove any trailing slashes and normalize path to full path
-    std::filesystem::path dirpath_c = std::filesystem::canonical(dirpath, ec);
-    if(ec) {
-      // filesystem error
-      return empty_list_of_devices;
-    }
-    
-    // check if this is the same as the source_device_data_dir_path itself (then this is the 'default')
-    if(std::filesystem::equivalent(dirpath_c, device_data_dir_path_c)) {
-      device = QLDeviceManager::getInstance()->DeviceString(family,
-                                                            foundry,
-                                                            node,
-                                                            "",
-                                                            "",
-                                                            "");
-      device_variants.push_back(device);
-    }
-    // otherwise this should be a device_variant
-    else {
-      // get the dir-name component of the path, this is the p_v_t_corner
-      std::string p_v_t_corner = dirpath_c.filename().string();
-      
-      // get the dir-name component of the parent of the path, this is the voltage_threshold
-      std::string voltage_threshold = dirpath_c.parent_path().filename().string();
-      
-      // add the variant to the list
-      device = QLDeviceManager::getInstance()->DeviceString(family,
-                                                            foundry,
-                                                            node,
-                                                            voltage_threshold,
-                                                            p_v_t_corner,
-                                                            "");
-      device_variants.push_back(device);
-
-
-      // check that p_v_t_corner dir is 2 levels down from the source_device_data_dir_path
-      if(!std::filesystem::equivalent(dirpath_c.parent_path().parent_path(), device_data_dir_path_c)) {
-        std::cout << dirpath_c.parent_path() << std::endl;
-        std::cout << device_data_dir_path_c << std::endl;
-        ErrorMessage("p_v_t_corner dirs with XMLs are not 2 levels down from the source_device_data_dir_path!!!");
-        return empty_list_of_devices;
-      }
-    }
-  }
-
-  // sort the devices found
-  std::sort(device_variants.begin(),device_variants.end());
-
-  // debug prints
-  // std::cout << std::endl;
-  // std::cout << "device variants parsed:" << std::endl;
-  // std::cout << "<family>,<foundry>,<node>,[voltage_threshold],[p_v_t_corner]" << std::endl;
-  // int index = 1;
-  // for (auto device_variant: device_variants) {
-  //   std::cout << index << ". " << device_variant << std::endl;
-  //   index++;
-  // }
-  // std::cout << std::endl;
-
-  // [2][c] check other required and optional XML files for the device:
-  // required:
-  // std::filesystem::path fixed_sim_openfpga_xml = 
-  //     device_data_dir_path_c / "aurora" / "fixed_sim_openfpga.xml";
-  // std::filesystem::path fixed_sim_openfpga_xml_en = 
-  //     device_data_dir_path_c / "aurora" / "fixed_sim_openfpga.xml.en";
-  // if(!std::filesystem::exists(fixed_sim_openfpga_xml) &&
-  //    !std::filesystem::exists(fixed_sim_openfpga_xml_en)) {
-  //   ErrorMessage("fixed_sim_openfpga.xml not found in source_device_data_dir_path!!!");
-  //   return empty_list_of_devices;
-  // }
-
-  // optional: not checking these for now, if needed we can add in later.
-  //std::filesystem::path bitstream_annotation_xml = 
-  //    source_device_data_dir_path_c / std::string("aurora") / "bitstream_annotation.xml";
-  //std::filesystem::path repack_design_constraint_xml = 
-  //    source_device_data_dir_path_c / std::string("aurora") / "repack_design_constraint.xml";
-  //std::filesystem::path fabric_key_xml = 
-  //    source_device_data_dir_path_c / std::string("aurora") / "fabric_key.xml";
-
-  return device_variants;
 }
 
 
