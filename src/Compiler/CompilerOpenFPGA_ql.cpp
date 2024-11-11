@@ -4468,15 +4468,16 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return true;
   }
 
-  // if flat_routing is enabled in VPR, skip bitstream generation
-  // OpenFPGA does not support bitstream generation with flat_routing (yet)
-  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/issues/2256#issuecomment-1498007179
-  if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-    Message("##################################################");
-    Message("Skipping Bitstream Generation since flat_routing is enabled in VPR!");
-    Message("##################################################");
-    return true;
-  }
+  // flat_routing enabled should be able to generate bitstream with updated OpenFPGA/vpr 11NOV2024.
+  // // if flat_routing is enabled in VPR, skip bitstream generation
+  // // OpenFPGA does not support bitstream generation with flat_routing (yet)
+  // // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/issues/2256#issuecomment-1498007179
+  // if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+  //   Message("##################################################");
+  //   Message("Skipping Bitstream Generation since flat_routing is enabled in VPR!");
+  //   Message("##################################################");
+  //   return true;
+  // }
 
 #if UPSTREAM_UNUSED
   if (BitsOpt() == BitstreamOpt::EnableSimulation) {
