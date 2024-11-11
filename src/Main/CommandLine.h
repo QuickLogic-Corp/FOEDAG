@@ -67,7 +67,6 @@ class CommandLine {
   void ErrorAndExit(const std::string& message);
   bool FileExists(const std::filesystem::path& name);
   bool Mute() const { return m_mute; }
-  bool NoYosysCopy() const { return m_noyosyscopy; }
 
   void Clear();
 
@@ -86,7 +85,6 @@ class CommandLine {
   bool m_version = false;
   bool m_useVerific = false;
   bool m_mute = false;
-  bool m_noyosyscopy = false;
 };
 
 }  // namespace FOEDAG

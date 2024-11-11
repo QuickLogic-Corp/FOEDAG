@@ -130,11 +130,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
-  std::vector<std::string> list_device_variants(
-      std::string family,
-      std::string foundry,
-      std::string node,
-      std::filesystem::path device_data_dir_path);
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 

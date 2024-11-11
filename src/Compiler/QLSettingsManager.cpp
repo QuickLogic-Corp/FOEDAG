@@ -64,6 +64,7 @@ QLSettingsManager* QLSettingsManager::getInstance() {
     std::string family              = getStringValue("general", "device", "family");
     std::string foundry             = getStringValue("general", "device", "foundry");
     std::string node                = getStringValue("general", "device", "node");
+    std::string devicename          = getStringValue("general", "device", "devicename");
     std::string voltage_threshold   = getStringValue("general", "device", "voltage_threshold");
     std::string p_v_t_corner        = getStringValue("general", "device", "p_v_t_corner");
     std::string layout              = getStringValue("general", "device", "layout");
@@ -73,12 +74,13 @@ QLSettingsManager* QLSettingsManager::getInstance() {
     // std::cout << " >> [family]              " << family << std::endl;
     // std::cout << " >> [foundry]             " << foundry << std::endl;
     // std::cout << " >> [node]                " << node << std::endl;
+    // std::cout << " >> [devicename]          " << devicename << std::endl;
     // std::cout << " >> [voltage_threshold]   " << voltage_threshold << std::endl;
     // std::cout << " >> [p_v_t_corner]        " << p_v_t_corner << std::endl;
     // std::cout << " >> [layout]              " << layout << std::endl;
     // std::cout << "---------------------------------------------\n" << std::endl;
 
-    instance->device_manager->setCurrentDeviceTarget(family, foundry, node, voltage_threshold, p_v_t_corner, layout);
+    instance->device_manager->setCurrentDeviceTarget(family, foundry, node, devicename, voltage_threshold, p_v_t_corner, layout);
   }
 
   return instance;
@@ -767,6 +769,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   std::string family;
   std::string foundry;
   std::string node;
+  std::string devicename;
   std::string voltage_threshold;
   std::string p_v_t_corner;
   std::string layout;
@@ -774,6 +777,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   std::string family_updated              = device_target.device_variant.family;
   std::string foundry_updated             = device_target.device_variant.foundry;
   std::string node_updated                = device_target.device_variant.node;
+  std::string devicename_updated                = device_target.device_variant.devicename;
   std::string voltage_threshold_updated   = device_target.device_variant.voltage_threshold;
   std::string p_v_t_corner_updated        = device_target.device_variant.p_v_t_corner;
   std::string layout_updated              = device_target.device_variant_layout.name;
@@ -788,6 +792,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
       family              = settings_json_newproject["general"]["device"]["family"]["userValue"];
       foundry             = settings_json_newproject["general"]["device"]["foundry"]["userValue"];
       node                = settings_json_newproject["general"]["device"]["node"]["userValue"];
+      devicename          = settings_json_newproject["general"]["device"]["devicename"]["userValue"];
       voltage_threshold   = settings_json_newproject["general"]["device"]["voltage_threshold"]["userValue"];
       p_v_t_corner        = settings_json_newproject["general"]["device"]["p_v_t_corner"]["userValue"];
       layout              = settings_json_newproject["general"]["device"]["layout"]["userValue"];
@@ -802,6 +807,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     family                = getStringValue("general", "device", "family");
     foundry               = getStringValue("general", "device", "foundry");
     node                  = getStringValue("general", "device", "node");
+    devicename            = getStringValue("general", "device", "devicename");
     voltage_threshold     = getStringValue("general", "device", "voltage_threshold");
     p_v_t_corner          = getStringValue("general", "device", "p_v_t_corner");
     layout                = getStringValue("general", "device", "layout");
@@ -813,7 +819,8 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   // template JSON, we only update the changed values and save the current JSON.
   if(family == family_updated &&
      foundry == foundry_updated &&
-     node == node_updated) {
+     node == node_updated &&
+     devicename == devicename_updated) {
 
     if(newProjectMode) {
       
@@ -821,6 +828,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
         settings_json_newproject["general"]["device"]["family"]["userValue"] = family_updated;
         settings_json_newproject["general"]["device"]["foundry"]["userValue"] = foundry_updated;
         settings_json_newproject["general"]["device"]["node"]["userValue"] = node_updated;
+        settings_json_newproject["general"]["device"]["devicename"]["userValue"] = devicename_updated;
         settings_json_newproject["general"]["device"]["voltage_threshold"]["userValue"] = voltage_threshold_updated;
         settings_json_newproject["general"]["device"]["p_v_t_corner"]["userValue"] = p_v_t_corner_updated;
         settings_json_newproject["general"]["device"]["layout"]["userValue"] = layout_updated;
@@ -834,6 +842,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
       settings_json["general"]["device"]["family"]["userValue"] = family_updated;
       settings_json["general"]["device"]["foundry"]["userValue"] = foundry_updated;
       settings_json["general"]["device"]["node"]["userValue"] = node_updated;
+      settings_json["general"]["device"]["devicename"]["userValue"] = devicename_updated;
       settings_json["general"]["device"]["voltage_threshold"]["userValue"] = voltage_threshold_updated;
       settings_json["general"]["device"]["p_v_t_corner"]["userValue"] = p_v_t_corner_updated;
       settings_json["general"]["device"]["layout"]["userValue"] = layout_updated;
@@ -849,13 +858,13 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     return;
   }
 
-  // if the device-type has changed (family/foundry/node) then the Settings may no longer be compatible
+  // if the device-type has changed (family/foundry/node/devicename) then the Settings may no longer be compatible
   // and we have to 'reset' the settings from the template JSON for the new device-type
 
   std::filesystem::path root_device_data_dir_path = 
       QLDeviceManager::getInstance()->deviceDataRootDirPath();
   
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family_updated / foundry_updated / node_updated;
+  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family_updated / foundry_updated / node_updated / devicename_updated;
 
   std::filesystem::path settings_json_template_filepath = device_data_dir_path / "aurora" / "settings_template.json";
 
@@ -894,6 +903,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
       settings_json_newproject["general"]["device"]["family"]["userValue"] = family_updated;
       settings_json_newproject["general"]["device"]["foundry"]["userValue"] = foundry_updated;
       settings_json_newproject["general"]["device"]["node"]["userValue"] = node_updated;
+      settings_json_newproject["general"]["device"]["devicename"]["userValue"] = devicename_updated;
       settings_json_newproject["general"]["device"]["voltage_threshold"]["userValue"] = voltage_threshold_updated;
       settings_json_newproject["general"]["device"]["p_v_t_corner"]["userValue"] = p_v_t_corner_updated;
       settings_json_newproject["general"]["device"]["layout"]["userValue"] = layout_updated;
@@ -937,6 +947,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     settings_json["general"]["device"]["family"]["userValue"] = family_updated;
     settings_json["general"]["device"]["foundry"]["userValue"] = foundry_updated;
     settings_json["general"]["device"]["node"]["userValue"] = node_updated;
+    settings_json["general"]["device"]["devicename"]["userValue"] = devicename_updated;
     settings_json["general"]["device"]["voltage_threshold"]["userValue"] = voltage_threshold_updated;
     settings_json["general"]["device"]["p_v_t_corner"]["userValue"] = p_v_t_corner_updated;
     settings_json["general"]["device"]["layout"]["userValue"] = layout_updated;
@@ -996,6 +1007,7 @@ bool QLSettingsManager::areJSONSettingsChanged() {
         settings_json_updated[categoryId][subcategoryId]["family"]["userValue"] = device_manager->device_target.device_variant.family;
         settings_json_updated[categoryId][subcategoryId]["foundry"]["userValue"] = device_manager->device_target.device_variant.foundry;
         settings_json_updated[categoryId][subcategoryId]["node"]["userValue"] = device_manager->device_target.device_variant.node;
+        settings_json_updated[categoryId][subcategoryId]["devicename"]["userValue"] = device_manager->device_target.device_variant.devicename;
         settings_json_updated[categoryId][subcategoryId]["voltage_threshold"]["userValue"] = device_manager->device_target.device_variant.voltage_threshold;
         settings_json_updated[categoryId][subcategoryId]["p_v_t_corner"]["userValue"] = device_manager->device_target.device_variant.p_v_t_corner;
         settings_json_updated[categoryId][subcategoryId]["layout"]["userValue"] = device_manager->device_target.device_variant_layout.name;
