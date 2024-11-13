@@ -50,6 +50,12 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
     QString error{QString::fromUtf8(readAllStandardError())};
     qCritical() << QString("QLIpConfiguratorProcess: %1").arg(error);
   });
+
+  connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState newState) {
+    if (newState == QProcess::NotRunning) {
+      emit closed();
+    }
+  });
 }
 
 QLIpConfiguratorProcess::~QLIpConfiguratorProcess() { stopAndWaitProcess(); }
@@ -65,7 +71,7 @@ void QLIpConfiguratorProcess::stopAndWaitProcess() {
 
 bool QLIpConfiguratorProcess::start() {
   if (isRunning()) {
-    return false;
+    stop();
   }
   m_resultWatcher.clear();
 
@@ -80,6 +86,7 @@ bool QLIpConfiguratorProcess::start() {
   setProgram(cmd);
   setArguments(args);
   QProcess::start();
+
   return isRunning();
 }
 

@@ -71,7 +71,7 @@ class QLIpConfiguratorProcess : public QProcess {
   QLIpConfiguratorProcess();
   ~QLIpConfiguratorProcess();
 
-  bool isRunning() const { return (state() == QProcess::Running); }
+  bool isRunning() const { return (state() != QProcess::NotRunning); }
 
   bool start();
   void stop();
