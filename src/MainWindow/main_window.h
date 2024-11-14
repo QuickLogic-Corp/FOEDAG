@@ -28,6 +28,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Main/AboutWidget.h"
 #include "NewProject/new_project_dialog.h"
 #include "TopLevelInterface.h"
+
+#include <memory>
+
 class QAction;
 class QLabel;
 class QProgressBar;
@@ -251,7 +254,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QPushButton* m_EULADialogAcceptButton;
   PinAssignmentCreator* m_pinAssignmentCreator{nullptr};
 #ifndef USE_UPSTREAM_IP_CONFIGURATOR
-  QLIpConfiguratorProcess* m_ipConfiguratorProcess{nullptr};
+  std::shared_ptr<QLIpConfiguratorProcess> m_ipConfiguratorProcess;
 #endif
 };
 

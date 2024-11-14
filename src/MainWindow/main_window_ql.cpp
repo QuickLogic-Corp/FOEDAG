@@ -244,19 +244,15 @@ MainWindow::MainWindow(Session* session)
   });
 #endif
 #ifndef USE_UPSTREAM_IP_CONFIGURATOR
-  m_ipConfiguratorProcess = new QLIpConfiguratorProcess;
-  connect(m_ipConfiguratorProcess, &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& files){
+  m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& files){
+    QList<QString> qFiles;
     for (const auto& file: files) {
-      qInfo() << "Aurora IP file" << QString::fromStdString(file);
-      // m_projectManager->addDesignFiles("", "", QString::fromStdString(file), "", true, true);
-
-      //  ErrorInfo addDesignFiles(const QString &commands, const QString &libs,
-      //                      const QString &fileNames, int lang,
-      //                      const QString &grName, bool isFileCopy = true,
-      //                      bool localToProject = true);
+      qFiles.append(QString::fromStdString(file));
     }
+    m_projectManager->addDesignFiles("", "", qFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
   });
-  connect(m_ipConfiguratorProcess, &QLIpConfiguratorProcess::closed, this, [this](){
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
     ipConfiguratorAction->setChecked(false);
   });
 #endif
@@ -296,6 +292,8 @@ void MainWindow::ProgressVisible(bool visible) {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (confirmExitProgram()) {
+    disconnect(m_ipConfiguratorProcess.get());
+    m_ipConfiguratorProcess.reset();
     forceStopCompilation();
     event->accept();
   } else {
