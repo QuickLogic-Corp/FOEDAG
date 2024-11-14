@@ -38,6 +38,9 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
     QByteArray output = readAllStandardOutput();
     QList<QByteArray> lines = output.split('\n');
     for (const auto line: lines) {
+      if (line.isEmpty()) {
+        continue;
+      }
       m_resultWatcher.process(QString(line));
     }
     if (m_resultWatcher.isReady()) {
@@ -51,8 +54,20 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
     qCritical() << QString("QLIpConfiguratorProcess: %1").arg(error);
   });
 
-  connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState newState) {
-    if (newState == QProcess::NotRunning) {
+  connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState state) {
+    //qInfo() << "~~~ QProcess::ProcessState" << state;
+    if (state == QProcess::NotRunning) {
+      // if (exitStatus() == QProcess::CrashExit) {
+      //   qDebug() << "Process crashed.";
+      // } else if (exitStatus() == QProcess::NormalExit) {
+      //   qDebug() << "Process exited normally with code:" << exitCode();
+      // }
+
+      // Check for specific error if the process terminated unexpectedly
+      // if (error() != QProcess::UnknownError) {
+      //     qDebug() << "Process error:" << errorString();
+      // }
+
       emit closed();
     }
   });
@@ -77,15 +92,28 @@ bool QLIpConfiguratorProcess::start() {
 
   QList<QString> args;
 
+  std::string family              = QLSettingsManager::getInstance()->getStringValue("general", "device", "family");
+  std::string foundry             = QLSettingsManager::getInstance()->getStringValue("general", "device", "foundry");
+  std::string node                = QLSettingsManager::getInstance()->getStringValue("general", "device", "node");
+  std::string devicename          = QLSettingsManager::getInstance()->getStringValue("general", "device", "devicename");
+  std::string voltage_threshold   = QLSettingsManager::getInstance()->getStringValue("general", "device", "voltage_threshold");
+  std::string p_v_t_corner        = QLSettingsManager::getInstance()->getStringValue("general", "device", "p_v_t_corner");
+
+  std::filesystem::path dataRoot = QLDeviceManager::getInstance()->deviceDataRootDirPath();
+  std::filesystem::path deviceFilePath = dataRoot / family / foundry / node / devicename / voltage_threshold / p_v_t_corner / "vpr.xml";
+  if (!std::filesystem::exists(deviceFilePath)) {
+    deviceFilePath = dataRoot / family / foundry / node / devicename / voltage_threshold / p_v_t_corner / "vpr.xml.en";
+  }
+
   QString ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
   args << "--build_path" << ipBuildPath;
-  args << "--device" << QString::fromStdString(QLDeviceManager::getInstance()->getCurrentDeviceTarget().device_variant.family);
-  args << "--arch_file_path" << QString::fromStdString((QLDeviceManager::getInstance()->deviceVariantDirPath() / "vpr.xml.en").string());
+  args << "--device" << QString::fromStdString(family);
+  args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
 
+  //qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
   setProgram(m_executableName);
   setArguments(args);
   QProcess::start();
-
   return isRunning();
 }
 
