@@ -251,6 +251,9 @@ MainWindow::MainWindow(Session* session)
       qFiles.append(QString::fromStdString(file));
     }
     m_projectManager->addDesignFiles("", "", qFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
+    if (sourcesForm) {
+      sourcesForm->UpdateSrcHierachyTree();
+    }
   });
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
     ipConfiguratorAction->setChecked(false);
