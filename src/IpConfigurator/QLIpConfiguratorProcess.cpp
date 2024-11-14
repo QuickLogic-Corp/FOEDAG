@@ -75,15 +75,14 @@ bool QLIpConfiguratorProcess::start() {
   }
   m_resultWatcher.clear();
 
-  QString cmd{"ipgenerator"};
   QList<QString> args;
 
   QString ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
   args << "--build_path" << ipBuildPath;
   args << "--device" << QString::fromStdString(QLDeviceManager::getInstance()->getCurrentDeviceTarget().device_variant.family);
-  args << "--arch_file_path" << QString::fromStdString(QLDeviceManager::getInstance()->deviceVPRArchitectureFile().string());
+  args << "--arch_file_path" << QString::fromStdString((QLDeviceManager::getInstance()->deviceVariantDirPath() / "vpr.xml.en").string());
 
-  setProgram(cmd);
+  setProgram(m_executableName);
   setArguments(args);
   QProcess::start();
 
@@ -91,7 +90,9 @@ bool QLIpConfiguratorProcess::start() {
 }
 
 void QLIpConfiguratorProcess::stop() {
-  stopAndWaitProcess();
+  if (isRunning()) {
+    stopAndWaitProcess();
+  }
 }
 
 }  // namespace FOEDAG

@@ -71,6 +71,8 @@ class QLIpConfiguratorProcess : public QProcess {
   QLIpConfiguratorProcess();
   ~QLIpConfiguratorProcess();
 
+  QString executableName() const { return m_executableName; }
+
   bool isRunning() const { return (state() != QProcess::NotRunning); }
 
   bool start();
@@ -83,6 +85,7 @@ signals:
 private:
   void stopAndWaitProcess();
 
+  QString m_executableName{"ipgenerator"};
   ResultWatcher m_resultWatcher;
 };
 

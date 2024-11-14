@@ -41,6 +41,7 @@ class DockWidget;
 class Session;
 class TclInterpreter;
 class ProjectFileLoader;
+class QLIpConfiguratorProcess;
 /** Main window of the program */
 class MainWindow : public QMainWindow, public TopLevelInterface {
   Q_OBJECT
@@ -249,6 +250,9 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QPushButton* m_EULADialogDeclineButton;
   QPushButton* m_EULADialogAcceptButton;
   PinAssignmentCreator* m_pinAssignmentCreator{nullptr};
+#ifndef USE_UPSTREAM_IP_CONFIGURATOR
+  QLIpConfiguratorProcess* m_ipConfiguratorProcess{nullptr};
+#endif
 };
 
 }  // namespace FOEDAG

@@ -43,6 +43,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "IpConfigurator/IpConfigWidget.h"
 #include "IpConfigurator/IpConfigurator.h"
 #include "IpConfigurator/IpConfiguratorCreator.h"
+#ifndef USE_UPSTREAM_IP_CONFIGURATOR
+#include "IpConfigurator/QLIpConfiguratorProcess.h"
+#endif
 #include "Main/CompilerNotifier.h"
 #include "Main/DialogProvider.h"
 #include "Main/Foedag.h"
@@ -238,6 +241,23 @@ MainWindow::MainWindow(Session* session)
       m_pinAssignmentCreator->forceNextPcfFileCheck();
     }
     refreshPinPlanner();
+  });
+#endif
+#ifndef USE_UPSTREAM_IP_CONFIGURATOR
+  m_ipConfiguratorProcess = new QLIpConfiguratorProcess;
+  connect(m_ipConfiguratorProcess, &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& files){
+    for (const auto& file: files) {
+      qInfo() << "Aurora IP file" << QString::fromStdString(file);
+      // m_projectManager->addDesignFiles("", "", QString::fromStdString(file), "", true, true);
+
+      //  ErrorInfo addDesignFiles(const QString &commands, const QString &libs,
+      //                      const QString &fileNames, int lang,
+      //                      const QString &grName, bool isFileCopy = true,
+      //                      bool localToProject = true);
+    }
+  });
+  connect(m_ipConfiguratorProcess, &QLIpConfiguratorProcess::closed, this, [this](){
+    ipConfiguratorAction->setChecked(false);
   });
 #endif
 }
@@ -1089,7 +1109,9 @@ void MainWindow::createActions() {
 
   ipConfiguratorAction = new QAction(tr("IP Configurator"), this);
   ipConfiguratorAction->setCheckable(true);
+#ifdef USE_UPSTREAM_IP_CONFIGURATOR
   ipConfiguratorAction->setEnabled(false);
+#endif
   connect(ipConfiguratorAction, &QAction::triggered, this,
           &MainWindow::ipConfiguratorActionTriggered);
 
@@ -2106,6 +2128,7 @@ void MainWindow::pinAssignmentChanged() {
 }
 
 void MainWindow::ipConfiguratorActionTriggered() {
+#ifdef USE_UPSTREAM_IP_CONFIGURATOR
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
@@ -2134,6 +2157,20 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_availableIpsgDockWidget = nullptr;
     m_ipCatalogTree = nullptr;
   }
+#else
+  if (ipConfiguratorAction->isChecked()) {
+    if (!m_ipConfiguratorProcess->isRunning()) {
+      if (!m_ipConfiguratorProcess->start()) {
+        qCritical() << "unable to run executable" << m_ipConfiguratorProcess->executableName();
+        ipConfiguratorAction->setChecked(false);
+      }
+    }
+  } else {
+    if (m_ipConfiguratorProcess->isRunning()) {
+      m_ipConfiguratorProcess->stop();
+    }
+  }
+#endif
 }
 
 void MainWindow::newDialogAccepted() {
@@ -2208,7 +2245,7 @@ void MainWindow::resetIps() {
 
 void MainWindow::updateViewMenu() {
   viewMenu->clear();
-  // viewMenu->addAction(ipConfiguratorAction);
+  viewMenu->addAction(ipConfiguratorAction);
   viewMenu->addAction(pinAssignmentAction);
   const QList<QDockWidget*> dockwidgets = findChildren<QDockWidget*>();
   if (!dockwidgets.empty()) {
