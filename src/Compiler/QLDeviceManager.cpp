@@ -3537,4 +3537,109 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceCornerPowerDataFiles(Q
   return corner_power_data_filepaths;
 }
 
+
+std::filesystem::path QLDeviceManager::deviceYosysModulesDirPath(QLDeviceTarget device_target) {
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  std::filesystem::path device_yosys_modules_dir_path;
+
+  device_yosys_modules_dir_path = deviceTypeDirPath(device_target) /
+                                  "yosys" /
+                                  "quicklogic";
+
+  return device_yosys_modules_dir_path;
+}
+
+
+std::string QLDeviceManager::deviceYosysFamilyName(QLDeviceTarget device_target) {
+
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  std::string device_yosys_family;
+
+  if(device_target.device_variant.family == "QLF_K6N10") {
+    device_yosys_family = "qlf_k6n10f";
+  }
+  else if(device_target.device_variant.family == "QLF_K4N8") {
+    device_yosys_family = "qlf_k4n8";
+  }
+
+  return device_yosys_family;
+}
+
+
+std::vector<std::filesystem::path> QLDeviceManager::deviceYosysModulesPathList(QLDeviceTarget device_target) {
+
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::vector<std::filesystem::path> yosys_modules_pathlist;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  std::filesystem::path device_yosys_modules_dir_path;
+  std::string device_yosys_family;
+  
+
+  if(device_target.device_variant.family == "QLF_K6N10") {
+    device_yosys_family = "qlf_k6n10f";
+  }
+
+  device_yosys_modules_dir_path = deviceYosysModulesDirPath(device_target) /
+                                  device_yosys_family;
+
+  std::error_code ec;
+  for (const std::filesystem::directory_entry& dir_entry :
+      std::filesystem::recursive_directory_iterator(device_yosys_modules_dir_path,
+                                                    std::filesystem::directory_options::skip_permission_denied,
+                                                    ec)) {
+    if(ec) {
+      std::cout << std::string("failed listing contents of ") +
+                              device_yosys_modules_dir_path.string() << std::endl;
+      return yosys_modules_pathlist;
+    }
+
+    if(dir_entry.is_regular_file(ec)) {
+
+      // match modules types:
+      std::string verilog_pattern = ".*\\.v";
+      std::string sv_pattern = ".*\\.sv";
+      std::string txt_pattern = ".*\\.txt";
+      
+      if (std::regex_match(dir_entry.path().filename().string(),
+                           std::regex(verilog_pattern, std::regex::icase))) {
+        yosys_modules_pathlist.push_back(dir_entry.path());
+      }
+
+      if (std::regex_match(dir_entry.path().filename().string(),
+                           std::regex(sv_pattern, std::regex::icase))) {
+        yosys_modules_pathlist.push_back(dir_entry.path());
+      }
+
+      if (std::regex_match(dir_entry.path().filename().string(),
+                           std::regex(txt_pattern, std::regex::icase))) {
+        yosys_modules_pathlist.push_back(dir_entry.path());
+      }
+    }
+
+    if(ec) {
+      std::cout << std::string("error while checking: ") +  dir_entry.path().string() << std::endl;
+      return yosys_modules_pathlist;
+    }
+  }
+
+  // sort the entries for easier processing
+  std::sort(yosys_modules_pathlist.begin(),yosys_modules_pathlist.end());
+
+  return yosys_modules_pathlist;
+}
+
 } // namespace FOEDAG

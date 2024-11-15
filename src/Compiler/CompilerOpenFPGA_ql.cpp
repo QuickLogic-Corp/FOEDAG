@@ -1742,32 +1742,105 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       }
     }
 
+    // workaround for enabling usage of '-lib' option, suggested by yosyshq
+    // add the following line in the ys script:
+    fileList += std::string("verific -cfg veri_create_empty_box 1\n");
+
+    // ProjectManager::addIncludePath(const std::string& includePath)
     for (auto path : ProjManager()->includePathList()) {
       includes += FileUtils::AdjustPath(path) + " ";
     }
-    fileList += "verific -vlog-incdir " + includes + "\n";
+    if(!includes.empty()) {
+      fileList += "verific -vlog-incdir " + includes + "\n";
+    }
+
+    // incdir:always add the project's 'sources' directory 
+    //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
+    std::filesystem::path design_sources_dir_path =
+        ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
+                                        ProjManager()->projectName(),
+                                        ProjManager()->getDesignActiveFileSet().toStdString());
+    fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
+    
+    // incdir: if executed via TCL script, and copy_files_on_add is *not* set
+    //   add the TCL script directory 
+    std::filesystem::path tcl_script_dir_path = 
+        QLSettingsManager::getTCLScriptDirPath();
+    if(!tcl_script_dir_path.empty()) {
+      if(!copyFilesOnAdd()) {
+        fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
+      }
+    }
 
     std::string libraries;
+    // ProjectManager::addLibraryPath(const std::string& libraryPath)
     for (auto path : ProjManager()->libraryPathList()) {
       libraries += FileUtils::AdjustPath(path) + " ";
     }
-    fileList += "verific -vlog-libdir " + libraries + "\n";
+    if(!libraries.empty()) {
+      fileList += "verific -vlog-libdir " + libraries + "\n";
+    }
 
+    // -vlog-libdir : currently it does not solve anything, so it is commented out.
+    // std::filesystem::path device_yosys_modules_dir_path = 
+    //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
+    //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
+    // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
+    
+    // recommendation by: <nak@yosyshq.com>
+    // with the -vlog-libdir option, if verific can't find a module named "Foo",
+    // it will look in the given directory for a file named "Foo.v".
+    // if we want to use the -vlog-libdir option we would have to split
+    // the primitive library into one file per module.
+    // instead of using -vlog-libdir, we could use the existing files by
+    // reading them in with the -lib option like this:
+    //      verific -vlog2k -lib /path/to/dsp_sim.v
+    // we should do this with all files that contain primitives that
+    // the user might want to instantiate manually, such as the BRAM sim files.
+    std::vector<std::filesystem::path> yosys_modules_pathlist = 
+        QLDeviceManager::getInstance()->deviceYosysModulesPathList();
+
+    for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
+
+      std::string sim_verilog_pattern = ".*_sim\\.v";
+
+      if (std::regex_match(yosys_module_path.filename().string(),
+                           std::regex(sim_verilog_pattern, std::regex::icase))) {
+
+          fileList += std::string("verific -vlog2k -lib ") + 
+                      yosys_module_path.string() +
+                      "\n";
+      }
+    }
+
+    // ProjectManager::addLibraryExtension(const std::string& libraryExt)
     for (auto ext : ProjManager()->libraryExtensionList()) {
       fileList += "verific -vlog-libext " + ext + "\n";
     }
 
+    // ProjectManager::addMacro(const std::string& macroName,
+    //                          const std::string& macroValue)
     std::string macros;
     for (auto& macro_value : ProjManager()->macroList()) {
       macros += macro_value.first + "=" + macro_value.second + " ";
     }
-    fileList += "verific -vlog-define " + macros + "\n";
+    if(!macros.empty()) {
+      fileList += "verific -vlog-define " + macros + "\n";
+    }
 
     std::string importLibs;
     auto importDesignFilesLibs = false;
 
+    // this is available only if TCL command has specified a top module library
+    // with -work <libname>
+    // set_top_module <top> ?-work <libName>?
     auto topModuleLib = ProjManager()->DesignTopModuleLib();
+
+    // this is available only if TCL command has specified a design library
+    // with -work <libname>
+    // add_design_file <file list> ?type? ?-work <libName>?
     auto commandsLibs = ProjManager()->DesignLibraries();
+
     size_t filesIndex{0};
     for (const auto& lang_file : ProjManager()->DesignFiles()) {
       std::string lang;
@@ -1830,18 +1903,21 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           if (!libName.empty()) {
             auto commandLib = "-work " + libName + " ";
             designLibraries += commandLib;
-            if (importDesignFilesLibs && libName != topModuleLib)
+            if (importDesignFilesLibs && libName != topModuleLib) {
               importLibs += "-L " + libName + " ";
+            }
           }
         }
       }
       ++filesIndex;
 
-      if (designLibraries.empty())
+      if (designLibraries.empty()) {
         fileList += "verific " + lang + " " + lang_file.second + "\n";
-      else
+      }
+      else {
         fileList +=
             "verific " + designLibraries + lang + " " + lang_file.second + "\n";
+      }
     }
     auto topModuleLibImport = std::string{};
     if (!topModuleLib.empty())
@@ -1946,20 +2022,16 @@ bool CompilerOpenFPGA_ql::Synthesize() {
         ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}", "-auto-top");
   }
 
-  std::string family = QLSettingsManager::getStringValue("general", "device", "family");
-
-  if(family == "QLF_K6N10") {
-    yosysScript = ReplaceAll(yosysScript, "${FAMILY}", std::string("qlf_k6n10f"));
+  std::string yosys_family_name = 
+    QLDeviceManager::getInstance()->deviceYosysFamilyName();
+  if(!yosys_family_name.empty()) {
+    yosysScript = 
+          ReplaceAll(yosysScript, "${FAMILY}", yosys_family_name);
   }
-  else if(family == "QLF_K4N8") {
-    yosysScript = ReplaceAll(yosysScript, "${FAMILY}", std::string("qlf_k4n8"));
+  else {
+    ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
+    return false;
   }
-  // ignore unknown family, as it might be customized in the template script.
-  // if yosys-plugins does not recognize the family, it will throw an error anyway.
-  //else {
-    // ErrorMessage("Unknown Family Specified: " + family);
-    // return false;
-  //}
 
 
   // ---------------------------------------------------------------- synth_sdc_file ++
@@ -2140,10 +2212,14 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 
   // pass in the path to the device specific yosys libraries directly.
-  std::string device_data_path_yosys = 
-      (QLDeviceManager::getInstance()->deviceTypeDirPath()).string() +
-      std::string("/yosys/quicklogic/");
-  yosys_options += " -lib_path " + device_data_path_yosys;
+  std::string yosys_modules_dir_path_string = 
+      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
+  if (yosys_modules_dir_path_string.back() != '/') {
+    // tack on a '/' separator if it is missing to be safe:
+    yosys_modules_dir_path_string += "/";
+  }
+  yosys_options += " -lib_path " + 
+                   yosys_modules_dir_path_string;
 
   // TODO: trim yosys_options at the front
   yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
