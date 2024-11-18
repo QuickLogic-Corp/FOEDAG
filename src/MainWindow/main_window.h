@@ -168,6 +168,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void setStatusAndProgressText(const QString& text);
   void saveSettings();
   void showEULADialog();
+  void showErrorMessageBox(const QString& title, const QString& msg);
 
  private: /* Objects/Widgets under the main window */
   /* Enum holding different states of actions visibility on the welcome page.

@@ -296,6 +296,7 @@ MainWindow::MainWindow(Session* session)
 
     FileUtils::RmDirRecursively(buildPath);
   });
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::error, this, &MainWindow::showErrorMessageBox);
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
     ipConfiguratorAction->setChecked(false);
   });
@@ -1678,6 +1679,17 @@ QObject::connect(m_EULADialogNextButton, &QPushButton::released,
     GlobalSession->CmdStack()->push_and_exec(&cmd);
   }
 
+}
+
+void MainWindow::showErrorMessageBox(const QString& title, const QString& msg) {
+  QMessageBox msgBox(this);
+  msgBox.setWindowModality(Qt::WindowModality::WindowModal);
+  msgBox.setIcon(QMessageBox::Critical);
+  msgBox.setWindowTitle(title);
+  msgBox.setText("An error occurred!");
+  msgBox.setInformativeText(msg);
+  msgBox.setStandardButtons(QMessageBox::Ok);
+  msgBox.exec();
 }
 
 void MainWindow::gui_start(bool showWP) {

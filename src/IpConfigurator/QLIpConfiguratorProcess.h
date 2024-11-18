@@ -84,6 +84,7 @@ class QLIpConfiguratorProcess : public QProcess {
 
 signals:
   void closed();
+  void error(QString title, QString msg);
   void resultReady(std::filesystem::path workPath, std::vector<std::string> files);
 
 private:

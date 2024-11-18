@@ -76,8 +76,8 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
   });
 
   connect(this, &QProcess::readyReadStandardError, this, [this]() {
-    QString error{QString::fromUtf8(readAllStandardError())};
-    qCritical() << QString("QLIpConfiguratorProcess: %1").arg(error);
+    QString msg{QString::fromUtf8(readAllStandardError())};
+    emit error(m_executableName, msg);
   });
 
   connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState state) {
