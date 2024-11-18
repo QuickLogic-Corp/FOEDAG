@@ -27,8 +27,10 @@
 #include "QLIpConfiguratorProcess.h"
 
 #include "Compiler/QLSettingsManager.h"
+#include "Utils/FileUtils.h"
 
 #include <QStandardPaths>
+#include <QUuid>
 #include <QDebug>
 
 
@@ -67,7 +69,8 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
       m_resultWatcher.process(QString(line));
     }
     if (m_resultWatcher.isReady()) {
-      emit resultReady(m_resultWatcher.ipFiles());
+      std::filesystem::path buildPath{m_ipBuildPath.toStdString()};
+      emit resultReady(buildPath, m_resultWatcher.ipFiles());
       m_resultWatcher.clear();
     }
   });
@@ -128,9 +131,12 @@ bool QLIpConfiguratorProcess::start() {
     deviceFilePath = dataRoot / family / foundry / node / devicename / voltage_threshold / p_v_t_corner / "vpr.xml.en";
   }
 
-  QString ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+  QString randomFolderName = QUuid::createUuid().toString(QUuid::Id128).remove('{').remove('}');
 
-  args << "--build_path" << ipBuildPath;
+  m_ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/" + randomFolderName;
+  FileUtils::MkDirs(std::filesystem::path{m_ipBuildPath.toStdString()});
+
+  args << "--build_path" << m_ipBuildPath;
   args << "--device" << QString::fromStdString(family);
   args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
 

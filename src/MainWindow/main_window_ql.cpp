@@ -245,7 +245,7 @@ MainWindow::MainWindow(Session* session)
 #endif
 #ifndef USE_UPSTREAM_IP_CONFIGURATOR
   m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
-  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& filePathes){
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](std::filesystem::path buildPath, std::vector<std::string> filePathes){
     auto existedDesignFiles = m_projectManager->getDesignFiles();
 
     QList<QString> acceptedFiles;
@@ -288,6 +288,8 @@ MainWindow::MainWindow(Session* session)
         FileUtils::overwriteFile(std::filesystem::path(origFilePath.toStdString()), std::filesystem::path(destFilePath.toStdString()));
       }
     }
+
+    FileUtils::RmDirRecursively(buildPath);
   });
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
     ipConfiguratorAction->setChecked(false);
