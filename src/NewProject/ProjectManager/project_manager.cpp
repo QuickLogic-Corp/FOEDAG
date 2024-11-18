@@ -1654,6 +1654,10 @@ void ProjectManager::FinishedProject() {
     emit saveFile(); 
 }
 
+void ProjectManager::save() {
+    emit saveFile();
+}
+
 int ProjectManager::CreateProjectDir() {
   int ret = 0;
   do {

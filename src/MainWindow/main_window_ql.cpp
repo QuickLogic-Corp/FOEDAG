@@ -274,9 +274,14 @@ MainWindow::MainWindow(Session* session)
     }
 
     if (!acceptedFiles.isEmpty()) {
-      m_projectManager->addDesignFiles("", "", acceptedFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
-      if (sourcesForm) {
-        sourcesForm->UpdateSrcHierachyTree();
+      auto error = m_projectManager->addDesignFiles("", "", acceptedFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
+      if (error.code == 0) {
+        if (sourcesForm) {
+          sourcesForm->UpdateSrcHierachyTree();
+        }
+        m_projectManager->save();
+      } else {
+        qCritical() << error.message;
       }
     } else {
       // we didn't add the design files because they are already existed, but we overwrite old file content with new data
