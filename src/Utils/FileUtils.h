@@ -80,6 +80,7 @@ class FileUtils final {
 
   // for the debug purposes, this function prints arguments
   static void printArgs(int argc, const char* argv[]);
+  static void overwriteFile(const std::filesystem::path &source, const std::filesystem::path &destination);
 
  private:
   FileUtils() = delete;

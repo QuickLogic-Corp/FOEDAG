@@ -245,19 +245,48 @@ MainWindow::MainWindow(Session* session)
 #endif
 #ifndef USE_UPSTREAM_IP_CONFIGURATOR
   m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
-  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& files){
-    QList<QString> qFiles;
-    for (const auto& file: files) {
-      QString qFile{QString::fromStdString(file)};
-      if (!QFile::exists(qFile)) {
-        qCritical() << "cannot add" << qFile << "because it doesn't exist";
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& filePathes){
+    auto existedDesignFiles = m_projectManager->getDesignFiles();
+
+    QList<QString> acceptedFiles;
+    QList<QString> rejectedFiles;
+
+    for (const auto& filePath: filePathes) {
+      QString origFilePath{QString::fromStdString(filePath)};
+      QFileInfo fileInfo{origFilePath};
+      if (!fileInfo.exists()) {
+        qCritical() << "skip add" << origFilePath << "because it doesn't exist";
         continue;
       }
-      qFiles.append(qFile);
+
+      QString localFilePath = m_projectManager->ProjectFilesPath("", m_projectManager->getProjectName(),
+                              m_projectManager->currentFileSet(), fileInfo.fileName());
+
+      if (!localFilePath.startsWith(PROJECT_OSRCDIR)) {
+        localFilePath.prepend(QString(PROJECT_OSRCDIR) + "/");
+      }
+
+      if (existedDesignFiles.contains(localFilePath)) {
+        rejectedFiles.append(origFilePath);
+      } else {
+        acceptedFiles.append(origFilePath);
+      }
     }
-    m_projectManager->addDesignFiles("", "", qFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
-    if (sourcesForm) {
-      sourcesForm->UpdateSrcHierachyTree();
+
+    if (!acceptedFiles.isEmpty()) {
+      m_projectManager->addDesignFiles("", "", acceptedFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
+      if (sourcesForm) {
+        sourcesForm->UpdateSrcHierachyTree();
+      }
+    } else {
+      // we didn't add the design files because they are already existed, but we overwrite old file content with new data
+      for (const auto& origFilePath: rejectedFiles) {
+        QFileInfo fileInfo{origFilePath};
+        QString destFilePath = m_projectManager->ProjectFilesPath(m_projectManager->getProjectPath(), m_projectManager->getProjectName(),
+                               m_projectManager->currentFileSet(), fileInfo.fileName());
+
+        FileUtils::overwriteFile(std::filesystem::path(origFilePath.toStdString()), std::filesystem::path(destFilePath.toStdString()));
+      }
     }
   });
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){

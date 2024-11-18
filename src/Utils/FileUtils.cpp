@@ -310,4 +310,12 @@ bool FileUtils::removeFile(const std::filesystem::path& file) noexcept {
   return ec.value() == 0;
 }
 
+void FileUtils::overwriteFile(const std::filesystem::path &source, const std::filesystem::path &destination) {
+  try {
+      std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing);
+  } catch (const std::filesystem::filesystem_error& e) {
+      std::cerr << "Error copying file: " << e.what() << std::endl;
+  }
+}
+
 }  // namespace FOEDAG
