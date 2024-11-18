@@ -31,9 +31,32 @@
 #include <QStandardPaths>
 #include <QDebug>
 
+
+#ifdef _WIN32
+//#define ATTACH_CONSOLE_FOR_DEBUGGING
+#ifdef ATTACH_CONSOLE_FOR_DEBUGGING
+
+#include <windows.h>
+#include <cstdio>
+
+void attachConsole() {
+    AllocConsole();
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+}
+
+#endif // ATTACH_CONSOLE_FOR_DEBUGGING
+#endif // _WIN32
+
 namespace FOEDAG {
 
 QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
+#ifdef _WIN32
+#ifdef ATTACH_CONSOLE_FOR_DEBUGGING
+  attachConsole();
+#endif
+#endif
+
   connect(this, &QProcess::readyReadStandardOutput, this, [this]() {
     QByteArray output = readAllStandardOutput();
     QList<QByteArray> lines = output.split('\n');
@@ -55,7 +78,7 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
   });
 
   connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState state) {
-    //qInfo() << "~~~ QProcess::ProcessState" << state;
+    //qDebug() << "~~~ QProcess::ProcessState" << state;
     if (state == QProcess::NotRunning) {
       // if (exitStatus() == QProcess::CrashExit) {
       //   qDebug() << "Process crashed.";
@@ -106,6 +129,7 @@ bool QLIpConfiguratorProcess::start() {
   }
 
   QString ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+
   args << "--build_path" << ipBuildPath;
   args << "--device" << QString::fromStdString(family);
   args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());

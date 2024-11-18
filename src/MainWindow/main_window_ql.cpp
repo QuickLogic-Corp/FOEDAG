@@ -248,7 +248,12 @@ MainWindow::MainWindow(Session* session)
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](const std::vector<std::string>& files){
     QList<QString> qFiles;
     for (const auto& file: files) {
-      qFiles.append(QString::fromStdString(file));
+      QString qFile{QString::fromStdString(file)};
+      if (!QFile::exists(qFile)) {
+        qCritical() << "cannot add" << qFile << "because it doesn't exist";
+        continue;
+      }
+      qFiles.append(qFile);
     }
     m_projectManager->addDesignFiles("", "", qFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
     if (sourcesForm) {

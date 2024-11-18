@@ -42,6 +42,8 @@ class QLIpConfiguratorProcess : public QProcess {
       const std::vector<std::string>& ipFiles() const { return m_ipFiles; }
 
       void process(QString line) {
+        line = line.trimmed();
+
         if (line == "INFO: IPG: begin listing generated IP files...") {
           m_isStartedCollectingFiles = true;
         }
