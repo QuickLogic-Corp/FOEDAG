@@ -247,6 +247,12 @@ MainWindow::MainWindow(Session* session)
   m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](std::filesystem::path buildPath, std::vector<std::string> filePathes){
     auto existedDesignFiles = m_projectManager->getDesignFiles();
+    // before we add new design file, the current fileset could be empty, so init it with default
+    QString currentFileSet = m_projectManager->currentFileSet();
+    if (currentFileSet.isEmpty()) {
+      currentFileSet = DEFAULT_FOLDER_SOURCE;
+    }
+    //
 
     QList<QString> acceptedFiles;
     QList<QString> rejectedFiles;
@@ -260,7 +266,7 @@ MainWindow::MainWindow(Session* session)
       }
 
       QString localFilePath = m_projectManager->ProjectFilesPath("", m_projectManager->getProjectName(),
-                              m_projectManager->currentFileSet(), fileInfo.fileName());
+                              currentFileSet, fileInfo.fileName());
 
       if (!localFilePath.startsWith(PROJECT_OSRCDIR)) {
         localFilePath.prepend(QString(PROJECT_OSRCDIR) + "/");
@@ -288,7 +294,7 @@ MainWindow::MainWindow(Session* session)
       for (const auto& origFilePath: rejectedFiles) {
         QFileInfo fileInfo{origFilePath};
         QString destFilePath = m_projectManager->ProjectFilesPath(m_projectManager->getProjectPath(), m_projectManager->getProjectName(),
-                               m_projectManager->currentFileSet(), fileInfo.fileName());
+                               currentFileSet, fileInfo.fileName());
 
         FileUtils::overwriteFile(std::filesystem::path(origFilePath.toStdString()), std::filesystem::path(destFilePath.toStdString()));
       }
