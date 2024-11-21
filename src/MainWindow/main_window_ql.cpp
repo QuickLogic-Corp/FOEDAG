@@ -43,6 +43,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "IpConfigurator/IpConfigWidget.h"
 #include "IpConfigurator/IpConfigurator.h"
 #include "IpConfigurator/IpConfiguratorCreator.h"
+#ifndef USE_UPSTREAM_IP_CONFIGURATOR
+#include "IpConfigurator/QLIpConfiguratorProcess.h"
+#endif
 #include "Main/CompilerNotifier.h"
 #include "Main/DialogProvider.h"
 #include "Main/Foedag.h"
@@ -240,6 +243,70 @@ MainWindow::MainWindow(Session* session)
     refreshPinPlanner();
   });
 #endif
+#ifndef USE_UPSTREAM_IP_CONFIGURATOR
+  m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](std::filesystem::path buildPath, std::vector<std::string> filePathes){
+    auto existedDesignFiles = m_projectManager->getDesignFiles();
+    // before we add new design file, the current fileset could be empty, so init it with default
+    QString currentFileSet = m_projectManager->currentFileSet();
+    if (currentFileSet.isEmpty()) {
+      currentFileSet = DEFAULT_FOLDER_SOURCE;
+    }
+    //
+
+    QList<QString> acceptedFiles;
+    QList<QString> rejectedFiles;
+
+    for (const auto& filePath: filePathes) {
+      QString origFilePath{QString::fromStdString(filePath)};
+      QFileInfo fileInfo{origFilePath};
+      if (!fileInfo.exists()) {
+        qCritical() << "skip add" << origFilePath << "because it doesn't exist";
+        continue;
+      }
+
+      QString localFilePath = m_projectManager->ProjectFilesPath("", m_projectManager->getProjectName(),
+                              currentFileSet, fileInfo.fileName());
+
+      if (!localFilePath.startsWith(PROJECT_OSRCDIR)) {
+        localFilePath.prepend(QString(PROJECT_OSRCDIR) + "/");
+      }
+
+      if (existedDesignFiles.contains(localFilePath)) {
+        rejectedFiles.append(origFilePath);
+      } else {
+        acceptedFiles.append(origFilePath);
+      }
+    }
+
+    if (!acceptedFiles.isEmpty()) {
+      auto error = m_projectManager->addDesignFiles("", "", acceptedFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
+      if (error.code == 0) {
+        if (sourcesForm) {
+          sourcesForm->UpdateSrcHierachyTree();
+        }
+        m_projectManager->save();
+      } else {
+        qCritical() << error.message;
+      }
+    } else {
+      // we didn't add the design files because they are already existed, but we overwrite old file content with new data
+      for (const auto& origFilePath: rejectedFiles) {
+        QFileInfo fileInfo{origFilePath};
+        QString destFilePath = m_projectManager->ProjectFilesPath(m_projectManager->getProjectPath(), m_projectManager->getProjectName(),
+                               currentFileSet, fileInfo.fileName());
+
+        FileUtils::overwriteFile(std::filesystem::path(origFilePath.toStdString()), std::filesystem::path(destFilePath.toStdString()));
+      }
+    }
+
+    FileUtils::RmDirRecursively(buildPath);
+  });
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::error, this, &MainWindow::showErrorMessageBox);
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
+    ipConfiguratorAction->setChecked(false);
+  });
+#endif
 }
 
 void MainWindow::Tcl_NewProject(int argc, const char* argv[]) {
@@ -276,6 +343,8 @@ void MainWindow::ProgressVisible(bool visible) {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (confirmExitProgram()) {
+    disconnect(m_ipConfiguratorProcess.get());
+    m_ipConfiguratorProcess.reset();
     forceStopCompilation();
     event->accept();
   } else {
@@ -1089,7 +1158,9 @@ void MainWindow::createActions() {
 
   ipConfiguratorAction = new QAction(tr("IP Configurator"), this);
   ipConfiguratorAction->setCheckable(true);
+#ifdef USE_UPSTREAM_IP_CONFIGURATOR
   ipConfiguratorAction->setEnabled(false);
+#endif
   connect(ipConfiguratorAction, &QAction::triggered, this,
           &MainWindow::ipConfiguratorActionTriggered);
 
@@ -1616,6 +1687,17 @@ QObject::connect(m_EULADialogNextButton, &QPushButton::released,
 
 }
 
+void MainWindow::showErrorMessageBox(const QString& title, const QString& msg) {
+  QMessageBox msgBox(this);
+  msgBox.setWindowModality(Qt::WindowModality::WindowModal);
+  msgBox.setIcon(QMessageBox::Critical);
+  msgBox.setWindowTitle(title);
+  msgBox.setText("An error occurred!");
+  msgBox.setInformativeText(msg);
+  msgBox.setStandardButtons(QMessageBox::Ok);
+  msgBox.exec();
+}
+
 void MainWindow::gui_start(bool showWP) {
   ReShowWindow({});
   if (showWP && m_showWelcomePage) showWelcomePage();
@@ -2106,6 +2188,7 @@ void MainWindow::pinAssignmentChanged() {
 }
 
 void MainWindow::ipConfiguratorActionTriggered() {
+#ifdef USE_UPSTREAM_IP_CONFIGURATOR
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
@@ -2134,6 +2217,20 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_availableIpsgDockWidget = nullptr;
     m_ipCatalogTree = nullptr;
   }
+#else
+  if (ipConfiguratorAction->isChecked()) {
+    if (!m_ipConfiguratorProcess->isRunning()) {
+      if (!m_ipConfiguratorProcess->start()) {
+        qCritical() << "unable to run executable" << m_ipConfiguratorProcess->executableName();
+        ipConfiguratorAction->setChecked(false);
+      }
+    }
+  } else {
+    if (m_ipConfiguratorProcess->isRunning()) {
+      m_ipConfiguratorProcess->stop();
+    }
+  }
+#endif
 }
 
 void MainWindow::newDialogAccepted() {
@@ -2208,7 +2305,7 @@ void MainWindow::resetIps() {
 
 void MainWindow::updateViewMenu() {
   viewMenu->clear();
-  // viewMenu->addAction(ipConfiguratorAction);
+  viewMenu->addAction(ipConfiguratorAction);
   viewMenu->addAction(pinAssignmentAction);
   const QList<QDockWidget*> dockwidgets = findChildren<QDockWidget*>();
   if (!dockwidgets.empty()) {

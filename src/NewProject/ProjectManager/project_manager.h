@@ -314,6 +314,7 @@ class ProjectManager : public QObject {
   int deleteRun(const QString &strRunName);
 
   void FinishedProject();
+  void save();
 
   QString currentFileSet() const;
   void setCurrentFileSet(const QString &currentFileSet);

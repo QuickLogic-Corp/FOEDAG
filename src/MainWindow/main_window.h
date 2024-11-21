@@ -28,6 +28,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Main/AboutWidget.h"
 #include "NewProject/new_project_dialog.h"
 #include "TopLevelInterface.h"
+
+#include <memory>
+
 class QAction;
 class QLabel;
 class QProgressBar;
@@ -41,6 +44,7 @@ class DockWidget;
 class Session;
 class TclInterpreter;
 class ProjectFileLoader;
+class QLIpConfiguratorProcess;
 /** Main window of the program */
 class MainWindow : public QMainWindow, public TopLevelInterface {
   Q_OBJECT
@@ -164,6 +168,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void setStatusAndProgressText(const QString& text);
   void saveSettings();
   void showEULADialog();
+  void showErrorMessageBox(const QString& title, const QString& msg);
 
  private: /* Objects/Widgets under the main window */
   /* Enum holding different states of actions visibility on the welcome page.
@@ -249,6 +254,9 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QPushButton* m_EULADialogDeclineButton;
   QPushButton* m_EULADialogAcceptButton;
   PinAssignmentCreator* m_pinAssignmentCreator{nullptr};
+#ifndef USE_UPSTREAM_IP_CONFIGURATOR
+  std::shared_ptr<QLIpConfiguratorProcess> m_ipConfiguratorProcess;
+#endif
 };
 
 }  // namespace FOEDAG
