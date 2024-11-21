@@ -4544,17 +4544,6 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return true;
   }
 
-  // flat_routing enabled should be able to generate bitstream with updated OpenFPGA/vpr 11NOV2024.
-  // // if flat_routing is enabled in VPR, skip bitstream generation
-  // // OpenFPGA does not support bitstream generation with flat_routing (yet)
-  // // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/issues/2256#issuecomment-1498007179
-  // if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-  //   Message("##################################################");
-  //   Message("Skipping Bitstream Generation since flat_routing is enabled in VPR!");
-  //   Message("##################################################");
-  //   return true;
-  // }
-
 #if UPSTREAM_UNUSED
   if (BitsOpt() == BitstreamOpt::EnableSimulation) {
     std::filesystem::path bit_path =
@@ -5585,13 +5574,24 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {
 
   // calculator_d26    = 0;                       // num_clb_ff               -->  (derived later)
   //
-  // num_clb_ff = sum of all ff primitives == dff + dffn + dffsre + dffnsre + sh_dff
+  // num_clb_ff = sum of all ff primitives : scour the cells_sim.v of every device, and 
+  // ensure that we account for all possible ff primitives across them here.
   int total_num_ffs = 0;
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffsre");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnsre");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dff");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dff");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffn");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffnre");
+
+
   
   calculator_d26 = total_num_ffs;                 // num_clb_ff
 
@@ -6208,7 +6208,7 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   long double calculator_d30      = QLMetricsManager::getDoubleValue("routing", "num_bram");             // num_bram
 
   // enable debug prints if specified in JSON
-  bool power_estimation_dbg = true; // TODO test change
+  bool power_estimation_dbg = false;
   std::ofstream power_analysis_debug_rpt;
 
   if( QLSettingsManager::getStringValue("power", "power_outputs", "debug") == "checked" ) {
