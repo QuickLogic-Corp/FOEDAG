@@ -4718,7 +4718,15 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   ///////////////////////////////////////////////////////////////// PLACE --
 
   ///////////////////////////////////////////////////////////////// PCF ++
-  std::filesystem::path filepath_pcf;
+  std::filesystem::path filepath_pcf = QLSettingsManager::getInstance()->parsePCFFilePath();
+
+  if(filepath_pcf.empty()) {
+    // no pcf file found, so we continue without PinConstraints defined.
+    // This is not an error, so we return true.
+    return true;
+  }
+
+#if ORIGINAL_PCF_LOGIC
   if( !QLSettingsManager::getStringValue("openfpga", "general", "pcf").empty() ) {
     filepath_pcf = QLSettingsManager::getStringValue("openfpga", "general", "pcf");
   }
@@ -4755,6 +4763,7 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
 
   // if pcf is located in current project folder, we may convert path to relative, since .openfpga also be called from that directory
   filepath_pcf = removePathPrefixFn(filepath_pcf, std::filesystem::path(ProjManager()->projectPath()));
+#endif // #if ORIGINAL_PCF_LOGIC
   ///////////////////////////////////////////////////////////////// PCF --
 
   ///////////////////////////////////////////////////////////////// NETLIST ++

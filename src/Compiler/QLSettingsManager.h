@@ -54,6 +54,7 @@ public:
   void updateJSONSettingsForDeviceTarget(QLDeviceTarget device_target);
   void parseJSONSettings();
   void parseSDCFilePath();
+  std::filesystem::path getPCFFilePath();
   bool areJSONSettingsChanged();
   bool saveJSONSettings();
 
@@ -78,6 +79,8 @@ public:
 
   std::filesystem::path sdc_file_path;
   bool sdc_file_path_from_json = false;
+
+  std::filesystem::path pcf_file_path;
 
   // GUI elements and GUI related variables
   QWidget* settings_manager_widget = nullptr;

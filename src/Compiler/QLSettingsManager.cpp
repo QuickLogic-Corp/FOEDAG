@@ -204,6 +204,105 @@ void QLSettingsManager::parseSDCFilePath() {
 }
 
 
+std::filesystem::path QLSettingsManager::getPCFFilePath() {
+
+  std::filesystem::path pcf_file_path;
+
+  if( (instance->settings_json).empty() ) {
+    // settings json is not parsed yet, nothing to do.
+    return pcf_file_path;
+  }
+
+  // ---------------------------------------------------------------- sdc_file ++
+  // sdc_file can come from Settings JSON -or- automatically picked up if named: <project_name>.sdc
+  // sdc_file path can be absolute or relative
+  // >> note: if sdc file specified in the Settings, and not found, then we flag this as an error!
+  // if relative path, heuristic to find the sdc_file:
+  //   1. check project_path, to see if sdc_file exists, use that
+  //   2. check tcl_script_dir_path (if driven by TCL script), to see if sdc_file exists, use that
+  //   3. check current dir, to see if sdc_file exists exists, use that
+
+
+  // 1. check if an sdc file is specified in the json: (can be relative/absolute)
+  if( !getStringValue("openfpga", "general", "pcf").empty() ) {
+
+    pcf_file_path = 
+        std::filesystem::path(getStringValue("openfpga", "general", "pcf"));
+  }
+  // 2. else, check for a PCF file with the naming convention (<project_name>.pcf)
+  // note that this will always be a 'relative_path' case
+  else {
+
+    pcf_file_path = 
+      std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectName() + std::string(".pcf"));
+  }
+
+  // check if the path specified is absolute:
+  if (pcf_file_path.is_absolute()) {
+    // check if the file exists:
+    if (!FileUtils::FileExists(pcf_file_path)) {
+      // currently, we ignore it, if the pcf file path is not found, instead of flagging an error.
+      pcf_file_path.clear();
+    }
+  }
+  // we have a relative path, needs further processing to determine where to pick it from:
+  else {
+    std::filesystem::path pcf_file_path_absolute;
+    
+    // 1. check project_path -> for generated PCF from pinconstraints manager
+    // 2. check tcl_script_dir_path (if driven by TCL script)
+    // 3. check current_dir_path
+
+    // 1. project path
+    std::filesystem::path project_path = 
+        std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
+    pcf_file_path_absolute = project_path / pcf_file_path;
+    if(!FileUtils::FileExists(pcf_file_path_absolute)) {
+      pcf_file_path_absolute.clear();
+    }
+
+    // 2. check tcl_script_dir_path
+    if(pcf_file_path_absolute.empty()) {
+      std::filesystem::path tcl_script_dir_path = getTCLScriptDirPath();
+      if(!tcl_script_dir_path.empty()) {
+        pcf_file_path_absolute = tcl_script_dir_path / pcf_file_path;
+        if(!FileUtils::FileExists(pcf_file_path_absolute)) {
+          pcf_file_path_absolute.clear();
+        }
+      }
+    }
+
+    // 3. check current working dir path
+    if(pcf_file_path_absolute.empty()) {
+      pcf_file_path_absolute = std::filesystem::current_path() / pcf_file_path;
+      if(!FileUtils::FileExists(pcf_file_path_absolute)) {
+        pcf_file_path_absolute.clear();
+      }
+    }
+
+
+    // final: check if we have a valid sdc file path:
+    if(!pcf_file_path_absolute.empty()) {
+      // assign the absolute path to the pcf_file_path variable:
+      pcf_file_path = pcf_file_path_absolute;
+    }
+    else {
+      // currently, we ignore it, if the sdc file path is not found.
+      pcf_file_path.clear();
+    }
+  }
+  // relative file path processing done.
+
+  // if we have a valid pcf_file_path at this point, store that:
+  if(!pcf_file_path.empty()) {
+    // std::cout << "pcf file available: " << sdc_file_path << std::endl;
+    instance->pcf_file_path = pcf_file_path;
+  }
+
+  return pcf_file_path;
+}
+
+
 std::string QLSettingsManager::getStringValue(std::string category, std::string subcategory, std::string parameter) {
 
   std::string value;
