@@ -4156,34 +4156,35 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   }
 
 
-  // [required] repack design contraint file
+  // [optional] repack design contraint file
   m_OpenFpgaRepackConstraintsFile = 
       QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile();
   if(m_OpenFpgaRepackConstraintsFile.empty()) {
 
-    ErrorMessage("Cannot proceed without repack design contraint file.");
-    return std::string("");
+    Message("Proceeding without user provided repack design contraint file.");
   }
+  else {
 
-  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_OpenFpgaRepackConstraintsFile)) {
-    
-    std::filesystem::path repack_design_contraint_xml_en_path = m_OpenFpgaRepackConstraintsFile;
-    m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
+    if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_OpenFpgaRepackConstraintsFile)) {
+      
+      std::filesystem::path repack_design_contraint_xml_en_path = m_OpenFpgaRepackConstraintsFile;
+      m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
+      m_cryptdbPath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
 
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
+      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+        Message("load cryptdb failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
 
-    if (!CRFileCryptProc::getInstance()->decryptFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile)) {
-      ErrorMessage("decryption failed!");
-      // empty string returned on error.
-      return std::string("");
+      if (!CRFileCryptProc::getInstance()->decryptFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile)) {
+        ErrorMessage("decryption failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
     }
   }
 
@@ -4418,14 +4419,24 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   result = ReplaceAll(result, "${READ_OPENFPGA_BITSTREAM_SETTING_COMMAND}",
                       read_openfpga_bitstream_setting_command);
 
-  // optional, so only if this file is available, else use without constraints
+  // repack constraints
+  // 1. pass in the PCF file, if available with '--pcf'
+  // 2. pass in the user provided repack design constraint xml if available with '--design_constraints'
+  // 3. pass in option '--write_design_constraints' to dump constraints to verify
   std::string openfpga_repack_constraints_command = "repack";
-  if(!m_OpenFpgaRepackConstraintsFile.empty()) {
-    // repack --design_constraints ${OPENFPGA_REPACK_CONSTRAINTS_FILE}
-    openfpga_repack_constraints_command = 
-        std::string("repack --design_constraints ") + 
-        m_OpenFpgaRepackConstraintsFile.string();
+  std::filesystem::path filepath_pcf = QLSettingsManager::getInstance()->getPCFFilePath();
+  if(!filepath_pcf.empty()) {
+    openfpga_repack_constraints_command += 
+        " --pcf " + filepath_pcf.string();
   }
+  if(!m_OpenFpgaRepackConstraintsFile.empty()) {
+    openfpga_repack_constraints_command += 
+        " --design_constraints " + m_OpenFpgaRepackConstraintsFile.string();
+  }
+  std::string generated_repack_design_constraint_filename =
+      "repack_design_constraint_generated.xml";
+  openfpga_repack_constraints_command += 
+      " --write_design_constraints " + generated_repack_design_constraint_filename;
   result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
                       openfpga_repack_constraints_command);
 
@@ -4718,7 +4729,15 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   ///////////////////////////////////////////////////////////////// PLACE --
 
   ///////////////////////////////////////////////////////////////// PCF ++
-  std::filesystem::path filepath_pcf;
+  std::filesystem::path filepath_pcf = QLSettingsManager::getInstance()->getPCFFilePath();
+
+  if(filepath_pcf.empty()) {
+    // no pcf file found, so we continue without PinConstraints defined.
+    // This is not an error, so we return true.
+    return true;
+  }
+
+#if ORIGINAL_PCF_LOGIC
   if( !QLSettingsManager::getStringValue("openfpga", "general", "pcf").empty() ) {
     filepath_pcf = QLSettingsManager::getStringValue("openfpga", "general", "pcf");
   }
@@ -4755,6 +4774,7 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
 
   // if pcf is located in current project folder, we may convert path to relative, since .openfpga also be called from that directory
   filepath_pcf = removePathPrefixFn(filepath_pcf, std::filesystem::path(ProjManager()->projectPath()));
+#endif // #if ORIGINAL_PCF_LOGIC
   ///////////////////////////////////////////////////////////////// PCF --
 
   ///////////////////////////////////////////////////////////////// NETLIST ++
