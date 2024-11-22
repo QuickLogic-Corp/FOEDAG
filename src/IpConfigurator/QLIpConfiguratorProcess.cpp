@@ -53,6 +53,11 @@ void attachConsole() {
 namespace FOEDAG {
 
 QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
+
+  // supress errors happens via docker run
+  m_bypassErrors.append("libGL error: MESA-LOADER: failed to retrieve device information");
+  m_bypassErrors.append("QStandardPaths: XDG_RUNTIME_DIR not set, defaulting to");
+
 #ifdef _WIN32
 #ifdef ATTACH_CONSOLE_FOR_DEBUGGING
   attachConsole();
@@ -77,7 +82,17 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
 
   connect(this, &QProcess::readyReadStandardError, this, [this]() {
     QString msg{QString::fromUtf8(readAllStandardError())};
-    emit error(m_executableName, msg);
+    bool notify = true;
+    for (const QString& error: m_bypassErrors) {
+      if (msg.contains(error)) {
+        notify = false;
+        break;
+      }
+    }
+
+    if (notify) {
+      emit error("IP Configurator", msg);
+    }
   });
 
   connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState state) {

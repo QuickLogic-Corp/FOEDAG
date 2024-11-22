@@ -93,6 +93,7 @@ private:
   QString m_ipBuildPath;
   QString m_executableName{"ipgenerator"};
   ResultWatcher m_resultWatcher;
+  QList<QString> m_bypassErrors;
 };
 
 }  // namespace FOEDAG
