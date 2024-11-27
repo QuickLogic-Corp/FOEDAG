@@ -62,6 +62,7 @@ third_party/zlib/libzlib.dll
 third_party/zlib/minigzip.exe
 third_party/zlib/minigzip64.exe
 third_party/zlib/zlib1rc.obj
+third_party/zlib/install_manifest.txt
 
 # more third party stuff
 third_party/include/
