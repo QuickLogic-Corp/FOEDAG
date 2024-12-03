@@ -333,7 +333,7 @@ void FileUtils::overwriteFile(const std::filesystem::path &source, const std::fi
     }
   }
 #endif
-  std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing, ec)
+  std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing, ec);
 }
 
 }  // namespace FOEDAG
