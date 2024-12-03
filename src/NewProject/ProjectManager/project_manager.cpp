@@ -330,10 +330,9 @@ int ProjectManager::CreateProject(const QString& strName,
           if(FileUtils::FileExists(source_settings_json_path)) {
             std::filesystem::path target_settings_json_path = std::filesystem::path(strPath.toStdString()) / (strName.toStdString() + ".json");
 
-            std::filesystem::copy_file(source_settings_json_path,
-                                      target_settings_json_path,
-                                      std::filesystem::copy_options::overwrite_existing,
-                                      ec);
+            FileUtils::overwriteFile(source_settings_json_path,
+                                     target_settings_json_path,
+                                     ec);
             if(ec) {
               // copy failed is a fatal error
               std::cout << "failed to copy settings json: " + source_settings_json_path.string() << " to: " << target_settings_json_path.string() << std::endl;
@@ -350,10 +349,9 @@ int ProjectManager::CreateProject(const QString& strName,
           if(FileUtils::FileExists(source_power_estimation_json_path)) {
             std::filesystem::path target_power_estimation_json_path = std::filesystem::path(strPath.toStdString()) / (strName.toStdString() + "_power" + ".json");
             std::error_code ec;
-            std::filesystem::copy_file(source_power_estimation_json_path,
-                                      target_power_estimation_json_path,
-                                      std::filesystem::copy_options::overwrite_existing,
-                                      ec);
+            FileUtils::overwriteFile(source_power_estimation_json_path,
+                                     target_power_estimation_json_path,
+                                     ec);
             if(ec) {
               // fatal error
               std::cout << "failed to copy: " + source_power_estimation_json_path.string() << " to: " << target_power_estimation_json_path.string() << std::endl;

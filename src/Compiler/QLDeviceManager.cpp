@@ -2079,10 +2079,9 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
         std::filesystem::remove(target_en_file_path);
       }
       std::cout << "copying:" << relative_en_file_path << std::endl;
-      std::filesystem::copy_file(source_en_file_path,
-                                 target_en_file_path,
-                                 std::filesystem::copy_options::overwrite_existing,
-                                 ec);
+      FileUtils::overwriteFile(source_en_file_path,
+                               target_en_file_path,
+                               ec);
       if(ec) {
         // error
         compiler->ErrorMessage(std::string("failed to copy: ") + source_en_file_path.string());
@@ -2123,10 +2122,9 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
       std::filesystem::remove(target_cryptdb_path);
     }
     std::cout << "copying:" << relative_cryptdb_path << std::endl;
-    std::filesystem::copy_file(source_cryptdb_path,
-                               target_cryptdb_path,
-                               std::filesystem::copy_options::overwrite_existing,
-                               ec);
+    FileUtils::overwriteFile(source_cryptdb_path,
+                             target_cryptdb_path,
+                             ec);
     if(ec) {
       // error
       compiler->ErrorMessage(std::string("failed to copy: ") + source_cryptdb_path.string());
@@ -2175,10 +2173,9 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
         std::filesystem::remove(target_file_path);
       }
       std::cout << "copying:" << relative_file_path << std::endl;
-      std::filesystem::copy_file(source_file_path,
-                                 target_file_path,
-                                 std::filesystem::copy_options::overwrite_existing,
-                                 ec);
+      FileUtils::overwriteFile(source_file_path,
+                               target_file_path,
+                               ec);
       if(ec) {
         // error
         compiler->ErrorMessage(std::string("failed to copy: ") + source_file_path.string());
