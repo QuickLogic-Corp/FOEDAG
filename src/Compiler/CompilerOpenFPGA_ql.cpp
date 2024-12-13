@@ -4545,6 +4545,14 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return false;
   }
 
+  if(QLSettingsManager::getStringValue("general", "device", "foundry") == "GF" &&
+     QLSettingsManager::getStringValue("general", "device", "node") == "12nm") {
+    Message("##################################################");
+    Message("Skipping Bitstream Generation for GF 12nm devices!");
+    Message("##################################################");
+    return true;
+  }
+
   if( QLSettingsManager::getStringValue("openfpga", "general", "bitstream_generation") == "checked" ) {
     // bitstream generation is enabled, we can continue.
   }
