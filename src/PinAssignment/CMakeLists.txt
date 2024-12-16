@@ -53,6 +53,7 @@ set (SRC_CPP_LIST
   LocationCollisionDetector.cpp
   PortsLoader.cpp
   QLPortsLoader.cpp
+  LazyComboBox.cpp
   BufferedComboBox.cpp
   PinAssignmentBaseView.cpp
   ComboBox.cpp
@@ -77,6 +78,7 @@ set (SRC_H_LIST
   LocationCollisionDetector.h
   PortsLoader.h
   QLPortsLoader.h
+  LazyComboBox.h
   BufferedComboBox.h
   PinAssignmentBaseView.h
   ComboBox.h

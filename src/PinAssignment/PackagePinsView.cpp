@@ -27,7 +27,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QStringListModel>
 #include <QToolButton>
 
+#ifdef UPSTREAM_PINPLANNER
 #include "BufferedComboBox.h"
+#else
+#include "LazyComboBox.h"
+#endif
 
 namespace FOEDAG {
 
@@ -39,6 +43,7 @@ constexpr int InternalPinCol{4};
 
 PackagePinsView::PackagePinsView(PinsBaseModel *model, QWidget *parent)
     : PinAssignmentBaseView(model, parent)
+    , m_iconAdd(QIcon{":/images/add.png"})
 #ifdef UPSTREAM_PINPLANNER
       , MAX_ROWS{m_model->packagePinModel()->internalPinMax()}
 #endif 
@@ -49,7 +54,6 @@ PackagePinsView::PackagePinsView(PinsBaseModel *model, QWidget *parent)
     headerItem()->setText(h.id, h.name);
     headerItem()->setToolTip(h.id, h.description);
   }
-
   QTreeWidgetItem *topLevelPackagePin = new QTreeWidgetItem(this);
   topLevelPackagePin->setText(NameCol, "All Pins");
   const auto banks = model->packagePinModel()->pinData();
@@ -85,7 +89,7 @@ PackagePinsView::PackagePinsView(PinsBaseModel *model, QWidget *parent)
       initLine(pinItem);
 
       auto [widget, button] =
-          prepareButtonWithLabel(pinItem->text(0), QIcon{":/images/add.png"});
+          prepareButtonWithLabel(pinItem->text(0), m_iconAdd);
 #ifdef UPSTREAM_PINPLANNER
       connect(button, &QToolButton::clicked, this, [=]() {
         CreateNewLine(pinItem);
@@ -200,11 +204,13 @@ void PackagePinsView::cleanTable() {
 void PackagePinsView::ioPortsSelectionHasChanged(const QModelIndex &index) {
   // update here Mode selection
   auto item = itemFromIndex(index);
-  auto combo = item ? GetCombo<BufferedComboBox *>(item, PortsCol) : nullptr;
 #ifdef UPSTREAM_PINPLANNER
+  auto combo = item ? GetCombo<BufferedComboBox *>(item, PortsCol) : nullptr;
   if (combo) {
     updateModeCombo(combo->currentText(), index);
   }
+#else
+  auto combo = item ? GetCombo(item, PortsCol) : nullptr;
 #endif
 
   if (combo) {
@@ -347,13 +353,20 @@ std::pair<QWidget *, QToolButton *> PackagePinsView::prepareButtonWithLabel(
 }
 
 void PackagePinsView::initLine(QTreeWidgetItem *item) {
-  auto combo = new BufferedComboBox;
+  auto combo = new LazyComboBox;
 
 #ifdef UPSTREAM_PINPLANNER
   combo->setModel(m_model->portsModel()->listModel());
 #else
   QString direction = item->text(m_directionItemColumn);
-  combo->setModel(m_model->portsModel()->listModel(direction));
+  if (m_initializedDirections.contains(direction)) {
+    combo->setDelayedModel(m_model->portsModel()->listModel(direction));
+  } else {
+    // We must set at least one model in a straightforward way to ensure the correct column width in the table is applied.
+    // This does not impact performance but solves many issues related to incorrect table width (column with comboboxes) and combobox dropdown content width.
+    combo->setModel(m_model->portsModel()->listModel(direction));
+    m_initializedDirections.insert(direction);
+  }
 #endif
 
   combo->setAutoFillBackground(true);
