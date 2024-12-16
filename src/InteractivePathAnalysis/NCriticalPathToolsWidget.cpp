@@ -71,6 +71,8 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
       "interface=\"org.freedesktop.DBus\" member=\"Hello\" error "
       "name=\"(unset)\" requested_reply=\"0\" "
       "destination=\"org.freedesktop.DBus\" (bus)");
+  m_vprProcess.addInnerErrorToBypass(
+      "GLib-GIO-WARNING **:");
 
   QHBoxLayout* layout = new QHBoxLayout;
   layout->setContentsMargins(0, 0, 0, 0);
