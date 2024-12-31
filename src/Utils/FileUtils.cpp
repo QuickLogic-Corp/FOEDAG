@@ -312,10 +312,28 @@ bool FileUtils::removeFile(const std::filesystem::path& file) noexcept {
 
 void FileUtils::overwriteFile(const std::filesystem::path &source, const std::filesystem::path &destination) {
   try {
+#ifdef __MINGW32__ // https://sourceforge.net/p/mingw-w64/mailman/message/37691759/
+      if (FileExists(source)) { // let's remove dest file only if source exists, to avoid situation of lost existed dest file when source doesn't exists (which fail to copy)
+        if (FileExists(destination)) {
+          removeFile(destination);
+        }
+      }
+#endif
       std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing);
   } catch (const std::filesystem::filesystem_error& e) {
       std::cerr << "Error copying file: " << e.what() << std::endl;
   }
+}
+
+void FileUtils::overwriteFile(const std::filesystem::path &source, const std::filesystem::path &destination, std::error_code &ec) {
+#ifdef __MINGW32__ // https://sourceforge.net/p/mingw-w64/mailman/message/37691759/
+  if (FileExists(source)) { // let's remove dest file only if source exists, to avoid situation of lost existed dest file when source doesn't exists (which fail to copy)
+    if (FileExists(destination)) {
+      removeFile(destination);
+    }
+  }
+#endif
+  std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing, ec);
 }
 
 }  // namespace FOEDAG

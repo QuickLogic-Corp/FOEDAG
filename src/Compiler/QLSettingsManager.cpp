@@ -1019,20 +1019,18 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
 
     std::error_code ec;
 
-    std::filesystem::copy_file(settings_json_template_filepath,
-                               settings_json_filepath,
-                               std::filesystem::copy_options::overwrite_existing,
-                               ec);
+    FileUtils::overwriteFile(settings_json_template_filepath,
+                             settings_json_filepath,
+                             ec);
     if(ec) {
       // error
       std::cout << std::string("failed to copy: ") + settings_json_template_filepath.string() << std::endl;
       return;
     }
 
-    std::filesystem::copy_file(power_json_template_filepath,
-                               power_estimation_json_filepath,
-                               std::filesystem::copy_options::overwrite_existing,
-                               ec);
+    FileUtils::overwriteFile(power_json_template_filepath,
+                             power_estimation_json_filepath,
+                             ec);
     if(ec) {
       // error
       std::cout << std::string("failed to copy: ") + power_json_template_filepath.string() << std::endl;

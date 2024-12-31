@@ -4545,12 +4545,31 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return false;
   }
 
+  if(QLSettingsManager::getStringValue("general", "device", "foundry") == "GF" &&
+     QLSettingsManager::getStringValue("general", "device", "node") == "12nm") {
+    Message("##################################################");
+    Message("Skipping Bitstream Generation for GF 12nm devices!");
+    Message("##################################################");
+    return true;
+  }
+
   if( QLSettingsManager::getStringValue("openfpga", "general", "bitstream_generation") == "checked" ) {
     // bitstream generation is enabled, we can continue.
   }
   else {
     Message("##################################################");
     Message("Skipping Bitstream Generation since it is not enabled!");
+    Message("##################################################");
+    return true;
+  }
+
+
+  // if flat_routing is enabled in VPR, skip bitstream generation
+  // OpenFPGA does not support bitstream generation with flat_routing (fully, yet)
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/issues/2256#issuecomment-1498007179
+  if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+    Message("##################################################");
+    Message("Skipping Bitstream Generation since flat_routing is enabled in VPR!");
     Message("##################################################");
     return true;
   }
