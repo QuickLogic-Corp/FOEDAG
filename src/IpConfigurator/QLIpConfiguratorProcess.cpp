@@ -27,6 +27,7 @@
 #include "QLIpConfiguratorProcess.h"
 
 #include "Compiler/QLSettingsManager.h"
+#include "Compiler/QLDeviceManager.h"
 #include "Utils/FileUtils.h"
 
 #include <QStandardPaths>
@@ -131,15 +132,30 @@ bool QLIpConfiguratorProcess::start() {
   }
   m_resultWatcher.clear();
 
-  QList<QString> args;
+  QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
 
-  std::string family              = QLSettingsManager::getInstance()->getStringValue("general", "device", "family");
-  std::string foundry             = QLSettingsManager::getInstance()->getStringValue("general", "device", "foundry");
-  std::string node                = QLSettingsManager::getInstance()->getStringValue("general", "device", "node");
-  std::string devicename          = QLSettingsManager::getInstance()->getStringValue("general", "device", "devicename");
-  std::string voltage_threshold   = QLSettingsManager::getInstance()->getStringValue("general", "device", "voltage_threshold");
-  std::string p_v_t_corner        = QLSettingsManager::getInstance()->getStringValue("general", "device", "p_v_t_corner");
+  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice) ) {
+    emit error("IP Configurator", "Target Device is invalid");
+    return false;
+  }
 
+  std::string family              = targetDevice.device_variant.family;
+  std::string foundry             = targetDevice.device_variant.foundry;
+  std::string node                = targetDevice.device_variant.node;
+  std::string devicename          = targetDevice.device_variant.devicename;
+  std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
+  std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
+
+  std::string layoutName = targetDevice.device_variant_layout.name;
+  int width = targetDevice.device_variant_layout.width;
+  int height = targetDevice.device_variant_layout.height;
+  int bram = targetDevice.device_variant_layout.bram;
+  int dsp = targetDevice.device_variant_layout.dsp;
+  int clb = targetDevice.device_variant_layout.clb;
+  int io = targetDevice.device_variant_layout.io;
+
+  // check is it possible to access it in easier way, maybe already baked method exists
   std::filesystem::path dataRoot = QLDeviceManager::getInstance()->deviceDataRootDirPath();
   std::filesystem::path deviceFilePath = dataRoot / family / foundry / node / devicename / voltage_threshold / p_v_t_corner / "vpr.xml";
   if (!std::filesystem::exists(deviceFilePath)) {
@@ -151,11 +167,19 @@ bool QLIpConfiguratorProcess::start() {
   m_ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/" + randomFolderName;
   FileUtils::MkDirs(std::filesystem::path{m_ipBuildPath.toStdString()});
 
+  QList<QString> args;
   args << "--build_path" << m_ipBuildPath;
   args << "--device" << QString::fromStdString(family);
   args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
+  args << "--layout_name" << QString::fromStdString(layoutName);
+  args << "--width" << QString::number(width);
+  args << "--height" << QString::number(height);
+  args << "--bram" << QString::number(bram);
+  args << "--dsp" << QString::number(dsp);
+  args << "--clb" << QString::number(clb);
+  args << "--io" << QString::number(io);
 
-  //qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
+  qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
   setProgram(m_executableName);
   setArguments(args);
   QProcess::start();
