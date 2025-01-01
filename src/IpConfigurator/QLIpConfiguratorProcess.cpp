@@ -143,7 +143,7 @@ bool QLIpConfiguratorProcess::start() {
   std::string family              = targetDevice.device_variant.family;
   std::string foundry             = targetDevice.device_variant.foundry;
   std::string node                = targetDevice.device_variant.node;
-  std::string devicename          = targetDevice.device_variant.devicename;
+  std::string device              = targetDevice.device_variant.devicename;
   std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
   std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
 
@@ -157,9 +157,9 @@ bool QLIpConfiguratorProcess::start() {
 
   // check is it possible to access it in easier way, maybe already baked method exists
   std::filesystem::path dataRoot = QLDeviceManager::getInstance()->deviceDataRootDirPath();
-  std::filesystem::path deviceFilePath = dataRoot / family / foundry / node / devicename / voltage_threshold / p_v_t_corner / "vpr.xml";
+  std::filesystem::path deviceFilePath = dataRoot / family / foundry / node / device / voltage_threshold / p_v_t_corner / "vpr.xml";
   if (!std::filesystem::exists(deviceFilePath)) {
-    deviceFilePath = dataRoot / family / foundry / node / devicename / voltage_threshold / p_v_t_corner / "vpr.xml.en";
+    deviceFilePath = dataRoot / family / foundry / node / device / voltage_threshold / p_v_t_corner / "vpr.xml.en";
   }
 
   QString randomFolderName = QUuid::createUuid().toString(QUuid::Id128).remove('{').remove('}');
@@ -168,16 +168,22 @@ bool QLIpConfiguratorProcess::start() {
   FileUtils::MkDirs(std::filesystem::path{m_ipBuildPath.toStdString()});
 
   QList<QString> args;
-  args << "--build_path" << m_ipBuildPath;
-  args << "--device" << QString::fromStdString(family);
-  args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
-  args << "--layout_name" << QString::fromStdString(layoutName);
+
+  args << "--family" << QString::fromStdString(family);
+  args << "--foundry" << QString::fromStdString(foundry);
+  args << "--node" << QString::fromStdString(node);
+  args << "--device" << QString::fromStdString(device);
+
+  args << "--layout" << QString::fromStdString(layoutName);
   args << "--width" << QString::number(width);
   args << "--height" << QString::number(height);
   args << "--bram" << QString::number(bram);
   args << "--dsp" << QString::number(dsp);
   args << "--clb" << QString::number(clb);
   args << "--io" << QString::number(io);
+
+  args << "--build_path" << m_ipBuildPath;
+  args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
 
   qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
   setProgram(m_executableName);
