@@ -172,19 +172,19 @@ bool QLIpConfiguratorProcess::start() {
 
   nlohmann::ordered_json json;
 
-  json["device"]["family"] = family;
-  json["device"]["foundry"] = foundry;
-  json["device"]["node"] = node;
-  json["device"]["device"] = device;
-  json["device"]["layout"] = layout;
-  json["device"]["width"] = std::to_string(width);
-  json["device"]["height"] = std::to_string(height);
-  json["device"]["bram"] = std::to_string(bram);
-  json["device"]["dsp"] = std::to_string(dsp);
-  json["device"]["clb"] = std::to_string(clb);
-  json["device"]["io"] = std::to_string(io);
+  json["family"] = family;
+  json["foundry"] = foundry;
+  json["node"] = node;
+  json["device"] = device;
+  json["layout"] = layout;
+  json["width"] = std::to_string(width);
+  json["height"] = std::to_string(height);
+  json["bram"] = std::to_string(bram);
+  json["dsp"] = std::to_string(dsp);
+  json["clb"] = std::to_string(clb);
+  json["io"] = std::to_string(io);
 
-  QString jsonFilepath{m_ipBuildPath + "/" + "aurora_ctx.json"};
+  QString jsonFilepath{m_ipBuildPath + "/" + "device_info.json"};
   std::ofstream json_ofstream(jsonFilepath.toStdString());
   json_ofstream << std::setw(4) << json << std::endl;
 
