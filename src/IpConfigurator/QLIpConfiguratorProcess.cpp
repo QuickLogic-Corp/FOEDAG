@@ -34,6 +34,9 @@
 #include <QUuid>
 #include <QDebug>
 
+#include "nlohmann_json/json.hpp"
+
+#include <fstream>
 
 #ifdef _WIN32
 //#define ATTACH_CONSOLE_FOR_DEBUGGING
@@ -147,7 +150,7 @@ bool QLIpConfiguratorProcess::start() {
   std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
   std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
 
-  std::string layoutName = targetDevice.device_variant_layout.name;
+  std::string layout = targetDevice.device_variant_layout.name;
   int width = targetDevice.device_variant_layout.width;
   int height = targetDevice.device_variant_layout.height;
   int bram = targetDevice.device_variant_layout.bram;
@@ -167,21 +170,25 @@ bool QLIpConfiguratorProcess::start() {
   m_ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/" + randomFolderName;
   FileUtils::MkDirs(std::filesystem::path{m_ipBuildPath.toStdString()});
 
+  nlohmann::ordered_json json;
+
+  json["device"]["family"] = family;
+  json["device"]["foundry"] = foundry;
+  json["device"]["node"] = node;
+  json["device"]["device"] = device;
+  json["device"]["layout"] = layout;
+  json["device"]["width"] = std::to_string(width);
+  json["device"]["height"] = std::to_string(height);
+  json["device"]["bram"] = std::to_string(bram);
+  json["device"]["dsp"] = std::to_string(dsp);
+  json["device"]["clb"] = std::to_string(clb);
+  json["device"]["io"] = std::to_string(io);
+
+  QString jsonFilepath{m_ipBuildPath + "/" + "aurora_ctx.json"};
+  std::ofstream json_ofstream(jsonFilepath.toStdString());
+  json_ofstream << std::setw(4) << json << std::endl;
+
   QList<QString> args;
-
-  args << "--family" << QString::fromStdString(family);
-  args << "--foundry" << QString::fromStdString(foundry);
-  args << "--node" << QString::fromStdString(node);
-  args << "--device" << QString::fromStdString(device);
-
-  args << "--layout" << QString::fromStdString(layoutName);
-  args << "--width" << QString::number(width);
-  args << "--height" << QString::number(height);
-  args << "--bram" << QString::number(bram);
-  args << "--dsp" << QString::number(dsp);
-  args << "--clb" << QString::number(clb);
-  args << "--io" << QString::number(io);
-
   args << "--build_path" << m_ipBuildPath;
   args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
 
