@@ -78,8 +78,7 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
       m_resultWatcher.process(QString(line));
     }
     if (m_resultWatcher.isReady()) {
-      std::filesystem::path buildPath{m_ipBuildPath.toStdString()};
-      emit resultReady(buildPath, m_resultWatcher.ipFiles());
+      emit resultReady(m_resultWatcher.ipFiles());
       m_resultWatcher.clear();
     }
   });
@@ -102,6 +101,9 @@ QLIpConfiguratorProcess::QLIpConfiguratorProcess() {
   connect(this, &QProcess::stateChanged, this, [this](QProcess::ProcessState state) {
     //qDebug() << "~~~ QProcess::ProcessState" << state;
     if (state == QProcess::NotRunning) {
+      if (FileUtils::FileExists(m_ipBuildPath.toStdString())) {
+        FileUtils::RmDirRecursively(m_ipBuildPath.toStdString());
+      }
       // if (exitStatus() == QProcess::CrashExit) {
       //   qDebug() << "Process crashed.";
       // } else if (exitStatus() == QProcess::NormalExit) {
@@ -168,7 +170,7 @@ bool QLIpConfiguratorProcess::start() {
   QString randomFolderName = QUuid::createUuid().toString(QUuid::Id128).remove('{').remove('}');
 
   m_ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/" + randomFolderName;
-  FileUtils::MkDirs(std::filesystem::path{m_ipBuildPath.toStdString()});
+  FileUtils::MkDirs(m_ipBuildPath.toStdString());
 
   nlohmann::ordered_json json;
 

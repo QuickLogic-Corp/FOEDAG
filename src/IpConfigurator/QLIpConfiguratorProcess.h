@@ -85,12 +85,13 @@ class QLIpConfiguratorProcess : public QProcess {
 signals:
   void closed();
   void error(QString title, QString msg);
-  void resultReady(std::filesystem::path workPath, std::vector<std::string> files);
+  void resultReady(std::vector<std::string> files);
 
 private:
   void stopAndWaitProcess();
 
   QString m_ipBuildPath;
+
   QString m_executableName{"ipgenerator"};
   ResultWatcher m_resultWatcher;
   QList<QString> m_bypassErrors;

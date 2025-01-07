@@ -245,7 +245,7 @@ MainWindow::MainWindow(Session* session)
 #endif
 #ifndef USE_UPSTREAM_IP_CONFIGURATOR
   m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
-  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](std::filesystem::path buildPath, std::vector<std::string> filePathes){
+  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](std::vector<std::string> filePathes){
     auto existedDesignFiles = m_projectManager->getDesignFiles();
     // before we add new design file, the current fileset could be empty, so init it with default
     QString currentFileSet = m_projectManager->currentFileSet();
@@ -299,8 +299,6 @@ MainWindow::MainWindow(Session* session)
         FileUtils::overwriteFile(std::filesystem::path(origFilePath.toStdString()), std::filesystem::path(destFilePath.toStdString()));
       }
     }
-
-    FileUtils::RmDirRecursively(buildPath);
   });
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::error, this, &MainWindow::showErrorMessageBox);
   connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
