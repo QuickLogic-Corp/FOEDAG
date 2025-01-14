@@ -194,7 +194,7 @@ bool QLIpConfiguratorProcess::start() {
   args << "--build_path" << m_ipBuildPath;
   args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
 
-  qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
+  //qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
   setProgram(m_executableName);
   setArguments(args);
   QProcess::start();
