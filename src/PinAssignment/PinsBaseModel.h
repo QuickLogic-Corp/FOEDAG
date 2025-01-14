@@ -28,6 +28,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "PackagePinsModel.h"
 #include "PortsModel.h"
 
+#define PINPLANNER_EXCLUDE_USED_ITEMS
+
 namespace FOEDAG {
 
 class PinsBaseModel : public QObject {
