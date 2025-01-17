@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define FOEDAG_STRINGUTILS_H
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <sstream>
 #include <string>
@@ -30,6 +31,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 
 namespace FOEDAG {
+
+namespace fs = std::filesystem;
+using StringVector = std::vector<std::string>;
+
+template <class T>
+std::vector<T>& operator+=(std::vector<T>& stringVector,
+                           const std::vector<T>& other) {
+  for (const auto& val : other) stringVector.push_back(val);
+  return stringVector;
+}
 
 class StringUtils final {
  public:
@@ -113,6 +124,22 @@ class StringUtils final {
   static std::string toLower(const std::string& text);
   // Converts the input text to upper case
   static std::string toUpper(const std::string& text);
+
+  static std::string format(const std::string& format) { return format; }
+  template <typename T, typename... Targs>
+  static std::string format(const std::string& string, T value,
+                            Targs... Fargs) {
+    static const size_t length{1};
+    auto find = string.find('%');
+    if (find != std::string::npos) {
+      std::string str = string;
+      std::stringstream sstream;
+      sstream << value;
+      str.replace(find, length, sstream.str());
+      return format(str, Fargs...);
+    }
+    return string;
+  }
 
  private:
   StringUtils() = delete;

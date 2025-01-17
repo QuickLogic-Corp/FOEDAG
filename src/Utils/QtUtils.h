@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QStringList>
 #include <QTimer>
 #include <QSet>
+#include <filesystem>
 #include <string>
 
 namespace FOEDAG {
@@ -51,6 +52,8 @@ class QtUtils {
   static St CreatePath(St s) {
     return s;
   }
+  static QString ToQString(const std::filesystem::path &path);
+  static QStringList ToQStringList(const std::vector<std::string> &strings);
 
   static QSet<QString> convertToSet(const QList<QString>&);
 };

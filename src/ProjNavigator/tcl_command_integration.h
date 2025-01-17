@@ -27,6 +27,8 @@ namespace FOEDAG {
 
 class ProjectManager;
 class SourcesForm;
+class IPGenerator;
+
 class TclCommandIntegration : public QObject {
   Q_OBJECT
  public:
@@ -52,7 +54,11 @@ class TclCommandIntegration : public QObject {
   bool TclCloseProject();
   bool TclClearSimulationFiles(std::ostream &out);
 
+  bool TclAddIpToDesign(const std::string &ipName, std::ostream &out);
+
   ProjectManager *GetProjectManager();
+
+  void setIPGenerator(IPGenerator *gen);
 
  signals:
   void newDesign(const QString &);
@@ -69,6 +75,7 @@ class TclCommandIntegration : public QObject {
  private:
   ProjectManager *m_projManager;
   SourcesForm *m_form;
+  IPGenerator *m_IPGenerator{nullptr};
 };
 
 }  // namespace FOEDAG

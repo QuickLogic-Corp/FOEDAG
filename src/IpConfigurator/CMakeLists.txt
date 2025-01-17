@@ -50,6 +50,7 @@ set (SRC_CPP_LIST
   IpConfigurator.cpp
   IpInstancesTree.cpp
   IpTreesWidget.cpp
+  IPDialogBox.cpp
   QLIpConfiguratorProcess.cpp
 )
 
@@ -64,19 +65,22 @@ set (SRC_H_LIST
   IpConfigurator.h
   IpInstancesTree.h
   IpTreesWidget.h
+  IPDialogBox.h
   QLIpConfiguratorProcess.h
 )
 
 set (SRC_UI_LIST
-  )
+  IPDialogBox.ui
+)
 
 add_library(ipconfigurator STATIC
   ${SRC_CPP_LIST}
   ${SRC_H_LIST}
   ${SRC_UI_LIST}
+  ip_resources.qrc
 )
 
-target_link_libraries(ipconfigurator PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui tcl_stubb tcl_static zlib)
+target_link_libraries(ipconfigurator PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui foedagutils tcl_stubb tcl_static zlib)
 target_compile_definitions(ipconfigurator PRIVATE IPCONFIGURATOR_LIBRARY)
 
 install (
