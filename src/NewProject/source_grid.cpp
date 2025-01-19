@@ -472,7 +472,7 @@ QComboBox *sourceGrid::CreateLanguageCombo(int projectType, GridType gType) {
     return combo;
   }
   switch (projectType) {
-    case Synplify:
+    case PostMapSynplify:
       combo->addItem("VERILOG MAPPED NETLIST", Design::Language::VERILOG_MAPPED_NETLIST);
       combo->addItem("VERILOG NETLIST", Design::Language::VERILOG_NETLIST);
       break;
@@ -538,7 +538,7 @@ QString sourceGrid::Filter(int projectType, GridType gType) const {
       return DESIGN_SOURCES_FILTER;
     case PostSynth:
       return DESIGN_SOURCES_FILTER_POS;
-    case Synplify:
+    case PostMapSynplify:
       return DESIGN_SOURCES_FILTER_SYN; 
   }
   return DESIGN_SOURCES_FILTER;

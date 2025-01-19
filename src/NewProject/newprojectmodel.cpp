@@ -98,11 +98,11 @@ QString NewProjectModel::textPostSynthesisProject() {
 }
 
 
-QString NewProjectModel::radioButtonSynplifyProjectCaption() {
+QString NewProjectModel::radioButtonPostMapSynplifyProjectCaption() {
   return QString(tr("Post-map Synplify Project"));
 }
 
-QString NewProjectModel::textSynplifyProject() {
+QString NewProjectModel::textPostMapSynplifyProject() {
   return QString(
       tr("You will be able to add sources, view device resources, run design "
          "analysis, planning and implementation. "));

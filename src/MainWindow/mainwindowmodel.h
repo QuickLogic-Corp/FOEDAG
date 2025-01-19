@@ -116,16 +116,16 @@ class MainWindowModel : public QObject {
   Q_INVOKABLE QString textPostSynthesisProject();  // 1 page
 
   /**
-   * @brief radio button caption. Synplify Project
+   * @brief radio button caption. PostMapSynplify Project
    * @return radio button caption
    */
-  Q_INVOKABLE QString radioButtonSynplifyProjectCaption();  // 1 page
+  Q_INVOKABLE QString radioButtonPostMapSynplifyProjectCaption();  // 1 page
 
   /**
-   * @brief text under Synplify Project radio button
+   * @brief text under PostMapSynplify Project radio button
    * @return text
    */
-  Q_INVOKABLE QString textSynplifyProject();  // 1 page
+  Q_INVOKABLE QString textPostMapSynplifyProject();  // 1 page
   
 
   /**

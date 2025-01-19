@@ -98,7 +98,7 @@ public:
 
   // GUI can operate in 'newProjectMode' or 'existingProjectMode'
   bool newProjectMode=false;
-  bool synplifyProject=false;
+  bool postMapSynplifyProject=false;
   json settings_json_newproject;
   json power_estimation_json_newproject;
 

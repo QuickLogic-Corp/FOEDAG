@@ -11,7 +11,7 @@ projectTypeForm::projectTypeForm(QWidget *parent)
   ui->m_labelDetail->setText(tr("Specify the type of project to create."));
   ui->m_radioBtnRTL->setText(tr("RTL Project"));
   ui->m_radioBtnPost->setText(tr("Post-synthesis Project"));
-  ui->m_radioBtnSynp->setText(tr("Post-map (Synplify) Project"));
+  ui->m_radioBtnSynp->setText(tr("Post-map Synplify Project"));
   ui->m_labelRTL->setText(
       tr("- Generate IP\n"
          "- Run Analysis, Synthesis, P&R timing & generate bitstream"));
@@ -35,7 +35,7 @@ ProjectType projectTypeForm::projectType() const {
   } else if (ui->m_radioBtnPost->isChecked()) {
     return PostSynth;
   } else if (ui->m_radioBtnSynp->isChecked()) {
-    return Synplify;
+    return PostMapSynplify;
   }
   return RTL;
 }
@@ -50,8 +50,8 @@ QString projectTypeForm::projectTypeStr(ProjectType type) {
       return "RTL";
     case PostSynth:
       return "Post-synthesis";
-    case Synplify:
-      return "Synplify";
+    case PostMapSynplify:
+      return "PostMapSynplify";
 
   }
   return QString{};
