@@ -70,6 +70,19 @@ class NewProjectModel : public QObject {
    */
   QString textPostSynthesisProject();  // 1 page
 
+
+/**
+   * @brief radio button caption. Post-synthesis Project
+   * @return radio button caption
+   */
+  QString radioButtonSynplifyProjectCaption();  // 1 page
+
+  /**
+   * @brief text under PostSynthesis Project radio button
+   * @return text
+   */
+  QString textSynplifyProject();  // 1 page
+
   /**
    * @brief radio button caption. Post-synthesis Project
    * @return radio button caption
@@ -110,7 +123,7 @@ class NewProjectModel : public QObject {
  protected:
   QString m_projectName{"project_1"};
   QString m_projectLocation;
-  QString m_projectType{"RTL"};  // QString "RTL" or "Post-synthesis" or "PostMapSynplify"
+  QString m_projectType{"RTL"};  // QString "RTL" or "Post-synthesis" or "Synplify" or "PostMapSynplify"
   bool m_needToCreateProjrctSubDirectory{false};
 };
 

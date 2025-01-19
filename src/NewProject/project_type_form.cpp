@@ -11,7 +11,8 @@ projectTypeForm::projectTypeForm(QWidget *parent)
   ui->m_labelDetail->setText(tr("Specify the type of project to create."));
   ui->m_radioBtnRTL->setText(tr("RTL Project"));
   ui->m_radioBtnPost->setText(tr("Post-synthesis Project"));
-  ui->m_radioBtnSynp->setText(tr("Post-map Synplify Project"));
+  ui->m_radioBtnSynp->setText(tr("Synplify Project"));
+  ui->m_radioBtnPostMapSynp->setText(tr("Post-map Synplify Project"));
   ui->m_labelRTL->setText(
       tr("- Generate IP\n"
          "- Run Analysis, Synthesis, P&R timing & generate bitstream"));
@@ -19,6 +20,9 @@ projectTypeForm::projectTypeForm(QWidget *parent)
       tr("- Only one of .edif, .edf, .blif, .eblif, .v file allowed\n"
          "- Run P&R timing & generate bitstream"));
   ui->m_labelSYN->setText(
+      tr("- Generate IP\n"
+         "- Run Analysis, Synthesis, P&R timing & generate bitstream"));
+  ui->m_labelPostMapSYN->setText(
       tr("- Only one of .v or .vm file allowed\n"
          "- Run Yosys for conversion, P&R timing & generate bitstream"));
   ui->m_radioBtnRTL->setChecked(true);
@@ -35,6 +39,8 @@ ProjectType projectTypeForm::projectType() const {
   } else if (ui->m_radioBtnPost->isChecked()) {
     return PostSynth;
   } else if (ui->m_radioBtnSynp->isChecked()) {
+    return Synplify;
+  } else if (ui->m_radioBtnPostMapSynp->isChecked()) {
     return PostMapSynplify;
   }
   return RTL;
@@ -50,6 +56,8 @@ QString projectTypeForm::projectTypeStr(ProjectType type) {
       return "RTL";
     case PostSynth:
       return "Post-synthesis";
+    case Synplify:
+      return "Synplify";
     case PostMapSynplify:
       return "PostMapSynplify";
 

@@ -136,6 +136,7 @@ enum ProjectType {
   RTL = 0,
   PostSynth = 1,
   PostMapSynplify = 2,
+  Synplify = 3,
 };
 
 class ProjectManager : public QObject {

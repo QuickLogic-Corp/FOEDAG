@@ -76,6 +76,15 @@ QString MainWindowModel::textPostSynthesisProject() {
   return m_newProjectModel->textPostSynthesisProject();
 }
 
+QString MainWindowModel::radioButtonSynplifyProjectCaption() {
+  return m_newProjectModel->radioButtonSynplifyProjectCaption();
+}
+
+
+QString MainWindowModel::textSynplifyProject() {
+  return m_newProjectModel->textSynplifyProject();
+}
+
 QString MainWindowModel::radioButtonPostMapSynplifyProjectCaption() {
   return m_newProjectModel->radioButtonPostMapSynplifyProjectCaption();
 }

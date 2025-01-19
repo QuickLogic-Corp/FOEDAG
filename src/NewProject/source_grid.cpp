@@ -540,6 +540,8 @@ QString sourceGrid::Filter(int projectType, GridType gType) const {
       return DESIGN_SOURCES_FILTER_POS;
     case PostMapSynplify:
       return DESIGN_SOURCES_FILTER_SYN; 
+    case Synplify:
+      return DESIGN_SOURCES_FILTER; 
   }
   return DESIGN_SOURCES_FILTER;
 }

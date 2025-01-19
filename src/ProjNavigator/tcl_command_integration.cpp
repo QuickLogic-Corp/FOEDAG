@@ -303,6 +303,9 @@ bool TclCommandIntegration::TclCreateProject(const QString &name,
     else if (QtUtils::IsEqual(type, "post-map")) {
       projectType = PostMapSynplify;
     }
+    else if (QtUtils::IsEqual(type, "synplify")) {
+      projectType = Synplify;
+    }
     else {
       out << "Wrong project type. Values are rtl, gate-level, post-map";
       return false;

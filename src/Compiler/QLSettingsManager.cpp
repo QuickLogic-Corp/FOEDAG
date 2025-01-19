@@ -634,7 +634,7 @@ void QLSettingsManager::populateSettingsWidget() {
     }
   }
 
-  if(postMapSynplifyProject){
+  if(postMapSynplifyProject || synplifyProject){
     rootJson["yosys"]["general"]["synplify"]["userValue"] = "checked";
   }
 
@@ -852,6 +852,13 @@ void QLSettingsManager::updateJSONSettingsForProjectType(int projectType){
     }
     else{
       postMapSynplifyProject = false;
+    }
+
+    if(projectType == Synplify){
+      synplifyProject = true;
+    }
+    else{
+      synplifyProject = false;
     }
     updateSettingsWidget();
 }
