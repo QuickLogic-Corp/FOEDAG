@@ -99,16 +99,19 @@ IPDialogBox::IPDialogBox(const DeviceParameters& deviceInfo, QWidget* parent,
           &IPDialogBox::GenerateIp);
   connect(ui->restoreDefaults, &QPushButton::clicked, this,
           &IPDialogBox::RestoreToDefaults);
+#ifdef USE_UPSTREAM
   connect(ui->documentation, &QPushButton::clicked, this,
           &IPDialogBox::OpenDocumentaion);
   connect(ui->ipLocation, &QPushButton::clicked, this,
           &IPDialogBox::OpenIpLocation);
+#endif
 
   if (moduleName.isEmpty()) {
     if (auto def = getDefinition(m_requestedIpName.toStdString()); def) {
       auto meta = FOEDAG::getIpInfoFromPath(def->FilePath());
+#ifdef USE_UPSTREAM
       ui->labelName->setText(QString::fromStdString(meta.name));
-
+#endif
       std::string build_name = def->BuildName();
       if (build_name.empty()) {
         build_name = meta.name;
@@ -129,7 +132,9 @@ IPDialogBox::IPDialogBox(const DeviceParameters& deviceInfo, QWidget* parent,
   setWindowTitle("Configure IP");
   ui->lineEditModuleName->setValidator(
       new QRegularExpressionValidator{QRegularExpression{"^[a-zA-Z0-9_]*$"}});
+#ifdef USE_UPSTREAM
   ui->labelImage->setMouseTracking(true);
+#endif
 }
 
 IPDialogBox::~IPDialogBox() {}
@@ -142,6 +147,7 @@ std::string IPDialogBox::ModuleNameStd() const {
   return ui->lineEditModuleName->text().toStdString();
 }
 
+#ifdef USE_UPSTREAM
 void IPDialogBox::OpenDocumentaion() {
   if (auto def = getDefinition(m_requestedIpName.toStdString()); def) {
     auto filePath = def->FilePath().parent_path();
@@ -168,6 +174,7 @@ void IPDialogBox::OpenIpLocation() {
     }
   }
 }
+#endif
 
 void IPDialogBox::RestoreToDefaults() {
   auto answer = QMessageBox::question(
@@ -216,12 +223,14 @@ void IPDialogBox::handleEditorChanged(const QString& customId,
     restoreProperties(properties);
     ui->labelSummary->setText(GenerateSummary(newJson));
     auto instances = generator->IPInstances();
+#ifdef USE_UPSTREAM
     auto foundIp = std::find_if(
         instances.begin(), instances.end(), [this](IPInstance* inst) {
           return inst->IPName() == m_requestedIpName.toStdString();
         });
     if (foundIp != instances.end())
       LoadImage(generator->GetTmpCachePath(*foundIp).parent_path());
+#endif
   } else {
     showInvalidParametersWarning(this);
   }
@@ -584,11 +593,11 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
         jsonF["json"] = jsonFile.filename().string();
         jsonF["json_template"] = false;
         jsonF["device"] = deviceInfo.deviceName.toStdString();
-        jsonF["device_path"] = deviceInfo.deviceFile.string();
+        jsonF["device_path"] = FileUtils::resolvePathStr(deviceInfo.deviceFile.string());
         jsonF.close();
 
         // Find path to litex enabled python interpreter
-        std::filesystem::path pythonPath = IPCatalog::getPythonPath();
+        std::filesystem::path pythonPath = IPCatalog::getPythonPath(compiler->GetIPGenerator()->EnvsPath());
         if (pythonPath.empty()) {
           std::filesystem::path python3Path =
               FileUtils::LocateExecFile("python3");
@@ -614,7 +623,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
                           "--json-template"};
         std::ostringstream help;
         auto exitStatus =
-            FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help)
+            FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, compiler->GetIPGenerator()->environment())
                 .code;
         if (exitStatus != 0) {
           qWarning()
@@ -653,6 +662,10 @@ bool IPDialogBox::Generate(bool addToProject, const QString& outputPath) {
         outputPath.isEmpty()
             ? QString::fromStdString(FileUtils::GetFullPath(outFile).string())
             : outputPath;
+
+#ifdef _WIN32
+    outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outFileStr.toStdString()));
+#endif
 
     // Build up a cmd string to generate the IP
     QString cmd = "configure_ip " + this->m_requestedIpName + " -mod_name " +
@@ -729,6 +742,7 @@ QString IPDialogBox::outPath() const {
   return QString::fromStdString(FileUtils::GetFullPath(outPath).string());
 }
 
+#ifdef USE_UPSTREAM
 void IPDialogBox::LoadImage(const std::filesystem::path& location) {
   auto filePath = location;
   filePath /= "docs";
@@ -749,5 +763,6 @@ void IPDialogBox::LoadImage(const std::filesystem::path& location) {
     ui->labelImage->setText("No image");
   }
 }
+#endif
 
 }  // namespace FOEDAG

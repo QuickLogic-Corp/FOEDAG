@@ -109,13 +109,18 @@ VLNV FOEDAG::getIpInfoFromPath(std::filesystem::path path) {
 
 // This will return a path to the litex enabled python interpreter used by the
 // ip catalog. This will cache the return value the first time it's not empty
-std::filesystem::path IPCatalog::getPythonPath() {
+std::filesystem::path IPCatalog::getPythonPath(const std::filesystem::path& envsPath) {
   static std::filesystem::path s_pythonPath{};
   if (s_pythonPath.empty()) {
-    std::filesystem::path searchPath =
-        GlobalSession->Context()->DataPath() / "../envs/litex";
+#ifdef _WIN32
+    std::string pythonExecName = "python.exe";
+    std::filesystem::path searchPath = envsPath;
+#else
+    std::string pythonExecName = "python";
+    std::filesystem::path searchPath = envsPath / "litex";
+#endif
     searchPath = FileUtils::GetFullPath(searchPath);
-    s_pythonPath = FileUtils::LocateFileRecursive(searchPath, "python");
+    s_pythonPath = FileUtils::LocateFileRecursive(searchPath, pythonExecName);
   }
   return s_pythonPath;
 }

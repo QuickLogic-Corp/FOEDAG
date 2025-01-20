@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <string_view>
 #include <vector>
+#include <map>
 
 class QProcess;
 
@@ -83,6 +84,14 @@ class FileUtils final {
                                      const std::string& workingDir = {},
                                      std::ostream* err = nullptr,
                                      bool startDetached = false);
+  static Return ExecuteSystemCommand(const std::string& command,
+                                     const std::vector<std::string>& args,
+                                     std::ostream* out,
+                                     const std::map<std::string, std::string>& envs = {},
+                                     int timeout_ms = -1,
+                                     const std::string& workingDir = {},
+                                     std::ostream* err = nullptr,
+                                     bool startDetached = false);
 
   static time_t Mtime(const std::filesystem::path& path);
 
@@ -99,6 +108,8 @@ class FileUtils final {
   static void printArgs(int argc, const char* argv[]);
   static void overwriteFile(const std::filesystem::path &source, const std::filesystem::path &destination);
   static void overwriteFile(const std::filesystem::path &source, const std::filesystem::path &destination, std::error_code &ec);
+
+  static std::string resolvePathStr(const std::string& pathStr);
 
  private:
   FileUtils() = delete;

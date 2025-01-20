@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QDebug>
 #include <QProcess>
+#include <QCoreApplication>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -46,6 +47,18 @@ extern FOEDAG::Session* GlobalSession;
 using namespace FOEDAG;
 using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
+
+std::filesystem::path IPGenerator::ExecPath() const {
+    return std::filesystem::path(QCoreApplication::applicationDirPath().toStdString());
+}
+
+std::filesystem::path IPGenerator::EnvsPath() const {
+  return ExecPath() / ".." / "envs";
+}
+
+std::filesystem::path IPGenerator::IPCatalogPath() const {
+  return ExecPath() / ".." / "IP_Catalog";
+}
 
 bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   auto add_litex_ip_catalog = [](void* clientData, Tcl_Interp* interp, int argc,
@@ -533,7 +546,7 @@ bool IPGenerator::Generate() {
         }
 
         // Find path to litex enabled python interpreter
-        std::filesystem::path pythonPath = IPCatalog::getPythonPath();
+        std::filesystem::path pythonPath = IPCatalog::getPythonPath(m_compiler->GetIPGenerator()->EnvsPath());
         if (pythonPath.empty()) {
           std::filesystem::path python3Path =
               FileUtils::LocateExecFile("python3");
@@ -558,7 +571,7 @@ bool IPGenerator::Generate() {
         std::ostringstream help;
         m_compiler->Message("IP Generate, generating IP " +
                             GetBuildDir(inst).string());
-        if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help)
+        if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, environment())
                 .code) {
           m_compiler->ErrorMessage("IP Generate, " + help.str());
           return false;
@@ -609,7 +622,7 @@ std::pair<bool, std::string> IPGenerator::SimulateIpTcl(
   std::string command = "make";
   StringVector args{"OUT_DIR=" + artifactsPath.string(), "MODULE_NAME=" + name};
   if (auto ret = FileUtils::ExecuteSystemCommand(
-          command, args, m_compiler->GetOutStream(), -1, path.string(),
+          command, args, m_compiler->GetOutStream(), {}, -1, path.string(),
           m_compiler->GetErrStream());
       ret.code != 0) {
     return {false, ret.message};

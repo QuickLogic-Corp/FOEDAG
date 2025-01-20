@@ -341,7 +341,7 @@ class IPCatalog {
   const std::vector<IPDefinition*>& Definitions() { return m_definitions; }
   IPDefinition* Definition(const std::string& name);
   void WriteCatalog(std::ostream& out);
-  static std::filesystem::path getPythonPath();
+  static std::filesystem::path getPythonPath(const std::filesystem::path& envsPath);
 
  protected:
   std::vector<IPDefinition*> m_definitions;

@@ -95,9 +95,9 @@ endforeach()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../bin)
 
-add_executable(ipconfigurator_bin
- ${PROJECT_SOURCE_DIR}/../IpConfigurator/Test/ipconfigurator_main.cpp
- )
-target_link_libraries(ipconfigurator_bin foedag tcl_stubb tcl_static zlib tclutils ipconfigurator)
-set_target_properties(ipconfigurator_bin PROPERTIES OUTPUT_NAME ipconfigurator)
+# add_executable(ipconfigurator_bin
+#  ${PROJECT_SOURCE_DIR}/../IpConfigurator/Test/ipconfigurator_main.cpp
+#  )
+# target_link_libraries(ipconfigurator_bin foedag tcl_stubb tcl_static zlib tclutils ipconfigurator)
+# set_target_properties(ipconfigurator_bin PROPERTIES OUTPUT_NAME ipconfigurator)
 

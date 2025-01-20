@@ -134,7 +134,7 @@ std::vector<std::string> JsonArrayToStringVector(
 bool IPCatalogBuilder::buildLiteXIPFromGenerator(
     IPCatalog* catalog, const std::filesystem::path& pythonConverterScript) {
   // Find path to litex enabled python interpreter
-  std::filesystem::path pythonPath = IPCatalog::getPythonPath();
+  std::filesystem::path pythonPath = IPCatalog::getPythonPath(m_compiler->GetIPGenerator()->EnvsPath());
   if (pythonPath.empty()) {
     std::filesystem::path python3Path = FileUtils::LocateExecFile("python3");
     if (python3Path.empty()) {
@@ -161,7 +161,7 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
   std::string command = pythonPath.string() + " " +
                         pythonConverterScript.string() + " --json-template";
   StringVector args{pythonConverterScript.string(), "--json-template"};
-  if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help).code) {
+  if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, m_compiler->GetIPGenerator()->environment()).code) {
     m_compiler->ErrorMessage("IP Catalog, no IP information for " +
                              pythonConverterScript.string() + "\n" +
                              help.str());

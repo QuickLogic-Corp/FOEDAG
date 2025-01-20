@@ -59,8 +59,10 @@ class IPDialogBox : public QDialog {
       const QString& ipName, const DeviceParameters& deviceInfo, bool& ok);
 
  private slots:
+#ifdef USE_UPSTREAM
   void OpenDocumentaion();
   void OpenIpLocation();
+#endif
   void RestoreToDefaults();
   void GenerateIp();
   void handleEditorChanged(const QString& customId, QWidget* widget);
@@ -78,7 +80,9 @@ class IPDialogBox : public QDialog {
   bool Generate(bool addToProject, const QString& outputPath = {});
   static void AddIpToProject(const QString& cmd);
   QString outPath() const;
+#ifdef USE_UPSTREAM
   void LoadImage(const std::filesystem::path& location);
+#endif
 
  private:
   Ui::IPDialogBox* ui{};

@@ -26,6 +26,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "IPGenerate/IPCatalogBuilder.h"
 #include "MainWindow/Session.h"
 
+#include <QDebug>
+
 extern FOEDAG::Session* GlobalSession;
 
 using namespace FOEDAG;
@@ -48,7 +50,7 @@ bool tclCmdExists(const QString& cmdName) {
 
 IpCatalogTree::IpCatalogTree(QWidget* parent /*nullptr*/)
     : QTreeWidget(parent) {
-  this->setHeaderLabel("Available");
+  this->setHeaderLabel("Available IPs");
   refresh();
   connect(this, &QTreeWidget::itemSelectionChanged, this,
           &IpCatalogTree::itemSelectionHasChanged);
@@ -95,6 +97,9 @@ QStringList IpCatalogTree::getAvailableIPs(
   if (tclCmdExists("ip_catalog")) {
     std::string result = GlobalSession->TclInterp()->evalCmd("ip_catalog");
     ips = QString::fromStdString(result).trimmed().split(" ");
+    //std::cout << "~~~ ip catalog result=" << result << std::endl;
+  } else {
+    qCritical() << "cmd ip_catalog is not registered";
   }
 
   return ips;

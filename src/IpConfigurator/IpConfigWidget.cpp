@@ -74,6 +74,8 @@ IpConfigWidget::IpConfigWidget(QWidget* parent /*nullptr*/,
 
   // Add VLNV meta text description
   containerLayout->addWidget(&m_metaLabel);
+  QSpacerItem *spacer = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
+  containerLayout->addItem(spacer);
 
   // Fill and add Parameters box
   CreateParamFields();
@@ -146,14 +148,13 @@ void IpConfigWidget::updateMetaLabel(const IPDetails& details) {
 
 // Returns the IPDefinitions stored in the current IPGenerator's IPCatalog
 std::vector<FOEDAG::IPDefinition*> IpConfigWidget::getDefinitions() {
-  FOEDAG::Compiler* compiler = nullptr;
-  FOEDAG::IPGenerator* ipgen = nullptr;
-  FOEDAG::IPCatalog* ipcatalog = nullptr;
+  Compiler* compiler = GlobalSession->GetCompiler();
+  auto ipgen = compiler->GetIPGenerator();
+  FOEDAG::IPCatalog* ipcatalog = ipgen->Catalog();
   std::vector<FOEDAG::IPDefinition*> defs;
 
   // This just checks at each getter step to make sure no nulls are returned
-  if (GlobalSession && (compiler = GlobalSession->GetCompiler()) &&
-      (ipgen = compiler->GetIPGenerator()) && (ipcatalog = ipgen->Catalog())) {
+  if (ipgen && ipcatalog) {
     defs = ipcatalog->Definitions();
   }
 
@@ -197,6 +198,10 @@ void IpConfigWidget::Generate(const QString& outputPath) {
         outputPath.isEmpty()
             ? QString::fromStdString(FileUtils::GetFullPath(outFile).string())
             : outputPath;
+
+#ifdef _WIN32
+    outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outFileStr.toStdString()));
+#endif
 
     // Build up a cmd string to generate the IP
     QString cmd = "configure_ip " + this->m_requestedIpName + " -mod_name " +

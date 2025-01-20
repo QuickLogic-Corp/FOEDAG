@@ -27,6 +27,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <iostream>
 #include <string>
 #include <vector>
+#include <map>
+#include <cassert>
 
 #include "IPGenerate/IPCatalog.h"
 
@@ -39,8 +41,19 @@ class IPInstance;
 class IPGenerator {
  public:
   IPGenerator(IPCatalog* catalog, Compiler* compiler)
-      : m_catalog(catalog), m_compiler(compiler) {}
+      : m_catalog(catalog), m_compiler(compiler) {
+        m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
+        m_environment["QL_IPGENERATOR_BUILD_DIR"] = "";//m_cmdLine->buildPath().string();
+        assert(false && "TODO: forward build path");
+      }
   virtual ~IPGenerator() {}
+  
+  const std::map<std::string, std::string>& environment() const { return m_environment; }
+  
+  std::filesystem::path ExecPath() const;
+  std::filesystem::path EnvsPath() const;
+  std::filesystem::path IPCatalogPath() const;
+
   IPCatalog* Catalog() { return m_catalog; }
   Compiler* GetCompiler() { return m_compiler; }
   bool RegisterCommands(TclInterpreter* interp, bool batchMode);
@@ -82,6 +95,7 @@ class IPGenerator {
   IPCatalog* m_catalog = nullptr;
   Compiler* m_compiler = nullptr;
   std::vector<IPInstance*> m_instances;
+  std::map<std::string, std::string> m_environment;
 };
 
 }  // namespace FOEDAG

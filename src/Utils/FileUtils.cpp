@@ -166,6 +166,12 @@ std::filesystem::path FileUtils::LocateExecFile(
 std::filesystem::path FileUtils::LocateFileRecursive(
     const std::filesystem::path& searchPath, const std::string filename) {
   std::filesystem::path result{};
+#ifndef USE_UPSTREAM
+std::filesystem::path candidate = searchPath / filename;
+  if (std::filesystem::exists(candidate)) {
+    return candidate;
+  }
+#endif
   if (FileUtils::FileExists(searchPath)) {
     // Recursively search searchPath
     for (const std::filesystem::path& entry :
@@ -330,6 +336,71 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   return {returnStatus, {message}};
 }
 
+Return FileUtils::ExecuteSystemCommand(const std::string& command,
+                                       const std::vector<std::string>& args,
+                                       std::ostream* out,
+                                       const std::map<std::string, std::string>& envs,
+                                       int timeout_ms,
+                                       const std::string& workingDir,
+                                       std::ostream* err, bool startDetached) {
+  QProcess process;
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  for (const auto& [var, val]: envs) {
+    environment.insert(var.c_str(), val.c_str());
+  }
+  process.setProcessEnvironment(environment);
+
+  if (!workingDir.empty())
+    process.setWorkingDirectory(QString::fromStdString(workingDir));
+
+  std::ostream* errStream = err ? err : out;
+
+  if (out) {
+    QObject::connect(
+        &process, &QProcess::readyReadStandardOutput, [out, &process]() {
+          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+        });
+  }
+
+  if (errStream) {
+    QObject::connect(&process, &QProcess::readyReadStandardError,
+                     [errStream, &process]() {
+                       QByteArray data = process.readAllStandardError();
+                       errStream->write(data, data.size());
+                     });
+  }
+
+  QString program = QString::fromStdString(command);
+  QStringList args_{};
+  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  if (startDetached) {
+    auto success = process.startDetached(program, args_);
+    return {success ? 0 : -1,
+            QString{"%1: Failed to start."}.arg(program).toStdString()};
+  } else {
+    m_processes.push_back(&process);
+    process.start(program, args_);
+  }
+  //qDebug() << "~~~ ExecuteSystemCommand" << program << args_.join(" ");
+
+  bool finished = process.waitForFinished(timeout_ms);
+  auto it = std::find(m_processes.begin(), m_processes.end(), &process);
+  if (it != m_processes.end()) m_processes.erase(it);
+
+  std::string message{};
+  if (!finished) {
+    message = process.errorString().toStdString();
+    if (errStream) (*errStream) << message << std::endl;
+  }
+
+  auto status = process.exitStatus();
+  auto exitCode = process.exitCode();
+  int returnStatus =
+      finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
+
+  return {returnStatus, {message}};
+}
+
 bool FileUtils::IsUptoDate(const std::string& sourceFile,
                            const std::string& outputFile) {
   time_t time_output = -1;
@@ -407,6 +478,21 @@ void FileUtils::overwriteFile(const std::filesystem::path &source, const std::fi
   }
 #endif
   std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing, ec);
+}
+
+#ifdef _WIN32
+std::string toWindowsPathWithForwardSlashes(std::string pathStr) {
+  std::replace(pathStr.begin(), pathStr.end(), '\\', '/');
+  return pathStr;
+}
+#endif
+
+std::string FileUtils::resolvePathStr(const std::string& pathStr) {
+#ifdef _WIN32
+  return toWindowsPathWithForwardSlashes(pathStr);
+#else
+  return pathStr;
+#endif
 }
 
 }  // namespace FOEDAG
