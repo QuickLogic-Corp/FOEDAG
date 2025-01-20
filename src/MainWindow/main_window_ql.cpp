@@ -2198,7 +2198,6 @@ void MainWindow::pinAssignmentChanged() {
 }
 
 void MainWindow::ipConfiguratorActionTriggered() {
-#ifdef USE_UPSTREAM_IP_CONFIGURATOR
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
@@ -2233,20 +2232,6 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_availableIpsgDockWidget = nullptr;
     m_ipCatalogTree = nullptr;
   }
-#else
-  if (ipConfiguratorAction->isChecked()) {
-    if (!m_ipConfiguratorProcess->isRunning()) {
-      if (!m_ipConfiguratorProcess->start()) {
-        qCritical() << "unable to run executable" << m_ipConfiguratorProcess->executableName();
-        ipConfiguratorAction->setChecked(false);
-      }
-    }
-  } else {
-    if (m_ipConfiguratorProcess->isRunning()) {
-      m_ipConfiguratorProcess->stop();
-    }
-  }
-#endif
 }
 
 void MainWindow::newDialogAccepted() {
