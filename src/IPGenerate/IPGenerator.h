@@ -43,7 +43,6 @@ class IPGenerator {
   IPGenerator(IPCatalog* catalog, Compiler* compiler)
       : m_catalog(catalog), m_compiler(compiler) {
         m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
-        m_environment["QL_IPGENERATOR_BUILD_DIR"] = GetProjectIPsPath().string();
       }
   virtual ~IPGenerator() {}
   

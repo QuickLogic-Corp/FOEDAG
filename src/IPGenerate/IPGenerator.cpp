@@ -102,9 +102,13 @@ void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
   json["clb"] = std::to_string(clb);
   json["io"] = std::to_string(io);
 
+  FileUtils::MkDirs(path);
+
   QString jsonFilepath{QString::fromStdString(path.string()) + "/" + "device_info.json"};
   std::ofstream json_ofstream(jsonFilepath.toStdString());
   json_ofstream << std::setw(4) << json << std::endl;
+
+  m_environment["QL_IPGENERATOR_BUILD_DIR"] = path.string();
 }
 
 bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
@@ -518,6 +522,8 @@ bool IPGenerator::Generate() {
       std::filesystem::create_directories(out_path.parent_path());
     }
 
+    dumpDeviceData(GetBuildDir(inst));
+
     const IPDefinition* def = inst->Definition();
     switch (def->Type()) {
       case IPDefinition::IPType::Other: {
@@ -616,7 +622,6 @@ bool IPGenerator::Generate() {
         StringVector args{executable.string(), "--build", "--json",
                           FileUtils::GetFullPath(jsonFile).string()};
         std::ostringstream help;
-        dumpDeviceData(GetBuildDir(inst));
         m_compiler->Message("IP Generate, generating IP " +
                             GetBuildDir(inst).string());
         if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, environment())

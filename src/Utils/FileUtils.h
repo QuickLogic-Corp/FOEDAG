@@ -87,7 +87,7 @@ class FileUtils final {
   static Return ExecuteSystemCommand(const std::string& command,
                                      const std::vector<std::string>& args,
                                      std::ostream* out,
-                                     const std::map<std::string, std::string>& envs = {},
+                                     const std::map<std::string, std::string>& environments = {},
                                      int timeout_ms = -1,
                                      const std::string& workingDir = {},
                                      std::ostream* err = nullptr,

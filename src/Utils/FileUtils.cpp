@@ -339,16 +339,16 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
 Return FileUtils::ExecuteSystemCommand(const std::string& command,
                                        const std::vector<std::string>& args,
                                        std::ostream* out,
-                                       const std::map<std::string, std::string>& envs,
+                                       const std::map<std::string, std::string>& environment,
                                        int timeout_ms,
                                        const std::string& workingDir,
                                        std::ostream* err, bool startDetached) {
   QProcess process;
-  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-  for (const auto& [var, val]: envs) {
-    environment.insert(var.c_str(), val.c_str());
+  QProcessEnvironment currentEnvironment = QProcessEnvironment::systemEnvironment();
+  for (const auto& [var, val]: environment) {
+    currentEnvironment.insert(var.c_str(), val.c_str());
   }
-  process.setProcessEnvironment(environment);
+  process.setProcessEnvironment(currentEnvironment);
 
   if (!workingDir.empty())
     process.setWorkingDirectory(QString::fromStdString(workingDir));
