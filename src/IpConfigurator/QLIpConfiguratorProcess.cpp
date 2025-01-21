@@ -137,62 +137,21 @@ bool QLIpConfiguratorProcess::start() {
   }
   m_resultWatcher.clear();
 
-  QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
-
-  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice) ) {
-    emit error("IP Configurator", "Target Device is invalid");
-    return false;
-  }
-
-  std::string family              = targetDevice.device_variant.family;
-  std::string foundry             = targetDevice.device_variant.foundry;
-  std::string node                = targetDevice.device_variant.node;
-  std::string device              = targetDevice.device_variant.devicename;
-  std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
-  std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
-
-  std::string layout = targetDevice.device_variant_layout.name;
-  int width = targetDevice.device_variant_layout.width;
-  int height = targetDevice.device_variant_layout.height;
-  int bram = targetDevice.device_variant_layout.bram;
-  int dsp = targetDevice.device_variant_layout.dsp;
-  int clb = targetDevice.device_variant_layout.clb;
-  int io = targetDevice.device_variant_layout.io;
-
   // check is it possible to access it in easier way, maybe already baked method exists
-  std::filesystem::path dataRoot = QLDeviceManager::getInstance()->deviceDataRootDirPath();
-  std::filesystem::path deviceFilePath = dataRoot / family / foundry / node / device / voltage_threshold / p_v_t_corner / "vpr.xml";
-  if (!std::filesystem::exists(deviceFilePath)) {
-    deviceFilePath = dataRoot / family / foundry / node / device / voltage_threshold / p_v_t_corner / "vpr.xml.en";
-  }
+  // std::filesystem::path dataRoot = QLDeviceManager::getInstance()->deviceDataRootDirPath();
+  // std::filesystem::path deviceFilePath = dataRoot / family / foundry / node / device / voltage_threshold / p_v_t_corner / "vpr.xml";
+  // if (!std::filesystem::exists(deviceFilePath)) {
+  //  deviceFilePath = dataRoot / family / foundry / node / device / voltage_threshold / p_v_t_corner / "vpr.xml.en";
+  // }
 
-  QString randomFolderName = QUuid::createUuid().toString(QUuid::Id128).remove('{').remove('}');
+  // QString randomFolderName = QUuid::createUuid().toString(QUuid::Id128).remove('{').remove('}');
 
-  m_ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/" + randomFolderName;
-  FileUtils::MkDirs(m_ipBuildPath.toStdString());
-
-  nlohmann::ordered_json json;
-
-  json["family"] = family;
-  json["foundry"] = foundry;
-  json["node"] = node;
-  json["device"] = device;
-  json["layout"] = layout;
-  json["width"] = std::to_string(width);
-  json["height"] = std::to_string(height);
-  json["bram"] = std::to_string(bram);
-  json["dsp"] = std::to_string(dsp);
-  json["clb"] = std::to_string(clb);
-  json["io"] = std::to_string(io);
-
-  QString jsonFilepath{m_ipBuildPath + "/" + "device_info.json"};
-  std::ofstream json_ofstream(jsonFilepath.toStdString());
-  json_ofstream << std::setw(4) << json << std::endl;
+  // m_ipBuildPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/" + randomFolderName;
+  // FileUtils::MkDirs(m_ipBuildPath.toStdString());
 
   QList<QString> args;
   args << "--build_path" << m_ipBuildPath;
-  args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
+  // args << "--arch_file_path" << QString::fromStdString(deviceFilePath.string());
 
   //qDebug() << "~~~run following command: " << m_executableName << " " << args.join(" ");
   setProgram(m_executableName);

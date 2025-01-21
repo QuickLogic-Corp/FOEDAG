@@ -37,11 +37,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Compiler.h"
 #include "Compiler/Log.h"
 #include "Compiler/WorkerThread.h"
+#include "Compiler/QLSettingsManager.h"
 #include "IPGenerate/IPCatalog.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
+
+#include "nlohmann_json/json.hpp"
 
 extern FOEDAG::Session* GlobalSession;
 using namespace FOEDAG;
@@ -58,6 +61,50 @@ std::filesystem::path IPGenerator::EnvsPath() const {
 
 std::filesystem::path IPGenerator::IPCatalogPath() const {
   return ExecPath() / ".." / "IP_Catalog";
+}
+
+void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
+{
+  QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
+
+  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice) ) {
+    m_compiler->ErrorMessage("Cannot proceed IP Generation because target device is invalid\n");
+    return;
+  }
+
+  std::string family              = targetDevice.device_variant.family;
+  std::string foundry             = targetDevice.device_variant.foundry;
+  std::string node                = targetDevice.device_variant.node;
+  std::string device              = targetDevice.device_variant.devicename;
+  std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
+  std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
+
+  std::string layout = targetDevice.device_variant_layout.name;
+  int width = targetDevice.device_variant_layout.width;
+  int height = targetDevice.device_variant_layout.height;
+  int bram = targetDevice.device_variant_layout.bram;
+  int dsp = targetDevice.device_variant_layout.dsp;
+  int clb = targetDevice.device_variant_layout.clb;
+  int io = targetDevice.device_variant_layout.io;
+
+  nlohmann::ordered_json json;
+
+  json["family"] = family;
+  json["foundry"] = foundry;
+  json["node"] = node;
+  json["device"] = device;
+  json["layout"] = layout;
+  json["width"] = std::to_string(width);
+  json["height"] = std::to_string(height);
+  json["bram"] = std::to_string(bram);
+  json["dsp"] = std::to_string(dsp);
+  json["clb"] = std::to_string(clb);
+  json["io"] = std::to_string(io);
+
+  QString jsonFilepath{QString::fromStdString(path.string()) + "/" + "device_info.json"};
+  std::ofstream json_ofstream(jsonFilepath.toStdString());
+  json_ofstream << std::setw(4) << json << std::endl;
 }
 
 bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
@@ -569,6 +616,7 @@ bool IPGenerator::Generate() {
         StringVector args{executable.string(), "--build", "--json",
                           FileUtils::GetFullPath(jsonFile).string()};
         std::ostringstream help;
+        dumpDeviceData(GetBuildDir(inst));
         m_compiler->Message("IP Generate, generating IP " +
                             GetBuildDir(inst).string());
         if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, environment())

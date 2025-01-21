@@ -43,12 +43,12 @@ class IPGenerator {
   IPGenerator(IPCatalog* catalog, Compiler* compiler)
       : m_catalog(catalog), m_compiler(compiler) {
         m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
-        m_environment["QL_IPGENERATOR_BUILD_DIR"] = "";//m_cmdLine->buildPath().string();
-        assert(false && "TODO: forward build path");
+        m_environment["QL_IPGENERATOR_BUILD_DIR"] = GetProjectIPsPath().string();
       }
   virtual ~IPGenerator() {}
   
   const std::map<std::string, std::string>& environment() const { return m_environment; }
+  void dumpDeviceData(const std::filesystem::path&);
   
   std::filesystem::path ExecPath() const;
   std::filesystem::path EnvsPath() const;
