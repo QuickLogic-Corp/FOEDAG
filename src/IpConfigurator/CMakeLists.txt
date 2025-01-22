@@ -51,7 +51,6 @@ set (SRC_CPP_LIST
   IpInstancesTree.cpp
   IpTreesWidget.cpp
   IPDialogBox.cpp
-  QLIpConfiguratorProcess.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -66,7 +65,6 @@ set (SRC_H_LIST
   IpInstancesTree.h
   IpTreesWidget.h
   IPDialogBox.h
-  QLIpConfiguratorProcess.h
 )
 
 set (SRC_UI_LIST
