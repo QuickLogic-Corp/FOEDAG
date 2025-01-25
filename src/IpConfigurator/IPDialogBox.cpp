@@ -620,7 +620,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
 
         StringVector args{executable.string(), "--json",
                           FileUtils::GetFullPath(jsonFile).string(),
-                          "--json-template"};
+                          "--json_template"};
         std::ostringstream help;
         auto exitStatus =
             FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, compiler->GetIPGenerator()->environment())

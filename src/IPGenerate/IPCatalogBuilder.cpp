@@ -159,8 +159,8 @@ bool IPCatalogBuilder::buildLiteXIPFromGenerator(
 
   std::ostringstream help;
   std::string command = pythonPath.string() + " " +
-                        pythonConverterScript.string() + " --json-template";
-  StringVector args{pythonConverterScript.string(), "--json-template"};
+                        pythonConverterScript.string() + " --json_template";
+  StringVector args{pythonConverterScript.string(), "--json_template"};
   if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, m_compiler->GetIPGenerator()->environment()).code) {
     m_compiler->ErrorMessage("IP Catalog, no IP information for " +
                              pythonConverterScript.string() + "\n" +

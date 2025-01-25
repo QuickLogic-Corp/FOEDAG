@@ -84,7 +84,7 @@ IpConfigWidget::IpConfigWidget(QWidget* parent /*nullptr*/,
   // re-configure)
   if (!moduleName.isEmpty()) this->m_moduleName = moduleName;
 
-  // run with --json --json-template parameters to get default GUI
+  // run with --json --json_template parameters to get default GUI
   if (!requestedIpName.isEmpty()) generateDetailedInformation();
 }
 

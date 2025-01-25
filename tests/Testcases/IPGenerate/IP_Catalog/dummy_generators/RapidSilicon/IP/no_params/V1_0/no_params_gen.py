@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 
-# The following is simulated output of `python3 <some_generator>_gen.py --json-template`
+# The following is simulated output of `python3 <some_generator>_gen.py --json_template`
 # which is what the IPCatalog calls when first reading in IPs
 # Foedag currently doesn't have the dependencies(litex/migen) to run that command
 # on the fly so this file is a temporary solution

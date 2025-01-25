@@ -381,7 +381,7 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
     m_processes.push_back(&process);
     process.start(program, args_);
   }
-  //qDebug() << "~~~ ExecuteSystemCommand" << program << args_.join(" ");
+  qDebug() << "~~~ ExecuteSystemCommand" << program << args_.join(" ");
 
   bool finished = process.waitForFinished(timeout_ms);
   auto it = std::find(m_processes.begin(), m_processes.end(), &process);
