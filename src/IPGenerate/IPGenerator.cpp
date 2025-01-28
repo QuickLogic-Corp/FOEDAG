@@ -63,6 +63,17 @@ std::filesystem::path IPGenerator::IPCatalogPath() const {
   return ExecPath() / ".." / "IP_Catalog";
 }
 
+void IPGenerator::shareContext()
+{
+  std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
+
+  m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
+  m_environment["QL_DEVICE_PATH"] = QLDeviceManager::getInstance()->deviceTypeDirPath().string();
+  m_environment["QL_IP_BUILD_PATH"] = ipBuildPath.string();
+
+  dumpDeviceData(ipBuildPath);
+}
+
 void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
 {
   QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
@@ -107,8 +118,6 @@ void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
   QString jsonFilepath{QString::fromStdString(path.string()) + "/" + "device_info.json"};
   std::ofstream json_ofstream(jsonFilepath.toStdString());
   json_ofstream << std::setw(4) << json << std::endl;
-
-  m_environment["QL_IPGENERATOR_BUILD_DIR"] = path.string();
 }
 
 bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
@@ -496,6 +505,8 @@ void IPGenerator::DeleteIPInstance(const std::string& moduleName) {
 }
 
 bool IPGenerator::Generate() {
+  shareContext();
+
   bool status = true;
   Compiler* compiler = GetCompiler();
   std::vector<IPInstance*> instances{};
@@ -521,8 +532,6 @@ bool IPGenerator::Generate() {
     if (!std::filesystem::exists(out_path)) {
       std::filesystem::create_directories(out_path.parent_path());
     }
-
-    dumpDeviceData(GetBuildDir(inst));
 
     const IPDefinition* def = inst->Definition();
     switch (def->Type()) {

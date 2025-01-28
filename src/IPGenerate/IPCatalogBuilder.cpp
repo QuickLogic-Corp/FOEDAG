@@ -83,6 +83,7 @@ bool IPCatalogBuilder::buildLiteXCatalog(
       if (exec_name.find("__init__.py") != std::string::npos) continue;
       if (exec_name.find("_gen.py") != std::string::npos) {
         foundCount++;
+        m_compiler->GetIPGenerator()->shareContext();
         bool res = namesOnly ? buildLiteXIPFromGeneratorInternal(catalog, entry)
                              : buildLiteXIPFromGenerator(catalog, entry);
         if (res == false) {

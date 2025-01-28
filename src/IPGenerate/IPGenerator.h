@@ -40,14 +40,13 @@ class IPInstance;
 
 class IPGenerator {
  public:
-  IPGenerator(IPCatalog* catalog, Compiler* compiler)
-      : m_catalog(catalog), m_compiler(compiler) {
-        m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
-      }
+  IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler) {
+    m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
+  }
   virtual ~IPGenerator() {}
   
+  void shareContext();
   const std::map<std::string, std::string>& environment() const { return m_environment; }
-  void dumpDeviceData(const std::filesystem::path&);
   
   std::filesystem::path ExecPath() const;
   std::filesystem::path EnvsPath() const;
@@ -95,6 +94,9 @@ class IPGenerator {
   Compiler* m_compiler = nullptr;
   std::vector<IPInstance*> m_instances;
   std::map<std::string, std::string> m_environment;
+
+private:
+  void dumpDeviceData(const std::filesystem::path&);
 };
 
 }  // namespace FOEDAG

@@ -123,6 +123,7 @@ void IpCatalogTree::itemSelectionHasChanged() {
             ip.toStdString());
     if (def && !def->Valid()) {
       IPCatalogBuilder builder{GlobalSession->GetCompiler()};
+      GlobalSession->GetCompiler()->GetIPGenerator()->shareContext();
       builder.buildLiteXIPFromGenerator(
           GlobalSession->GetCompiler()->GetIPGenerator()->Catalog(),
           def->FilePath());
