@@ -80,45 +80,44 @@ void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
   QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
 
   auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice) ) {
-    m_compiler->ErrorMessage("Cannot proceed IP Generation because target device is invalid\n");
-    return;
-  }
+  if( QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice) ) {
+    std::string family              = targetDevice.device_variant.family;
+    std::string foundry             = targetDevice.device_variant.foundry;
+    std::string node                = targetDevice.device_variant.node;
+    std::string device              = targetDevice.device_variant.devicename;
+    std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
+    std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
 
-  std::string family              = targetDevice.device_variant.family;
-  std::string foundry             = targetDevice.device_variant.foundry;
-  std::string node                = targetDevice.device_variant.node;
-  std::string device              = targetDevice.device_variant.devicename;
-  std::string voltage_threshold   = targetDevice.device_variant.voltage_threshold;
-  std::string p_v_t_corner        = targetDevice.device_variant.p_v_t_corner;
+    std::string layout = targetDevice.device_variant_layout.name;
+    int width = targetDevice.device_variant_layout.width;
+    int height = targetDevice.device_variant_layout.height;
+    int bram = targetDevice.device_variant_layout.bram;
+    int dsp = targetDevice.device_variant_layout.dsp;
+    int clb = targetDevice.device_variant_layout.clb;
+    int io = targetDevice.device_variant_layout.io;
 
-  std::string layout = targetDevice.device_variant_layout.name;
-  int width = targetDevice.device_variant_layout.width;
-  int height = targetDevice.device_variant_layout.height;
-  int bram = targetDevice.device_variant_layout.bram;
-  int dsp = targetDevice.device_variant_layout.dsp;
-  int clb = targetDevice.device_variant_layout.clb;
-  int io = targetDevice.device_variant_layout.io;
+    nlohmann::ordered_json json;
 
-  nlohmann::ordered_json json;
+    json["family"] = family;
+    json["foundry"] = foundry;
+    json["node"] = node;
+    json["device"] = device;
+    json["layout"] = layout;
+    json["width"] = std::to_string(width);
+    json["height"] = std::to_string(height);
+    json["bram"] = std::to_string(bram);
+    json["dsp"] = std::to_string(dsp);
+    json["clb"] = std::to_string(clb);
+    json["io"] = std::to_string(io);
 
-  json["family"] = family;
-  json["foundry"] = foundry;
-  json["node"] = node;
-  json["device"] = device;
-  json["layout"] = layout;
-  json["width"] = std::to_string(width);
-  json["height"] = std::to_string(height);
-  json["bram"] = std::to_string(bram);
-  json["dsp"] = std::to_string(dsp);
-  json["clb"] = std::to_string(clb);
-  json["io"] = std::to_string(io);
+    FileUtils::MkDirs(path);
 
-  FileUtils::MkDirs(path);
-
-  QString jsonFilepath{QString::fromStdString(path.string()) + "/" + "device_info.json"};
-  std::ofstream json_ofstream(jsonFilepath.toStdString());
-  json_ofstream << std::setw(4) << json << std::endl;
+    QString jsonFilepath{QString::fromStdString(path.string()) + "/" + "device_info.json"};
+    std::ofstream json_ofstream(jsonFilepath.toStdString());
+    json_ofstream << std::setw(4) << json << std::endl;
+  } else {
+    m_compiler->Message("WARNING: Cannot dump device info because target device is invalid\n");
+  }  
 }
 
 bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
