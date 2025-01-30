@@ -397,10 +397,14 @@ void PackagePinsView::initLine(QTreeWidgetItem *item) {
 }
 
 void PackagePinsView::copyData(QTreeWidgetItem *from, QTreeWidgetItem *to) {
+#ifdef UPSTREAM_PINPLANNER
   auto fromCombo = GetCombo(from, PortsCol);
+#endif
   int portIndex{0};
+  #ifdef UPSTREAM_PINPLANNER
   int modeIndex{0};
   int intPin{0};
+#endif
 
 #ifdef UPSTREAM_PINPLANNER
   if (fromCombo) portIndex = fromCombo->currentIndex();

@@ -28,9 +28,9 @@ void QLPackagePinsLoader::initHeader()
 
   int id = 0;
 
-  m_model->appendHeaderData(HeaderData{"Interface pin", "Interface pin", id++, true});
-  m_model->appendHeaderData(HeaderData{"Available", "How many pins are in the group", id++, true});
-  m_model->appendHeaderData(HeaderData{"Ports", "User defined ports", id++, true});
+  m_model->appendHeaderData(HeaderData{"Interface pin", "Interface pin", id++, visible});
+  m_model->appendHeaderData(HeaderData{"Available", "How many pins are in the group", id++, visible});
+  m_model->appendHeaderData(HeaderData{"Ports", "User defined ports", id++, visible});
 }
 
 void QLPackagePinsLoader::parseHeader(const QString &header)
