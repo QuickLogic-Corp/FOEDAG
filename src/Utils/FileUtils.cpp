@@ -28,6 +28,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string.h>
 #include <sys/stat.h>
 
+#ifdef __WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <QDebug>
 #include <QProcess>
 #include <algorithm>
@@ -347,6 +353,7 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   QProcessEnvironment currentEnvironment = QProcessEnvironment::systemEnvironment();
   for (const auto& [var, val]: environment) {
     currentEnvironment.insert(var.c_str(), val.c_str());
+    qDebug() << "~~~ ENV:" << var.c_str() << "="<< val.c_str();
   }
   process.setProcessEnvironment(currentEnvironment);
 
@@ -493,6 +500,21 @@ std::string FileUtils::resolvePathStr(const std::string& pathStr) {
 #else
   return pathStr;
 #endif
+}
+
+std::filesystem::path FileUtils::getExecutablePath() {
+  std::filesystem::path result;
+#ifdef _WIN32
+    char path[MAX_PATH];
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    result = std::string(path);
+#else
+    char path[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", path, PATH_MAX);
+    result = (count != -1) ? std::string(path, count) : "";
+#endif
+
+  return result.parent_path();
 }
 
 }  // namespace FOEDAG

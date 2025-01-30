@@ -52,7 +52,8 @@ using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
 
 std::filesystem::path IPGenerator::ExecPath() const {
-    return std::filesystem::path(QCoreApplication::applicationDirPath().toStdString());
+    qDebug() << "--- ~~~ ExecPath=" << FileUtils::getExecutablePath().string().c_str();
+    return FileUtils::getExecutablePath();
 }
 
 std::filesystem::path IPGenerator::EnvsPath() const {

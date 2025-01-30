@@ -111,6 +111,8 @@ class FileUtils final {
 
   static std::string resolvePathStr(const std::string& pathStr);
 
+  static std::filesystem::path getExecutablePath();
+
  private:
   FileUtils() = delete;
   FileUtils(const FileUtils& orig) = delete;
