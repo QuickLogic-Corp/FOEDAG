@@ -18,7 +18,7 @@
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 proc readLog {} {
-    set fp [open "foedag.log" r]
+    set fp [open "aurora.log" r]
     set file_data [read $fp]
     close $fp
     return $file_data
