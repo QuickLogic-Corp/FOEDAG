@@ -44,7 +44,7 @@ if { $platform == "windows" } {
     # Generate only inst2
     ipgenerate -modules inst2
 
-    set fp [open "foedag.log" r]
+    set fp [open "aurora.log" r]
     set file_data [read $fp]
     close $fp
     # Error out if inst1 was generated
