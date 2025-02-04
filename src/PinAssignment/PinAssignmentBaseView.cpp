@@ -104,8 +104,10 @@ void PinAssignmentBaseView::setComboData(const QModelIndex &index, int column,
   }
 }
 
+#ifdef UPSTREAM_PINPLANNER
 QComboBox *PinAssignmentBaseView::CreateCombo(QWidget *parent) {
   return new ComboBox{parent};
 }
+#endif
 
 }  // namespace FOEDAG

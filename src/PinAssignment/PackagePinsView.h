@@ -23,6 +23,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "PinAssignmentBaseView.h"
 #include "PinsBaseModel.h"
 
+#ifndef UPSTREAM_PINPLANNER
+#include <QSet>
+#endif
+
 class QComboBox;
 class QToolButton;
 namespace FOEDAG {
@@ -74,8 +78,10 @@ private slots:
   void updatePinNames();
 
  private:
+  QIcon m_iconAdd;
 #ifndef UPSTREAM_PINPLANNER
   int m_directionItemColumn = -1;
+  QSet<QString> m_initializedDirections;
 #endif
 #ifdef UPSTREAM_PINPLANNER
   const int MAX_ROWS{};

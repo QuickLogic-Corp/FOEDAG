@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QSet>
 #include <QTreeWidget>
+#include "LazyComboBox.h"
 
 class QComboBox;
 namespace FOEDAG {
@@ -46,6 +47,7 @@ class PinAssignmentBaseView : public QTreeWidget {
   void updateInternalPinSelection(const QString &pin, QComboBox *combo);
 #endif
 
+#ifdef UPSTREAM_PINPLANNER
   template <class ComboPtr = QComboBox *>
   ComboPtr GetCombo(const QModelIndex &index) const {
     return qobject_cast<ComboPtr>(indexWidget(index));
@@ -58,10 +60,24 @@ class PinAssignmentBaseView : public QTreeWidget {
   Combo GetCombo(QTreeWidgetItem *item, int column) const {
     return qobject_cast<Combo>(itemWidget(item, column));
   }
+#else
+  LazyComboBox* GetCombo(const QModelIndex &index) const {
+    return qobject_cast<LazyComboBox*>(indexWidget(index));
+  }
+  LazyComboBox* GetCombo(const QModelIndex &index, int column) const {
+    return qobject_cast<LazyComboBox*>(itemWidget(itemFromIndex(index), column));
+  }
+  LazyComboBox* GetCombo(QTreeWidgetItem *item, int column) const {
+    return qobject_cast<LazyComboBox*>(itemWidget(item, column));
+  }
+#endif
+
   void setComboData(const QModelIndex &index, const QString &data);
   void setComboData(const QModelIndex &index, int column, const QString &data);
 
+#ifdef UPSTREAM_PINPLANNER
   static QComboBox *CreateCombo(QWidget *parent);
+#endif
 
  protected:
   PinsBaseModel *m_model{nullptr};
