@@ -57,18 +57,27 @@ std::filesystem::path IPGenerator::ExecPath() const {
 }
 
 std::filesystem::path IPGenerator::EnvsPath() const {
-  return ExecPath() / ".." / "envs";
+  return std::filesystem::weakly_canonical(ExecPath() / ".." / "envs");
 }
 
 std::filesystem::path IPGenerator::IPCatalogPath() const {
-  return ExecPath() / ".." / "IP_Catalog";
+  return std::filesystem::weakly_canonical(ExecPath() / ".." / "IP_Catalog");
+}
+
+IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler) {
+  m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
+#ifndef __WIN32
+  // IP Generator requires libffi.so.6 which is absent on ubuntu>=20.04
+  std::string ldLibraryPath = qgetenv("LD_LIBRARY_PATH").toStdString();
+  std::string newLdLibraryPath = (EnvsPath() / "python3.8" / "lib" / "os_libs").string();
+  m_environment["LD_LIBRARY_PATH"] = newLdLibraryPath + ":" + ldLibraryPath;
+#endif
 }
 
 void IPGenerator::shareContext()
 {
   std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
 
-  m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
   m_environment["QL_DEVICE_PATH"] = QLDeviceManager::getInstance()->deviceTypeDirPath().string();
   m_environment["QL_IP_BUILD_PATH"] = ipBuildPath.string();
 

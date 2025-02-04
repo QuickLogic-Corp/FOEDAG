@@ -40,9 +40,7 @@ class IPInstance;
 
 class IPGenerator {
  public:
-  IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler) {
-    m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
-  }
+  IPGenerator(IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
   
   void shareContext();
