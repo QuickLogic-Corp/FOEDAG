@@ -570,7 +570,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
         }
       }
     }
-    if (compiler->ProjManager()->projectType() != RTL) {
+    if (compiler->ProjManager()->projectType() == PostSynth) {
       compiler->ErrorMessage(
           "Post synthesis flow. Please use read_netlist or change design "
           "type.");
