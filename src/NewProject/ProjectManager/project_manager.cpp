@@ -1868,11 +1868,11 @@ bool ProjectManager::CopyFileToPath(QString sourceDir, QString destinDir,
     return false;
   }
 
-  QDir* createfile = new QDir;
-  bool exist = createfile->exists(destinDir);
+  QDir createfile;
+  bool exist = createfile.exists(destinDir);
   if (exist) {
     if (iscover) {
-      createfile->remove(destinDir);
+      createfile.remove(destinDir);
     }
   }
 
