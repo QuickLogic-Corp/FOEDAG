@@ -657,9 +657,14 @@ void QLSettingsManager::populateSettingsWidget() {
 
     for (auto [subcategoryId, subcategoryJson] : categoryJson.items()) {
 
-      if(categoryId == "general" && subcategoryId == "device") {
+      if((categoryId == "general" && subcategoryId == "device") || 
+        (categoryId == "synplify" && !synplifyProject) || 
+        (categoryId == "yosys" && synplifyProject))
+      {
         continue;
       }
+
+
 
       // container widget for each 'subcategory'  -> 'page' widget inside the category QTabWidget
       // the container widget will contain all the 'parameters' of this subcategory -> hence a simple QWidget will do.

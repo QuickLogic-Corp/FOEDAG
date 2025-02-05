@@ -22,6 +22,8 @@ class projectTypeForm : public QWidget {
   QString projectTypeStr() const;
   static QString projectTypeStr(ProjectType type);
 
+  QComboBox* m_combobox_synthesis_tool;
+  
  signals:
   void skipSources(bool skip);
 

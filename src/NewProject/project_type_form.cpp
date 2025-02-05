@@ -7,11 +7,12 @@ using namespace FOEDAG;
 projectTypeForm::projectTypeForm(QWidget *parent)
     : QWidget(parent), ui(new Ui::projectTypeForm) {
   ui->setupUi(this);
+  m_combobox_synthesis_tool = new QComboBox();
+  m_combobox_synthesis_tool->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   ui->m_labelTitle->setText(tr("Type of Project"));
   ui->m_labelDetail->setText(tr("Specify the type of project to create."));
   ui->m_radioBtnRTL->setText(tr("RTL Project"));
   ui->m_radioBtnPost->setText(tr("Post-synthesis Project"));
-  ui->m_radioBtnSynp->setText(tr("Synplify Project"));
   ui->m_radioBtnPostMapSynp->setText(tr("Post-map Synplify Project"));
   ui->m_labelRTL->setText(
       tr("- Generate IP\n"
@@ -19,9 +20,6 @@ projectTypeForm::projectTypeForm(QWidget *parent)
   ui->m_labelPOS->setText(
       tr("- Only one of .edif, .edf, .blif, .eblif, .v file allowed\n"
          "- Run P&R timing & generate bitstream"));
-  ui->m_labelSYN->setText(
-      tr("- Generate IP\n"
-         "- Run Analysis, Synthesis, P&R timing & generate bitstream"));
   ui->m_labelPostMapSYN->setText(
       tr("- Only one of .v or .vm file allowed\n"
          "- Run Yosys for conversion, P&R timing & generate bitstream"));
@@ -35,11 +33,12 @@ projectTypeForm::~projectTypeForm() { delete ui; }
 
 ProjectType projectTypeForm::projectType() const {
   if (ui->m_radioBtnRTL->isChecked()) {
-    return RTL;
+    if (ui->m_combobox_synthesis_tool->currentText() == "yosys")
+      return RTL;
+    else if (ui->m_combobox_synthesis_tool->currentText() == "synplify")
+      return Synplify;
   } else if (ui->m_radioBtnPost->isChecked()) {
     return PostSynth;
-  } else if (ui->m_radioBtnSynp->isChecked()) {
-    return Synplify;
   } else if (ui->m_radioBtnPostMapSynp->isChecked()) {
     return PostMapSynplify;
   }
