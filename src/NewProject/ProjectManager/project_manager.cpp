@@ -1807,10 +1807,12 @@ bool ProjectManager::CreateSynplifyPRJFilefromTemplate() {
   
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
 
-  std::filesystem::path prj_template_filepath = device_data_dir_path / "aurora" / "aurora_template_script.prj";
+  std::filesystem::path template_file_name = "aurora_template_script.prj";
+  std::filesystem::path src_prj_template_filepath = device_data_dir_path / "aurora" / template_file_name;
+  std::filesystem::path dst_prj_template_filepath = std::filesystem::path(projectPath()) / template_file_name;
 
-  ret = CopyFileToPath(QString::fromStdString(prj_template_filepath),getProjectPath(), false);
-  std::cout<<prj_template_filepath<<std::endl;
+  ret = CopyFileToPath(QString::fromStdString(src_prj_template_filepath), QString::fromStdString(dst_prj_template_filepath), false);
+  std::cout<<src_prj_template_filepath<<std::endl;
   return ret;
 }
 
