@@ -113,12 +113,12 @@
                 </property>
                 <item>
                     <property name="text">
-                        <string>yosys</string>
+                        <string>Yosys</string>
                     </property>
                 </item>
                 <item>
                     <property name="text">
-                        <string>synplify</string>
+                        <string>Synplify</string>
                     </property>
                 </item>
             </widget>
