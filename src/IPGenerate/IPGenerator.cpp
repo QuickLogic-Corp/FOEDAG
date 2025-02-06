@@ -77,10 +77,7 @@ IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(cata
 void IPGenerator::shareContext()
 {
   std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
-
-  m_environment["QL_DEVICE_PATH"] = QLDeviceManager::getInstance()->deviceTypeDirPath().string();
   m_environment["QL_IP_BUILD_PATH"] = ipBuildPath.string();
-
   dumpDeviceData(ipBuildPath);
 }
 
