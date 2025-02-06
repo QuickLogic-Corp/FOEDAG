@@ -44,8 +44,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
-#include "nlohmann_json/json.hpp"
-
 extern FOEDAG::Session* GlobalSession;
 using namespace FOEDAG;
 using Time = std::chrono::high_resolution_clock;
@@ -78,10 +76,11 @@ void IPGenerator::shareContext()
 {
   std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
   m_environment["QL_IP_BUILD_PATH"] = ipBuildPath.string();
-  dumpDeviceData(ipBuildPath);
+  dumpDeviceInfo(ipBuildPath);
+  dumpParameterModifications(ipBuildPath);
 }
 
-void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
+void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
 {
   QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
 
@@ -116,14 +115,45 @@ void IPGenerator::dumpDeviceData(const std::filesystem::path& path)
     json["clb"] = std::to_string(clb);
     json["io"] = std::to_string(io);
 
-    FileUtils::MkDirs(path);
-
-    QString jsonFilepath{QString::fromStdString(path.string()) + "/" + "device_info.json"};
-    std::ofstream json_ofstream(jsonFilepath.toStdString());
-    json_ofstream << std::setw(4) << json << std::endl;
+    saveJsonFile(json, path / "device_info.json");
   } else {
     m_compiler->Message("WARNING: Cannot dump device info because target device is invalid\n");
-  }  
+  }
+}
+
+void IPGenerator::dumpParameterModifications(const std::filesystem::path& path)
+{
+  QLSettingsManager::getInstance(); // is required in order to proper QLSettingsManager and QLDeviceManager initilization
+
+  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice) ) {
+    std::string foundry             = targetDevice.device_variant.foundry;
+    std::string node                = targetDevice.device_variant.node;
+
+    // TODO: this is temprorary solution, we need find the way how to fetch data based on HW info
+    if (StringUtils::toLower(foundry) == "gf" && StringUtils::toLower(node) == "22nm") {
+      nlohmann::json paramsModData = {
+          {"parameters", {
+              {
+                  {"parameter", "memory_type"},
+                  {"options", {"Single_Port", "Simple_Dual_Port"}}
+              }
+          }}
+      };
+      saveJsonFile(paramsModData, path / "on_chip_memory" / "params_mod.json");
+    }
+  }
+}
+
+void IPGenerator::saveJsonFile(const nlohmann::json& json, const std::filesystem::path& filepath)
+{
+  std::filesystem::path path = filepath.parent_path();
+  if (!std::filesystem::exists(path)) {
+    FileUtils::MkDirs(path.parent_path());
+  }
+
+  std::ofstream json_ofstream(filepath);
+  json_ofstream << std::setw(4) << json << std::endl;
 }
 
 bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {

@@ -30,6 +30,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <map>
 #include <cassert>
 
+#include "nlohmann_json/json.hpp"
+
 #include "IPGenerate/IPCatalog.h"
 
 namespace FOEDAG {
@@ -94,7 +96,9 @@ class IPGenerator {
   std::map<std::string, std::string> m_environment;
 
 private:
-  void dumpDeviceData(const std::filesystem::path&);
+  void dumpDeviceInfo(const std::filesystem::path&);
+  void dumpParameterModifications(const std::filesystem::path&);
+  void saveJsonFile(const nlohmann::json& data, const std::filesystem::path& filepath);
 };
 
 }  // namespace FOEDAG
