@@ -49,6 +49,9 @@ using namespace FOEDAG;
 using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
 
+// Right now we bypass new approach and still use legacy flow of building commandline arguments.
+#define EXCLUDE_MODIFICATION_JSON_FLOW
+
 std::filesystem::path IPGenerator::ExecPath() const {
     qDebug() << "--- ~~~ ExecPath=" << FileUtils::getExecutablePath().string().c_str();
     return FileUtils::getExecutablePath();
@@ -77,7 +80,9 @@ void IPGenerator::shareContext()
   std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
   m_environment["QL_IP_BUILD_PATH"] = ipBuildPath.string();
   dumpDeviceInfo(ipBuildPath);
+#ifndef EXCLUDE_MODIFICATION_JSON_FLOW
   dumpParameterModifications(ipBuildPath);
+#endif // EXCLUDE_MODIFICATION_JSON_FLOW
 }
 
 void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
