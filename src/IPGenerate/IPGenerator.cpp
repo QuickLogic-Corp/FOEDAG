@@ -120,6 +120,9 @@ void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
     json["clb"] = std::to_string(clb);
     json["io"] = std::to_string(io);
 
+    if (!std::filesystem::exists(path)) {
+      FileUtils::MkDirs(path);
+    }
     saveJsonFile(json, path / "device_info.json");
   } else {
     m_compiler->Message("WARNING: Cannot dump device info because target device is invalid\n");
