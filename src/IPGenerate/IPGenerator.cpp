@@ -53,8 +53,7 @@ using ms = std::chrono::milliseconds;
 #define EXCLUDE_MODIFICATION_JSON_FLOW
 
 std::filesystem::path IPGenerator::ExecPath() const {
-    qDebug() << "--- ~~~ ExecPath=" << FileUtils::getExecutablePath().string().c_str();
-    return FileUtils::getExecutablePath();
+  return FileUtils::getExecutablePath();
 }
 
 std::filesystem::path IPGenerator::EnvsPath() const {
