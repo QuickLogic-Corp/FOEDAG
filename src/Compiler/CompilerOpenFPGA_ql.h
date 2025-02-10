@@ -162,6 +162,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::string FinishAnalyzeScript(const std::string& script);
   virtual std::string InitOpenFPGAScript();
   virtual std::string FinishOpenFPGAScript(const std::string& script);
+  virtual std::string InitSynplifyScript();
+  virtual std::filesystem::path FindSynthSDCPaths();
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
       const std::string& size) const;
@@ -185,6 +187,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_staExecutablePath = "sta";
   std::filesystem::path m_pinConvExecutablePath = "pin_c";
   std::filesystem::path m_aurora_template_script_yosys_path;
+  std::filesystem::path m_aurora_template_script_synplify_path;
   std::filesystem::path m_aurora_template_script_openfpga_path;
   /*!
    * \brief m_architectureFile
@@ -204,6 +207,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaPinMapXml = "";
   std::string m_deviceSize;
   std::string m_yosysScript;
+  std::string m_synplifyScript;
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 

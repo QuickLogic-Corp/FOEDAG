@@ -300,6 +300,79 @@ ${QL_SYNTH_PASS_NAME} -top ${TOP_MODULE} -family ${FAMILY} -blif ${OUTPUT_BLIF} 
 
 )";
 
+
+const std::string qlSynplifyScript = R"( 
+#project files
+${READ_DESIGN_FILES}
+
+impl -add ${TOP_MODULE} -type fpga
+
+#implementation attributes
+
+set_option -vlog_std sysv
+set_option -project_relative_includes 1
+
+#device options
+set_option -technology QuickLogic
+set_option -part ${FAMILY}
+set_option -package ""
+set_option -speed_grade ""
+set_option -part_companion ""
+
+#compilation/mapping options
+
+set_option -top_module "${TOP_MODULE}"
+
+# hdl_compiler_options
+set_option -distributed_compile 1
+set_option -scm2hydra 0
+set_option -scm2hydra_preserve_rtl_sig 1
+set_option -hdl_strict_syntax 0
+
+# mapper_without_write_options
+set_option -frequency ${FREQUENCY_VALUE}
+set_option -srs_instrumentation 1
+
+# Quicklogic
+set_option -no_sequential_opt 0
+set_option -write_verilog 1
+set_option -maxfan 10000
+set_option -rw_check_on_ram 0
+set_option -disable_io_insertion 0
+set_option -bram_threshold 100000
+set_option -pipe 1
+set_option -infer_seqShift 1
+set_option -retiming ${RETIMING_VALUE}
+set_option -update_models_cp 0
+set_option -run_prop_extract 1
+
+# common_options
+set_option -add_dut_hierarchy 0
+set_option -prepare_readback 0
+
+# flow_options
+set_option -slr_aware_debug 0
+
+# sequential_optimization_options
+set_option -symbolic_fsm_compiler 1
+
+# Compiler Options
+set_option -compiler_compatible 0
+set_option -resource_sharing 1
+set_option -multi_file_compilation_unit 1
+
+# Compiler Options
+set_option -auto_infer_blackbox 0
+
+#automatic place and route (vendor) options
+set_option -write_apr_constraint 1
+
+#set result format/file last
+project -result_file "${TOP_MODULE}.vm"
+impl -active "${TOP_MODULE}"
+
+)";
+
 // https://github.com/lnis-uofu/OpenFPGA/blob/master/openfpga_flow/misc/ys_tmpl_yosys_vpr_flow.ys
 const std::string basicYosysScript = R"( 
 # Yosys synthesis script for ${TOP_MODULE}
@@ -1685,6 +1758,136 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
 
+  if(m_projManager->projectType() == Synplify)
+  {
+    std::string synplifyScript; 
+    m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
+    if(m_aurora_template_script_synplify_path.empty()) {
+
+      ErrorMessage("Cannot proceed without Synplify Template Script.");
+      return false;
+    }
+    synplifyScript = InitSynplifyScript();
+    std::string designFiles;
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string filesScript =
+          "add_file ${LANGUAGE_STANDARD} ${FILES}";
+      std::string lang;
+
+      auto files = lang_file.second + " ";
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+        case Design::Language::VHDL_1993:
+        case Design::Language::VHDL_2000:
+        case Design::Language::VHDL_2008:
+        case Design::Language::VHDL_2019:
+          lang = "-vhdl";
+          break;
+        case Design::Language::VERILOG_1995:
+        case Design::Language::VERILOG_2001:
+        case Design::Language::SYSTEMVERILOG_2005:
+        lang = "-verilog";
+          break;
+        case Design::Language::SYSTEMVERILOG_2009:
+        case Design::Language::SYSTEMVERILOG_2012:
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-sv";
+          break;
+        case Design::Language::VERILOG_NETLIST:
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Unsupported language (Synplify default parser)");
+          break;
+        case Design::Language::OTHER:
+          // don't include it in the compilation process
+          continue;
+      }
+      filesScript = ReplaceAll(filesScript, "${LANGUAGE_STANDARD}", lang);
+      filesScript = ReplaceAll(filesScript, "${FILES}", files);
+      designFiles += filesScript + "\n";
+    }
+    synplifyScript =
+        ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
+
+    if (!ProjManager()->DesignTopModule().empty()) {
+      synplifyScript = ReplaceAll(synplifyScript, "${TOP_MODULE}",
+                                ProjManager()->DesignTopModule());
+    } else {
+      ErrorMessage("Cannot proceed without the top module specified.");
+    }
+
+    std::string synplify_family_name = 
+      QLDeviceManager::getInstance()->deviceSynplifyFamilyName();
+    if(!synplify_family_name.empty()) {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FAMILY}", synplify_family_name);
+    }
+    else {
+      ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
+      return false;
+    }
+
+    std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
+    if (synplify_mode == "speed")
+    {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "1");
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "auto");
+    }
+    else if (synplify_mode == "area")
+    {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
+    }
+    else
+    {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
+    }
+    std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
+    // if we have a valid sdc_file_path at this point, pass it on to vpr:
+    if(!synth_sdc_filepath.empty()) {
+      // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
+
+      synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
+                                                                std::string(" -constraint ") + 
+                                                                synth_sdc_filepath.string());
+    }
+    else {
+      //std::cout << "synth sdc file not available." << std::endl;
+
+      synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+    }
+
+    std::string synplify_script_path = ProjManager()->projectName() + ".prj";
+    synplify_script_path =
+      (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
+          .string();
+    std::ofstream ofs(synplify_script_path);
+    ofs << synplifyScript;
+    ofs.close();
+    // synplify_base -batch -licensetype synplifybase_quicklogic -license_wait $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
+    std::string command =
+    std::string("synplify_base") + " -batch " +
+      "-licensetype synplifybase_quicklogic -license_wait " +
+      synplify_script_path + " >> " +  ProjManager()->projectName() + "_synplify.log";
+    Message("Synthesis command: " + command);
+    int status = ExecuteAndMonitorSystemCommand(command);
+    CleanTempFiles();
+    if (status) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                  " synthesis failed");
+      return false;
+    } else {
+      m_state = State::Synthesized;
+      Message("Design " + ProjManager()->projectName() + " is synthesized");
+    }
+  }
 
   // use the device specific yosys script
   m_aurora_template_script_yosys_path = QLDeviceManager::getInstance()->deviceYosysScriptFile();
@@ -1999,9 +2202,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
-  }
+    }
 
-  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
@@ -2034,77 +2237,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 
 
-  // ---------------------------------------------------------------- synth_sdc_file ++
-  // SDC file support in yosys using sdc-plugin:
-  // 1. if there is a sdc file specified in yosys > sdc_plugin > sdc_file > userValue -> take this
-  // 2. if there is an sdc file in the project dir of the name: <project_name>_synth.sdc -> take this
-  // 3. if there is an sdc file in the TCL dir of the name: <project_name>_synth.sdc -> take this
-  // then we need to process the sdc file using the sdc-plugin.
-  std::filesystem::path synth_sdc_filepath;
   
-  // 1. check if an sdc file is specified in the json:
-  if( !QLSettingsManager::getStringValue("yosys", "sdc_plugin", "sdc_file").empty() ) {
-    synth_sdc_filepath = QLSettingsManager::getStringValue("yosys", "sdc_plugin", "sdc_file");
-  }
-  // else, check for an sdc file with the naming convention (<project_name>_synth.sdc)
-  // note that, this path is always a relative path.
-  else {
-    synth_sdc_filepath = ProjManager()->projectName() + std::string("_synth") + std::string(".sdc");
-  }
-
-  // check if the path specified is absolute:
-  if (synth_sdc_filepath.is_absolute()) {
-    // check if the file exists:
-    if (!FileUtils::FileExists(synth_sdc_filepath)) {
-      // currently, we ignore it, if the sdc file path is not found.
-      synth_sdc_filepath.clear();
-    }
-  }
-  // we have a relative path
-  else {
-    std::filesystem::path synth_sdc_filepath_absolute;
-    
-    // 1. check project_path
-    // 2. check tcl_script_dir_path (if driven by TCL script)
-    // 3. check current_dir_path
-
-    std::filesystem::path project_path = std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
-    synth_sdc_filepath_absolute = project_path / synth_sdc_filepath;
-    if(!FileUtils::FileExists(synth_sdc_filepath_absolute)) {
-      synth_sdc_filepath_absolute.clear();
-    }
-
-    // 2. check tcl_script_dir_path
-    if(synth_sdc_filepath_absolute.empty()) {
-      std::filesystem::path tcl_script_dir_path = QLSettingsManager::getTCLScriptDirPath();
-      if(!tcl_script_dir_path.empty()) {
-        synth_sdc_filepath_absolute = tcl_script_dir_path / synth_sdc_filepath;
-        if(!FileUtils::FileExists(synth_sdc_filepath_absolute)) {
-          synth_sdc_filepath_absolute.clear();
-        }
-      }
-    }
-
-    // 3. check current working dir path
-    if(synth_sdc_filepath_absolute.empty()) {
-      synth_sdc_filepath_absolute = synth_sdc_filepath;
-      if(!FileUtils::FileExists(synth_sdc_filepath_absolute)) {
-        synth_sdc_filepath_absolute.clear();
-      }
-    }
-
-    // final: check if we have a valid sdc file path:
-    if(!synth_sdc_filepath_absolute.empty()) {
-      // assign the absolute path to the sdc_file_path variable:
-      synth_sdc_filepath = synth_sdc_filepath_absolute;
-    }
-    else {
-      // currently, we ignore it, if the sdc file path is not found.
-      synth_sdc_filepath.clear();
-    }
-  }
-  // relative file path processing done.
-
+  std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!synth_sdc_filepath.empty()) {
     // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
@@ -2352,6 +2486,44 @@ std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
   return m_yosysScript;
 }
 
+std::string CompilerOpenFPGA_ql::InitSynplifyScript() {
+  // Default or custom Synplify script
+  if (m_synplifyScript.empty()) {
+    bool use_external_template_synplify = false;
+    std::string aurora_template_script_synplify;
+
+    // check if we have the device aurora template script available:
+    if(FileUtils::FileExists(m_aurora_template_script_synplify_path)) {
+        
+      // get it into a ifstream
+      std::ifstream stream(m_aurora_template_script_synplify_path.string());
+        
+      if (stream.good()) {
+        aurora_template_script_synplify = 
+          std::string((std::istreambuf_iterator<char>(stream)),
+                       std::istreambuf_iterator<char>());
+          stream.close();
+          use_external_template_synplify = true;
+          
+        }
+    }
+
+    if(use_external_template_synplify) {
+      Message("Using External Synplify Template Script: " +
+                                std::string(m_aurora_template_script_synplify_path.string()));
+      m_synplifyScript = aurora_template_script_synplify;
+    }
+    else {
+      Message("Cannot load Synplify Template Script: " +
+                                std::string(m_aurora_template_script_synplify_path.string()));
+      Message("Using Internal Synplify Template Script.");
+      m_synplifyScript = qlSynplifyScript;
+    }
+  }
+  return m_synplifyScript;
+}
+
+
 std::string CompilerOpenFPGA_ql::FinishSynthesisScript(const std::string& script) {
   std::string result = script;
   // Keeps for Synthesis, preserve nodes used in constraints
@@ -2372,6 +2544,80 @@ std::string CompilerOpenFPGA_ql::FinishSynthesisScript(const std::string& script
   result = ReplaceAll(result, "${MAP_TO_TECHNOLOGY}", YosysMapTechnology());
   result = ReplaceAll(result, "${LUT_SIZE}", std::to_string(m_lut_size));
   return result;
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
+  // ---------------------------------------------------------------- synth_sdc_file ++
+  // SDC file support in yosys using sdc-plugin:
+  // 1. if there is a sdc file specified in yosys > sdc_plugin > sdc_file > userValue -> take this
+  // 2. if there is an sdc file in the project dir of the name: <project_name>_synth.sdc -> take this
+  // 3. if there is an sdc file in the TCL dir of the name: <project_name>_synth.sdc -> take this
+  // then we need to process the sdc file using the sdc-plugin.
+  std::filesystem::path synth_sdc_filepath;
+  
+  // 1. check if an sdc file is specified in the json:
+  if( !QLSettingsManager::getStringValue("yosys", "sdc_plugin", "sdc_file").empty() ) {
+    synth_sdc_filepath = QLSettingsManager::getStringValue("yosys", "sdc_plugin", "sdc_file");
+  }
+  // else, check for an sdc file with the naming convention (<project_name>_synth.sdc)
+  // note that, this path is always a relative path.
+  else {
+    synth_sdc_filepath = ProjManager()->projectName() + std::string("_synth") + std::string(".sdc");
+  }
+
+  // check if the path specified is absolute:
+  if (synth_sdc_filepath.is_absolute()) {
+    // check if the file exists:
+    if (!FileUtils::FileExists(synth_sdc_filepath)) {
+      // currently, we ignore it, if the sdc file path is not found.
+      synth_sdc_filepath.clear();
+    }
+  }
+  // we have a relative path
+  else {
+    std::filesystem::path synth_sdc_filepath_absolute;
+    
+    // 1. check project_path
+    // 2. check tcl_script_dir_path (if driven by TCL script)
+    // 3. check current_dir_path
+
+    std::filesystem::path project_path = std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
+    synth_sdc_filepath_absolute = project_path / synth_sdc_filepath;
+    if(!FileUtils::FileExists(synth_sdc_filepath_absolute)) {
+      synth_sdc_filepath_absolute.clear();
+    }
+
+    // 2. check tcl_script_dir_path
+    if(synth_sdc_filepath_absolute.empty()) {
+      std::filesystem::path tcl_script_dir_path = QLSettingsManager::getTCLScriptDirPath();
+      if(!tcl_script_dir_path.empty()) {
+        synth_sdc_filepath_absolute = tcl_script_dir_path / synth_sdc_filepath;
+        if(!FileUtils::FileExists(synth_sdc_filepath_absolute)) {
+          synth_sdc_filepath_absolute.clear();
+        }
+      }
+    }
+
+    // 3. check current working dir path
+    if(synth_sdc_filepath_absolute.empty()) {
+      synth_sdc_filepath_absolute = synth_sdc_filepath;
+      if(!FileUtils::FileExists(synth_sdc_filepath_absolute)) {
+        synth_sdc_filepath_absolute.clear();
+      }
+    }
+
+    // final: check if we have a valid sdc file path:
+    if(!synth_sdc_filepath_absolute.empty()) {
+      // assign the absolute path to the sdc_file_path variable:
+      synth_sdc_filepath = synth_sdc_filepath_absolute;
+    }
+    else {
+      // currently, we ignore it, if the sdc file path is not found.
+      synth_sdc_filepath.clear();
+    }
+  }
+  // relative file path processing done.
+  return synth_sdc_filepath;
 }
 
 std::string CompilerOpenFPGA_ql::BaseVprCommand() {

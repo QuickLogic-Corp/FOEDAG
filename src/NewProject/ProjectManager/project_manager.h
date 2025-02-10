@@ -414,8 +414,6 @@ class ProjectManager : public QObject {
   int CreateVHDLFile(QString strFile);
   int CreateSDCFile(QString strFile);
 
-  bool CreateSynplifyPRJFilefromTemplate();
-
   int AddOrCreateFileToFileSet(const QString &strFileName,
                                bool isFileCopy = true);
 

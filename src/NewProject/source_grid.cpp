@@ -513,7 +513,7 @@ bool sourceGrid::CheckPinFileExists(const QString &suffix) {
 bool sourceGrid::CheckNetlistFileExists(const QStringList &files) {
   const bool good{true};
   const bool fail{false};
-  if (CurrentProjectType() == RTL) return good;
+  if (CurrentProjectType() == RTL || CurrentProjectType() == Synplify) return good;
 
   int netlistCount{0};
   for (const QString &file : files) {

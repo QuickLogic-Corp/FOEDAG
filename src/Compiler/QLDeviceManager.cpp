@@ -2451,6 +2451,53 @@ std::filesystem::path QLDeviceManager::deviceYosysScriptFile(QLDeviceTarget devi
   return aurora_template_script_yosys_path;
 }
 
+std::filesystem::path QLDeviceManager::deviceSynplifyScriptFile(QLDeviceTarget device_target) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path empty_path;
+  std::filesystem::path aurora_template_script_synplify_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // use the device specific synplify script
+  // -- hardcoded path --
+  // aurora_template_script_synplify_path = 
+  //     std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora") / std::string("aurora_template_script.prj"));
+  // use config.json if it exists
+  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("AURORA_SYNPLIFY_TEMPLATE_SCRIPT")  ) {
+      json_value = device_target_config_json["AURORA_SYNPLIFY_TEMPLATE_SCRIPT"].get<std::string>();
+    }
+    aurora_template_script_synplify_path = 
+        deviceTypeDirPath(device_target) / json_value;
+  }
+  // else, we assume that this is a legacy device data directory (< v2.8.0)
+  else {
+
+    aurora_template_script_synplify_path = 
+        std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora_template_script.prj"));
+  }
+
+  // std::cout << "[zyxw]" << "using ys template: " << aurora_template_script_synplify_path.string() << std::endl;
+
+  if(!FileUtils::FileExists(aurora_template_script_synplify_path)) {
+
+    compiler->ErrorMessage("Cannot find device Synplify Template Script: " + aurora_template_script_synplify_path.string());
+    return empty_path;
+  }
+
+  return aurora_template_script_synplify_path;
+}
+
 
 std::filesystem::path QLDeviceManager::deviceSettingsTemplateFile(QLDeviceTarget device_target) {
 
@@ -3569,6 +3616,24 @@ std::string QLDeviceManager::deviceYosysFamilyName(QLDeviceTarget device_target)
   }
 
   return device_yosys_family;
+}
+
+
+std::string QLDeviceManager::deviceSynplifyFamilyName(QLDeviceTarget device_target) {
+
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  std::string device_synplify_family;
+
+  if(device_target.device_variant.family == "QLF_K6N10") {
+    device_synplify_family = "QLF_K6N10";
+  }
+
+  return device_synplify_family;
 }
 
 

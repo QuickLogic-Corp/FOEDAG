@@ -175,9 +175,11 @@ class QLDeviceManager : public QObject {
   
   std::filesystem::path deviceYosysModulesDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::string deviceYosysFamilyName(QLDeviceTarget device_target = QLDeviceTarget());
+  std::string deviceSynplifyFamilyName(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::filesystem::path> deviceYosysModulesPathList(QLDeviceTarget device_target = QLDeviceTarget());
 
   std::filesystem::path deviceYosysScriptFile(QLDeviceTarget device_target = QLDeviceTarget());
+  std::filesystem::path deviceSynplifyScriptFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAScriptFile(QLDeviceTarget device_target = QLDeviceTarget());
 
   std::filesystem::path deviceSettingsTemplateFile(QLDeviceTarget device_target);

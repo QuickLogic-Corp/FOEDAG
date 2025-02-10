@@ -56,7 +56,6 @@ void ProjectManager::CreateProject(const ProjectOptions& opt) {
   UpdateProjectInternal(opt, true);
 
   DesignFileWatcher::Instance()->emitDesignCreated();
-  CreateSynplifyPRJFilefromTemplate();
 }
 
 void ProjectManager::UpdateProject(const ProjectOptions& opt) {
@@ -1794,25 +1793,6 @@ int ProjectManager::CreateSDCFile(QString strFile) {
   return ret;
 }
 
-bool ProjectManager::CreateSynplifyPRJFilefromTemplate() {
-  int ret = 0;
-  
-  std::filesystem::path root_device_data_dir_path = 
-      QLDeviceManager::getInstance()->deviceDataRootDirPath();
-
-  std::string family              = QLSettingsManager::getInstance()->getStringValue("general", "device", "family");
-  std::string foundry             = QLSettingsManager::getInstance()->getStringValue("general", "device", "foundry");
-  std::string node                = QLSettingsManager::getInstance()->getStringValue("general", "device", "node");
-  std::string devicename          = QLSettingsManager::getInstance()->getStringValue("general", "device", "devicename");
-  
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
-
-  std::filesystem::path prj_template_filepath = device_data_dir_path / "aurora" / "aurora_template_script.prj";
-
-  ret = CopyFileToPath(QString::fromStdString(prj_template_filepath),getProjectPath(), false);
-  std::cout<<prj_template_filepath<<std::endl;
-  return ret;
-}
 
 
 int ProjectManager::AddOrCreateFileToFileSet(const QString& strFileName,
