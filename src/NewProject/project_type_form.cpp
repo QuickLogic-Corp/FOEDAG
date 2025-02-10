@@ -33,9 +33,9 @@ projectTypeForm::~projectTypeForm() { delete ui; }
 
 ProjectType projectTypeForm::projectType() const {
   if (ui->m_radioBtnRTL->isChecked()) {
-    if (ui->m_combobox_synthesis_tool->currentText() == "yosys")
+    if (ui->m_combobox_synthesis_tool->currentText().toLower() == "yosys")
       return RTL;
-    else if (ui->m_combobox_synthesis_tool->currentText() == "synplify")
+    else if (ui->m_combobox_synthesis_tool->currentText().toLower() == "synplify")
       return Synplify;
   } else if (ui->m_radioBtnPost->isChecked()) {
     return PostSynth;

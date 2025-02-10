@@ -1945,6 +1945,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
+          // include synplify template script for copy (aurora_template_script.prj)
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                std::regex("aurora_template_script\\.prj",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
           // include openfpga template script for copy (aurora_template_script.openfpga)
           if (std::regex_match(dir_entry.path().filename().string(),
                                 std::regex("aurora_template_script\\.openfpga",
