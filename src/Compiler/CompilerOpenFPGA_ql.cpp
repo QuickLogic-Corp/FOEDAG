@@ -1922,217 +1922,219 @@ bool CompilerOpenFPGA_ql::Synthesize() {
         break;
     }
   }
+  
+  if(m_projManager->projectType() != Synplify)
+  {
+    if (m_useVerific) {
+      // Verific parser
+      std::string fileList;
+      std::string includes;
 
-  if (m_useVerific) {
-    // Verific parser
-    std::string fileList;
-    std::string includes;
-
-    for (auto msg_sev : MsgSeverityMap()) {
-      switch (msg_sev.second) {
-        case MsgSeverity::Ignore:
-          fileList += "verific -set-ignore " + msg_sev.first + "\n";
-          break;
-        case MsgSeverity::Info:
-          fileList += "verific -set-info " + msg_sev.first + "\n";
-          break;
-        case MsgSeverity::Warning:
-          fileList += "verific -set-warning " + msg_sev.first + "\n";
-          break;
-        case MsgSeverity::Error:
-          fileList += "verific -set-error " + msg_sev.first + "\n";
-          break;
+      for (auto msg_sev : MsgSeverityMap()) {
+        switch (msg_sev.second) {
+          case MsgSeverity::Ignore:
+            fileList += "verific -set-ignore " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Info:
+            fileList += "verific -set-info " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Warning:
+            fileList += "verific -set-warning " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Error:
+            fileList += "verific -set-error " + msg_sev.first + "\n";
+            break;
+        }
       }
-    }
 
-    // workaround for enabling usage of '-lib' option, suggested by yosyshq
-    // add the following line in the ys script:
-    fileList += std::string("verific -cfg veri_create_empty_box 1\n");
+      // workaround for enabling usage of '-lib' option, suggested by yosyshq
+      // add the following line in the ys script:
+      fileList += std::string("verific -cfg veri_create_empty_box 1\n");
 
-    // ProjectManager::addIncludePath(const std::string& includePath)
-    for (auto path : ProjManager()->includePathList()) {
-      includes += FileUtils::AdjustPath(path) + " ";
-    }
-    if(!includes.empty()) {
-      fileList += "verific -vlog-incdir " + includes + "\n";
-    }
-
-    // incdir:always add the project's 'sources' directory 
-    //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
-    std::filesystem::path design_sources_dir_path =
-        ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
-                                        ProjManager()->projectName(),
-                                        ProjManager()->getDesignActiveFileSet().toStdString());
-    fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
-    
-    // incdir: if executed via TCL script, and copy_files_on_add is *not* set
-    //   add the TCL script directory 
-    std::filesystem::path tcl_script_dir_path = 
-        QLSettingsManager::getTCLScriptDirPath();
-    if(!tcl_script_dir_path.empty()) {
-      if(!copyFilesOnAdd()) {
-        fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
+      // ProjectManager::addIncludePath(const std::string& includePath)
+      for (auto path : ProjManager()->includePathList()) {
+        includes += FileUtils::AdjustPath(path) + " ";
       }
-    }
-
-    std::string libraries;
-    // ProjectManager::addLibraryPath(const std::string& libraryPath)
-    for (auto path : ProjManager()->libraryPathList()) {
-      libraries += FileUtils::AdjustPath(path) + " ";
-    }
-    if(!libraries.empty()) {
-      fileList += "verific -vlog-libdir " + libraries + "\n";
-    }
-
-    // -vlog-libdir : currently it does not solve anything, so it is commented out.
-    // std::filesystem::path device_yosys_modules_dir_path = 
-    //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
-    //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
-    // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
-    
-    // recommendation by: <nak@yosyshq.com>
-    // with the -vlog-libdir option, if verific can't find a module named "Foo",
-    // it will look in the given directory for a file named "Foo.v".
-    // if we want to use the -vlog-libdir option we would have to split
-    // the primitive library into one file per module.
-    // instead of using -vlog-libdir, we could use the existing files by
-    // reading them in with the -lib option like this:
-    //      verific -vlog2k -lib /path/to/dsp_sim.v
-    // we should do this with all files that contain primitives that
-    // the user might want to instantiate manually, such as the BRAM sim files.
-    std::vector<std::filesystem::path> yosys_modules_pathlist = 
-        QLDeviceManager::getInstance()->deviceYosysModulesPathList();
-
-    for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
-
-      std::string sim_verilog_pattern = ".*_sim\\.v";
-
-      if (std::regex_match(yosys_module_path.filename().string(),
-                           std::regex(sim_verilog_pattern, std::regex::icase))) {
-
-          fileList += std::string("verific -vlog2k -lib ") + 
-                      yosys_module_path.string() +
-                      "\n";
+      if(!includes.empty()) {
+        fileList += "verific -vlog-incdir " + includes + "\n";
       }
-    }
 
-    // ProjectManager::addLibraryExtension(const std::string& libraryExt)
-    for (auto ext : ProjManager()->libraryExtensionList()) {
-      fileList += "verific -vlog-libext " + ext + "\n";
-    }
-
-    // ProjectManager::addMacro(const std::string& macroName,
-    //                          const std::string& macroValue)
-    std::string macros;
-    for (auto& macro_value : ProjManager()->macroList()) {
-      macros += macro_value.first + "=" + macro_value.second + " ";
-    }
-    if(!macros.empty()) {
-      fileList += "verific -vlog-define " + macros + "\n";
-    }
-
-    std::string importLibs;
-    auto importDesignFilesLibs = false;
-
-    // this is available only if TCL command has specified a top module library
-    // with -work <libname>
-    // set_top_module <top> ?-work <libName>?
-    auto topModuleLib = ProjManager()->DesignTopModuleLib();
-
-    // this is available only if TCL command has specified a design library
-    // with -work <libname>
-    // add_design_file <file list> ?type? ?-work <libName>?
-    auto commandsLibs = ProjManager()->DesignLibraries();
-
-    size_t filesIndex{0};
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string lang;
-      std::string designLibraries;
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-          lang = "-vhdl87";
-          break;
-        case Design::Language::VHDL_1993:
-          lang = "-vhdl93";
-          break;
-        case Design::Language::VHDL_2000:
-          lang = "-vhdl2k";
-          break;
-        case Design::Language::VHDL_2008:
-          lang = "-vhdl2008";
-          break;
-        case Design::Language::VHDL_2019:
-          lang = "-vhdl2019";
-          break;
-        case Design::Language::VERILOG_1995:
-          lang = "-vlog95";
-          break;
-        case Design::Language::VERILOG_2001:
-          lang = "-vlog2k";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2005:
-          lang = "-sv2005";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2009:
-          lang = "-sv2009";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2012:
-          lang = "-sv2012";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-sv";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::VERILOG_NETLIST:
-          lang = "";
-          break;
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          lang = "BLIF";
-          ErrorMessage("Unsupported file format:" + lang);
-          return false;
-        case Design::Language::OTHER:
-          // don't include it in the compilation process
-          continue;
+      // incdir:always add the project's 'sources' directory 
+      //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
+      std::filesystem::path design_sources_dir_path =
+          ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
+                                          ProjManager()->projectName(),
+                                          ProjManager()->getDesignActiveFileSet().toStdString());
+      fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
+      
+      // incdir: if executed via TCL script, and copy_files_on_add is *not* set
+      //   add the TCL script directory 
+      std::filesystem::path tcl_script_dir_path = 
+          QLSettingsManager::getTCLScriptDirPath();
+      if(!tcl_script_dir_path.empty()) {
+        if(!copyFilesOnAdd()) {
+          fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
+        }
       }
-      if (filesIndex < commandsLibs.size()) {
-        const auto& filesCommandsLibs = commandsLibs[filesIndex];
-        for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
-          auto libName = filesCommandsLibs.second[i];
-          if (!libName.empty()) {
-            auto commandLib = "-work " + libName + " ";
-            designLibraries += commandLib;
-            if (importDesignFilesLibs && libName != topModuleLib) {
-              importLibs += "-L " + libName + " ";
+
+      std::string libraries;
+      // ProjectManager::addLibraryPath(const std::string& libraryPath)
+      for (auto path : ProjManager()->libraryPathList()) {
+        libraries += FileUtils::AdjustPath(path) + " ";
+      }
+      if(!libraries.empty()) {
+        fileList += "verific -vlog-libdir " + libraries + "\n";
+      }
+
+      // -vlog-libdir : currently it does not solve anything, so it is commented out.
+      // std::filesystem::path device_yosys_modules_dir_path = 
+      //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
+      //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
+      // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
+      
+      // recommendation by: <nak@yosyshq.com>
+      // with the -vlog-libdir option, if verific can't find a module named "Foo",
+      // it will look in the given directory for a file named "Foo.v".
+      // if we want to use the -vlog-libdir option we would have to split
+      // the primitive library into one file per module.
+      // instead of using -vlog-libdir, we could use the existing files by
+      // reading them in with the -lib option like this:
+      //      verific -vlog2k -lib /path/to/dsp_sim.v
+      // we should do this with all files that contain primitives that
+      // the user might want to instantiate manually, such as the BRAM sim files.
+      std::vector<std::filesystem::path> yosys_modules_pathlist = 
+          QLDeviceManager::getInstance()->deviceYosysModulesPathList();
+
+      for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
+
+        std::string sim_verilog_pattern = ".*_sim\\.v";
+
+        if (std::regex_match(yosys_module_path.filename().string(),
+                            std::regex(sim_verilog_pattern, std::regex::icase))) {
+
+            fileList += std::string("verific -vlog2k -lib ") + 
+                        yosys_module_path.string() +
+                        "\n";
+        }
+      }
+
+      // ProjectManager::addLibraryExtension(const std::string& libraryExt)
+      for (auto ext : ProjManager()->libraryExtensionList()) {
+        fileList += "verific -vlog-libext " + ext + "\n";
+      }
+
+      // ProjectManager::addMacro(const std::string& macroName,
+      //                          const std::string& macroValue)
+      std::string macros;
+      for (auto& macro_value : ProjManager()->macroList()) {
+        macros += macro_value.first + "=" + macro_value.second + " ";
+      }
+      if(!macros.empty()) {
+        fileList += "verific -vlog-define " + macros + "\n";
+      }
+
+      std::string importLibs;
+      auto importDesignFilesLibs = false;
+
+      // this is available only if TCL command has specified a top module library
+      // with -work <libname>
+      // set_top_module <top> ?-work <libName>?
+      auto topModuleLib = ProjManager()->DesignTopModuleLib();
+
+      // this is available only if TCL command has specified a design library
+      // with -work <libname>
+      // add_design_file <file list> ?type? ?-work <libName>?
+      auto commandsLibs = ProjManager()->DesignLibraries();
+
+      size_t filesIndex{0};
+      for (const auto& lang_file : ProjManager()->DesignFiles()) {
+        std::string lang;
+        std::string designLibraries;
+        switch (lang_file.first.language) {
+          case Design::Language::VHDL_1987:
+            lang = "-vhdl87";
+            break;
+          case Design::Language::VHDL_1993:
+            lang = "-vhdl93";
+            break;
+          case Design::Language::VHDL_2000:
+            lang = "-vhdl2k";
+            break;
+          case Design::Language::VHDL_2008:
+            lang = "-vhdl2008";
+            break;
+          case Design::Language::VHDL_2019:
+            lang = "-vhdl2019";
+            break;
+          case Design::Language::VERILOG_1995:
+            lang = "-vlog95";
+            break;
+          case Design::Language::VERILOG_2001:
+            lang = "-vlog2k";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2005:
+            lang = "-sv2005";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2009:
+            lang = "-sv2009";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2012:
+            lang = "-sv2012";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2017:
+            lang = "-sv";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::VERILOG_NETLIST:
+            lang = "";
+            break;
+          case Design::Language::BLIF:
+          case Design::Language::EBLIF:
+            lang = "BLIF";
+            ErrorMessage("Unsupported file format:" + lang);
+            return false;
+          case Design::Language::OTHER:
+            // don't include it in the compilation process
+            continue;
+        }
+        if (filesIndex < commandsLibs.size()) {
+          const auto& filesCommandsLibs = commandsLibs[filesIndex];
+          for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
+            auto libName = filesCommandsLibs.second[i];
+            if (!libName.empty()) {
+              auto commandLib = "-work " + libName + " ";
+              designLibraries += commandLib;
+              if (importDesignFilesLibs && libName != topModuleLib) {
+                importLibs += "-L " + libName + " ";
+              }
             }
           }
         }
-      }
-      ++filesIndex;
+        ++filesIndex;
 
-      if (designLibraries.empty()) {
-        fileList += "verific " + lang + " " + lang_file.second + "\n";
+        if (designLibraries.empty()) {
+          fileList += "verific " + lang + " " + lang_file.second + "\n";
+        }
+        else {
+          fileList +=
+              "verific " + designLibraries + lang + " " + lang_file.second + "\n";
+        }
       }
-      else {
-        fileList +=
-            "verific " + designLibraries + lang + " " + lang_file.second + "\n";
+      auto topModuleLibImport = std::string{};
+      if (!topModuleLib.empty())
+        topModuleLibImport = "-work " + topModuleLib + " ";
+      if (ProjManager()->DesignTopModule().empty()) {
+        fileList += "verific -import -all\n";
+      } else {
+        fileList += "verific " + topModuleLibImport + importLibs + "-import " +
+                    ProjManager()->DesignTopModule() + "\n";
       }
-    }
-    auto topModuleLibImport = std::string{};
-    if (!topModuleLib.empty())
-      topModuleLibImport = "-work " + topModuleLib + " ";
-    if (ProjManager()->DesignTopModule().empty()) {
-      fileList += "verific -import -all\n";
+      yosysScript = ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", fileList);
     } else {
-      fileList += "verific " + topModuleLibImport + importLibs + "-import " +
-                  ProjManager()->DesignTopModule() + "\n";
-    }
-    yosysScript = ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", fileList);
-  } else {
     // Default Yosys parser
 
     for (const auto& commandLib : ProjManager()->DesignLibraries()) {
@@ -2203,7 +2205,32 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
     }
-
+  }
+  else
+  {
+    #if UPSTREAM_UNUSED
+        std::string macros = "verilog_defines ";
+        for (auto& macro_value : ProjManager()->macroList()) {
+          macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
+        }
+        macros += "\n";
+        std::string includes;
+        for (auto path : ProjManager()->includePathList()) {
+          includes += "-I" + FileUtils::AdjustPath(path) + " ";
+        }
+    #endif // #if UPSTREAM_UNUSED
+    std::string vm_file_path = ProjManager()->DesignTopModule() + "/" + ProjManager()->DesignTopModule() + ".vm";
+    std::cout<<vm_file_path<<std::endl;
+    std::string filesScript =
+            "read_verilog ${READ_VERILOG_OPTIONS} "
+            "${VERILOG_FILES}";
+    std::string options = " -nolatches";
+    filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
+    filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
+    std::string designFiles = filesScript + "\n";
+    yosysScript =
+        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
+  }
     yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
