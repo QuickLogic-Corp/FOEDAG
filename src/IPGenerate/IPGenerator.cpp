@@ -78,7 +78,7 @@ IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(cata
 void IPGenerator::shareContext()
 {
   std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
-  m_environment["QL_IP_BUILD_PATH"] = ipBuildPath.string();
+  m_environment["QL_IPS_BUILD_PATH"] = ipBuildPath.string();
   dumpDeviceInfo(ipBuildPath);
 #ifndef EXCLUDE_MODIFICATION_JSON_FLOW
   dumpParameterModifications(ipBuildPath);
@@ -108,11 +108,11 @@ void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
 
     nlohmann::ordered_json json;
 
-    json["family"] = family;
-    json["foundry"] = foundry;
-    json["node"] = node;
-    json["device"] = device;
-    json["layout"] = layout;
+    json["family"] = StringUtils::toLower(family);
+    json["foundry"] = StringUtils::toLower(foundry);
+    json["node"] = StringUtils::toLower(node);
+    json["device"] = StringUtils::toLower(device);
+    json["layout"] = StringUtils::toLower(layout);
     json["width"] = std::to_string(width);
     json["height"] = std::to_string(height);
     json["bram"] = std::to_string(bram);
