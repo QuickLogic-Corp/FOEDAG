@@ -1784,14 +1784,16 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           lang = "-vhdl";
           break;
         case Design::Language::VERILOG_1995:
-        case Design::Language::VERILOG_2001:
-        case Design::Language::SYSTEMVERILOG_2005:
-        lang = "-verilog";
+          lang = "-verilog -vlog_std v95";
           break;
+        case Design::Language::VERILOG_2001:
+          lang = "-verilog -vlog_std v2001";
+          break;
+        case Design::Language::SYSTEMVERILOG_2005:
         case Design::Language::SYSTEMVERILOG_2009:
         case Design::Language::SYSTEMVERILOG_2012:
         case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-sv";
+          lang = "-verilog -vlog_std sysv";
           break;
         case Design::Language::VERILOG_NETLIST:
         case Design::Language::BLIF:
