@@ -1,4 +1,5 @@
 #include "QLPackagePinsLoader.h"
+#include "MainWindow/Session.h"
 
 #include <Utils/QtUtils.h>
 #include "IODirection.h"
@@ -7,6 +8,8 @@
 #include <QRegularExpression>
 #include <QXmlStreamReader>
 #include <QDebug>
+
+extern FOEDAG::Session* GlobalSession;
 
 namespace FOEDAG {
 
@@ -95,7 +98,7 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
         group.name = orientation;
       }
     } else {
-      qCritical() << QString("it looks like line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_ORIENTATION);
+      logWarning(QString("line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_ORIENTATION));
     }
 
     QStringList dataMod;
@@ -111,7 +114,7 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
       dataMod[BallName] = pinName;
       dataMod[BallId] = pinName;
     } else {
-      qCritical() << QString("it looks like line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_MAPPED_PIN);
+      logWarning(QString("line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_MAPPED_PIN));
     }
 
     if (!pinName.isEmpty()) {
@@ -135,7 +138,7 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
           }
         }
       } else {
-        qCritical() << QString("it looks like line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_PORT_NAME);
+        logWarning(QString("line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_PORT_NAME));
       }
 
       if (!dir.isEmpty()) {
@@ -157,7 +160,7 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
 {
   QFile file(ioMapFilePath);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-    qDebug() << "Failed to open the file." << ioMapFilePath;
+    logWarning(QString("Failed to open the file %1").arg(ioMapFilePath));
     return nullptr;
   }
 
@@ -186,7 +189,7 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
   }
 
   if (xmlReader.hasError()) {
-    qDebug() << ioMapFilePath << "contains XML error: " << xmlReader.errorString();
+    logWarning(QString("%1 contains XML error: %2").arg(ioMapFilePath).arg(xmlReader.errorString()));
   }
 
   file.close();
@@ -194,13 +197,18 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
   LocationCollisionDetectorPtr collisionDetector = std::make_shared<LocationCollisionDetector>(pinToLocationMap);
   QMap<QString, QSet<QString>> overlappedLocationToPinsMap = collisionDetector->overlappedLocationToPinsMap();
   if (!overlappedLocationToPinsMap.isEmpty()) {
-    qWarning() << ioMapFilePath << "contains mapping issues";
+    logWarning(QString("%1 contains mapping issues").arg(ioMapFilePath));
     for (auto it = overlappedLocationToPinsMap.begin(); it != overlappedLocationToPinsMap.end(); ++it) {
-      qWarning() << "WARNING: The following pins:" << QStringList(it.value().values()).join(", ") << "share the same location:" << it.key();
+      logWarning(QString("The following pins: %1, share the same location: %2").arg(QStringList(it.value().values()).join(", ")).arg(it.key()));
     }
   }
 
   return collisionDetector;
+}
+
+void QLPackagePinsLoader::logWarning(const QString& msg) const
+{
+  GlobalSession->GetCompiler()->Message("[WARNING] QLPackagePinsLoader: " + msg.toStdString());
 }
 
 }  // namespace FOEDAG
