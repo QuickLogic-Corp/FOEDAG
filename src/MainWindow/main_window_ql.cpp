@@ -2178,6 +2178,12 @@ void MainWindow::pinAssignmentActionTriggered() {
       m_pinAssignmentCreator = nullptr;
     }
   }
+
+  // update the console for input incase the pinplanner system printed any messages
+  // which can break the console currently
+  if (m_console) {
+    m_console->showPrompt();
+  }
 }
 
 void MainWindow::pinAssignmentChanged() {
