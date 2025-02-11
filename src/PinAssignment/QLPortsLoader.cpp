@@ -5,8 +5,8 @@
 
 namespace FOEDAG {
 
-QLPortsLoader::QLPortsLoader(PortsModel *model, QObject *parent)
-    : PortsLoader(model, parent) {}
+QLPortsLoader::QLPortsLoader(PortsModel *model, const QSet<QString>& clocks, QObject *parent)
+    : PortsLoader(model, parent), m_clocks(clocks) {}
 
 std::pair<bool, QString> QLPortsLoader::load(const QString& filePath) {
   if (!filePath.endsWith(".blif")) {
@@ -42,10 +42,14 @@ std::pair<bool, QString> QLPortsLoader::load(const QString& filePath) {
 
   IOPortGroup group;
   for (const QString& input: inputs) {
-    addPort(group, input, IODirection::INPUT);
+    if (!m_clocks.contains(input)) {
+      addPort(group, input, IODirection::INPUT);
+    }
   }
   for (const QString& output: outputs) {
-    addPort(group, output, IODirection::OUTPUT);
+    if (!m_clocks.contains(output)) {
+      addPort(group, output, IODirection::OUTPUT);
+    }
   }
   m_model->clear();
   m_model->append(group);

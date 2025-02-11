@@ -237,7 +237,7 @@ PortsLoader *PinAssignmentCreator::FindPortsLoader(
 #ifdef UPSTREAM_PINPLANNER
     RegisterPortsLoader(targetDevice, new PortsLoader{nullptr});
 #else
-    RegisterPortsLoader(targetDevice, new QLPortsLoader{nullptr});
+    RegisterPortsLoader(targetDevice, new QLPortsLoader{nullptr, {}});
 #endif
   }
   auto loader = m_portsLoader.value(targetDevice);
