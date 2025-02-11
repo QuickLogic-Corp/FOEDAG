@@ -2045,6 +2045,7 @@ void MainWindow::pinAssignmentActionTriggered() {
     CompilerOpenFPGA_ql* compiler_ql = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
     if (!compiler_ql) {
         qCritical() << "cannot get CompilerOpenFPGA_ql instance";
+        pinAssignmentAction->setChecked(false);
         return;
     }
 
@@ -2052,6 +2053,7 @@ void MainWindow::pinAssignmentActionTriggered() {
     if (filepath_pin_table_csv.empty()) {
       QMessageBox::critical(this, "missing pin map csv file",
                             QString::fromStdString(error));
+      pinAssignmentAction->setChecked(false);
       return;
     }
     data.pinMapFile = QString::fromStdString(filepath_pin_table_csv.string());

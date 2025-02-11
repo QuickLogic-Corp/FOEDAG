@@ -24,7 +24,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QHeaderView>
 #include <QStringListModel>
 
+#ifdef UPSTREAM_PINPLANNER
 #include "BufferedComboBox.h"
+#else
+#include "LazyComboBox.h"
+#endif
 #include "PinsBaseModel.h"
 
 namespace FOEDAG {
@@ -163,7 +167,12 @@ void PortsView::packagePinSelectionHasChanged(const QModelIndex &index) {
 #endif
 
   if (item) {
+#ifdef UPSTREAM_PINPLANNER
     auto combo = GetCombo<BufferedComboBox *>(item, PackagePinCol);
+#else
+    auto combo = GetCombo(item, PackagePinCol);
+#endif
+
 #ifdef UPSTREAM_PINPLANNER
     auto internalPinCombo = GetCombo(item, InternalPinsCol);
 #endif
@@ -199,11 +208,24 @@ void PortsView::insertTableItem(QTreeWidgetItem *parent, const IOPort &port) {
   it->setText(DirCol, port.dir);
   it->setText(TypeCol, port.type);
 
+#ifdef UPSTREAM_PINPLANNER
   auto combo = new BufferedComboBox{this};
+#else
+  auto combo = new LazyComboBox{this};
+#endif
+
 #ifdef UPSTREAM_PINPLANNER
   combo->setModel(m_model->packagePinModel()->listModel());
 #else
-  combo->setModel(m_model->packagePinModel()->listModel(port.dir));
+  QString direction{port.dir};
+  if (m_initializedDirections.contains(direction)) {
+    combo->setDelayedModel(m_model->packagePinModel()->listModel(direction));
+  } else {
+    // We must set at least one model in a straightforward way to ensure the correct column width in the table is applied.
+    // This does not impact performance but solves many issues related to incorrect table width (column with comboboxes) and combobox dropdown content width.
+    combo->setModel(m_model->packagePinModel()->listModel(direction));
+    m_initializedDirections.insert(direction);
+  }
 #endif
 
   combo->setAutoFillBackground(true);

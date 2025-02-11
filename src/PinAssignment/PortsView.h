@@ -22,6 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "PinAssignmentBaseView.h"
 
+#ifndef UPSTREAM_PINPLANNER
+#include <QSet>
+#endif
+
 class QComboBox;
 namespace FOEDAG {
 
@@ -60,6 +64,7 @@ private slots:
   void pinAssignmentRemoved(const QString &pin);
 private:
   QTreeWidgetItem *m_topLevel = nullptr;
+  QSet<QString> m_initializedDirections;
 #endif
 };
 
