@@ -1763,11 +1763,24 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string synplifyScript; 
     m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
     if(m_aurora_template_script_synplify_path.empty()) {
-
+      
       ErrorMessage("Cannot proceed without Synplify Template Script.");
       return false;
     }
     synplifyScript = InitSynplifyScript();
+
+    std::string includes;
+    for (auto path : ProjManager()->includePathList()) {
+      includes += "set_option -include_path " + FileUtils::AdjustPath(path) + "\n";
+    }
+    if(!includes.empty()) {
+      synplifyScript =
+        ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", includes);
+    }
+    else{
+      synplifyScript = ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
+    }
+
     std::string designFiles;
     for (const auto& lang_file : ProjManager()->DesignFiles()) {
       std::string filesScript =
@@ -2149,7 +2162,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
 
     std::string macros = "";
-	std::string includes = "";
+	  std::string includes = "";
 #if UPSTREAM_UNUSED
     std::string macros = "verilog_defines ";
     for (auto& macro_value : ProjManager()->macroList()) {
