@@ -35,7 +35,7 @@ std::pair<bool, QString> QLPortsLoader::load(const QString& filePath) {
     }
 
     // all ".subckt ? C=?" occurs after ".inputs" and ".outputs", so it's safe to extract it here
-    static QRegularExpression clockPattern(R"(\.subckt\s+\w+\s+C=([\w\[\]]+))");
+    static QRegularExpression clockPattern(R"(\.subckt\s+\w+.*?\s+C=([\w\[\]]+))");
     QRegularExpressionMatch match = clockPattern.match(line);
     if (match.hasMatch()) {
       QString clock = match.captured(1);
