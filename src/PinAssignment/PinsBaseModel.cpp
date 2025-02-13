@@ -170,8 +170,12 @@ void PinsBaseModel::invalidate()
   QSet<QString> busyPorts;
   QSet<QString> busyPins;
   for (auto it = m_pinsMap.constBegin(); it != m_pinsMap.constEnd(); ++it) {
-    busyPorts.insert(it.key());
-    busyPins.insert(it.value().first);
+    QString connectedPort{it.key()};
+    QString connectedPin{it.value().first};
+    busyPorts.insert(connectedPort);
+    busyPins.insert(connectedPin);
+    QSet<QString> overllapedPins = m_collisionDetector->getOverlappedPins(connectedPin);
+    busyPins.unite(overllapedPins);
   }
   // qInfo() << "~~~ invalidate, busyPorts=" << busyPorts << ", busyPins=" << busyPins;
 
