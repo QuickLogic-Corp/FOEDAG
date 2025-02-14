@@ -1512,7 +1512,7 @@ bool CompilerOpenFPGA_ql::Analyze() {
   }
 
 
-  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" ) {
+  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->projectType() != Synplify) {
     m_useVerific = true;
   }
   else {
@@ -1665,7 +1665,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::string yosysScript = InitSynthesisScript();
 
 
-  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" ) {
+  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->projectType() != Synplify) {
     m_useVerific = true;
   }
   else {
