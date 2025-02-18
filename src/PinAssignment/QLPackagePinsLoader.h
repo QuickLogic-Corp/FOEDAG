@@ -29,6 +29,8 @@ private:
 
   QMap<QString, int> m_header;
   QMap<QString, QString> m_portToPinMap;
+
+  void logWarning(const QString& msg) const;
 };
 
 }  // namespace FOEDAG
