@@ -18,7 +18,7 @@
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 proc readLog {} {
-    set fp [open "foedag.log" r]
+    set fp [open "aurora.log" r]
     set file_data [read $fp]
     close $fp
     return $file_data
@@ -65,7 +65,7 @@ if { $platform == "windows" } {
     }
 
     # remove the IPs dir which will remove the cached IP as well
-    file delete -force ./ip_gen_cache/ip_gen_cache.IPs/
+    file delete -force ./ip_gen_cache/run_1/IPs/
 
     # Generate again, the cache file has been removed so it shouldn't re-use
     ipgenerate

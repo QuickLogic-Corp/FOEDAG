@@ -26,7 +26,7 @@ if { $platform == "windows" } {
 } else {
     # Load IPs
     create_design ip_test
-    architecture ../../Arch/k6_frac_N10_tileable_40nm.xml ../../Arch/k6_N10_40nm_openfpga.xml
+    architecture ../Arch/k6_frac_N10_tileable_40nm.xml ../Arch/k6_N10_40nm_openfpga.xml
     add_litex_ip_catalog ../Testcases/IPGenerate/IP_Catalog
 
     # Configure an IP w/ module named inst1
@@ -35,11 +35,11 @@ if { $platform == "windows" } {
     # Generate ip
     ipgenerate
 
-    set fp [open "foedag.log" r]
+    set fp [open "aurora.log" r]
     set file_data [read $fp]
     close $fp
     # Error out if inst1 wasn't generated
-    set found [regexp "rs_ips/inst1" $file_data]
+    set found [regexp "V1_0/inst1" $file_data]
     if { !$found } {
         puts "TEST FAILED: ipgenerate failed to generate inst1"
         exit 1

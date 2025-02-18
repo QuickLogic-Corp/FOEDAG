@@ -28,6 +28,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string.h>
 #include <sys/stat.h>
 
+#ifdef __WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <QDebug>
 #include <QProcess>
 #include <algorithm>
@@ -41,6 +47,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/StringUtils.h"
 
 namespace FOEDAG {
+
+std::vector<QProcess*> FileUtils::m_processes{};
 
 bool FileUtils::FileExists(const std::filesystem::path& name) {
   std::error_code ec;
@@ -164,6 +172,12 @@ std::filesystem::path FileUtils::LocateExecFile(
 std::filesystem::path FileUtils::LocateFileRecursive(
     const std::filesystem::path& searchPath, const std::string filename) {
   std::filesystem::path result{};
+#ifndef USE_UPSTREAM
+std::filesystem::path candidate = searchPath / filename;
+  if (std::filesystem::exists(candidate)) {
+    return candidate;
+  }
+#endif
   if (FileUtils::FileExists(searchPath)) {
     // Recursively search searchPath
     for (const std::filesystem::path& entry :
@@ -216,6 +230,21 @@ std::vector<std::filesystem::path> FileUtils::FindFileInDirs(
   return results;
 }
 
+std::filesystem::path FileUtils::FindFileByExtension(
+    const std::filesystem::path& path, const std::string& extension) {
+  if (FileUtils::FileExists(path)) {
+    for (const std::filesystem::path& entry :
+         std::filesystem::directory_iterator(path)) {
+      if (FileUtils::FileIsRegular(entry)) {
+        if (StringUtils::toLower(entry.extension().string()) ==
+            StringUtils::toLower(extension))
+          return entry;
+      }
+    }
+  }
+  return {};
+}
+
 int FileUtils::ExecuteSystemCommand(const std::string& command,
                                     std::ostream* result) {
   QProcess* m_process = new QProcess;
@@ -255,6 +284,128 @@ time_t FileUtils::Mtime(const std::filesystem::path& path) {
     return -1;
   }
   return statbuf.st_mtime;
+}
+
+Return FileUtils::ExecuteSystemCommand(const std::string& command,
+                                       const std::vector<std::string>& args,
+                                       std::ostream* out, int timeout_ms,
+                                       const std::string& workingDir,
+                                       std::ostream* err, bool startDetached) {
+  QProcess process;
+  if (!workingDir.empty())
+    process.setWorkingDirectory(QString::fromStdString(workingDir));
+
+  std::ostream* errStream = err ? err : out;
+
+  if (out) {
+    QObject::connect(
+        &process, &QProcess::readyReadStandardOutput, [out, &process]() {
+          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+        });
+  }
+
+  if (errStream) {
+    QObject::connect(&process, &QProcess::readyReadStandardError,
+                     [errStream, &process]() {
+                       QByteArray data = process.readAllStandardError();
+                       errStream->write(data, data.size());
+                     });
+  }
+
+  QString program = QString::fromStdString(command);
+  QStringList args_{};
+  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  if (startDetached) {
+    auto success = process.startDetached(program, args_);
+    return {success ? 0 : -1,
+            QString{"%1: Failed to start."}.arg(program).toStdString()};
+  } else {
+    m_processes.push_back(&process);
+    process.start(program, args_);
+  }
+
+  bool finished = process.waitForFinished(timeout_ms);
+  auto it = std::find(m_processes.begin(), m_processes.end(), &process);
+  if (it != m_processes.end()) m_processes.erase(it);
+
+  std::string message{};
+  if (!finished) {
+    message = process.errorString().toStdString();
+    if (errStream) (*errStream) << message << std::endl;
+  }
+
+  auto status = process.exitStatus();
+  auto exitCode = process.exitCode();
+  int returnStatus =
+      finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
+
+  return {returnStatus, {message}};
+}
+
+Return FileUtils::ExecuteSystemCommand(const std::string& command,
+                                       const std::vector<std::string>& args,
+                                       std::ostream* out,
+                                       const std::map<std::string, std::string>& environment,
+                                       int timeout_ms,
+                                       const std::string& workingDir,
+                                       std::ostream* err, bool startDetached) {
+  QProcess process;
+  QProcessEnvironment currentEnvironment = QProcessEnvironment::systemEnvironment();
+  for (const auto& [var, val]: environment) {
+    currentEnvironment.insert(var.c_str(), val.c_str());
+    // qDebug() << "ENV:" << var.c_str() << "="<< val.c_str();
+  }
+  process.setProcessEnvironment(currentEnvironment);
+
+  if (!workingDir.empty())
+    process.setWorkingDirectory(QString::fromStdString(workingDir));
+
+  std::ostream* errStream = err ? err : out;
+
+  if (out) {
+    QObject::connect(
+        &process, &QProcess::readyReadStandardOutput, [out, &process]() {
+          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+        });
+  }
+
+  if (errStream) {
+    QObject::connect(&process, &QProcess::readyReadStandardError,
+                     [errStream, &process]() {
+                       QByteArray data = process.readAllStandardError();
+                       errStream->write(data, data.size());
+                     });
+  }
+
+  QString program = QString::fromStdString(command);
+  QStringList args_{};
+  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  if (startDetached) {
+    auto success = process.startDetached(program, args_);
+    return {success ? 0 : -1,
+            QString{"%1: Failed to start."}.arg(program).toStdString()};
+  } else {
+    m_processes.push_back(&process);
+    process.start(program, args_);
+  }
+  // qDebug() << ExecuteSystemCommand" << program << args_.join(" ");
+
+  bool finished = process.waitForFinished(timeout_ms);
+  auto it = std::find(m_processes.begin(), m_processes.end(), &process);
+  if (it != m_processes.end()) m_processes.erase(it);
+
+  std::string message{};
+  if (!finished) {
+    message = process.errorString().toStdString();
+    if (errStream) (*errStream) << message << std::endl;
+  }
+
+  auto status = process.exitStatus();
+  auto exitCode = process.exitCode();
+  int returnStatus =
+      finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
+
+  return {returnStatus, {message}};
 }
 
 bool FileUtils::IsUptoDate(const std::string& sourceFile,
@@ -334,6 +485,36 @@ void FileUtils::overwriteFile(const std::filesystem::path &source, const std::fi
   }
 #endif
   std::filesystem::copy(source, destination, std::filesystem::copy_options::overwrite_existing, ec);
+}
+
+#ifdef _WIN32
+std::string toWindowsPathWithForwardSlashes(std::string pathStr) {
+  std::replace(pathStr.begin(), pathStr.end(), '\\', '/');
+  return pathStr;
+}
+#endif
+
+std::string FileUtils::resolvePathStr(const std::string& pathStr) {
+#ifdef _WIN32
+  return toWindowsPathWithForwardSlashes(pathStr);
+#else
+  return pathStr;
+#endif
+}
+
+std::filesystem::path FileUtils::getExecutablePath() {
+  std::filesystem::path result;
+#ifdef _WIN32
+    char path[MAX_PATH];
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    result = std::string(path);
+#else
+    char path[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", path, PATH_MAX);
+    result = (count != -1) ? std::string(path, count) : "";
+#endif
+
+  return result.parent_path();
 }
 
 }  // namespace FOEDAG

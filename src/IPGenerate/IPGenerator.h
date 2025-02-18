@@ -19,16 +19,20 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef IPGENERATOR_H
+#define IPGENERATOR_H
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include <map>
+#include <cassert>
+
+#include "nlohmann_json/json.hpp"
 
 #include "IPGenerate/IPCatalog.h"
-
-#ifndef IPGENERATOR_H
-#define IPGENERATOR_H
 
 namespace FOEDAG {
 
@@ -38,9 +42,16 @@ class IPInstance;
 
 class IPGenerator {
  public:
-  IPGenerator(IPCatalog* catalog, Compiler* compiler)
-      : m_catalog(catalog), m_compiler(compiler) {}
+  IPGenerator(IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
+  
+  void shareContext();
+  const std::map<std::string, std::string>& environment() const { return m_environment; }
+  
+  std::filesystem::path ExecPath() const;
+  std::filesystem::path EnvsPath() const;
+  std::filesystem::path IPCatalogPath() const;
+
   IPCatalog* Catalog() { return m_catalog; }
   Compiler* GetCompiler() { return m_compiler; }
   bool RegisterCommands(TclInterpreter* interp, bool batchMode);
@@ -57,14 +68,37 @@ class IPGenerator {
     m_instances.erase(m_instances.begin(), m_instances.end());
   }
   bool Generate();
+  std::pair<bool, std::string> IsSimulateIpSupported(
+      const std::string& name) const;
+  void SimulateIp(const std::string& name);
+  std::pair<bool, std::string> OpenWaveForm(const std::string& name);
   std::filesystem::path GetBuildDir(IPInstance* instance) const;
+  std::filesystem::path GetSimDir(IPInstance* instance) const;
+  std::filesystem::path GetSimArtifactsDir(IPInstance* instance) const;
   std::filesystem::path GetCachePath(IPInstance* instance) const;
+  std::filesystem::path GetTmpCachePath(IPInstance* instance) const;
+  std::filesystem::path GetTmpPath() const;
+  std::filesystem::path GetProjectIPsPath() const;
+  std::filesystem::path GetMetaPath(const std::filesystem::path& base,
+                                    IPInstance* inst) const;
   std::vector<std::filesystem::path> GetDesignFiles(IPInstance* instance);
+  std::vector<std::filesystem::path> GetDesignAndCacheFiles(
+      IPInstance* instance);
+  std::vector<std::filesystem::path> GetCacheFiles(IPInstance* instance);
+
+ protected:
+  std::pair<bool, std::string> SimulateIpTcl(const std::string& name);
 
  protected:
   IPCatalog* m_catalog = nullptr;
   Compiler* m_compiler = nullptr;
   std::vector<IPInstance*> m_instances;
+  std::map<std::string, std::string> m_environment;
+
+private:
+  void dumpDeviceInfo(const std::filesystem::path&);
+  void dumpParameterModifications(const std::filesystem::path&);
+  void saveJsonFile(const nlohmann::json& data, const std::filesystem::path& filepath);
 };
 
 }  // namespace FOEDAG

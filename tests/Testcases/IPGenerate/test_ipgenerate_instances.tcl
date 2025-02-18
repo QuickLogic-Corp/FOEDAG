@@ -39,7 +39,7 @@ if { $platform == "windows" } {
     ipgenerate
 
     # Error out if "IPs are generated" was printed
-    set fp [open "foedag.log" r]
+    set fp [open "aurora.log" r]
     set file_data [read $fp]
     close $fp
     set failed [regexp "IPs are generated" $file_data]

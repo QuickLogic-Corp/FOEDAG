@@ -46,6 +46,21 @@ using tclArgFnMap = std::map<std::string, tclArgFns>;
 #define WF_DASH "_TclArgDash_"
 
 namespace FOEDAG {
+
+/*!
+ * \brief The LineEdit class
+ * This class will emit editingFinished() even if input is not accepted.
+ */
+class LineEdit : public QLineEdit {
+ public:
+  LineEdit(QWidget* parent = nullptr);
+
+ protected:
+  void focusOutEvent(QFocusEvent* e) override;
+  void keyPressEvent(QKeyEvent* event) override;
+};
+
+constexpr bool addUnsetDefault{false};
 QString convertAll(const QString& str);
 QString restoreAll(const QString& str);
 void initTclArgFns();
@@ -76,11 +91,13 @@ QWidget* createContainerWidget(QWidget* widget,
                                const QString& label = QString());
 QComboBox* createComboBox(
     const QString& objectName, const QStringList& options,
-    const QString& selectedValue = "", bool addUnset = true,
+    const QStringList& lookup, const QString& selectedValue = "",
+    bool addUnset = addUnsetDefault,
     std::function<void(QComboBox*, const QString&)> onChange = nullptr);
 QLineEdit* createLineEdit(
     const QString& objectName, const QString& text = "",
     std::function<void(QLineEdit*, const QString&)> onChange = nullptr);
+    void validateLineEdit(QLineEdit* lineEdit);
 QTextEdit* createTextEdit(
     const QString& objectName, const QString& text = "",
     std::function<void(QTextEdit*, const QString&)> onChange = nullptr);
@@ -107,9 +124,11 @@ class WidgetFactoryDependencyNotifier : public QObject {
 
  public:
   static WidgetFactoryDependencyNotifier* Instance();
+  void emitEditorChanged(QWidget* widget);
 
  signals:
   void checkboxChanged(const QString& customId, QCheckBox* widget);
+  void editorChanged(const QString& customId, QWidget* widget);
 };
 
 }  // namespace FOEDAG

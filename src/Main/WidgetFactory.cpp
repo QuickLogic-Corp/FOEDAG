@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFocusEvent>
 #include <QFormLayout>
 #include <QHeaderView>
 #include <QMessageBox>
@@ -42,12 +43,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 using namespace FOEDAG;
 using nlohmann::json_pointer;
+using LineEditChanged = std::function<void(QLineEdit*, const QString&)>;
 
 // This provides a way to listen for value changes in a form created by
 // widgetFactory. Note: Only checkbox changes are reported currently
 Q_GLOBAL_STATIC(WidgetFactoryDependencyNotifier, factoryNotifier)
 WidgetFactoryDependencyNotifier* WidgetFactoryDependencyNotifier::Instance() {
   return factoryNotifier();
+}
+
+void WidgetFactoryDependencyNotifier::emitEditorChanged(QWidget* widget) {
+  emit editorChanged(widget->property("customId").toString(), widget);
 }
 
 static tclArgFnMap TclArgFnLookup;
@@ -197,8 +203,14 @@ QString restoreDashes(const QString& str) {
 }
 
 // Set Value overloads for diff widgets
-void setVal(QLineEdit* ptr, const QString& userVal) {
+void setVal(QLineEdit* ptr, const QString& userVal,
+            const LineEditChanged& onChange) {
+  // since 'onChange' connected to editingFinished() signal we have to manually
+  // call 'onChange'. Because editingFinished() emitted only if user modify line
+  // edit
+  auto prevValue = ptr->text();
   ptr->setText(userVal);
+  if (prevValue != userVal) onChange(ptr, userVal);
   DBG_PRINT_VAL_SET(ptr, userVal);
 }
 void setVal(QTextEdit* ptr, const QString& userVal) {
@@ -206,7 +218,8 @@ void setVal(QTextEdit* ptr, const QString& userVal) {
   DBG_PRINT_VAL_SET(ptr, userVal);
 }
 void setVal(QComboBox* ptr, const QString& userVal) {
-  ptr->setCurrentText(userVal);
+  if (int index = ptr->findData(userVal); index != -1)
+    ptr->setCurrentIndex(index);
   DBG_PRINT_VAL_SET(ptr, userVal);
 }
 void setVal(QSpinBox* ptr, int userVal) {
@@ -503,7 +516,7 @@ QWidget* FOEDAG::createSettingsPane(const QString& jsonPath,
       }
 
       // Get any task settings that have been set via tcl commands
-      QString tclArgs = "";
+      QString tclArgs{};
       if (tclArgGetter != nullptr) {
         tclArgs = QString::fromStdString(tclArgGetter());
       }
@@ -817,6 +830,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       std::function<void(QLineEdit*, const QString&)> handleChange =
           [arg](QLineEdit* ptr, const QString& val) {
             QString userVal = ptr->text();
+            ptr->setProperty("value", userVal);
             json changeJson;
             changeJson["userValue"] = userVal.toStdString();
             storeJsonPatch(ptr, changeJson);
@@ -828,6 +842,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + userVal;
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create our widget
@@ -860,35 +875,22 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
         }
         ptr->setValidator(val);
       } else if (validator == "regex") {
-        ptr->setValidator(new QRegExpValidator(ptr));
+        ptr->setValidator(new QRegularExpressionValidator(ptr));
       }
 
       // Update field look based off validator results
-      QObject::connect(ptr, &QLineEdit::textChanged, [ptr]() {
-        QPalette palette;
-        // assume property is valid until we find otherwise
-        ptr->setProperty("invalid", {});
-        // Change text to red if the input is invalid
-        if (ptr->hasAcceptableInput()) {
-          palette.setColor(QPalette::Text, Qt::black);
-        } else {
-          palette.setColor(QPalette::Text, Qt::red);
-          // Mark field as invalid for downstream logic
-          ptr->setProperty("invalid", true);
-        }
-        ptr->setPalette(palette);
-      });
+      QObject::connect(ptr, &QLineEdit::textChanged,
+                       [ptr]() { validateLineEdit(ptr); });
 
       if (tclArgPassed) {
         // convert any spaces to a replaceable tag so the arg is 1 token
         argVal = restoreAll(argVal);
-        setVal(ptr, argVal);
+        setVal(ptr, argVal, handleChange);
       } else if (widgetJsonObj.contains("userValue")) {
         // Load and set user value
         QString userVal = QString::fromStdString(
             widgetJsonObj["userValue"].get<std::string>());
-        setVal(ptr, userVal);
-
+        setVal(ptr, userVal, handleChange);
         DBG_PRINT_VAL_SET(ptr, userVal);
       }
 
@@ -951,6 +953,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       std::function<void(QTextEdit*, const QString&)> handleChange =
           [arg](QTextEdit* ptr, const QString& val) {
             QString userVal = ptr->toPlainText();
+            ptr->setProperty("value", userVal);
 
             json changeJson;
             changeJson["userValue"] = userVal.toStdString();
@@ -963,6 +966,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + userVal;
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create our widget
@@ -985,6 +989,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       targetObject = createdWidget;
     } else if (type == "dropdown" || type == "combobox") {
       // QComboBox - "dropdown" or "combobox"
+      // default value should be in the options list
       QString sysDefaultVal =
           QString::fromStdString(getDefault<std::string>(widgetJsonObj));
 
@@ -998,38 +1003,43 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
           [arg, comboOptions, comboLookup, lookupStr](QComboBox* ptr,
                                                       const QString& val) {
             json changeJson;
-            QString userVal = ptr->currentText();
+            QString userVal = lookupStr(comboLookup, comboOptions,
+                                        ptr->currentData().toString());
             changeJson["userValue"] = userVal.toStdString();
+            ptr->setProperty("value", ptr->currentText());
             storeJsonPatch(ptr, changeJson);
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a tcl arg/value string if an arg was provided
-            if (arg != "" && userVal != "<unset>") {
+            if (!arg.isEmpty()) {
               QString argStr = "-" + arg + " " +
                                lookupStr(comboOptions, comboLookup, userVal);
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Determine if this combobox should add <unset> option
 #if UPSTREAM_UNUSED
-      bool addUnset = widgetJsonObj.value("addUnset", true);
+      bool addUnset = widgetJsonObj.value("addUnset", addUnsetDefault);
 #endif // #if UPSTREAM_UNUSED
       bool addUnset = widgetJsonObj.value("addUnset", false);
 
       // Create Widget
-      auto ptr = createComboBox(objName, comboOptions, sysDefaultVal, addUnset,
-                                handleChange);
+      QString sysDefaultValLookUp =
+          lookupStr(comboOptions, comboLookup, sysDefaultVal);
+      auto ptr = createComboBox(objName, comboOptions, comboLookup,
+                                sysDefaultValLookUp, addUnset, handleChange);
       createdWidget = ptr;
 
       if (tclArgPassed) {
         // Do a reverse lookup to convert the tcl value to a display value
-        setVal(ptr, lookupStr(comboLookup, comboOptions, argVal));
+        setVal(ptr, lookupStr(comboOptions, comboLookup, argVal));
       } else if (widgetJsonObj.contains("userValue")) {
         // Load and set user value
         QString userVal = QString::fromStdString(
             widgetJsonObj["userValue"].get<std::string>());
-        setVal(ptr, userVal);
+        setVal(ptr, lookupStr(comboLookup, comboOptions, userVal));
       }
 
       targetObject = createdWidget;
@@ -1047,6 +1057,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             json changeJson;
             changeJson["userValue"] = ptr->value();
             storeJsonPatch(ptr, changeJson);
+            ptr->setProperty("value", ptr->value());
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a tcl arg/value string if an arg was provided
@@ -1054,6 +1065,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + QString::number(ptr->value());
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create Widget
@@ -1088,6 +1100,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             json changeJson;
             changeJson["userValue"] = ptr->value();
             storeJsonPatch(ptr, changeJson);
+            ptr->setProperty("value", ptr->value());
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a tcl arg/value string if an arg was provided
@@ -1095,6 +1108,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               QString argStr = "-" + arg + " " + QString::number(ptr->value());
               storeTclArg(ptr, argStr);
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create Widget
@@ -1143,6 +1157,8 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               WIDGET_DBG_PRINT("radiobutton handleChange - Storing Tcl Arg:  " +
                                argStr.toStdString() + "\n");
             }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(
+                btnPtr);
           };
 
       // Create radiobuttons in a QButtonGroup
@@ -1216,6 +1232,7 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
             changeJson["userValue"] =
                 QMetaEnum::fromType<Qt::CheckState>().valueToKey(val);
             storeJsonPatch(ptr, changeJson);
+            ptr->setProperty("value", ptr->checkState());
 
             ptr->setProperty("tclArg", {});  // clear previous vals
             // store a switch style tcl arg if this is checked
@@ -1224,8 +1241,11 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
               WIDGET_DBG_PRINT("checkbox handleChange - Storing Tcl Arg:  -" +
                                arg.toStdString() + "\n");
             }
+	    // OLD: left for backward compatibility
             emit WidgetFactoryDependencyNotifier::Instance()->checkboxChanged(
                 ptr->property("customId").toString(), ptr);
+	    // OLD
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
           };
 
       // Create Widget
@@ -1284,6 +1304,8 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
           targetObject->setProperty("bool_dependency", deps[0]);
         }
       }
+      bool disable = (getStr(widgetJsonObj, "disable").toLower() == "true");
+      createdWidget->setDisabled(disable);
     }
   }
 
@@ -1317,16 +1339,29 @@ QWidget* FOEDAG::createContainerWidget(QWidget* widget,
 
 QComboBox* FOEDAG::createComboBox(
     const QString& objectName, const QStringList& options,
-    const QString& selectedValue, bool addUnset,
+    const QStringList& lookup, const QString& selectedValue, bool addUnset,
     std::function<void(QComboBox*, const QString&)> onChange) {
   QComboBox* widget = new QComboBox();
   widget->setObjectName(objectName);
-  widget->insertItems(0, options);
+
+  QStringList lookupValues = lookup;
+  if (lookupValues.isEmpty()) {
+    // if lookup values are not provided we will take as lookup values actual
+    // text. This is equivalent to search items by text.
+    lookupValues = options;
+  }
+
+  for (int i = 0; i < options.count() && i < lookupValues.count(); i++) {
+    auto text = options.at(i);
+    if (lookupValues.at(i) == selectedValue) text += QString{" (default)"};
+    widget->addItem(text, lookupValues.at(i));
+  }
   if (addUnset) {
-    widget->addItem("<unset>");
+    widget->addItem("<unset>", "<unset>");
     widget->setCurrentText("<unset>");
   }
-  widget->setCurrentText(selectedValue);
+  if (int index{widget->findData(selectedValue)}; index != -1)
+    widget->setCurrentIndex(index);
 
   if (onChange != nullptr) {
     // onChange needs the widget so we capture that in a closure we
@@ -1344,21 +1379,35 @@ QComboBox* FOEDAG::createComboBox(
 QLineEdit* FOEDAG::createLineEdit(
     const QString& objectName, const QString& text,
     std::function<void(QLineEdit*, const QString&)> onChange) {
-  QLineEdit* widget = new QLineEdit();
+  QLineEdit* widget = new LineEdit();
   widget->setObjectName(objectName);
   widget->setText(text);
 
   if (onChange != nullptr) {
     // onChange needs the widget so we capture that in a closure we
     // can then pass to the normal qt handler
-    std::function<void(const QString&)> changeCb =
-        [onChange, widget](const QString& newText) {
-          onChange(widget, newText);
-        };
-    QObject::connect(widget, &QLineEdit::textChanged, changeCb);
+    std::function<void(void)> changeCb = [onChange, widget]() {
+      onChange(widget, widget->text());
+    };
+    QObject::connect(widget, &QLineEdit::editingFinished, changeCb);
   }
 
   return widget;
+}
+
+void FOEDAG::validateLineEdit(QLineEdit* lineEdit) {
+  QPalette palette;
+  // assume property is valid until we find otherwise
+  lineEdit->setProperty("invalid", {});
+  // Change text to red if the input is invalid
+  if (lineEdit->hasAcceptableInput()) {
+    palette.setColor(QPalette::Text, Qt::black);
+  } else {
+    palette.setColor(QPalette::Text, Qt::red);
+    // Mark field as invalid for downstream logic
+    lineEdit->setProperty("invalid", true);
+  }
+  lineEdit->setPalette(palette);
 }
 
 QTextEdit* FOEDAG::createTextEdit(
@@ -1506,4 +1555,28 @@ QString FOEDAG::convertAll(const QString& str) {
 
 QString FOEDAG::restoreAll(const QString& str) {
   return restoreSpaces(restoreNewLines(restoreDashes(str)));
+}
+
+LineEdit::LineEdit(QWidget* parent) : QLineEdit(parent) {}
+
+void LineEdit::focusOutEvent(QFocusEvent* e) {
+  QLineEdit::focusOutEvent(e);
+  Qt::FocusReason reason = e->reason();
+  if (reason != Qt::PopupFocusReason ||
+      !(QApplication::activePopupWidget() &&
+        QApplication::activePopupWidget()->parentWidget() == this)) {
+    if (!hasAcceptableInput()) {
+      emit editingFinished();
+    }
+  }
+}
+
+void LineEdit::keyPressEvent(QKeyEvent* event) {
+  QLineEdit::keyPressEvent(event);
+  if (event->key() == Qt::Key_Enter || event->key() == Qt::Key_Return) {
+    if (!hasAcceptableInput()) {
+      emit editingFinished();
+      event->accept();
+    }
+  }
 }

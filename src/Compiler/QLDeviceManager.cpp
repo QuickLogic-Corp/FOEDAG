@@ -772,7 +772,7 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
     archInfo += "clb: <b>" + QString::number(device_target_selected.device_variant_layout.clb) + " </b>| ";
     archInfo += "dsp: <b>" + QString::number(device_target_selected.device_variant_layout.dsp) + " </b>| ";
     archInfo += "bram: <b>" + QString::number(device_target_selected.device_variant_layout.bram) + " </b>| ";
-    archInfo += "io: <b>" + QString::number(device_target_selected.device_variant_layout.io) + " </b>| ";
+    archInfo += "io: <b>" + QString::number(device_target_selected.device_variant_layout.io) + " </b>";
     m_device_resources_label->setText(archInfo);
   }
 

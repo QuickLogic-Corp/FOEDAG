@@ -43,15 +43,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "IpConfigurator/IpConfigWidget.h"
 #include "IpConfigurator/IpConfigurator.h"
 #include "IpConfigurator/IpConfiguratorCreator.h"
-#ifndef USE_UPSTREAM_IP_CONFIGURATOR
-#include "IpConfigurator/QLIpConfiguratorProcess.h"
-#endif
 #include "Main/CompilerNotifier.h"
 #include "Main/DialogProvider.h"
 #include "Main/Foedag.h"
 #include "Main/ProjectFile/ProjectFileLoader.h"
 #include "Main/licenseviewer.h"
 #include "MainWindow/DockWidget.h"
+#include "IpConfigurator/IPDialogBox.h"
+#include "IpConfigurator/IpCatalogTree.h"
+#include "IpConfigurator/IpConfigWidget.h"
+#include "IpConfigurator/IpConfigurator.h"
+#include "IpConfigurator/IpConfiguratorCreator.h"
 #include "MainWindow/Session.h"
 #include "MainWindow/WelcomePageWidget.h"
 #include "MessagesTabWidget.h"
@@ -72,6 +74,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TextEditor/text_editor_form.h"
 #include "Utils/FileUtils.h"
 #include "Utils/QtUtils.h"
+#include "Utils/StringUtils.h"
 #include "WidgetFactory.h"
 #include "foedag_version.h"
 #include "Compiler/QLSettingsManager.h"
@@ -243,70 +246,6 @@ MainWindow::MainWindow(Session* session)
     refreshPinPlanner();
   });
 #endif
-#ifndef USE_UPSTREAM_IP_CONFIGURATOR
-  m_ipConfiguratorProcess = std::make_shared<QLIpConfiguratorProcess>();
-  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::resultReady, this, [this](std::filesystem::path buildPath, std::vector<std::string> filePathes){
-    auto existedDesignFiles = m_projectManager->getDesignFiles();
-    // before we add new design file, the current fileset could be empty, so init it with default
-    QString currentFileSet = m_projectManager->currentFileSet();
-    if (currentFileSet.isEmpty()) {
-      currentFileSet = DEFAULT_FOLDER_SOURCE;
-    }
-    //
-
-    QList<QString> acceptedFiles;
-    QList<QString> rejectedFiles;
-
-    for (const auto& filePath: filePathes) {
-      QString origFilePath{QString::fromStdString(filePath)};
-      QFileInfo fileInfo{origFilePath};
-      if (!fileInfo.exists()) {
-        qCritical() << "skip add" << origFilePath << "because it doesn't exist";
-        continue;
-      }
-
-      QString localFilePath = m_projectManager->ProjectFilesPath("", m_projectManager->getProjectName(),
-                              currentFileSet, fileInfo.fileName());
-
-      if (!localFilePath.startsWith(PROJECT_OSRCDIR)) {
-        localFilePath.prepend(QString(PROJECT_OSRCDIR) + "/");
-      }
-
-      if (existedDesignFiles.contains(localFilePath)) {
-        rejectedFiles.append(origFilePath);
-      } else {
-        acceptedFiles.append(origFilePath);
-      }
-    }
-
-    if (!acceptedFiles.isEmpty()) {
-      auto error = m_projectManager->addDesignFiles("", "", acceptedFiles.join(" "), Design::Language::VERILOG_2001, "", true, true);
-      if (error.code == 0) {
-        if (sourcesForm) {
-          sourcesForm->UpdateSrcHierachyTree();
-        }
-        m_projectManager->save();
-      } else {
-        qCritical() << error.message;
-      }
-    } else {
-      // we didn't add the design files because they are already existed, but we overwrite old file content with new data
-      for (const auto& origFilePath: rejectedFiles) {
-        QFileInfo fileInfo{origFilePath};
-        QString destFilePath = m_projectManager->ProjectFilesPath(m_projectManager->getProjectPath(), m_projectManager->getProjectName(),
-                               currentFileSet, fileInfo.fileName());
-
-        FileUtils::overwriteFile(std::filesystem::path(origFilePath.toStdString()), std::filesystem::path(destFilePath.toStdString()));
-      }
-    }
-
-    FileUtils::RmDirRecursively(buildPath);
-  });
-  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::error, this, &MainWindow::showErrorMessageBox);
-  connect(m_ipConfiguratorProcess.get(), &QLIpConfiguratorProcess::closed, this, [this](){
-    ipConfiguratorAction->setChecked(false);
-  });
-#endif
 }
 
 void MainWindow::Tcl_NewProject(int argc, const char* argv[]) {
@@ -343,8 +282,6 @@ void MainWindow::ProgressVisible(bool visible) {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (confirmExitProgram()) {
-    disconnect(m_ipConfiguratorProcess.get());
-    m_ipConfiguratorProcess.reset();
     forceStopCompilation();
     event->accept();
   } else {
@@ -1787,12 +1724,18 @@ void MainWindow::ReShowWindow(QString strProject) {
   addDockWidget(Qt::LeftDockWidgetArea, propertiesDockWidget);
   propertiesDockWidget->hide();
   connect(sourcesForm, &SourcesForm::IpReconfigRequested, this,
-          &MainWindow::handleIpReConfigRequested);
+          &MainWindow::openIpConfigurationDialog);
   connect(sourcesForm, &SourcesForm::IpRemoveRequested, this,
           &MainWindow::handleRemoveIpRequested);
   connect(sourcesForm, &SourcesForm::IpDeleteRequested, this,
           &MainWindow::handleDeleteIpRequested);
-
+  connect(sourcesForm, &SourcesForm::IpSimulationRequested, this,
+          &MainWindow::handleSimulationIpRequested);
+  connect(sourcesForm, &SourcesForm::IpWaveFormRequest, this,
+          &MainWindow::handlewaveFormRequested);
+  connect(sourcesForm, &SourcesForm::IpAddToDesignRequest, this,
+          &MainWindow::handleIpAddToDesignRequested);
+  
   TextEditor* textEditor = new TextEditor(this);
   textEditor->RegisterCommands(GlobalSession);
   textEditor->setObjectName("textEditor");
@@ -2190,13 +2133,16 @@ void MainWindow::pinAssignmentChanged() {
 }
 
 void MainWindow::ipConfiguratorActionTriggered() {
-#ifdef USE_UPSTREAM_IP_CONFIGURATOR
   if (ipConfiguratorAction->isChecked()) {
     IpConfiguratorCreator creator;
     // Available IPs DockWidget
-    m_availableIpsgDockWidget = PrepareTab(tr("IPs"), "availableIpsWidget",
-                                           creator.GetAvailableIpsWidget(),
-                                           nullptr, Qt::RightDockWidgetArea);
+    auto availableIpsgDockWidget = PrepareTab(
+        tr("IP Index"), "availableIpsWidget", creator.GetAvailableIpsWidget(),
+        nullptr, Qt::RightDockWidgetArea);
+    connect(availableIpsgDockWidget, &DockWidget::closed, ipConfiguratorAction,
+            &QAction::trigger);
+
+    m_availableIpsgDockWidget = availableIpsgDockWidget;
 
     // Get the actual IpCatalogTree
     auto ipsWidgets = m_availableIpsgDockWidget->findChildren<IpCatalogTree*>();
@@ -2204,8 +2150,10 @@ void MainWindow::ipConfiguratorActionTriggered() {
       m_ipCatalogTree = ipsWidgets[0];
 
       // Update the IP Config widget when the Available IPs selection changes
-      QObject::connect(m_ipCatalogTree, &IpCatalogTree::itemSelectionChanged,
-                       this, &MainWindow::handleIpTreeSelectionChanged);
+      connect(m_ipCatalogTree, &IpCatalogTree::ipReady, this,
+              &MainWindow::handleIpTreeSelectionChanged);
+      connect(m_ipCatalogTree, &IpCatalogTree::openIpSettings, this,
+              [this]() { openIpConfigurationDialog({}, {}, {}); });
     }
 
     // update the console for input incase the IP system printed any messages
@@ -2219,20 +2167,6 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_availableIpsgDockWidget = nullptr;
     m_ipCatalogTree = nullptr;
   }
-#else
-  if (ipConfiguratorAction->isChecked()) {
-    if (!m_ipConfiguratorProcess->isRunning()) {
-      if (!m_ipConfiguratorProcess->start()) {
-        qCritical() << "unable to run executable" << m_ipConfiguratorProcess->executableName();
-        ipConfiguratorAction->setChecked(false);
-      }
-    }
-  } else {
-    if (m_ipConfiguratorProcess->isRunning()) {
-      m_ipConfiguratorProcess->stop();
-    }
-  }
-#endif
 }
 
 void MainWindow::newDialogAccepted() {
@@ -2258,17 +2192,57 @@ void MainWindow::handleIpTreeSelectionChanged() {
       // Create a new config widget for the selected IP
       // Note: passing null for the last 2 args causes a configure instead of a
       // re-configure
-      handleIpReConfigRequested(items[0]->text(0), {}, {});
+      handleIpReConfigRequested(items[0]->text(0), {});
     }
   }
 }
 
-void MainWindow::handleIpReConfigRequested(const QString& ipName,
+void MainWindow::openIpConfigurationDialog(const QString& ipName,
                                            const QString& moduleName,
                                            const QStringList& paramList) {
-  IpConfigWidget* configWidget =
-      new IpConfigWidget(this, ipName, moduleName, paramList);
-  replaceIpConfigDockWidget(configWidget);
+  QString name{ipName};
+  if (name.isEmpty()) {
+    auto items = m_ipCatalogTree->selectedItems();
+    if (items.count() > 0) name = items[0]->text(0);
+  }
+  if (!name.isEmpty()) {    
+  #ifndef IPCONFIG_UPSTREAM
+    std::filesystem::path deviceFile = QLDeviceManager::getInstance()->deviceVariantDirPath() / "vpr.xml.en";
+  #else
+    sdd::filesystem::path deviceFile = m_compiler->DeviceFile();
+    if (m_compiler->DeviceFileLocal())
+      deviceFile = Config::Instance()->customDeviceXml();
+    if (deviceFile.empty()) deviceFile = Config::Instance()->deviceXml();
+  #endif
+    DeviceParameters deviceInfo{
+        QString::fromStdString(m_projectManager->getTargetDevice()),
+        deviceFile};
+    IPDialogBox ipDialogBox{deviceInfo, this, name, moduleName, paramList};
+    auto result = ipDialogBox.exec();
+    if (result == QDialog::Accepted) updateSourceTree();
+  }
+}
+
+void MainWindow::handleIpReConfigRequested(const QString& ipName,
+                                           const QString& moduleName) {
+  if (m_ipConfigDockWidget) {
+    // remove old config widget
+    auto oldWidget = m_ipConfigDockWidget->widget();
+    if (oldWidget) delete m_ipConfigDockWidget->widget();
+  }
+  IpConfigWidget* configWidget = new IpConfigWidget(this, ipName, moduleName);
+
+  // If dock widget has already been created
+  if (m_ipConfigDockWidget) {
+    // set new config widget
+    m_ipConfigDockWidget->setWidget(configWidget);
+    m_ipConfigDockWidget->show();
+  } else {  // If dock widget hasn't been created
+    // Create and place new dockwidget
+    m_ipConfigDockWidget =
+        PrepareTab(configWidget->windowTitle(), "configureIpsWidget",
+                   configWidget, nullptr, Qt::RightDockWidgetArea);
+  }
 }
 
 void MainWindow::handleRemoveIpRequested(const QString& moduleName) {
@@ -2293,6 +2267,48 @@ void MainWindow::handleDeleteIpRequested(const QString& moduleName) {
   }
 
   updateSourceTree();
+}
+
+
+void MainWindow::handleSimulationIpRequested(const QString& moduleName) {
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+
+  if ((compiler = GlobalSession->GetCompiler()) &&
+      (ipGen = compiler->GetIPGenerator())) {
+    auto module = moduleName.toStdString();
+    auto [supported, message] = ipGen->IsSimulateIpSupported(module);
+    if (!supported) {
+      QMessageBox::critical(this, "IP Simulation",
+                            QString::fromStdString(message));
+      return;
+    }
+    ipGen->SimulateIp(module);
+  }
+  updateSourceTree();
+}
+
+void MainWindow::handlewaveFormRequested(const QString& moduleName) {
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+
+  if ((compiler = GlobalSession->GetCompiler()) &&
+      (ipGen = compiler->GetIPGenerator())) {
+    auto module = moduleName.toStdString();
+    auto [supported, message] = ipGen->IsSimulateIpSupported(module);
+    const QString title{"View waveform"};
+    if (!supported) {
+      QMessageBox::critical(this, title, QString::fromStdString(message));
+      return;
+    }
+    auto [ok, mes] = ipGen->OpenWaveForm(module);
+    if (!ok) QMessageBox::critical(this, title, QString::fromStdString(mes));
+  }
+}
+
+void MainWindow::handleIpAddToDesignRequested(const QString& moduleName) {
+  m_interpreter->evalCmd(
+      StringUtils::format("ip_add_to_design %", moduleName.toStdString()));
 }
 
 void MainWindow::resetIps() {
@@ -2396,33 +2412,6 @@ void MainWindow::recentProjectOpen() {
 void MainWindow::openProjectSettings() {
   newProjdialog->Reset(Mode::ProjectSettings);
   newProjdialog->open();
-}
-
-void MainWindow::replaceIpConfigDockWidget(QWidget* newWidget) {
-  IpConfigWidget* configWidget = qobject_cast<IpConfigWidget*>(newWidget);
-  if (configWidget) {
-    // Listen for IpInstance selection changes in the source tree
-    QObject::connect(configWidget, &IpConfigWidget::ipInstancesUpdated, this,
-                     &MainWindow::updateSourceTree);
-  }
-
-  // If dock widget has already been created
-  if (m_ipConfigDockWidget) {
-    // remove old config widget
-    auto oldWidget = m_ipConfigDockWidget->widget();
-    if (oldWidget) {
-      delete m_ipConfigDockWidget->widget();
-    }
-
-    // set new config widget
-    m_ipConfigDockWidget->setWidget(newWidget);
-    m_ipConfigDockWidget->show();
-  } else {  // If dock widget hasn't been created
-    // Create and place new dockwidget
-    m_ipConfigDockWidget =
-        PrepareTab(tr("Configure IP"), "configureIpsWidget", newWidget, nullptr,
-                   Qt::RightDockWidgetArea);
-  }
 }
 
 bool MainWindow::confirmCloseProject() {

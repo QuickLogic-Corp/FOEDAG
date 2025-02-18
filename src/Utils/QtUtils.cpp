@@ -34,6 +34,17 @@ bool QtUtils::IsEqual(const QString &str, const QString &s) {
   return str.compare(s, Qt::CaseInsensitive) == 0;
 }
 
+QString QtUtils::ToQString(const std::filesystem::path &path) {
+  return QString::fromStdString(path.string());
+}
+
+QStringList QtUtils::ToQStringList(const std::vector<std::string> &strings) {
+  QStringList stringList{};
+  for (const auto &str : strings)
+    stringList.append(QString::fromStdString(str));
+  return stringList;
+}
+
 QSet<QString> QtUtils::convertToSet(const QList<QString>& l) {
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
   return QSet<QString>{l.begin(), l.end()};

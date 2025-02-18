@@ -34,7 +34,7 @@ if { $platform == "windows" } {
     }
 
     # Error out if the correct FOUND IP messages aren't printed
-    set fp [open "foedag.log" r]
+    set fp [open "aurora.log" r]
     set file_data [read $fp]
     close $fp
     set found1 [regexp "Found IP: axis_converter_V1_0" $file_data]

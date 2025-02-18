@@ -97,10 +97,10 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
       m_pinsMap.insert(port, newValue);
       emit portAssignmentChanged(port, pin, index);
     }
-#ifdef PINPLANNER_EXCLUDE_USED_ITEMS
-    invalidate();
-#endif
   }
+#ifdef PINPLANNER_EXCLUDE_USED_ITEMS
+  invalidate();
+#endif
 }
 
 QList<PinsBaseModel::ConnectionFrame> PinsBaseModel::findConnectionsForPins(const QSet<QString>& pins)
@@ -170,9 +170,14 @@ void PinsBaseModel::invalidate()
   QSet<QString> busyPorts;
   QSet<QString> busyPins;
   for (auto it = m_pinsMap.constBegin(); it != m_pinsMap.constEnd(); ++it) {
-    busyPorts.insert(it.key());
-    busyPins.insert(it.value().first);
+    QString connectedPort{it.key()};
+    QString connectedPin{it.value().first};
+    busyPorts.insert(connectedPort);
+    busyPins.insert(connectedPin);
+    QSet<QString> overllapedPins = m_collisionDetector->getOverlappedPins(connectedPin);
+    busyPins.unite(overllapedPins);
   }
+  // qInfo() << "~~~ invalidate, busyPorts=" << busyPorts << ", busyPins=" << busyPins;
 
   invalidatePortsModel(busyPorts);
   invalidatePackagePinsModel(busyPins);

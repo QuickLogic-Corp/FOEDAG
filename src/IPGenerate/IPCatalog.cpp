@@ -19,20 +19,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifdef _WIN32
-#include <Windows.h>
-#include <direct.h>
-#include <process.h>
-#else
-#include <stdlib.h>
-#include <sys/param.h>
-#include <unistd.h>
-#endif
+#include "IPGenerate/IPCatalog.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <QDebug>
+#include <QFile>
 #include <QProcess>
 #include <chrono>
 #include <ctime>
@@ -41,13 +34,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <thread>
 
 #include "Compiler/Log.h"
-#include "Compiler/TclInterpreterHandler.h"
 #include "Compiler/WorkerThread.h"
-#include "IPGenerate/IPCatalog.h"
 #include "MainWindow/Session.h"
 #include "Utils/FileUtils.h"
-#include "Utils/ProcessUtils.h"
 #include "Utils/StringUtils.h"
+#include "nlohmann_json/json.hpp"
+using json = nlohmann::ordered_json;
 
 extern FOEDAG::Session* GlobalSession;
 using namespace FOEDAG;
@@ -117,13 +109,40 @@ VLNV FOEDAG::getIpInfoFromPath(std::filesystem::path path) {
 
 // This will return a path to the litex enabled python interpreter used by the
 // ip catalog. This will cache the return value the first time it's not empty
-std::filesystem::path IPCatalog::getPythonPath() {
+std::filesystem::path IPCatalog::getPythonPath(const std::filesystem::path& envsPath) {
   static std::filesystem::path s_pythonPath{};
   if (s_pythonPath.empty()) {
-    std::filesystem::path searchPath =
-        GlobalSession->Context()->DataPath() / "../envs/litex";
+#ifdef _WIN32
+    std::string pythonExecName = "python.exe";
+    std::filesystem::path searchPath = envsPath;
+#else
+    std::string pythonExecName = "python";
+    std::filesystem::path searchPath = envsPath / "litex";
+#endif
     searchPath = FileUtils::GetFullPath(searchPath);
-    s_pythonPath = FileUtils::LocateFileRecursive(searchPath, "python");
+    s_pythonPath = FileUtils::LocateFileRecursive(searchPath, pythonExecName);
   }
   return s_pythonPath;
+}
+
+IPDetails FOEDAG::readIpDetails(const std::filesystem::path& path) {
+  IPDetails details;
+  QFile file{QString::fromStdString(path.string())};
+  if (!file.open(QFile::ReadOnly)) return details;
+  QString content = file.readAll();
+  json object;
+  try {
+    object = json::parse(content.toStdString());
+  } catch (std::exception& e) {
+    return details;
+  }
+
+  if (object.contains("IP details")) {
+    auto ip_details = object.at("IP details");
+    details.name = ip_details["Name"];
+    details.description = ip_details["Description"];
+    details.interface_str = ip_details["Interface"];
+    details.version = ip_details["Version"];
+  }
+  return details;
 }
