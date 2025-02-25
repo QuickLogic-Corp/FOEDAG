@@ -2422,6 +2422,7 @@ std::filesystem::path QLDeviceManager::deviceYosysScriptFile(QLDeviceTarget devi
     device_target = this->device_target;
   }
 
+  std::string script_filename{"aurora_template_script.ys"};
   // use the device specific yosys script
   // -- hardcoded path --
   // aurora_template_script_yosys_path = 
@@ -2432,20 +2433,13 @@ std::filesystem::path QLDeviceManager::deviceYosysScriptFile(QLDeviceTarget devi
 
     std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
     json device_target_config_json = json::parse(device_target_config_json_ifstream);
-    // get json value
-    std::string json_value;
     if( device_target_config_json.contains("AURORA_YOSYS_TEMPLATE_SCRIPT")  ) {
-      json_value = device_target_config_json["AURORA_YOSYS_TEMPLATE_SCRIPT"].get<std::string>();
+      script_filename = device_target_config_json["AURORA_YOSYS_TEMPLATE_SCRIPT"].get<std::string>();
     }
-    aurora_template_script_yosys_path = 
-        deviceTypeDirPath(device_target) / json_value;
   }
-  // else, we assume that this is a legacy device data directory (< v2.8.0)
-  else {
 
-    aurora_template_script_yosys_path = 
-        std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora_template_script.ys"));
-  }
+  aurora_template_script_yosys_path =
+      deviceTypeDirPath(device_target) / script_filename;
 
   // std::cout << "[zyxw]" << "using ys template: " << aurora_template_script_yosys_path.string() << std::endl;
 
@@ -2469,6 +2463,7 @@ std::filesystem::path QLDeviceManager::deviceSynplifyScriptFile(QLDeviceTarget d
     device_target = this->device_target;
   }
 
+  std::string script_filename{"aurora_template_script.prj"};
   // use the device specific synplify script
   // -- hardcoded path --
   // aurora_template_script_synplify_path = 
@@ -2479,20 +2474,13 @@ std::filesystem::path QLDeviceManager::deviceSynplifyScriptFile(QLDeviceTarget d
 
     std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
     json device_target_config_json = json::parse(device_target_config_json_ifstream);
-    // get json value
-    std::string json_value;
     if( device_target_config_json.contains("AURORA_SYNPLIFY_TEMPLATE_SCRIPT")  ) {
-      json_value = device_target_config_json["AURORA_SYNPLIFY_TEMPLATE_SCRIPT"].get<std::string>();
+      script_filename = device_target_config_json["AURORA_SYNPLIFY_TEMPLATE_SCRIPT"].get<std::string>();
     }
-    aurora_template_script_synplify_path = 
-        deviceTypeDirPath(device_target) / json_value;
   }
   // else, we assume that this is a legacy device data directory (< v2.8.0)
-  else {
-
-    aurora_template_script_synplify_path = 
-        std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora_template_script.prj"));
-  }
+  aurora_template_script_synplify_path =
+        deviceTypeDirPath(device_target) / script_filename;
 
   // std::cout << "[zyxw]" << "using ys template: " << aurora_template_script_synplify_path.string() << std::endl;
 
