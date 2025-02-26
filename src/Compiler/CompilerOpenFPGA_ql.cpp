@@ -1851,9 +1851,17 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::ofstream ofs(synplify_script_path);
     ofs << synplifyScript;
     ofs.close();
+
+    const std::string synplifyExecName{"synplify_base"};
+
+    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
+      ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
+      return false;
+    }
+
     // synplify_base -batch -licensetype synplifybase_quicklogic -license_wait $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
     std::string command =
-    std::string("synplify_base") + " -batch " +
+    synplifyExecName + " -batch " +
       "-licensetype synplifybase_quicklogic -license_wait " +
       synplify_script_path + " >> " +  ProjManager()->projectName() + "_synplify.log";
     Message("Synthesis command: " + command);

@@ -286,6 +286,18 @@ time_t FileUtils::Mtime(const std::filesystem::path& path) {
   return statbuf.st_mtime;
 }
 
+bool FileUtils::IsSystemCommandAvailable(const std::string& command) {
+  QProcess process;
+#ifdef _WIN32
+  // if we don't specify extension [exe] for command [where], this won't work with power shell.
+  process.start("where.exe", QStringList() << QString::fromStdString(command));
+#else
+  process.start("which", QStringList() << QString::fromStdString(command));
+#endif
+  process.waitForFinished(5000);
+  return (process.exitCode() == 0);
+}
+
 Return FileUtils::ExecuteSystemCommand(const std::string& command,
                                        const std::vector<std::string>& args,
                                        std::ostream* out, int timeout_ms,
