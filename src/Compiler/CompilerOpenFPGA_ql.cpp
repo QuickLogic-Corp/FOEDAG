@@ -1852,7 +1852,13 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     ofs << synplifyScript;
     ofs.close();
 
+#ifdef _WIN32
+    // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
+    // let's use synplify_base_console instead to have proper logging into compiler console.
+    const std::string synplifyExecName{"synplify_base_console"};
+#else
     const std::string synplifyExecName{"synplify_base"};
+#endif
 
     if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
       ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
@@ -1863,7 +1869,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string command =
     synplifyExecName + " -batch " +
       "-licensetype synplifybase_quicklogic -license_wait " +
-      synplify_script_path + " >> " +  ProjManager()->projectName() + "_synplify.log";
+      synplify_script_path + " >> " + ProjManager()->projectName() + "_synplify.log";
     Message("Synthesis command: " + command);
     int status = ExecuteAndMonitorSystemCommand(command);
     CleanTempFiles();
