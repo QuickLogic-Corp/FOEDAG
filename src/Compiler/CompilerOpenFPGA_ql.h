@@ -35,6 +35,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
 
+#ifdef _WIN32
+#define WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
+#endif // _WIN32
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };
@@ -221,6 +224,12 @@ class CompilerOpenFPGA_ql : public Compiler {
 private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
+
+#ifdef WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
+  // this is workaround to forcely terminate synplify process when job is done and user input is awaited
+  // this method is build upon ExecuteAndMonitorSynplifyCommand by adding logic to explicitly terminate process when it's done
+  virtual int ExecuteAndMonitorSynplifyCommandWithExitEventDetection(const std::string& command);
+#endif // WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
 };
 
 }  // namespace FOEDAG
