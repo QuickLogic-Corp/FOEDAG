@@ -1865,10 +1865,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
 
-    // synplify_base -batch -licensetype synplifybase_quicklogic -license_wait $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
+    // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
     std::string command =
     synplifyExecName + " -batch " +
-      "-licensetype synplifybase_quicklogic -license_wait " +
+      "-licensetype synplifybase_quicklogic " +
       synplify_script_path + " >> " + ProjManager()->projectName() + "_synplify.log";
     Message("Synthesis command: " + command);
     int status = ExecuteAndMonitorSystemCommand(command);
