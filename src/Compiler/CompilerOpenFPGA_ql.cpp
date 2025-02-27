@@ -6770,7 +6770,7 @@ int CompilerOpenFPGA_ql::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(
         qInfo() << "~~~ pattern of temrination process detected";
         m_process->write("exit\n");
         m_process->closeWriteChannel();
-        m_process->terminate()
+        m_process->terminate();
       }
     }
   });
