@@ -6762,12 +6762,15 @@ int CompilerOpenFPGA_ql::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(
     QString output = m_process->readAllStandardOutput();
     QList<QString> lines = output.split("\n");
     for (const QString& line: lines) {
+      qInfo() << "~ line=" << line;
       std::string stdLine{line.toStdString() + "\n"};
       m_out->write(stdLine.data(), stdLine.size());
-      if (line.contains(QRegularExpression("Complete:\\s+Implementation\\s+Batch\\s+Run"))) {
+      //if (line.contains(QRegularExpression("Complete:\\s+Implementation\\s+Batch\\s+Run"))) {
+      if (line.contains("Complete:") && line.contains("synthesis")) {
         qInfo() << "~~~ pattern of temrination process detected";
         m_process->write("exit\n");
         m_process->closeWriteChannel();
+        m_process->terminate()
       }
     }
   });
