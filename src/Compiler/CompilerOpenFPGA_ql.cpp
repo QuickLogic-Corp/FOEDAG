@@ -1879,7 +1879,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -runall >> $(SYNPLIFY_LOG_FILE)
     std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " +
-    synplify_script_path + " -runall" + " >> " + ProjManager()->projectName() + "_synplify.log";
+    synplify_script_path + " -runall";
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
     std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " +
@@ -6765,6 +6765,7 @@ int CompilerOpenFPGA_ql::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(
       std::string stdLine{line.toStdString() + "\n"};
       m_out->write(stdLine.data(), stdLine.size());
       if (line.contains(QRegularExpression("Complete:\\s+Implementation\\s+Batch\\s+Run"))) {
+        qInfo() << "~~~ pattern of temrination process detected";
         m_process->write("exit\n");
         m_process->closeWriteChannel();
       }
