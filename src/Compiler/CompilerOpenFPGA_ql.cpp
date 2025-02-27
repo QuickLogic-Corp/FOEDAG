@@ -73,6 +73,14 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 
+#ifdef WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
+#include <QProcess>
+#include <Utils/ProcessUtils.h>
+#include <ctime>
+using Time = std::chrono::high_resolution_clock;
+using ms = std::chrono::milliseconds;
+#endif
+
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
 extern const char* foedag_git_hash;
@@ -6731,7 +6739,7 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 }
 
 #ifdef WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
-int Compiler::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(const std::string& command) {
+int CompilerOpenFPGA_ql::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(const std::string& command) {
   auto start = Time::now();
   PERF_LOG("Command: " + command);
   (*m_out) << "Command: " << command << std::endl;
@@ -6754,8 +6762,9 @@ int Compiler::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(const std::
     QString output = m_process->readAllStandardOutput();
     QList<QString> lines = output.split("\n");
     for (const QString& line: lines) {
-      m_out->write(line.toUtf8()+"\n");
-      if (line.constains(QRegularExpression("Complete:\\s+Implementation\\s+Batch\\s+Run"))) {
+      std::string stdLine{line.toStdString() + "\n"};
+      m_out->write(stdLine.data(), stdLine.size());
+      if (line.contains(QRegularExpression("Complete:\\s+Implementation\\s+Batch\\s+Run"))) {
         m_process->write("exit\n");
         m_process->closeWriteChannel();
       }

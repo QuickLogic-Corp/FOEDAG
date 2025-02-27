@@ -38,6 +38,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #define WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
 #endif // _WIN32
+
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };
