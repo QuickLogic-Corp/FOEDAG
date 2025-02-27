@@ -1865,11 +1865,16 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
 
+#ifdef _WIN32
+    // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -runall >> $(SYNPLIFY_LOG_FILE)
+    std::string command = synplifyExecName + "-licensetype synplifybase_quicklogic " +
+    synplify_script_path + " -runall" + " >> " + ProjManager()->projectName() + "_synplify.log";
+#else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command =
-    synplifyExecName + " -batch " +
+    std::string command = synplifyExecName + " -batch " +
       "-licensetype synplifybase_quicklogic " +
       synplify_script_path + " >> " + ProjManager()->projectName() + "_synplify.log";
+#endif
     Message("Synthesis command: " + command);
     int status = ExecuteAndMonitorSystemCommand(command);
     CleanTempFiles();
