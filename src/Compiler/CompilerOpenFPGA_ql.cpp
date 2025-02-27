@@ -1786,6 +1786,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       filesScript = ReplaceAll(filesScript, "${FILES}", files);
       designFiles += filesScript + "\n";
     }
+#ifdef _WIN32
+    designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
+#endif
     synplifyScript =
         ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
 
