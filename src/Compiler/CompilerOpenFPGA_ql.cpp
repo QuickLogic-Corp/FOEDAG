@@ -1854,6 +1854,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::ofstream ofs(synplify_script_path);
     ofs << synplifyScript;
 #ifdef _WIN32
+    ofs << "\n";
     ofs << "# Run all implementations of the active project.\n";
     ofs << "run -all\n";
     ofs << "\n";
