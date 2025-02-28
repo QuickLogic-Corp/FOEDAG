@@ -73,14 +73,6 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 
-#ifdef WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
-#include <QProcess>
-#include <Utils/ProcessUtils.h>
-#include <ctime>
-using Time = std::chrono::high_resolution_clock;
-using ms = std::chrono::milliseconds;
-#endif
-
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
 extern const char* foedag_git_hash;
@@ -1876,21 +1868,18 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
 
+    const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -runall >> $(SYNPLIFY_LOG_FILE)
     std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " +
-    synplify_script_path + " -runall";
+    synplify_script_path + " -runall " + " -log " + synplifyLogFilePath;
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
     std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " +
-    synplify_script_path + " >> " + ProjManager()->projectName() + "_synplify.log";
+    synplify_script_path + " >> " + synplifyLogFilePath;
 #endif
     Message("Synthesis command: " + command);
-#ifdef WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
-    int status = ExecuteAndMonitorSynplifyCommandWithExitEventDetection(command);
-#else
     int status = ExecuteAndMonitorSystemCommand(command);
-#endif
     CleanTempFiles();
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
@@ -6737,86 +6726,5 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
   return power_leakage;
 }
-
-#ifdef WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
-int CompilerOpenFPGA_ql::ExecuteAndMonitorSynplifyCommandWithExitEventDetection(const std::string& command) {
-  auto start = Time::now();
-  PERF_LOG("Command: " + command);
-  (*m_out) << "Command: " << command << std::endl;
-  auto path = std::filesystem::current_path();                  // getting path
-  std::filesystem::current_path(m_projManager->projectPath());  // setting path
-  // new QProcess must be created here to avoid issues related to creating
-  // QObjects in different threads
-  m_process = new QProcess;
-  QStringList env = QProcess::systemEnvironment();
-  if (!m_environmentVariableMap.empty()) {
-    for (std::map<std::string, std::string>::iterator itr =
-             m_environmentVariableMap.begin();
-         itr != m_environmentVariableMap.end(); itr++) {
-      env << strdup(((*itr).first + "=" + (*itr).second).c_str());
-    }
-  }
-  m_process->setEnvironment(env);
-
-  QObject::connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
-    QString output = m_process->readAllStandardOutput();
-    QList<QString> lines = output.split("\n");
-    for (const QString& line: lines) {
-      qInfo() << "~ line=" << line;
-      std::string stdLine{line.toStdString() + "\n"};
-      m_out->write(stdLine.data(), stdLine.size());
-      //if (line.contains(QRegularExpression("Complete:\\s+Implementation\\s+Batch\\s+Run"))) {
-      if (line.contains("Complete:") && line.contains("synthesis")) {
-        qInfo() << "~~~ pattern of temrination process detected";
-        m_process->write("exit\n");
-        m_process->closeWriteChannel();
-        m_process->terminate();
-      }
-    }
-  });
-  QObject::connect(m_process, &QProcess::readyReadStandardError, [this]() {
-    QByteArray data = m_process->readAllStandardError();
-    QString errorstring{QString::fromUtf8(data)};
-    if (errorstring.contains("gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed")) {
-      // we skip reporting this specific error because it is not under our control,
-      // and it can be ignored! [VPR P&R Viewer]
-    }
-    else {
-      m_err->write(data, data.size());
-    }
-  });
-
-  ProcessUtils utils;
-  QObject::connect(m_process, &QProcess::started,
-                   [&utils, this]() { utils.Start(m_process->processId()); });
-
-  QString cmd{command.c_str()};
-  QStringList args = cmd.split(" ");
-  QString program = args.first();
-  args.pop_front();  // remove program
-  m_process->start(program, args);
-  std::filesystem::current_path(path);
-  m_process->waitForFinished(-1);
-  utils.Stop();
-  // DEBUG: (*m_out) << "Changed path to: " << (path).string() << std::endl;
-  uint max_utiliation{utils.Utilization()};
-  auto status = m_process->exitStatus();
-  auto exitCode = m_process->exitCode();
-  delete m_process;
-  m_process = nullptr;
-
-  auto end = Time::now();
-  auto fs = end - start;
-  ms d = std::chrono::duration_cast<ms>(fs);
-  std::stringstream stream;
-  stream << "Duration: " << d.count() << " ms. Max utilization: ";
-  if (max_utiliation <= 1024)
-    stream << max_utiliation << " kiB";
-  else
-    stream << max_utiliation / 1024 << " MB";
-  PERF_LOG(stream.str());
-  return (status == QProcess::NormalExit) ? exitCode : -1;
-}
-#endif // WIN32_SYNPLIFY_BASE_CONSOLE_WORKAROUND
 
 // clang-format on
