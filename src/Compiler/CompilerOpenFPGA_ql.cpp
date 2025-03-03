@@ -211,15 +211,19 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
   (*out) << "   ip_catalog ?<ip_name>?     : Lists all available IPs, and "
             "their parameters if <ip_name> is given "
          << std::endl;
-  (*out) << "   ip_configure <IP_NAME> -mod_name <name> -out_file <filename> "
+  (*out) << "   configure_ip <ip_name> -mod_name <name> -out_file <filename> "
             "-version <ver_name> -P<param>=\"<value>\"..."
          << std::endl;
-  (*out) << "                              : Configures an IP <IP_NAME> and "
+  (*out) << "                              : Configures an IP <ip_name> and "
             "generates the corresponding file with module name"
          << std::endl;
   (*out) << "   ipgenerate ?clean?         : Generates all IP instances set by "
-            "ip_configure"
+            "configure_ip"
          << std::endl;
+  (*out) << "   remove_ip <name>           : Remove IP by name"
+          << std::endl;
+  (*out) << "   delete_ip <name>           : Delete IP by name"
+          << std::endl;
   (*out) << "   verific_parser <on/off>    : Turns on/off Verific parser"
          << std::endl;
   (*out) << "   message_severity <message_id> <ERROR/WARNING/INFO/IGNORE> : "
