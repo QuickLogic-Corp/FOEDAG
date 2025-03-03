@@ -23,6 +23,8 @@ static constexpr int SetFileDataRole{Qt::UserRole + 1};
 #define SRC_TREE_CONF_TOP_ITEM "conftopitem"
 #define SRC_TREE_CONF_FILE_ITEM "conffileitem"
 
+#define DISABLE_AURORA_SIMULATE_IP_ACTION
+
 SourcesForm::SourcesForm(QWidget *parent)
     : QWidget(parent), ui(new Ui::SourcesForm) {
   ui->setupUi(this);
@@ -552,8 +554,13 @@ void SourcesForm::CreateActions() {
 
   m_simulateIp = new QAction{tr("Simulate IP"), m_treeSrcHierachy};
   m_simulateIp->setToolTip("Start simulation of selected IP");
+#ifdef DISABLE_AURORA_SIMULATE_IP_ACTION
+  m_simulateIp->setVisible(false);
+  m_simulateIp->setEnabled(false);
+#else
   connect(m_simulateIp, &QAction::triggered, this,
           &SourcesForm::SlotSimulateIp);
+#endif
 
   m_waveFormView = new QAction{tr("View waveform"), m_treeSrcHierachy};
   m_waveFormView->setToolTip("View waveform");
