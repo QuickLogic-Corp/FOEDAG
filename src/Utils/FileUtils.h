@@ -75,6 +75,8 @@ class FileUtils final {
   static std::filesystem::path FindFileByExtension(
       const std::filesystem::path& path, const std::string& extension);
 
+  static bool IsSystemCommandAvailable(const std::string& command);
+
   [[deprecated]]
   static int ExecuteSystemCommand(const std::string& command,
                                   std::ostream* result);

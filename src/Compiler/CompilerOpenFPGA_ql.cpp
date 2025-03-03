@@ -1790,6 +1790,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       filesScript = ReplaceAll(filesScript, "${FILES}", files);
       designFiles += filesScript + "\n";
     }
+#ifdef _WIN32
+    designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
+#endif
     synplifyScript =
         ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
 
@@ -1854,12 +1857,39 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           .string();
     std::ofstream ofs(synplify_script_path);
     ofs << synplifyScript;
+#ifdef _WIN32
+    ofs << "\n";
+    ofs << "# Run all implementations of the active project.\n";
+    ofs << "run -all\n";
+    ofs << "\n";
+    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
+    ofs << "program_terminate\n";
+#endif
     ofs.close();
-    // synplify_base -batch -licensetype synplifybase_quicklogic -license_wait $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command =
-    std::string("synplify_base") + " -batch " +
-      "-licensetype synplifybase_quicklogic -license_wait " +
-      synplify_script_path + " >> " +  ProjManager()->projectName() + "_synplify.log";
+
+#ifdef _WIN32
+    // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
+    // let's use synplify_base_console instead to have proper logging into compiler console.
+    const std::string synplifyExecName{"synplify_base_console"};
+#else
+    const std::string synplifyExecName{"synplify_base"};
+#endif
+
+    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
+      ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
+      return false;
+    }
+
+    const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
+#ifdef _WIN32
+    // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
+    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " +
+    synplify_script_path + " -log " + synplifyLogFilePath;
+#else
+    // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
+    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " +
+    synplify_script_path + " >> " + synplifyLogFilePath;
+#endif
     Message("Synthesis command: " + command);
     int status = ExecuteAndMonitorSystemCommand(command);
     CleanTempFiles();
