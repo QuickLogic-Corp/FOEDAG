@@ -1727,9 +1727,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   {
     std::string synplifyScript; 
     m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
-    if(m_aurora_template_script_synplify_path.empty()) {
-      
-      ErrorMessage("Cannot proceed without Synplify Template Script.");
+    if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
+      ErrorMessage("This Device is Not Supported by Synplify.");
       return false;
     }
     synplifyScript = InitSynplifyScript();
@@ -1898,7 +1897,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       Message("Design " + ProjManager()->projectName() + " is synthesized");
     }
   }
-
+  
   // use the device specific yosys script
   m_aurora_template_script_yosys_path = QLDeviceManager::getInstance()->deviceYosysScriptFile();
 
@@ -2230,7 +2229,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
         }
     #endif // #if UPSTREAM_UNUSED
     std::string vm_file_path = ProjManager()->DesignTopModule() + "/" + ProjManager()->DesignTopModule() + ".vm";
-    std::cout<<vm_file_path<<std::endl;
     std::string filesScript =
             "read_verilog ${READ_VERILOG_OPTIONS} "
             "${VERILOG_FILES}";
@@ -2531,10 +2529,10 @@ std::string CompilerOpenFPGA_ql::InitSynplifyScript() {
 
     // check if we have the device aurora template script available:
     if(FileUtils::FileExists(m_aurora_template_script_synplify_path)) {
-        
+      
       // get it into a ifstream
       std::ifstream stream(m_aurora_template_script_synplify_path.string());
-        
+      
       if (stream.good()) {
         aurora_template_script_synplify = 
           std::string((std::istreambuf_iterator<char>(stream)),
