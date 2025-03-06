@@ -4832,10 +4832,23 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
 
   if(QLSettingsManager::getStringValue("general", "device", "foundry") == "GF" &&
      QLSettingsManager::getStringValue("general", "device", "node") == "12nm") {
-    Message("##################################################");
-    Message("Skipping Bitstream Generation for GF 12nm devices!");
-    Message("##################################################");
-    return true;
+
+    // add an internal check, if we really want to enable the bitstream generation
+    // for gf12 devices: if the feature enable file exists, we honor it.
+    std::string enable_bitstream_file_name = "bitstream_enable.au";
+    std::filesystem::path enable_bitstream_file_path = 
+        QLDeviceManager::getInstance()->deviceTypeDirPath() /
+        enable_bitstream_file_name;
+    if (FileUtils::FileExists(enable_bitstream_file_path)) {
+      // continue with the bitstream generation, as internal
+      // feature enable file exists.
+    }
+    else {
+      Message("##################################################");
+      Message("Skipping Bitstream Generation for GF 12nm devices!");
+      Message("##################################################");
+      return true;
+    }
   }
 
   if( QLSettingsManager::getStringValue("openfpga", "general", "bitstream_generation") == "checked" ) {
@@ -4853,10 +4866,22 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
   // OpenFPGA does not support bitstream generation with flat_routing (fully, yet)
   // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/issues/2256#issuecomment-1498007179
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-    Message("##################################################");
-    Message("Skipping Bitstream Generation since flat_routing is enabled in VPR!");
-    Message("##################################################");
-    return true;
+    // add an internal check, if we really want to enable the bitstream generation
+    // with flatrouter: if the feature enable file exists, we honor it.
+    std::string enable_bitstream_file_name = "flatrouting_bitstream_enable.au";
+    std::filesystem::path enable_bitstream_file_path = 
+        QLDeviceManager::getInstance()->deviceTypeDirPath() /
+        enable_bitstream_file_name;
+    if (FileUtils::FileExists(enable_bitstream_file_path)) {
+      // continue with the bitstream generation, as internal
+      // feature enable file exists.
+    }
+    else {
+      Message("##################################################");
+      Message("Skipping Bitstream Generation since flat_routing is enabled in VPR!");
+      Message("##################################################");
+      return true;
+    }
   }
 
 #if UPSTREAM_UNUSED
