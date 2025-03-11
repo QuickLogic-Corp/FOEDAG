@@ -77,6 +77,7 @@ class PinsBaseModel : public QObject {
 
 #ifndef UPSTREAM_PINPLANNER
 public:
+  const LocationCollisionDetectorPtr& collisionDetector() const { return m_collisionDetector; }
   void setCollisionDetector(const LocationCollisionDetectorPtr& detector) { m_collisionDetector = detector; }
 private:
   LocationCollisionDetectorPtr m_collisionDetector;

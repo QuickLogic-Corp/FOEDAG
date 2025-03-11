@@ -1,6 +1,7 @@
 #include "PcfObserver.h"
 #include "PackagePinsModel.h"
 #include "PortsModel.h"
+#include "PinsBaseModel.h"
 #include "IODirection.h"
 
 #include "Utils/QtUtils.h"
@@ -57,6 +58,7 @@ void PcfObserver::check()
     checkPortsAndPinsAvailability();
     checkPortsAndPinsDuplication();
     checkInputOutputMix();
+    checkPinsOccupySamePhysicalLocation();
 
     m_lastModified = lastModified;
     if (m_forceNextCheck) {
@@ -185,6 +187,23 @@ void PcfObserver::checkInputOutputMix()
     }
     if (outputPorts.contains(frame.port) && inputPins.contains(frame.pin)) {
       regError(frame.lineNum, frame.line, MIXING_OUTPUT_PORT_AND_INPUT_PIN_TEMPLATE.arg(frame.port).arg(frame.pin));
+    }
+  }
+}
+
+void PcfObserver::checkPinsOccupySamePhysicalLocation()
+{
+  // Despite the UI guard assigning several pins that share the same physical location,
+  // the user is able to make assignments outside the Aurora UI (via text file editor). This pass is guarding against exactly this case.
+  QMap<QString, QString> busyLocations;
+  for (const PcfLineFrame& frame: m_lineFrames) {
+    QString location = m_pinsModel->baseModel()->collisionDetector()->getPhysicalLocation(frame.pin);
+    if (!location.isEmpty()) {
+      if (busyLocations.contains(location)) {
+        QString prevPin{busyLocations.value(location)};
+        regError(frame.lineNum, frame.line, PINS_SHARE_SAME_PHYSICAL_LOCATION_TEMPLATE.arg(frame.pin).arg(prevPin).arg(location));
+      }
+      busyLocations[location] = frame.pin;
     }
   }
 }

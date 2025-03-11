@@ -14,7 +14,8 @@ public:
   LocationCollisionDetector(const QMap<QString, QString>& pinToLocationMap);
 
   const QMap<QString, QSet<QString>>& overlappedLocationToPinsMap() const { return m_overlappedLocationToPinsMap; }
-  QSet<QString> getOverlappedPins(const QString& pin);
+  QSet<QString> getOverlappedPins(const QString& pin) const;
+  QString getPhysicalLocation(const QString& pin) const;
 
 private:
   QMap<QString, QString> m_overlappedPinToLocationMap;
