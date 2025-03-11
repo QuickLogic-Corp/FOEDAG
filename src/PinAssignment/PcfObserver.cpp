@@ -58,7 +58,7 @@ void PcfObserver::check()
     checkPortsAndPinsAvailability();
     checkPortsAndPinsDuplication();
     checkInputOutputMix();
-    checkSharingSamePhysicalLocation();
+    checkPinsShareSamePhysicalLocation();
 
     m_lastModified = lastModified;
     if (m_forceNextCheck) {
@@ -191,7 +191,7 @@ void PcfObserver::checkInputOutputMix()
   }
 }
 
-void PcfObserver::checkSharingSamePhysicalLocation()
+void PcfObserver::checkPinsShareSamePhysicalLocation()
 {
   // Despite the UI guard assigning several pins that share the same physical location,
   // the user is able to make assignments outside the Aurora UI (via text file editor). This pass is guarding against exactly this case.

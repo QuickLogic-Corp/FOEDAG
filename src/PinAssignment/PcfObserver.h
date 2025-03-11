@@ -71,7 +71,7 @@ private:
   void checkPortsAndPinsAvailability();
   void checkPortsAndPinsDuplication();
   void checkInputOutputMix();
-  void checkSharingSamePhysicalLocation();
+  void checkPinsShareSamePhysicalLocation();
 
   void regError(int lineNum, const QString& line, const QString& errorMsg);
 };
