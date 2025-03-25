@@ -3726,15 +3726,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
     TimingAnalysisOpt(STAOpt::None);
     
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      Message("");
-      Message("");
-      Message("##################################################");
-      Message("Place&Route View is disabled since flat_routing is enabled in VPR!");
-      Message("##################################################");
-      return true;
-    }
-
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
