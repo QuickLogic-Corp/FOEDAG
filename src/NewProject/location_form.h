@@ -7,6 +7,8 @@ namespace Ui {
 class locationForm;
 }
 
+class QFileSystemModel;
+
 namespace FOEDAG {
 
 class locationForm : public QWidget {
@@ -28,6 +30,7 @@ class locationForm : public QWidget {
   void on_m_lineEditPpath_textChanged(const QString &path);
 
  private:
+  QFileSystemModel* m_fsModel{nullptr};
   Ui::locationForm *ui;
   void updateProjectLocation(const QString& name, const QString& path, bool createSubDir);
 };

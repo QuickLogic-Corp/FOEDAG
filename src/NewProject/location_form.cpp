@@ -1,6 +1,8 @@
 #include "location_form.h"
 
 #include <QFileDialog>
+#include <QCompleter>
+#include <QFileSystemModel>
 
 #include "ui_location_form.h"
 using namespace FOEDAG;
@@ -36,6 +38,15 @@ locationForm::locationForm(const QString &defaultPath, QWidget *parent)
   ui->m_lineEditPpath->setText(homePath);
   ui->m_labelPath1->setText(ui->m_lineEditPpath->text());
   ui->m_checkBox->setCheckState(Qt::CheckState::Checked);
+
+  QCompleter* completer = new QCompleter;
+  m_fsModel = new QFileSystemModel;
+  m_fsModel->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot);
+  m_fsModel->setRootPath(homePath);
+  completer->setModel(m_fsModel);
+  completer->setCompletionMode(QCompleter::PopupCompletion);
+  completer->setCaseSensitivity(Qt::CaseInsensitive);
+  ui->m_lineEditPpath->setCompleter(completer);
 }
 
 locationForm::~locationForm() { delete ui; }
@@ -74,6 +85,7 @@ void locationForm::on_m_btnBrowse_clicked() {
     return;
   }
   ui->m_lineEditPpath->setText(path);
+  m_fsModel->setRootPath(path);
 
   QString name = ui->m_lineEditPname->text();
   Qt::CheckState state = ui->m_checkBox->checkState();
