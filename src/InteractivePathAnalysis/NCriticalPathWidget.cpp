@@ -53,8 +53,6 @@ NCriticalPathWidget::NCriticalPathWidget(
           new NCriticalPathToolsWidget(compiler, settingsFilePath, this)),
       m_statusBar(new NCriticalPathStatusBar(this)),
       m_gateIO(m_toolsWidget->parameters()) {
-  m_prevIsFlatRoutingFlag =
-      m_toolsWidget->parameters()->getIsFlatRouting();  // init prev value
 
   QVBoxLayout* layout = new QVBoxLayout;
   layout->setContentsMargins(0, 0, 0, 0);
@@ -119,10 +117,6 @@ NCriticalPathWidget::NCriticalPathWidget(
             m_statusBar->onConnectionStatusChanged(isConnected);
           });
 
-  connect(m_toolsWidget, &NCriticalPathToolsWidget::isFlatRoutingOnDetected,
-          this, &NCriticalPathWidget::onFlatRoutingOnDetected);
-  connect(m_toolsWidget, &NCriticalPathToolsWidget::isFlatRoutingOffDetected,
-          this, &NCriticalPathWidget::onFlatRoutingOffDetected);
   connect(FOEDAG::QLSettingsManager::getInstance(),
           &FOEDAG::QLSettingsManager::settingsChanged, this, [this]() {
             const auto& parameters = m_toolsWidget->parameters();
@@ -137,19 +131,6 @@ NCriticalPathWidget::NCriticalPathWidget(
 }
 
 NCriticalPathWidget::~NCriticalPathWidget() {}
-
-void NCriticalPathWidget::onFlatRoutingOnDetected() {
-  m_toolsWidget->deactivatePlaceAndRouteViewProcess();
-  QString msg =
-      tr("Place&Route View is disabled since flat_routing is enabled in VPR!");
-  m_statusBar->setMessage(msg);
-  notifyError("VPR", msg);
-}
-
-void NCriticalPathWidget::onFlatRoutingOffDetected() {
-  m_toolsWidget->enablePlaceAndRouteViewButton();
-  m_statusBar->setMessage("");
-}
 
 void NCriticalPathWidget::requestPathList(const QString& initiator) {
   if (m_gateIO.isConnected()) {
