@@ -95,8 +95,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
           &NCriticalPathToolsWidget::tryRunPnRView);
   connect(&m_vprProcess, &Process::runStatusChanged, this,
           [this](bool isRunning) {
-            m_bnRunPnRView->setEnabled(!isRunning &&
-                                       !m_parameters->getIsFlatRouting());
+            m_bnRunPnRView->setEnabled(!isRunning);
             emit PnRViewRunStatusChanged(isRunning);
           });
   connect(&m_vprProcess, &Process::innerErrorOccurred, this,
