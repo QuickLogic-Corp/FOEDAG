@@ -118,7 +118,7 @@ std::pair<QString, bool> PinAssignmentCreator::generatePcf() const {
   const auto pinMap = m_baseModel->pinMap();
   for (auto it = pinMap.constBegin(); it != pinMap.constEnd(); ++it) {
     QString port{it.key()};
-    QString pin{it.value().first};
+    QString pin{it.value()};
     QString assignment{QString("set_io %1 %2\n").arg(port, pin)};
     if (!ports.contains(port)) {
       //qInfo() << QString("skip assignment [%1], because of not existed port [%2]").arg(assignment).arg(port);
@@ -227,12 +227,11 @@ void PinAssignmentCreator::parseConstraints(const QStringList &commands,
   // First need to setup ports and then modes sinse mode will apply only when
   // port is selected.
   QVector<QStringList> internalPins;
-  QMap<QString, int> indx{};
   for (const auto &cmd : std::as_const(convertedCommands)) {
     if (cmd.startsWith("set_pin_loc")) {
       auto list = QtUtils::StringSplit(cmd, ' ');
       if (list.size() >= 3) {
-        packagePins->SetPort(list.at(2), list.at(1), indx[list.at(2)]++);
+        packagePins->SetPort(list.at(2), list.at(1));
       }
       if (list.size() >= 4) internalPins.append(list);
     }

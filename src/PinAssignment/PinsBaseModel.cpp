@@ -31,13 +31,11 @@ namespace FOEDAG {
 PinsBaseModel::PinsBaseModel(QObject *parent) : QObject(parent) {}
 
 bool PinsBaseModel::exists(const QString &port, const QString &pin) const {
-  for (auto it = m_pinsMap.constBegin(); it != m_pinsMap.constEnd(); ++it) {
-    if (it.key() == port && it.value().first == pin) return true;
-  }
-  return false;
+  auto it = m_pinsMap.find(port);
+  return (it != m_pinsMap.end()) && (it.value() == pin);
 }
 
-void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
+void PinsBaseModel::update(const QString &port, const QString &pin) {
   if (port.isEmpty() && pin.isEmpty()) {
     return;
   }
@@ -62,23 +60,22 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
 #endif // RESOLVE_LOCATION_COLLISIONS
 
   if (pin.isEmpty()) {
-    auto values = m_pinsMap.value(port);
+    auto value = m_pinsMap.value(port);
     m_pinsMap.remove(port);
-    emit portAssignmentChanged(port, values.first, values.second);
+    emit portAssignmentChanged(port, value);
   } else if (port.isEmpty()) {
     for (const QString& _port: m_pinsMap.keys()) {
-      auto [_pin, _index] = m_pinsMap.value(_port);
+      auto _pin = m_pinsMap.value(_port);
       if (_pin == pin) {
         m_pinsMap.remove(_port);
-        emit portAssignmentChanged(_port, _pin, _index);
+        emit portAssignmentChanged(_port, _pin);
         break;
       }
     }
   } else {
-    auto newValue{std::make_pair(pin, index)};
-    if (m_pinsMap.value(port) != newValue) {
-      m_pinsMap.insert(port, newValue);
-      emit portAssignmentChanged(port, pin, index);
+    if (m_pinsMap.value(port) != pin) {
+      m_pinsMap.insert(port, pin);
+      emit portAssignmentChanged(port, pin);
     }
   }
 #ifdef PINPLANNER_EXCLUDE_USED_ITEMS
@@ -89,42 +86,25 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
 QList<PinsBaseModel::ConnectionFrame> PinsBaseModel::findConnectionsForPins(const QSet<QString>& pins)
 {
   QList<PinsBaseModel::ConnectionFrame> connections;
-  for (auto it = m_pinsMap.begin(); it != m_pinsMap.end(); ++it) {
-    QString port = it.key();
-    const auto& [pin, index] = it.value();
-    if (pins.contains(pin)) {
-      PinsBaseModel::ConnectionFrame connection{port, pin, index};
-      connections.append(connection);
+  for (const QString& pin: pins) {
+    auto it = m_pinsMap.find(pin);
+    if (it != m_pinsMap.end()) {
+      connections.append(PinsBaseModel::ConnectionFrame{it.key(), pin});
     }
   }
   return connections;
 }
 
-void PinsBaseModel::remove(const QString &port, const QString &pin, int index) {
+void PinsBaseModel::remove(const QString &port, const QString &pin) {
   m_pinsMap.remove(port);
-  emit portAssignmentChanged(port, QString{}, index);
+  emit portAssignmentChanged(port, QString{});
 }
 
-QStringList PinsBaseModel::getPort(const QString &pin) const {
-  QStringList ports;
+QString PinsBaseModel::getPort(const QString &pin) const {
   for (auto it{m_pinsMap.begin()}; it != m_pinsMap.end(); ++it) {
-    if (it.value().first == pin) ports.append(it.key());
+    if (it.value() == pin) return it.key();
   }
-  return ports;
-}
-
-int PinsBaseModel::getIndex(const QString &pin) const {
-  QVector<int> indexes;
-  for (auto it{m_pinsMap.begin()}; it != m_pinsMap.end(); ++it) {
-    if (it.value().first == pin) {
-      indexes.append(it.value().second);
-    }
-  }
-  std::sort(indexes.begin(), indexes.end());
-  for (int i = 0; i < indexes.count(); i++) {
-    if (i != indexes.at(i)) return i;
-  }
-  return indexes.count();
+  return QString{};
 }
 
 PackagePinsModel *PinsBaseModel::packagePinModel() const {
@@ -141,7 +121,7 @@ void PinsBaseModel::setPortsModel(PortsModel *newPortsModel) {
   m_portsModel = newPortsModel;
 }
 
-const QMap<QString, std::pair<QString, int> > &PinsBaseModel::pinMap() const {
+const QMap<QString, QString> &PinsBaseModel::pinMap() const {
   return m_pinsMap;
 }
 
@@ -152,7 +132,7 @@ void PinsBaseModel::invalidate()
   QSet<QString> busyPins;
   for (auto it = m_pinsMap.constBegin(); it != m_pinsMap.constEnd(); ++it) {
     QString connectedPort{it.key()};
-    QString connectedPin{it.value().first};
+    QString connectedPin{it.value()};
     busyPorts.insert(connectedPort);
     busyPins.insert(connectedPin);
     QSet<QString> overllapedPins = m_collisionDetector->getOverlappedPins(connectedPin);

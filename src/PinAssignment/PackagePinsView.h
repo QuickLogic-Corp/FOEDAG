@@ -34,7 +34,7 @@ class PackagePinsView : public PinAssignmentBaseView {
  public:
   PackagePinsView(PinsBaseModel *model, QWidget *parent = nullptr);
 
-  void SetPort(const QString &pin, const QString &port, int row);
+  void SetPort(const QString &pin, const QString &port);
   void cleanTable();
 
  signals:
@@ -55,7 +55,7 @@ class PackagePinsView : public PinAssignmentBaseView {
   QString GetPort(const QModelIndex &index) const;
 
 private slots:
-  void portAssignmentChanged(const QString &port, const QString &pin, int row);
+  void portAssignmentChanged(const QString &port, const QString &pin);
   void portAssignmentRemoved(const QString &port);
 
   void updatePinNames();

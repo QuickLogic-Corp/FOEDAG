@@ -46,7 +46,7 @@ class PortsView : public PinAssignmentBaseView {
   QString getPinSelection(const QModelIndex &index) const;
 
 private slots:
-  void portAssignmentChanged(const QString &port, const QString &pin, int row);
+  void portAssignmentChanged(const QString &port, const QString &pin);
   void pinAssignmentRemoved(const QString &pin);
 
 private:

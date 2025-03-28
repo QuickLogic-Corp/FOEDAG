@@ -108,11 +108,10 @@ void PortsView::packagePinSelectionHasChanged(const QModelIndex &index) {
       auto pin = combo->currentText();
 
       auto port = item->text(PortName);
-      int index = m_model->getIndex(pin);
 
       m_blockUpdate = true;
 
-      m_model->update(port, pin, index);
+      m_model->update(port, pin);
       removeDuplications(pin, combo);
       m_blockUpdate = false;
       emit selectionHasChanged();
@@ -165,8 +164,7 @@ QString PortsView::getPinSelection(const QModelIndex &index) const {
   return pinCombo ? pinCombo->currentText() : QString{};
 }
 
-void PortsView::portAssignmentChanged(const QString &port, const QString &pin,
-                                      int /* unused */) {
+void PortsView::portAssignmentChanged(const QString &port, const QString &pin) {
   if (m_blockUpdate) return;
   if (m_model->exists(port, pin))
     SetPin(port, pin);

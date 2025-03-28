@@ -112,20 +112,13 @@ PackagePinsView::PackagePinsView(PinsBaseModel *model, QWidget *parent)
   headerItem()->setToolTip(lastCol, QString{});
 }
 
-void PackagePinsView::SetPort(const QString &pin, const QString &port,
-                              int row) {
+void PackagePinsView::SetPort(const QString &pin, const QString &port) {
   if (pin.isEmpty()) return;
-  if (row == -1) return;
 
   QModelIndexList indexes{match(pin)};
 
-  // TODO: fixme
-  if (row >= 1) {
-    row = 0;
-  }
-  if (row < indexes.size()) {
-
-    auto index = indexes.at(row);
+  if (!indexes.empty()) {
+    auto index = indexes.at(0);
     setComboData(index, PortsCol, port);
   }
 }
@@ -153,10 +146,9 @@ void PackagePinsView::ioPortsSelectionHasChanged(const QModelIndex &index) {
 
     auto pin = item->text(NameCol);
 
-    int index = item->parent() ? item->parent()->indexOfChild(item) : 0;
     m_blockUpdate = true;
 
-    m_model->update(port, pin, index);
+    m_model->update(port, pin);
     m_blockUpdate = false;
     emit selectionHasChanged();
   }
@@ -244,13 +236,13 @@ QString PackagePinsView::GetPort(const QModelIndex &index) const {
 }
 
 void PackagePinsView::portAssignmentChanged(const QString &port,
-                                            const QString &pin, int row) {
+                                            const QString &pin) {
   if (m_blockUpdate) return;
   auto ports = m_model->getPort(pin);
   if (ports.contains(port))
-    SetPort(pin, port, row);
+    SetPort(pin, port);
   else
-    SetPort(pin, QString{}, row);
+    SetPort(pin, QString{});
 }
 
 void PackagePinsView::portAssignmentRemoved(const QString& port) {
