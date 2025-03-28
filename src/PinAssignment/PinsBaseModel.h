@@ -60,22 +60,18 @@ class PinsBaseModel : public QObject {
 
  signals:
   void portAssignmentChanged(const QString &port, const QString &pin, int row);
-#ifndef UPSTREAM_PINPLANNER
+
   // it's hard to use portAssignmentChanged without making regressions, so let's add new signals to fix problem in isolation.
   void portAssignmentRemoved(const QString &port);
   void pinAssignmentRemoved(const QString &pin);
-#endif
 
  private:
   QMap<QString, std::pair<QString, int>> m_pinsMap;  // key - port, value - pin
   PackagePinsModel *m_packagePinModel;
   PortsModel *m_portsModel;
 
-#ifndef UPSTREAM_PINPLANNER
   QList<ConnectionFrame> findConnectionsForPins(const QSet<QString>& pins);
-#endif
 
-#ifndef UPSTREAM_PINPLANNER
 public:
   void setCollisionDetector(const LocationCollisionDetectorPtr& detector) { m_collisionDetector = detector; }
 private:
@@ -85,7 +81,6 @@ private:
   void invalidatePortsModel(const QSet<QString>& busyPorts);
   void invalidatePackagePinsModel(const QSet<QString>& busyPins);
   void setListModelSilently(QStringListModel* model, const QStringList& list);
-#endif
 #endif
 };
 

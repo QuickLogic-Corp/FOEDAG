@@ -43,24 +43,7 @@ class PinAssignmentBaseView : public QTreeWidget {
   void removeDuplications(const QString &text, QComboBox *current);
   QModelIndexList match(const QString &text) const;
   QModelIndexList indexFromText(QTreeWidgetItem *i, const QString &text) const;
-#ifdef UPSTREAM_PINPLANNER
-  void updateInternalPinSelection(const QString &pin, QComboBox *combo);
-#endif
 
-#ifdef UPSTREAM_PINPLANNER
-  template <class ComboPtr = QComboBox *>
-  ComboPtr GetCombo(const QModelIndex &index) const {
-    return qobject_cast<ComboPtr>(indexWidget(index));
-  }
-  template <class ComboPtr = QComboBox *>
-  ComboPtr GetCombo(const QModelIndex &index, int column) const {
-    return qobject_cast<ComboPtr>(itemWidget(itemFromIndex(index), column));
-  }
-  template <class Combo = QComboBox *>
-  Combo GetCombo(QTreeWidgetItem *item, int column) const {
-    return qobject_cast<Combo>(itemWidget(item, column));
-  }
-#else
   LazyComboBox* GetCombo(const QModelIndex &index) const {
     return qobject_cast<LazyComboBox*>(indexWidget(index));
   }
@@ -70,22 +53,14 @@ class PinAssignmentBaseView : public QTreeWidget {
   LazyComboBox* GetCombo(QTreeWidgetItem *item, int column) const {
     return qobject_cast<LazyComboBox*>(itemWidget(item, column));
   }
-#endif
 
   void setComboData(const QModelIndex &index, const QString &data);
   void setComboData(const QModelIndex &index, int column, const QString &data);
-
-#ifdef UPSTREAM_PINPLANNER
-  static QComboBox *CreateCombo(QWidget *parent);
-#endif
 
  protected:
   PinsBaseModel *m_model{nullptr};
   QMap<QComboBox *, QModelIndex> m_allCombo;
   bool m_blockUpdate{false};
-#ifdef UPSTREAM_PINPLANNER
-  QMap<QString, QSet<QComboBox *>> m_intPins;
-#endif
 };
 
 }  // namespace FOEDAG

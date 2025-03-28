@@ -35,11 +35,9 @@ PinAssignmentBaseView::~PinAssignmentBaseView() { m_allCombo.clear(); }
 
 void PinAssignmentBaseView::removeDuplications(const QString &text,
                                                QComboBox *current) {
-#ifndef UPSTREAM_PINPLANNER
   if (text.isEmpty()) {
     return;
   }
-#endif
   for (auto it{m_allCombo.cbegin()}; it != m_allCombo.cend(); it++) {
     if ((it.key() != current) && (it.key()->currentText() == text)) {
       it.key()->setCurrentIndex(0);
@@ -65,24 +63,6 @@ QModelIndexList PinAssignmentBaseView::indexFromText(
   return indexList;
 }
 
-#ifdef UPSTREAM_PINPLANNER
-void PinAssignmentBaseView::updateInternalPinSelection(const QString &pin,
-                                                       QComboBox *combo) {
-  auto current = combo->currentText();
-
-  auto mode = m_model->packagePinModel()->getMode(pin);
-  auto model = new QStringListModel{combo};
-  QStringList list{{""}};
-  list.append(
-      m_model->packagePinModel()->GetInternalPinsList(pin, mode, current));
-  model->setStringList(list);
-  combo->blockSignals(true);
-  combo->setModel(model);
-  combo->setCurrentIndex(combo->findData(current, Qt::DisplayRole));
-  combo->blockSignals(false);
-}
-#endif
-
 void PinAssignmentBaseView::setComboData(const QModelIndex &index,
                                          const QString &data) {
   if (auto combo = GetCombo(index)) {
@@ -95,19 +75,12 @@ void PinAssignmentBaseView::setComboData(const QModelIndex &index, int column,
                                          const QString &data) {
   if (auto combo = GetCombo(index, column)) {
     const auto index = combo->findData(data, Qt::DisplayRole);
-    if (index > -1) combo->setCurrentIndex(index);
-#ifndef UPSTREAM_PINPLANNER
-    else {
+    if (index > -1) {
+      combo->setCurrentIndex(index);
+    } else {
       combo->setCurrentText(data);
     }
-#endif
   }
 }
-
-#ifdef UPSTREAM_PINPLANNER
-QComboBox *PinAssignmentBaseView::CreateCombo(QWidget *parent) {
-  return new ComboBox{parent};
-}
-#endif
 
 }  // namespace FOEDAG

@@ -36,9 +36,6 @@ std::pair<bool, QString> PackagePinsLoader::load(const QString &fileName) {
   const auto &[success, content] = getFileContent(fileName);
   if (!success) return std::make_pair(success, content);
 
-#ifdef UPSTREAM_PINPLANNER
-  InternalPins &internalPins = m_model->internalPinsRef();
-#endif
   QStringList lines = QtUtils::StringSplit(content, '\n');
   parseHeader(lines.takeFirst());
   PackagePinGroup group{};
@@ -54,16 +51,7 @@ std::pair<bool, QString> PackagePinsLoader::load(const QString &fileName) {
       group.name = data.first();
     }
     data.pop_front();
-#ifdef UPSTREAM_PINPLANNER
-    // internal pins parsing
-    for (int i = ModeFirst; (i <= ModeLast) && (i < data.count()); i++) {
-      if (data.at(i) == "Y") {
-        internalPins[data.at(BallName)][i].append(data.at(InternalPinName));
-        m_model->insertBallData(data.at(BallName), data.at(BallId));
-      }
-    }
-    // -------------
-#endif
+
     if (uniquePins.contains(data.at(BallName))) continue;
     uniquePins.insert(data.at(BallName));
     group.pinData.append({data});
@@ -122,18 +110,6 @@ void PackagePinsLoader::parseHeader(const QString &header) {
   const QStringList columns = header.split(",");
   QStringList modesRx{};
   QStringList modesTx{};
-
-#ifdef UPSTREAM_PINPLANNER
-  for (const auto &col : columns) {
-    if (col.startsWith("Mode_", Qt::CaseInsensitive)) {
-      m_model->insertMode(columns.indexOf(col) - 1, col);
-      if (col.endsWith("tx", Qt::CaseInsensitive))
-        modesTx.append(col);
-      else if (col.endsWith("rx", Qt::CaseInsensitive))
-        modesRx.append(col);
-    }
-  }
-#endif
 
   if (!modesRx.isEmpty()) modesRx.push_front({});  // one empty element
   if (!modesTx.isEmpty()) modesTx.push_front({});  // one empty element

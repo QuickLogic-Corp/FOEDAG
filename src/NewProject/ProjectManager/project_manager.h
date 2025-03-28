@@ -234,9 +234,7 @@ class ProjectManager : public QObject {
   int setDesignActive(const QString &strSetName);
   QStringList getDesignFiles(const QString &strFileSet) const;
   QStringList getDesignFiles() const;
-#ifndef UPSTREAM_PINPLANNER
   QString getPcfFilePath() const;
-#endif
   // Compiler interface
   // design
   Libraries DesignLibraries() const;

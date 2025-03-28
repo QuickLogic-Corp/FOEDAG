@@ -25,13 +25,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QWidget>
 #include <QPushButton>
 
-#ifndef UPSTREAM_PINPLANNER
 #include "PcfObserver.h" // to include PcfLineFrame
 
 namespace FOEDAG {
 class ErrorsView;
 }
-#endif
 
 namespace FOEDAG {
 
@@ -57,13 +55,11 @@ class PinAssignmentCreator : public QObject {
                        QObject *parent = nullptr);
   QWidget *GetPackagePinsWidget();
   QWidget *GetPortsWidget();
-#ifdef UPSTREAM_PINPLANNER
-  QString generateSdc() const;
-#else
+
   void forceNextPcfFileCheck();
   std::pair<QString, bool> generatePcf() const;
   static QList<QString> convertPcfToSdcCommands(const QList<PcfLineFrame>& lineFrames);
-#endif
+
   PinsBaseModel *baseModel() const;
   const PinAssignmentData &data() const;
   void setPinFile(const QString &file);
@@ -73,11 +69,8 @@ class PinAssignmentCreator : public QObject {
    * \brief refresh
    * Reload all data from *.pin file
    */
-#ifdef UPSTREAM_PINPLANNER
-  void refresh();
-#else
   void refresh(bool isPcfOk = true);
-#endif
+
   /*!
    * \brief searchPortsFile
    * Search file 'port_info.json' in path \param projectPath.
@@ -91,16 +84,12 @@ class PinAssignmentCreator : public QObject {
  signals:
   void changed();
   void allowSaving(bool);
-#ifndef UPSTREAM_PINPLANNER
   void openPcfFileRequested(const QString& pcfFilePath);
-#endif
 
  private:
   QWidget *CreateLayoutedWidget(QWidget *main);
   QString searchCsvFile() const;
-#ifdef UPSTREAM_PINPLANNER
-  QString packagePinHeaderFile(ToolContext *context) const;
-#endif
+
   PackagePinsLoader *FindPackagePinLoader(const QString &targetDevice) const;
   PortsLoader *FindPortsLoader(const QString &targetDevice) const;
   void parseConstraints(const QStringList &commands,
@@ -114,11 +103,10 @@ class PinAssignmentCreator : public QObject {
   static QMap<QString, PackagePinsLoader *> m_loader;
   static QMap<QString, PortsLoader *> m_portsLoader;
   PinAssignmentData m_data;
-#ifndef UPSTREAM_PINPLANNER
+  
   PcfObserver* m_pcfObserver{nullptr};
   QList<ErrorsView*> m_errorsViews;
   QList<QWidget*> m_ioViews;
-#endif
 };
 
 }  // namespace FOEDAG

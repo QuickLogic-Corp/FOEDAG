@@ -20,21 +20,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "PortsModel.h"
 
-#ifndef UPSTREAM_PINPLANNER
 #include "IODirection.h"
-#endif
 
 namespace FOEDAG {
 
 PortsModel::PortsModel(QObject *parent)
-#ifdef UPSTREAM_PINPLANNER
-    : QObject(parent), m_model(new QStringListModel(this)) {}
-#else
     : QObject(parent),
     m_model(new QStringListModel(this)),
     m_inputModel(new QStringListModel(this)),
     m_outputModel(new QStringListModel(this))  {}
-#endif
 
 QStringList PortsModel::headerList() const {
   return {"Name", "Dir", "Interface Pin", "Mode", "Internal pins", "Type"};
@@ -48,12 +42,10 @@ void PortsModel::initListModel() {
   QStringList portsList;
   portsList.append(QString());
 
-#ifndef UPSTREAM_PINPLANNER
   m_inputPortsOrig.clear();
   m_inputPortsOrig.append(QString());
   m_outputPortsOrig.clear();
   m_outputPortsOrig.append(QString());
-#endif
 
   for (const auto &group : std::as_const(m_ioPorts))
     for (const auto &p : std::as_const(group.ports)) {
@@ -61,20 +53,16 @@ void PortsModel::initListModel() {
         for (const auto &sub : p.ports) portsList.append(sub.name);
       } else {
         portsList.append(p.name);
-#ifndef UPSTREAM_PINPLANNER
         if (p.dir == IODirection::INPUT) {
           m_inputPortsOrig.append(p.name);
         } else if (p.dir == IODirection::OUTPUT) {
           m_outputPortsOrig.append(p.name);
         }
-#endif
       }
     }
   m_model->setStringList(portsList);
-#ifndef UPSTREAM_PINPLANNER
   m_inputModel->setStringList(m_inputPortsOrig);
   m_outputModel->setStringList(m_outputPortsOrig);
-#endif
 }
 
 IOPort PortsModel::GetPort(const QString &portName) const {
@@ -98,7 +86,6 @@ IOPort PortsModel::GetPort(const QString &portName) const {
 
 QStringListModel *PortsModel::listModel() const { return m_model; }
 
-#ifndef UPSTREAM_PINPLANNER
 void PortsModel::clear()
 {
   m_ioPorts.clear();
@@ -114,6 +101,5 @@ QStringListModel *PortsModel::listModel(const QString& direction) const
   }
   return m_model;
 }
-#endif
 
 }  // namespace FOEDAG

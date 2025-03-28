@@ -53,10 +53,6 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
   const auto &[success, content] = getFileContent(pinTableFilePath);
   if (!success) return std::make_pair(success, content);
 
-#ifdef UPSTREAM_PINPLANNER
-  InternalPins &internalPins = m_model->internalPinsRef();
-#endif
-
   QStringList lines = QtUtils::StringSplit(content, '\n');
   parseHeader(lines.takeFirst());
 

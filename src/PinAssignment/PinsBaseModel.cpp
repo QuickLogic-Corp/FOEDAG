@@ -20,11 +20,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "PinsBaseModel.h"
 
-#ifndef UPSTREAM_PINPLANNER
 #include "IODirection.h"
 #include <QSet>
 #include <QDebug>
-#endif
 
 #define RESOLVE_LOCATION_COLLISIONS
 
@@ -39,21 +37,6 @@ bool PinsBaseModel::exists(const QString &port, const QString &pin) const {
   return false;
 }
 
-#ifdef UPSTREAM_PINPLANNER
-void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
-  if (port.isEmpty()) return;
-  if (pin.isEmpty()) {
-    auto values = m_pinsMap.value(port);
-    m_pinsMap.remove(port);
-    emit portAssignmentChanged(port, values.first, values.second);
-  } else {
-    m_pinsMap.insert(port, std::make_pair(pin, index));
-    auto pinPair = m_pinsMap.value(port);
-    bool changed = (pinPair.first != pin || pinPair.second != index);
-    if (changed) emit portAssignmentChanged(port, pin, index);
-  }
-}
-#else
 void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
   if (port.isEmpty() && pin.isEmpty()) {
     return;
@@ -116,7 +99,6 @@ QList<PinsBaseModel::ConnectionFrame> PinsBaseModel::findConnectionsForPins(cons
   }
   return connections;
 }
-#endif
 
 void PinsBaseModel::remove(const QString &port, const QString &pin, int index) {
   m_pinsMap.remove(port);
@@ -163,7 +145,6 @@ const QMap<QString, std::pair<QString, int> > &PinsBaseModel::pinMap() const {
   return m_pinsMap;
 }
 
-#ifndef UPSTREAM_PINPLANNER
 #ifdef PINPLANNER_EXCLUDE_USED_ITEMS
 void PinsBaseModel::invalidate()
 {
@@ -234,6 +215,5 @@ void PinsBaseModel::setListModelSilently(QStringListModel* model, const QStringL
   model->blockSignals(false);
 }
 #endif // PINPLANNER_EXCLUDE_USED_ITEMS
-#endif // UPSTREAM_PINPLANNER
 
 }  // namespace FOEDAG

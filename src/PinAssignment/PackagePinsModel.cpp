@@ -22,9 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "PinsBaseModel.h"
 
-#ifndef UPSTREAM_PINPLANNER
 #include "IODirection.h"
-#endif
 
 namespace FOEDAG {
 
@@ -40,82 +38,14 @@ void PackagePinsModel::appendHeaderData(const HeaderData &h) {
   m_header.append(h);
 }
 
-#ifdef UPSTREAM_PINPLANNER
-void PackagePinsModel::updateMode(const QString &pin, const QString &mode) {
-  if (pin.isEmpty()) return;
-  if (mode.isEmpty()) {
-    m_modeMap.remove(pin);
-    emit modeHasChanged(pin, mode);
-  } else {
-    auto currentMode = m_modeMap.value(pin);
-    m_modeMap.insert(pin, mode);
-    if (currentMode != mode) emit modeHasChanged(pin, mode);
-  }
-}
-
-QString PackagePinsModel::getMode(const QString &pin) const {
-  return m_modeMap.value(pin);
-}
-
-void PackagePinsModel::updateInternalPin(const QString &port,
-                                         const QString &intPin) {
-  if (intPin.isEmpty())
-    m_internalPinMap.remove(port);
-  else
-    m_internalPinMap.insert(port, intPin);
-  emit internalPinHasChanged(port, intPin);
-}
-
-void PackagePinsModel::insertMode(int id, const QString &mode) {
-  m_modes.insert(mode, id);
-}
-
-InternalPins &PackagePinsModel::internalPinsRef() { return m_internalPinsData; }
-
-QStringList PackagePinsModel::GetInternalPinsList(
-    const QString &pin, const QString &mode, const QString &current) const {
-  int modeId = m_modes.value(mode);
-  auto v = m_internalPinsData.value(convertPinName(pin)).value(modeId);
-  if (m_baseModel) {
-    const auto ports = m_baseModel->getPort(pin);
-    for (const auto &p : ports) {
-      if (m_internalPinMap.value(p) != current)
-        v.removeAll(m_internalPinMap.value(p));
-    }
-  }
-  return v;
-}
-
-int PackagePinsModel::internalPinMax() const {
-  int max{0};
-  for (const auto &modes : m_internalPinsData) {
-    for (const auto &intPins : modes) {
-      max = std::max(max, intPins.count());
-    }
-  }
-  return max;
-}
-#endif
-
 void PackagePinsModel::append(const PackagePinGroup &g) { m_pinData.append(g); }
 
 const QVector<PackagePinGroup> &PackagePinsModel::pinData() const {
   return m_pinData;
 }
 
-#ifdef UPSTREAM_PINPLANNER
-const QMap<QString, QString> &PackagePinsModel::modeMap() const {
-  return m_modeMap;
-}
-
-QString PackagePinsModel::internalPin(const QString &port) const {
-  return m_internalPinMap.value(port);
-}
-#endif
-
 QStringListModel *PackagePinsModel::listModel() const { return m_listModel; }
 
-#ifndef UPSTREAM_PINPLANNER
 QStringListModel *PackagePinsModel::listModel(const QString& direction) const
 {
   if (direction == IODirection::INPUT) {
@@ -126,7 +56,6 @@ QStringListModel *PackagePinsModel::listModel(const QString& direction) const
   }
   return m_listModel;
 }
-#endif
 
 QStringListModel *PackagePinsModel::modeModelTx() const {
   return m_modeModelTx;
@@ -139,32 +68,30 @@ QStringListModel *PackagePinsModel::modeModelRx() const {
 void PackagePinsModel::initListModel() {
   QStringList pinsList;
   pinsList.append(QString());
-#ifndef UPSTREAM_PINPLANNER
+
   m_inputPinsOrig.clear();
   m_inputPinsOrig.append(QString());
 
   m_outputPinsOrig.clear();
   m_outputPinsOrig.append(QString());
-#endif
+
   for (const auto &group : std::as_const(m_pinData)) {
     for (const auto &pin : group.pinData) {
       QString p = pin.data.at(useBallId() ? BallId : BallName);
       pinsList.append(p);
-#ifndef UPSTREAM_PINPLANNER
+
       if (pin.data.at(Direction) == IODirection::INPUT) {
         m_inputPinsOrig.append(p);
       }
       if (pin.data.at(Direction) == IODirection::OUTPUT) {
         m_outputPinsOrig.append(p);
       }
-#endif
     }
   }
   m_listModel->setStringList(pinsList);
-#ifndef UPSTREAM_PINPLANNER
+
   m_modeModelTx->setStringList(m_inputPinsOrig);
   m_modeModelRx->setStringList(m_outputPinsOrig);
-#endif
 }
 
 const QVector<QString> &PackagePinsModel::userGroups() const {

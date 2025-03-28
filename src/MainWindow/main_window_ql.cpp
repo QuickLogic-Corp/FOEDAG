@@ -236,7 +236,6 @@ MainWindow::MainWindow(Session* session)
           this, &MainWindow::onDesignFilesChanged);
   connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designCreated,
           this, &MainWindow::onDesignCreated);
-#ifndef UPSTREAM_PINPLANNER
   connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designFileContentChanged,
           TaskStatusWatcher::Instance(), &TaskStatusWatcher::onDesignFilesChanged);
   connect(TaskStatusWatcher::Instance(), &TaskStatusWatcher::synthSucceeded, this, [this](){
@@ -245,7 +244,6 @@ MainWindow::MainWindow(Session* session)
     }
     refreshPinPlanner();
   });
-#endif
 }
 
 void MainWindow::Tcl_NewProject(int argc, const char* argv[]) {
@@ -437,38 +435,6 @@ DockWidget* MainWindow::PrepareTab(const QString& name, const QString& objName,
   return dock;
 }
 
-#ifdef UPSTREAM_PINPLANNER
-void MainWindow::addPinPlannerRefreshButton(QDockWidget* dock) {
-  auto btn = new QPushButton{dock};
-  btn->setObjectName("refreshButton");
-  connect(btn, &QPushButton::clicked, this, &MainWindow::refreshPinPlanner);
-  btn->setSizePolicy(QSizePolicy{QSizePolicy::Maximum, QSizePolicy::Maximum});
-  btn->setText("Refresh");
-
-  QWidget* w = new QWidget;
-  auto layout = new QHBoxLayout;
-  layout->addWidget(new QLabel{dock->windowTitle()});
-
-  auto saveButton = new QPushButton;
-  saveButton->setObjectName("saveButton");
-  connect(saveButton, &QPushButton::clicked, this,
-          &MainWindow::saveActionTriggered);
-  saveButton->setSizePolicy(
-      QSizePolicy{QSizePolicy::Maximum, QSizePolicy::Maximum});
-  saveButton->setIcon(QIcon{":/images/save-action.png"});
-  saveButton->setToolTip("Save to *.pcf file");
-
-  layout->addWidget(saveButton);
-  layout->addWidget(btn);
-  layout->addSpacerItem(
-      new QSpacerItem{10, 10, QSizePolicy::Expanding, QSizePolicy::Expanding});
-  layout->setContentsMargins(9, 9, 9, 0);
-  w->setLayout(layout);
-  dock->setTitleBarWidget(w);
-
-  btn->hide();
-}
-#else
 QWidget* MainWindow::createPinPlannerToolBar(PinAssignmentCreator* creator) const {
   QWidget* w = new QWidget;
   auto layout = new QVBoxLayout;
@@ -533,7 +499,6 @@ QWidget* MainWindow::createPinPlannerToolBar(PinAssignmentCreator* creator) cons
 
   return w;
 }
-#endif
 
 void MainWindow::cleanUpDockWidgets(std::vector<QDockWidget*>& dockWidgets) {
   for (const auto& dock : dockWidgets) {
@@ -797,54 +762,6 @@ void MainWindow::onDesignCreated() {
   setStatusAndProgressText(msg);
 }
 
-#ifdef UPSTREAM_PINPLANNER
-bool MainWindow::saveConstraintFile() {
-  // KK: bypass saving constraint file section, as we don't use it (or pinassinment) yet.
-  return false;
-  // auto pinAssignment = findChild<PinAssignmentCreator*>();
-  // if (!pinAssignment) return false;
-  // auto constrFile = m_projectManager->getConstrPinFile();
-  // if (constrFile.empty()) {
-  //   newProjdialog->Reset(Mode::ProjectSettings);
-  //   newProjdialog->SetPageActive(FormIndex::INDEX_ADDCONST);
-  //   newProjdialog->exec();
-  // }
-  // constrFile = m_projectManager->getConstrPinFile();
-  // if (constrFile.empty()) {
-  //   QMessageBox::warning(this, "No *.pin constraint file...",
-  //                        "Please create *.pin constraint file.");
-  //   return false;
-  // }
-  // bool rewrite = false;
-  // auto constraint = QString::fromStdString(constrFile);
-  // QFile file{constraint};  // TODO @volodymyrk, need to fix
-  //                          // issue with target constraint
-  // QFile::OpenMode openFlags = QFile::ReadWrite;
-  // if (file.size() != 0) {
-  //   auto btns = QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel;
-  //   auto msgBox = QMessageBox(
-  //       QMessageBox::Question, tr("Save constraint file..."),
-  //       tr("Do you want to rewrite current constraint file?"), btns, this);
-  //   msgBox.button(QMessageBox::Yes)->setText("Rewrite");
-  //   msgBox.button(QMessageBox::No)->setText("Append");
-  //   msgBox.exec();
-  //   auto answer = msgBox.buttonRole(msgBox.clickedButton());
-  //   if (answer == QMessageBox::RejectRole) return false;
-  //   rewrite = (answer == QMessageBox::YesRole);
-  //   if (!rewrite) openFlags = QFile::ReadWrite | QIODevice::Append;
-  // }
-  // pinAssignment->setPinFile(constraint);
-  // file.open(openFlags);
-  // QString sdc{pinAssignment->generateSdc()};
-  // if (rewrite)
-  //   file.resize(0);  // clean content
-  // else if (!sdc.isEmpty() && file.size() != 0)
-  //   sdc.push_front('\n');  // make sure start with new line
-  // file.write(sdc.toLatin1());
-  // file.close();
-  // return true;
-}
-#else
 bool MainWindow::saveConstraintFile() {
   if (!m_pinAssignmentCreator) return false;
   auto [pcf, refreshUI] = m_pinAssignmentCreator->generatePcf();
@@ -854,7 +771,6 @@ bool MainWindow::saveConstraintFile() {
   }
   return true;
 }
-#endif
 
 void MainWindow::loadFile(const QString& file) {
   if (m_projectFileLoader) {
@@ -1864,9 +1780,7 @@ void MainWindow::ReShowWindow(QString strProject) {
   connect(console, &TclConsoleWidget::stateChanged, this,
           [this, console]() { startStopButtonsState(); });
 
-#ifndef UPSTREAM_PINPLANNER
   connect(m_taskManager, &TaskManager::taskDone, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
-#endif
 
   sourcesForm->InitSourcesForm();
   // runForm->InitRunsForm();
@@ -1956,19 +1870,6 @@ bool MainWindow::saveActionTriggered() {
 
 void MainWindow::pinAssignmentActionTriggered() {
   if (pinAssignmentAction->isChecked()) {
-#ifdef UPSTREAM_PINPLANNER
-    if (PinAssignmentCreator::searchPortsFile(
-            m_projectManager->getProjectPath())
-            .isEmpty()) {
-      auto res = Tcl_Eval(GlobalSession->TclInterp()->getInterp(), "analyze");
-      if (res != TCL_OK) {
-        QMessageBox::critical(this, "'analyze' command failed",
-                              "Please read console logs for 'analyze' above");
-        pinAssignmentAction->setChecked(false);
-        return;
-      }
-    }
-#else
     QString portsFilePath = PinAssignmentCreator::searchPortsFile(m_projectManager->getProjectPath());
     if (portsFilePath.isEmpty()) {
       QMessageBox::critical(this, "Pin Planner cannot be started",
@@ -1976,15 +1877,10 @@ void MainWindow::pinAssignmentActionTriggered() {
       pinAssignmentAction->setChecked(false);
       return;
     }
-#endif
 
     PinAssignmentData data;
     data.context = GlobalSession->Context();
 
-#ifdef UPSTREAM_PINPLANNER
-    data.pinMapFile =
-        QString::fromStdString(m_compiler->PinmapCSVFile().string());
-#else
     CompilerOpenFPGA_ql* compiler_ql = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
     if (!compiler_ql) {
         qCritical() << "cannot get CompilerOpenFPGA_ql instance";
@@ -2000,31 +1896,13 @@ void MainWindow::pinAssignmentActionTriggered() {
       return;
     }
     data.pinMapFile = QString::fromStdString(filepath_pin_table_csv.string());
-#endif
 
-#ifdef UPSTREAM_PINPLANNER
-    data.projectPath = m_projectManager->getProjectPath();
-    data.portsFilePath = QString::fromStdString(
-        m_compiler->FilePath(Compiler::Action::Analyze).string());
-#else
     data.portsFilePath = m_projectManager->getProjectPath();
-#endif
 
     data.target = QString::fromStdString(m_projectManager->getTargetDevice());
-#ifdef UPSTREAM_PINPLANNER
-    data.pinFile = QString::fromStdString(m_projectManager->getConstrPinFile());
-#else
     data.pinFile = m_projectManager->getPcfFilePath();
-#endif
 
-#ifdef UPSTREAM_PINPLANNER
-    QFile file{data.pinFile};
-    if (file.open(QFile::ReadOnly)) {
-      data.commands = QtUtils::StringSplit(QString{file.readAll()}, '\n');
-    }
-#else
     data.commands = PinAssignmentCreator::convertPcfToSdcCommands(PcfObserver::parsePcfFile(data.pinFile));
-#endif
 
     data.useBallId = m_settings.value(PIN_PLANNER_PIN_NAME, false).toBool();
 
@@ -2041,11 +1919,6 @@ void MainWindow::pinAssignmentActionTriggered() {
     connect(m_pinAssignmentCreator, &PinAssignmentCreator::changed, this,
             &MainWindow::pinAssignmentChanged);
 
-#ifdef UPSTREAM_PINPLANNER
-    auto portsDockWidget = PrepareTab(tr("IO Ports"), "portswidget",
-                                      m_pinAssignmentCreator->GetPortsWidget(), m_dockConsole);
-    addPinPlannerRefreshButton(portsDockWidget);
-#else
     connect(m_pinAssignmentCreator, &PinAssignmentCreator::openPcfFileRequested, this,
             &MainWindow::openFilePath);
 
@@ -2065,15 +1938,8 @@ void MainWindow::pinAssignmentActionTriggered() {
         pinAssignmentActionTriggered();
       }
     });
-#endif
 
 #ifdef ACTIVATE_PIN2PORT_TAB
-#ifdef UPSTREAM_PINPLANNER
-    auto packagePinDockWidget =
-        PrepareTab(tr("Interface Pins"), "interfacepinwidget",
-                   creator->GetPackagePinsWidget(), portsDockWidget);
-    addPinPlannerRefreshButton(packagePinDockWidget);
-#else // UPSTREAM_PINPLANNER
     QWidget* pinsGroup = createGroup({
       std::make_pair(createPinPlannerToolBar(m_pinAssignmentCreator), 0),
       std::make_pair(m_pinAssignmentCreator->GetPackagePinsWidget(), 2)}, Qt::Horizontal);
@@ -2087,7 +1953,6 @@ void MainWindow::pinAssignmentActionTriggered() {
         pinAssignmentActionTriggered();
       }
     });
-#endif // UPSTREAM_PINPLANNER
 #endif // ACTIVATE_PIN2PORT_TAB
 
 #ifdef ACTIVATE_PIN2PORT_TAB

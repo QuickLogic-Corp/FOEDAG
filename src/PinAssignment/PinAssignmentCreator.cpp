@@ -26,10 +26,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 
 #include "Main/ToolContext.h"
-#ifdef UPSTREAM_PINPLANNER
-#include "PackagePinsLoader.h"
-#include "PortsLoader.h"
-#else
 #include "Compiler/QLDeviceManager.h"
 #include "QLPackagePinsLoader.h"
 #include "QLPortsLoader.h"
@@ -38,7 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ErrorsView.h"
 #include "Utils/QtUtils.h"
 #include <QFile>
-#endif
+
 #include "PackagePinsView.h"
 #include "PinsBaseModel.h"
 #include "PortsView.h"
@@ -66,9 +62,6 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
 
   PackagePinsLoader *loader{FindPackagePinLoader(data.target)};
 
-#ifdef UPSTREAM_PINPLANNER
-  loader->loadHeader(packagePinHeaderFile(data.context));
-#else
   m_pcfObserver = new PcfObserver{this, m_data.pinFile, portsModel, packagePinModel};
   connect(m_pcfObserver, &PcfObserver::contentChecked, this, [this](bool status){
     for (QWidget* ioView: m_ioViews) {
@@ -83,7 +76,6 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
     refresh(status);
     emit allowSaving(status);
   });
-#endif
 
   loader->load(fileName);
 
@@ -109,29 +101,6 @@ QWidget *PinAssignmentCreator::GetPackagePinsWidget() {
 }
 
 QWidget *PinAssignmentCreator::GetPortsWidget() { return m_portsView; }
-
-#ifdef UPSTREAM_PINPLANNER
-QString PinAssignmentCreator::generateSdc() const {
-  QString sdc;
-  const auto pinMap = m_baseModel->pinMap();
-  // generate pin location
-  for (auto it = pinMap.constBegin(); it != pinMap.constEnd(); ++it) {
-    auto internalPin = m_baseModel->packagePinModel()->internalPin(it.key());
-    if (internalPin.isEmpty())
-      sdc.append(
-          QString("set_pin_loc %1 %2\n").arg(it.key(), it.value().first));
-    else
-      sdc.append(QString("set_pin_loc %1 %2 %3\n")
-                     .arg(it.key(), it.value().first, internalPin));
-  }
-  // generate mode
-  auto modeMap = m_baseModel->packagePinModel()->modeMap();
-  for (auto it{modeMap.begin()}; it != modeMap.end(); ++it) {
-    sdc.append(QString("set_mode %1 %2\n").arg(it.value(), it.key()));
-  }
-  return sdc;
-}
-#else
 
 void PinAssignmentCreator::forceNextPcfFileCheck()
 {
@@ -178,19 +147,14 @@ QList<QString> PinAssignmentCreator::convertPcfToSdcCommands(const QList<PcfLine
   }
   return commands;
 }
-#endif
 
 QWidget *PinAssignmentCreator::CreateLayoutedWidget(QWidget *main) {
   QWidget *w = new QWidget;
-#ifdef UPSTREAM_PINPLANNER
-  w->setLayout(new QVBoxLayout);
-#else
+
   w->setLayout(new QHBoxLayout);
   w->layout()->setContentsMargins(1, 1, 1, 1);
-#endif
   w->layout()->addWidget(main);
 
-#ifndef UPSTREAM_PINPLANNER
   m_ioViews.append(main);
 
   ErrorsModel* errorsModel = new ErrorsModel(m_baseModel);
@@ -202,7 +166,7 @@ QWidget *PinAssignmentCreator::CreateLayoutedWidget(QWidget *main) {
   m_errorsViews.append(errorsView);
   w->layout()->addWidget(errorsView);
   errorsView->setVisible(false); // initially hide
-#endif
+
   return w;
 }
 
@@ -210,22 +174,11 @@ QString PinAssignmentCreator::searchCsvFile() const {
   return m_data.pinMapFile;
 }
 
-#ifdef UPSTREAM_PINPLANNER
-QString PinAssignmentCreator::packagePinHeaderFile(ToolContext *context) const {
-  auto path = context->DataPath() / "etc" / "package_pin_info.json";
-  return QString::fromStdString(path.string());
-}
-#endif
-
 PackagePinsLoader *PinAssignmentCreator::FindPackagePinLoader(
     const QString &targetDevice) const {
   if (!m_loader.contains(targetDevice)) {
-#ifdef UPSTREAM_PINPLANNER
-    RegisterPackagePinLoader(targetDevice, new PackagePinsLoader{nullptr});
-#else
     RegisterPackagePinLoader(targetDevice, new QLPackagePinsLoader{nullptr});
-#endif
-}
+  }
   auto loader = m_loader.value(targetDevice);
   loader->setModel(m_baseModel->packagePinModel());
   return loader;
@@ -234,11 +187,7 @@ PackagePinsLoader *PinAssignmentCreator::FindPackagePinLoader(
 PortsLoader *PinAssignmentCreator::FindPortsLoader(
     const QString &targetDevice) const {
   if (!m_portsLoader.contains(targetDevice)) {
-#ifdef UPSTREAM_PINPLANNER
-    RegisterPortsLoader(targetDevice, new PortsLoader{nullptr});
-#else
     RegisterPortsLoader(targetDevice, new QLPortsLoader{nullptr});
-#endif
   }
   auto loader = m_portsLoader.value(targetDevice);
   loader->SetModel(m_baseModel->portsModel());
@@ -288,34 +237,14 @@ void PinAssignmentCreator::parseConstraints(const QStringList &commands,
       if (list.size() >= 4) internalPins.append(list);
     }
   }
-#ifdef UPSTREAM_PINPLANNER
-  for (const auto &cmd : std::as_const(convertedCommands)) {
-    if (cmd.startsWith("set_mode")) {
-      auto list = QtUtils::StringSplit(cmd, ' ');
-      if (list.size() >= 3) {
-        packagePins->SetMode(list.at(2), list.at(1));
-      }
-    } else if (cmd.startsWith("set_property mode")) {
-      auto list = QtUtils::StringSplit(cmd, ' ');
-      if (list.size() >= 4) {
-        packagePins->SetMode(list.at(3), list.at(2));
-      }
-    }
-  }
-  for (const auto &intPins : internalPins) {
-    packagePins->SetInternalPin(intPins.at(1), intPins.at(3));
-  }
-#endif
 }
 
 QString PinAssignmentCreator::searchPortsFile(const QString &projectPath) {
   const QDir dir{projectPath};
-#ifdef UPSTREAM_PINPLANNER
-  auto file = dir.filePath("port_info.json");
-#else
+
   QString projectName = QDir(projectPath).dirName();
   auto file = dir.filePath(projectName + "_post_synth.blif");
-#endif
+
   const QFileInfo fileInfo{file};
   if (fileInfo.exists()) return file;
   return QString();
@@ -346,23 +275,6 @@ void PinAssignmentCreator::setUseBallId(bool useBallId) {
   }
 }
 
-#ifdef UPSTREAM_PINPLANNER
-void PinAssignmentCreator::refresh(bool isPcfOk) {
-  const QSignalBlocker signalBlocker{this};
-
-  auto portView = m_portsView->findChild<PortsView *>();
-  if (portView) portView->cleanTable();
-
-  auto ppView = m_packagePinsView->findChild<PackagePinsView *>();
-  if (ppView) ppView->cleanTable();
-  QFile file{m_data.pinFile};
-  if (file.open(QFile::ReadOnly)) {
-    m_data.commands = QtUtils::StringSplit(QString{file.readAll()}, '\n');
-  }
-  m_baseModel->packagePinModel()->setUseBallId(m_data.useBallId);
-  if (ppView && portView) parseConstraints(m_data.commands, ppView, portView);
-}
-#else
 void PinAssignmentCreator::refresh(bool isPcfOk) {
   const QSignalBlocker signalBlocker{this};
 
@@ -387,6 +299,5 @@ void PinAssignmentCreator::refresh(bool isPcfOk) {
   m_baseModel->packagePinModel()->setUseBallId(m_data.useBallId);
   if (ppView && portView) parseConstraints(m_data.commands, ppView, portView);
 }
-#endif
 
 }  // namespace FOEDAG

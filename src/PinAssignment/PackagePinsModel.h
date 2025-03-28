@@ -30,12 +30,7 @@ enum PinData {
   PinName = 0,
   BallName = 1,
   BallId = 2,
-#ifndef UPSTREAM_PINPLANNER
-// we don't use Dir field because of it's big index value = 64 and QList<QString> dataset,
-// which require create a lot of empty QString elements, before putting direction value to index 64
-// to fix this properly the structure QList<QString> should be replaced with associated container, for example with QMap<int, QString>.
   Direction = 3,
-#endif
   InternalPinName = 12,
   ModeFirst = 13,
   ModeLast = 46,
@@ -78,30 +73,16 @@ class PackagePinsModel : public QObject {
   PackagePinsModel(QObject *parent = nullptr);
   const QVector<HeaderData> &header() const;
   void appendHeaderData(const HeaderData &h);
-#ifdef UPSTREAM_PINPLANNER
-  void updateMode(const QString &pin, const QString &mode);
-  QString getMode(const QString &pin) const;
-  void updateInternalPin(const QString &port, const QString &intPin);
-  void insertMode(int id, const QString &mode);
-  InternalPins &internalPinsRef();
-  QStringList GetInternalPinsList(const QString &pin, const QString &mode,
-                                  const QString &current = QString{}) const;
-  int internalPinMax() const;
-#endif
 
   void append(const PackagePinGroup &g);
   const QVector<PackagePinGroup> &pinData() const;
-#ifdef UPSTREAM_PINPLANNER
-  const QMap<QString, QString> &modeMap() const;
-  QString internalPin(const QString &port) const;
-#endif
 
   QStringListModel *listModel() const;
-#ifndef UPSTREAM_PINPLANNER
+
   const QStringList& inputPinsOrig() const { return m_inputPinsOrig; }
   const QStringList& outputPinsOrig() const { return m_outputPinsOrig; }
   QStringListModel *listModel(const QString& direction) const;
-#endif
+
   QStringListModel *modeModelTx() const;
   QStringListModel *modeModelRx() const;
   void initListModel();
@@ -132,18 +113,13 @@ class PackagePinsModel : public QObject {
   QStringListModel *m_listModel{nullptr};
   QStringListModel *m_modeModelTx{nullptr};
   QStringListModel *m_modeModelRx{nullptr};
-#ifndef UPSTREAM_PINPLANNER
+
   QStringList m_inputPinsOrig;
   QStringList m_outputPinsOrig;
-#endif
+
   QVector<HeaderData> m_header;
   QVector<QString> m_userGroups;
-#ifdef UPSTREAM_PINPLANNER
-  QMap<QString, QString> m_modeMap;
-  QMap<QString, QString> m_internalPinMap;
-  QMap<QString, int> m_modes;
-  InternalPins m_internalPinsData;  // <PinName, <ModeId, InternalPins>>
-#endif
+
   PinsBaseModel *m_baseModel;
   bool m_useBallId{false};
   BallData m_ballData;
