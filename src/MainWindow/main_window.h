@@ -37,6 +37,8 @@ class QProgressBar;
 class QStackedWidget;
 
 namespace FOEDAG {
+class PinAssignmentCreator;
+class DockWidget;
 class Session;
 class TclInterpreter;
 class ProjectFileLoader;
