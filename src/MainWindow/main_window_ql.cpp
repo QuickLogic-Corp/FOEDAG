@@ -2067,12 +2067,13 @@ void MainWindow::pinAssignmentActionTriggered() {
     });
 #endif
 
+#ifdef ACTIVATE_PIN2PORT_TAB
 #ifdef UPSTREAM_PINPLANNER
     auto packagePinDockWidget =
         PrepareTab(tr("Interface Pins"), "interfacepinwidget",
                    creator->GetPackagePinsWidget(), portsDockWidget);
     addPinPlannerRefreshButton(packagePinDockWidget);
-#else
+#else // UPSTREAM_PINPLANNER
     QWidget* pinsGroup = createGroup({
       std::make_pair(createPinPlannerToolBar(m_pinAssignmentCreator), 0),
       std::make_pair(m_pinAssignmentCreator->GetPackagePinsWidget(), 2)}, Qt::Horizontal);
@@ -2086,8 +2087,14 @@ void MainWindow::pinAssignmentActionTriggered() {
         pinAssignmentActionTriggered();
       }
     });
-#endif
+#endif // UPSTREAM_PINPLANNER
+#endif // ACTIVATE_PIN2PORT_TAB
+
+#ifdef ACTIVATE_PIN2PORT_TAB
     m_pinAssignmentDocks = {portsDockWidget, packagePinDockWidget};
+#else
+    m_pinAssignmentDocks = {portsDockWidget};
+#endif
   } else {
     if (saveAction->isEnabled()) {
       auto answer = QMessageBox::question(
