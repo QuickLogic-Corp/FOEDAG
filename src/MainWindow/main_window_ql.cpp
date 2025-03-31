@@ -2045,7 +2045,7 @@ void MainWindow::pinAssignmentActionTriggered() {
     auto portsDockWidget = PrepareTab(tr("IO Ports"), "portswidget",
                                       m_pinAssignmentCreator->GetPortsWidget(), m_dockConsole);
     addPinPlannerRefreshButton(portsDockWidget);
-#else
+#else // UPSTREAM_PINPLANNER
     connect(m_pinAssignmentCreator, &PinAssignmentCreator::openPcfFileRequested, this,
             &MainWindow::openFilePath);
 
@@ -2056,7 +2056,12 @@ void MainWindow::pinAssignmentActionTriggered() {
     QWidget* portsGroup = createGroup({
       std::make_pair(createPinPlannerToolBar(m_pinAssignmentCreator), 0),
       std::make_pair(m_pinAssignmentCreator->GetPortsWidget(), 2)}, Qt::Horizontal);
-    auto portsDockWidget = PrepareTab(tr("IO Ports"), "portswidget",
+#ifdef ACTIVATE_PIN2PORT_TAB
+    QString ioPortsTabName{tr("IO Ports")};
+#else // ACTIVATE_PIN2PORT_TAB
+    QString ioPortsTabName{tr("Pin Planner")};
+#endif // ACTIVATE_PIN2PORT_TAB
+    auto portsDockWidget = PrepareTab(ioPortsTabName, "portswidget",
                                    portsGroup , m_dockConsole);
     connect(portsDockWidget, &DockWidget::closed, this, [this, portsDockWidget, removeValueFromVec](){
       removeValueFromVec(m_pinAssignmentDocks, portsDockWidget);
@@ -2065,7 +2070,7 @@ void MainWindow::pinAssignmentActionTriggered() {
         pinAssignmentActionTriggered();
       }
     });
-#endif
+#endif // UPSTREAM_PINPLANNER
 
 #ifdef ACTIVATE_PIN2PORT_TAB
 #ifdef UPSTREAM_PINPLANNER
