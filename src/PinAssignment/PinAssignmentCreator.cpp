@@ -96,11 +96,14 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
           &PinAssignmentCreator::changed);
   m_portsView = CreateLayoutedWidget(portsView);
 
-  auto packagePins = new PackagePinsView(m_baseModel);
+PackagePinsView* packagePins{nullptr};
+#ifdef ACTIVATE_PIN2PORT_TAB
+  packagePins = new PackagePinsView(m_baseModel);
   connect(packagePins, &PackagePinsView::selectionHasChanged, this,
           &PinAssignmentCreator::changed);
   m_packagePinsView = CreateLayoutedWidget(packagePins);
   packagePinModel->setUseBallId(data.useBallId);
+#endif // ACTIVATE_PIN2PORT_TAB
   parseConstraints(data.commands, packagePins, portsView);
 }
 
@@ -275,37 +278,50 @@ void PinAssignmentCreator::parseConstraints(const QStringList &commands,
     }
   }
 
-  // First need to setup ports and then modes sinse mode will apply only when
-  // port is selected.
-  QVector<QStringList> internalPins;
-  QMap<QString, int> indx{};
-  for (const auto &cmd : std::as_const(convertedCommands)) {
-    if (cmd.startsWith("set_pin_loc")) {
-      auto list = QtUtils::StringSplit(cmd, ' ');
-      if (list.size() >= 3) {
-        packagePins->SetPort(list.at(2), list.at(1), indx[list.at(2)]++);
+  if (packagePins) {
+    // First need to setup ports and then modes sinse mode will apply only when
+    // port is selected.
+    QVector<QStringList> internalPins;
+    QMap<QString, int> indx{};
+    for (const auto &cmd : std::as_const(convertedCommands)) {
+      if (cmd.startsWith("set_pin_loc")) {
+        auto list = QtUtils::StringSplit(cmd, ' ');
+        if (list.size() >= 3) {
+          packagePins->SetPort(list.at(2), list.at(1), indx[list.at(2)]++);
+        }
+        if (list.size() >= 4) internalPins.append(list);
       }
-      if (list.size() >= 4) internalPins.append(list);
     }
-  }
+
 #ifdef UPSTREAM_PINPLANNER
-  for (const auto &cmd : std::as_const(convertedCommands)) {
-    if (cmd.startsWith("set_mode")) {
-      auto list = QtUtils::StringSplit(cmd, ' ');
-      if (list.size() >= 3) {
-        packagePins->SetMode(list.at(2), list.at(1));
+    for (const auto &cmd : std::as_const(convertedCommands)) {
+      if (cmd.startsWith("set_mode")) {
+        auto list = QtUtils::StringSplit(cmd, ' ');
+        if (list.size() >= 3) {
+          packagePins->SetMode(list.at(2), list.at(1));
+        }
+      } else if (cmd.startsWith("set_property mode")) {
+        auto list = QtUtils::StringSplit(cmd, ' ');
+        if (list.size() >= 4) {
+          packagePins->SetMode(list.at(3), list.at(2));
+        }
       }
-    } else if (cmd.startsWith("set_property mode")) {
-      auto list = QtUtils::StringSplit(cmd, ' ');
-      if (list.size() >= 4) {
-        packagePins->SetMode(list.at(3), list.at(2));
+    }
+    for (const auto &intPins : internalPins) {
+      packagePins->SetInternalPin(intPins.at(1), intPins.at(3));
+    }
+#endif
+  }
+  else if (portsView) {
+    for (const auto &cmd : std::as_const(convertedCommands)) {
+      if (cmd.startsWith("set_pin_loc")) {
+        auto list = QtUtils::StringSplit(cmd, ' ');
+        if (list.size() >= 3) {
+          portsView->SetPin(list.at(1), list.at(2));
+        }
       }
     }
   }
-  for (const auto &intPins : internalPins) {
-    packagePins->SetInternalPin(intPins.at(1), intPins.at(3));
-  }
-#endif
 }
 
 QString PinAssignmentCreator::searchPortsFile(const QString &projectPath) {
@@ -360,7 +376,7 @@ void PinAssignmentCreator::refresh(bool isPcfOk) {
     m_data.commands = QtUtils::StringSplit(QString{file.readAll()}, '\n');
   }
   m_baseModel->packagePinModel()->setUseBallId(m_data.useBallId);
-  if (ppView && portView) parseConstraints(m_data.commands, ppView, portView);
+  parseConstraints(m_data.commands, ppView, portView);
 }
 #else
 void PinAssignmentCreator::refresh(bool isPcfOk) {
@@ -385,7 +401,7 @@ void PinAssignmentCreator::refresh(bool isPcfOk) {
   }
 
   m_baseModel->packagePinModel()->setUseBallId(m_data.useBallId);
-  if (ppView && portView) parseConstraints(m_data.commands, ppView, portView);
+  parseConstraints(m_data.commands, ppView, portView);
 }
 #endif
 
