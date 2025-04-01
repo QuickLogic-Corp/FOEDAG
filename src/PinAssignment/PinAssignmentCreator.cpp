@@ -84,9 +84,7 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
     emit allowSaving(status);
   });
 #endif
-
   loader->load(fileName);
-
   QLPackagePinsLoader* qlLoader = static_cast<QLPackagePinsLoader*>(loader);
   auto collisionDetector = qlLoader->validateIOMap(QString::fromStdString(QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile().string()));
   m_baseModel->setCollisionDetector(collisionDetector);
@@ -96,7 +94,7 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
           &PinAssignmentCreator::changed);
   m_portsView = CreateLayoutedWidget(portsView);
 
-PackagePinsView* packagePins{nullptr};
+  PackagePinsView* packagePins{nullptr};
 #ifdef ACTIVATE_PIN2PORT_TAB
   packagePins = new PackagePinsView(m_baseModel);
   connect(packagePins, &PackagePinsView::selectionHasChanged, this,
