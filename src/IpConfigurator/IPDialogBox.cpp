@@ -537,7 +537,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
     // Create output directory
     const std::filesystem::path& out_path = inst->OutputFile();
     if (!std::filesystem::exists(out_path)) {
-      std::filesystem::create_directories(out_path.parent_path());
+      std::filesystem::create_directories(out_path);
     }
 
     const IPDefinition* def = inst->Definition();
@@ -587,8 +587,9 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
           }
           jsonF.insert(param.Name(), value);
         }
-        jsonF["build_dir"] = inst->OutputFile().parent_path().string();
-        jsonF["build_name"] = inst->OutputFile().filename().string();
+        qInfo() << "~~~ inst->IPName()" << inst->IPName().c_str();
+        jsonF["build_dir"] = inst->OutputFile().string();
+        jsonF["build_name"] = inst->IPName();
         jsonF["build"] = false;
         jsonF["json"] = jsonFile.filename().string();
         jsonF["json_template"] = false;
@@ -666,6 +667,7 @@ bool IPDialogBox::Generate(bool addToProject, const QString& outputPath) {
 #ifdef _WIN32
     outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outFileStr.toStdString()));
 #endif
+    qInfo() << "~~~ outFileStr=" << outFileStr;
 
     // Build up a cmd string to generate the IP
     QString cmd = "configure_ip " + this->m_requestedIpName + " -mod_name " +

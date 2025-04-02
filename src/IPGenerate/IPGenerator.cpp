@@ -573,7 +573,7 @@ bool IPGenerator::Generate() {
     // Create output directory
     const std::filesystem::path& out_path = inst->OutputFile();
     if (!std::filesystem::exists(out_path)) {
-      std::filesystem::create_directories(out_path.parent_path());
+      std::filesystem::create_directories(out_path);
     }
 
     const IPDefinition* def = inst->Definition();
@@ -628,9 +628,9 @@ bool IPGenerator::Generate() {
           jsonF << "   \"" << param.Name() << "\": " << value << ","
                 << std::endl;
         }
-        jsonF << "   \"build_dir\": " << inst->OutputFile().parent_path() << ","
+        jsonF << "   \"build_dir\": \"" << inst->OutputFile().string() << "\","
               << std::endl;
-        jsonF << "   \"build_name\": " << inst->OutputFile().filename() << ","
+        jsonF << "   \"build_name\": \"" << inst->IPName() << "\","
               << std::endl;
         jsonF << "   \"build\": true," << std::endl;
         jsonF << "   \"json\": \"" << jsonFile.filename().string() << "\","
@@ -775,10 +775,11 @@ std::pair<bool, std::string> IPGenerator::OpenWaveForm(
 
 // This will return the expected VLNV path for the given instance
 std::filesystem::path IPGenerator::GetBuildDir(IPInstance* instance) const {
-  auto projectIPsPath = GetProjectIPsPath();
-  if (!projectIPsPath.empty())
-    return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
-  return {};
+  return instance->OutputFile();
+  // auto projectIPsPath = GetProjectIPsPath();
+  // if (!projectIPsPath.empty())
+  //   return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
+  // return {};
 }
 
 std::filesystem::path IPGenerator::GetSimDir(IPInstance* instance) const {
