@@ -64,6 +64,12 @@ std::filesystem::path IPGenerator::IPCatalogPath() const {
   return std::filesystem::weakly_canonical(ExecPath() / ".." / "IP_Catalog");
 }
 
+void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation)
+{
+  qInfo() << "~~~ register, moduleName=" << moduleName.c_str() << ", ipOutputLocation=" << ipOutputLocation.string().c_str();
+  m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
+}
+
 IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler) {
   m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
 #ifndef __WIN32
@@ -76,7 +82,7 @@ IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(cata
 
 void IPGenerator::shareContext()
 {
-  std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
+  std::filesystem::path ipBuildPath = GetProjectIPsPath();
   m_environment["QL_IPS_BUILD_PATH"] = ipBuildPath.string();
   dumpDeviceInfo(ipBuildPath);
 #ifndef EXCLUDE_MODIFICATION_JSON_FLOW
@@ -286,7 +292,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
 
     std::string ip_name;
     std::string mod_name;
-    std::string out_file;
+    std::filesystem::path out_file;
     std::string version;
     std::vector<SParameter> parameters;
     bool generated{true};
@@ -327,6 +333,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       ok = false;
       return TCL_ERROR;
     }
+    qInfo() << "~~~: " << out_file.string().c_str();
+    generator->setIpOutputLocation(mod_name, version, out_file);
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_file);
     instance->Generated(generated);
@@ -630,7 +638,7 @@ bool IPGenerator::Generate() {
         }
         jsonF << "   \"build_dir\": \"" << inst->OutputFile().string() << "\","
               << std::endl;
-        jsonF << "   \"build_name\": \"" << inst->IPName() << "\","
+        jsonF << "   \"build_name\": \"" << inst->ModuleName() << "\","
               << std::endl;
         jsonF << "   \"build\": true," << std::endl;
         jsonF << "   \"json\": \"" << jsonFile.filename().string() << "\","
@@ -775,11 +783,10 @@ std::pair<bool, std::string> IPGenerator::OpenWaveForm(
 
 // This will return the expected VLNV path for the given instance
 std::filesystem::path IPGenerator::GetBuildDir(IPInstance* instance) const {
-  return instance->OutputFile();
-  // auto projectIPsPath = GetProjectIPsPath();
-  // if (!projectIPsPath.empty())
-  //   return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
-  // return {};
+  auto projectIPsPath = GetProjectIPsPath(instance->ModuleName(), instance->Version());
+  if (!projectIPsPath.empty())
+    return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
+  return {};
 }
 
 std::filesystem::path IPGenerator::GetSimDir(IPInstance* instance) const {
@@ -826,6 +833,19 @@ std::filesystem::path IPGenerator::GetTmpCachePath(IPInstance* instance) const {
 std::filesystem::path IPGenerator::GetTmpPath() const {
   auto projectIPsPath = GetProjectIPsPath();
   if (!projectIPsPath.empty()) return projectIPsPath / ".tmp";
+  return {};
+}
+
+std::filesystem::path IPGenerator::GetProjectIPsPath(const std::string& moduleName, const std::string& version) const {
+  qInfo() << "~~~ search location for moduleName=" << moduleName.c_str();
+  if (auto it = m_ipOutputLocations.find(moduleName + "_" + version); it != m_ipOutputLocations.end()) {
+    qInfo() << "~~~ ipOutputLocation=" << it->second.string().c_str();
+    return it->second;
+  }
+  if (m_compiler && m_compiler->ProjManager()) {
+    ProjectManager* projManager{m_compiler->ProjManager()};
+    return ProjectManager::projectIPsPath(projManager->projectPath());
+  }
   return {};
 }
 

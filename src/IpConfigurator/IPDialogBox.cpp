@@ -589,7 +589,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
         }
         qInfo() << "~~~ inst->IPName()" << inst->IPName().c_str();
         jsonF["build_dir"] = inst->OutputFile().string();
-        jsonF["build_name"] = inst->IPName();
+        jsonF["build_name"] = inst->ModuleName();
         jsonF["build"] = false;
         jsonF["json"] = jsonFile.filename().string();
         jsonF["json_template"] = false;
