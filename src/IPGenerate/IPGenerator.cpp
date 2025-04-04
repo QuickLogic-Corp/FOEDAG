@@ -66,7 +66,6 @@ std::filesystem::path IPGenerator::IPCatalogPath() const {
 
 void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation)
 {
-  qInfo() << "~~~ register, moduleName=" << moduleName.c_str() << ", ipOutputLocation=" << ipOutputLocation.string().c_str();
   m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
 }
 
@@ -857,9 +856,7 @@ std::filesystem::path IPGenerator::GetTmpPath() const {
 }
 
 std::filesystem::path IPGenerator::GetProjectIPsPath(const std::string& moduleName, const std::string& version) const {
-  qInfo() << "~~~ search location for moduleName=" << moduleName.c_str();
   if (auto it = m_ipOutputLocations.find(moduleName + "_" + version); it != m_ipOutputLocations.end()) {
-    qInfo() << "~~~ ipOutputLocation=" << it->second.string().c_str();
     return it->second;
   }
   if (m_compiler && m_compiler->ProjManager()) {
