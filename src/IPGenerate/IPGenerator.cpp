@@ -804,7 +804,7 @@ std::pair<bool, std::string> IPGenerator::OpenWaveForm(
 std::filesystem::path IPGenerator::GetBuildDir(IPInstance* instance) const {
   auto projectIPsPath = GetProjectIPsPath(instance->ModuleName(), instance->Version());
   if (!projectIPsPath.empty())
-    return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
+    return GetMetaPath(projectIPsPath, instance);
   return {};
 }
 
@@ -817,8 +817,7 @@ std::filesystem::path IPGenerator::GetSimArtifactsDir(
   std::filesystem::path dir{};
   auto projectIPsPath = GetProjectIPsPath();
   if (!projectIPsPath.empty())
-    dir = GetMetaPath(projectIPsPath / "simulation", instance) /
-          instance->ModuleName();
+    dir = GetMetaPath(projectIPsPath / "simulation", instance);
   return dir;
 }
 
@@ -840,7 +839,7 @@ std::filesystem::path IPGenerator::GetCachePath(IPInstance* instance) const {
 std::filesystem::path IPGenerator::GetTmpCachePath(IPInstance* instance) const {
   std::filesystem::path dir{};
   if (m_compiler && m_compiler->ProjManager()) {
-    auto ipPath = GetMetaPath(GetTmpPath(), instance) / instance->ModuleName();
+    auto ipPath = GetMetaPath(GetTmpPath(), instance);
     auto def = instance->Definition();
     std::string ip_config_file =
         def->Name() + "_" + instance->ModuleName() + ".json";
@@ -877,7 +876,7 @@ std::filesystem::path IPGenerator::GetProjectIPsPath() const {
 std::filesystem::path IPGenerator::GetMetaPath(
     const std::filesystem::path& base, IPInstance* inst) const {
   auto meta = FOEDAG::getIpInfoFromPath(inst->Definition()->FilePath());
-  auto ipPath = base / meta.vendor / meta.library / meta.name / meta.version;
+  auto ipPath = base / meta.vendor / meta.library / meta.name / meta.version / inst->ModuleName();
   return ipPath;
 }
 

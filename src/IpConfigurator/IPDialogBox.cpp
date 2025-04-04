@@ -208,8 +208,7 @@ void IPDialogBox::handleEditorChanged(const QString& customId,
   bool ok{true};
   Compiler* compiler = GlobalSession->GetCompiler();
   auto generator = compiler->GetIPGenerator();
-  std::filesystem::path baseDir{generator->GetTmpPath()};
-  std::filesystem::path outFile = baseDir / ModuleNameStd();
+  std::filesystem::path outFile = generator->GetTmpPath();
   QString outFileStr =
       QString::fromStdString(FileUtils::GetFullPath(outFile).string());
   Generate(false, outFileStr);
