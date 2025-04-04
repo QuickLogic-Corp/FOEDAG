@@ -81,7 +81,7 @@ IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(cata
 
 void IPGenerator::shareContext()
 {
-  std::filesystem::path ipBuildPath = GetProjectIPsPath();
+  std::filesystem::path ipBuildPath = GetProjectIPsPath() / "quicklogic" / "ip";
   m_environment["QL_IPS_BUILD_PATH"] = ipBuildPath.string();
   dumpDeviceInfo(ipBuildPath);
 #ifndef EXCLUDE_MODIFICATION_JSON_FLOW
