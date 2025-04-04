@@ -75,7 +75,7 @@ class ImageViewer : public QObject {
   QLabel* label{nullptr};
 };
 
-std::filesystem::path getUserProjectPath() {
+std::filesystem::path getProjectIPsPath() {
   return ProjectManager::projectIPsPath(
       GlobalSession->GetCompiler()->ProjManager()->projectPath());
 }
@@ -657,8 +657,7 @@ bool IPDialogBox::Generate(bool addToProject, const QString& outputPath) {
     return false;
   } else {
     // If all enabled fields are valid, configure and generate IP
-    std::filesystem::path baseDir(getUserProjectPath());
-    std::filesystem::path outLocation = baseDir / ModuleNameStd();
+    std::filesystem::path outLocation = getProjectIPsPath();
     QString outLocationStr =
         outputPath.isEmpty()
             ? QString::fromStdString(FileUtils::GetFullPath(outLocation).string())
@@ -732,9 +731,8 @@ void IPDialogBox::AddIpToProject(const QString& cmd) {
 }
 
 QString IPDialogBox::outPath() const {
-  std::filesystem::path baseDir(getUserProjectPath());
   std::filesystem::path vlnvPath =
-      baseDir / m_meta.vendor / m_meta.library / m_meta.name / m_meta.version;
+      getProjectIPsPath() / m_meta.vendor / m_meta.library / m_meta.name / m_meta.version;
 
   // Add the module wrapper
   std::filesystem::path outPath = vlnvPath / ModuleNameStd();
