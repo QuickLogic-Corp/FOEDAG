@@ -211,7 +211,7 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
   (*out) << "   ip_catalog ?<ip_name>?     : Lists all available IPs, and "
             "their parameters if <ip_name> is given "
          << std::endl;
-  (*out) << "   configure_ip <ip_name> -mod_name <name> -out_file <filename> "
+  (*out) << "   configure_ip <ip_name> -mod_name <name> -out_location <path> "
             "-version <ver_name> -P<param>=\"<value>\"..."
          << std::endl;
   (*out) << "                              : Configures an IP <ip_name> and "

@@ -535,7 +535,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
     if (inst->IPName() != ipName.toStdString()) continue;
 
     // Create output directory
-    const std::filesystem::path& out_path = inst->OutputFile();
+    const std::filesystem::path& out_path = inst->OutputLocation();
     if (!std::filesystem::exists(out_path)) {
       std::filesystem::create_directories(out_path);
     }
@@ -588,7 +588,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
           jsonF.insert(param.Name(), value);
         }
         qInfo() << "~~~ inst->IPName()" << inst->IPName().c_str();
-        jsonF["build_dir"] = inst->OutputFile().string();
+        jsonF["build_dir"] = inst->OutputLocation().string();
         jsonF["build_name"] = inst->ModuleName();
         jsonF["build"] = false;
         jsonF["json"] = jsonFile.filename().string();
@@ -658,22 +658,21 @@ bool IPDialogBox::Generate(bool addToProject, const QString& outputPath) {
   } else {
     // If all enabled fields are valid, configure and generate IP
     std::filesystem::path baseDir(getUserProjectPath());
-    std::filesystem::path outFile = baseDir / ModuleNameStd();
-    QString outFileStr =
+    std::filesystem::path outLocation = baseDir / ModuleNameStd();
+    QString outLocationStr =
         outputPath.isEmpty()
-            ? QString::fromStdString(FileUtils::GetFullPath(outFile).string())
+            ? QString::fromStdString(FileUtils::GetFullPath(outLocation).string())
             : outputPath;
 
 #ifdef _WIN32
-    outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outFileStr.toStdString()));
+    outLocationStr = QString::fromStdString(FileUtils::resolvePathStr(outLocationStr.toStdString()));
 #endif
-    qInfo() << "~~~ outFileStr=" << outFileStr;
 
     // Build up a cmd string to generate the IP
     QString cmd = "configure_ip " + this->m_requestedIpName + " -mod_name " +
                   ModuleName() + " -version " +
                   QString::fromStdString(m_meta.version) + " " + params +
-                  " -out_file " + outFileStr;
+                  " -out_location " + outLocationStr;
     if (addToProject)
       cmd += "\nipgenerate -modules " + ModuleName() + "\n";
     else

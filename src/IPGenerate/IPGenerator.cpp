@@ -287,12 +287,12 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto printWrongUsageMsgHelperFn = [compiler](const std::string& msg){
         compiler->ErrorMessage(msg +
           "\n\nUsage:\nconfigure_ip <IP_NAME> -mod_name <name> "
-          "-out_file <filename> -version <ver_name> -P<param>=\"<value>\"...");
+          "-out_location <path> -version <ver_name> -P<param>=\"<value>\"...");
     };
 
     std::string ip_name;
     std::string mod_name;
-    std::filesystem::path out_file;
+    std::filesystem::path out_location;
     std::string version;
     std::vector<SParameter> parameters;
     bool generated{true};
@@ -303,9 +303,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       } else if (arg == "-mod_name") {
         i++;
         mod_name = argv[i];
-      } else if (arg == "-out_file") {
+      } else if (arg == "-out_location") {
         i++;
-        out_file = argv[i];
+        out_location = argv[i];
       } else if (arg == "-version") {
         i++;
         version = argv[i];
@@ -336,10 +336,10 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       ok = false;
       return TCL_ERROR;
     }
-    if (!out_file.empty()) {
-      generator->setIpOutputLocation(mod_name, version, out_file);
+    if (!out_location.empty()) {
+      generator->setIpOutputLocation(mod_name, version, out_location);
     } else {
-      out_file = generator->GetProjectIPsPath();
+      out_location = generator->GetProjectIPsPath();
     }
 
     if (ip_name.empty()) {
@@ -356,7 +356,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     }
 
     IPInstance* instance =
-        new IPInstance(ip_name, version, def, parameters, mod_name, out_file);
+        new IPInstance(ip_name, version, def, parameters, mod_name, out_location);
     instance->Generated(generated);
     if (!generator->AddIPInstance(instance)) {
       ok = false;
@@ -599,7 +599,7 @@ bool IPGenerator::Generate() {
 
   for (IPInstance* inst : instances) {
     // Create output directory
-    const std::filesystem::path& out_path = inst->OutputFile();
+    const std::filesystem::path& out_path = inst->OutputLocation();
     if (!std::filesystem::exists(out_path)) {
       std::filesystem::create_directories(out_path);
     }
@@ -656,7 +656,7 @@ bool IPGenerator::Generate() {
           jsonF << "   \"" << param.Name() << "\": " << value << ","
                 << std::endl;
         }
-        jsonF << "   \"build_dir\": \"" << inst->OutputFile().string() << "\","
+        jsonF << "   \"build_dir\": \"" << inst->OutputLocation().string() << "\","
               << std::endl;
         jsonF << "   \"build_name\": \"" << inst->ModuleName() << "\","
               << std::endl;

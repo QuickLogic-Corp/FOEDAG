@@ -305,20 +305,20 @@ class IPInstance {
   IPInstance(const std::string& ipname, const std::string& version,
              IPDefinition* definition, std::vector<SParameter>& parameters,
              const std::string& moduleName,
-             const std::filesystem::path& outputFile)
+             const std::filesystem::path& outputLocation)
       : m_ipname(ipname),
         m_version(version),
         m_definition(definition),
         m_parameters(parameters),
         m_moduleName(moduleName),
-        m_outputFile(outputFile) {}
+        m_outputLocation(outputLocation) {}
   ~IPInstance() {}
   const std::string& IPName() { return m_ipname; }
   const std::string& Version() { return m_version; }
   const IPDefinition* Definition() { return m_definition; }
   const std::vector<SParameter>& Parameters() { return m_parameters; }
   const std::string& ModuleName() { return m_moduleName; }
-  const std::filesystem::path OutputFile() { return m_outputFile; }
+  const std::filesystem::path OutputLocation() { return m_outputLocation; }
 
   bool Generated() const { return m_generated; }
   void Generated(bool generated) { m_generated = generated; }
@@ -329,7 +329,7 @@ class IPInstance {
   IPDefinition* m_definition;
   std::vector<SParameter> m_parameters;
   std::string m_moduleName;
-  std::filesystem::path m_outputFile;
+  std::filesystem::path m_outputLocation;
   bool m_generated{false};
 };
 
