@@ -272,12 +272,6 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       compiler->ErrorMessage("Create a design first: create_design <name>");
       return TCL_ERROR;
     }
-    if (argc < 6) {
-      compiler->ErrorMessage(
-          "Incorrect syntax for configure_ip <IP_NAME> -mod_name <name> "
-          "-out_file <filename> -version <ver_name> -P<param>=\"<value>\"...");
-      return TCL_ERROR;
-    }
 
     // Load IPs if no definitions are available
     if (!compiler->HasIPDefinitions()) {
@@ -289,6 +283,12 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" +
                                      path.lexically_normal().string() + "}");
     }
+
+    auto printWrongUsageMsgHelperFn = [compiler](const std::string& msg){
+        compiler->ErrorMessage(msg +
+          "\n\nUsage:\nconfigure_ip <IP_NAME> -mod_name <name> "
+          "-out_file <filename> -version <ver_name> -P<param>=\"<value>\"...");
+    };
 
     std::string ip_name;
     std::string mod_name;
@@ -325,6 +325,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           SParameter param(def, value);
           parameters.push_back(param);
         }
+      } else {
+        printWrongUsageMsgHelperFn("Unsupported parameter " + std::string(argv[i]));
+        return TCL_ERROR;
       }
     }
     IPDefinition* def = generator->Catalog()->Definition(ip_name);
@@ -333,8 +336,25 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       ok = false;
       return TCL_ERROR;
     }
-    qInfo() << "~~~: " << out_file.string().c_str();
-    generator->setIpOutputLocation(mod_name, version, out_file);
+    if (!out_file.empty()) {
+      generator->setIpOutputLocation(mod_name, version, out_file);
+    } else {
+      out_file = generator->GetProjectIPsPath();
+    }
+
+    if (ip_name.empty()) {
+      printWrongUsageMsgHelperFn("ip_name is not set (must be first argument)");
+      return TCL_ERROR;
+    }
+    if (mod_name.empty()) {
+      printWrongUsageMsgHelperFn("-mod_name is not set");
+      return TCL_ERROR;
+    }
+    if (version.empty()) {
+      printWrongUsageMsgHelperFn("-version is not set");
+      return TCL_ERROR;
+    }
+
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_file);
     instance->Generated(generated);
