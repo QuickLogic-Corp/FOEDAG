@@ -297,9 +297,11 @@ bool TclCommandIntegration::TclCreateProject(const QString &name,
   }
 
   int projectType{RTL};
+  int synthesisTool{Yosys};
   if (!type.isEmpty()) {
     if (QtUtils::IsEqual(type, "rtl")) {
       projectType = RTL;
+      synthesisTool = Yosys;
     } else if (QtUtils::IsEqual(type, "gate-level")) {
       projectType = PostSynth;
     } 
@@ -307,7 +309,8 @@ bool TclCommandIntegration::TclCreateProject(const QString &name,
       projectType = PostMapSynplify;
     }
     else if (QtUtils::IsEqual(type, "synplify")) {
-      projectType = Synplify;
+      projectType = RTL;
+      synthesisTool = Synplify;
     }
     else {
       out << "Wrong project type. Values are rtl, gate-level, post-map";
@@ -320,7 +323,7 @@ bool TclCommandIntegration::TclCreateProject(const QString &name,
     out << "Project \"" << name.toStdString() << "\" was rewritten.";
   }
 
-  createNewDesign(name, projectType);
+  createNewDesign(name, projectType, synthesisTool);
   return true;
 }
 
@@ -412,10 +415,11 @@ void TclCommandIntegration::setIPGenerator(IPGenerator *gen) {
 }
 
 void TclCommandIntegration::createNewDesign(const QString &projName,
-                                            int projectType) {
+                                            int projectType, int synthesisTool) {
   ProjectOptions opt{projName,
                      QString("%1/%2").arg(QDir::currentPath(), projName),
                      projectType,
+                     synthesisTool,
                      {{}, false},
                      {{}, false},
                      {{}, false},

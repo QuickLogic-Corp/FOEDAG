@@ -1589,7 +1589,7 @@ bool CompilerOpenFPGA_ql::Analyze() {
   }
 
 
-  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->projectType() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
     m_useVerific = true;
   }
   else {
@@ -1727,7 +1727,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
 
-  if(m_projManager->projectType() == Synplify)
+  if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
     std::string synplifyScript; 
     m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
@@ -1916,7 +1916,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::string yosysScript = InitSynthesisScript();
 
 
-  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->projectType() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
     m_useVerific = true;
   }
   else {
@@ -1936,7 +1936,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
   }
   
-  if(m_projManager->projectType() != Synplify)
+  if(m_projManager->synthesisTool() != Synplify)
   {
     if (m_useVerific) {
       // Verific parser
@@ -2379,7 +2379,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosys_options += " -use_dsp_cfg_params";
   }
 
-  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || m_projManager->projectType() == Synplify) {
+  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
 
     yosys_options += " -synplify";
   }

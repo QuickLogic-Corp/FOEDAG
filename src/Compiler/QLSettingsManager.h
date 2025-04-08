@@ -50,7 +50,7 @@ public:
   void updateSettingsWidget();
   void populateSettingsWidget();
   
-  void updateJSONSettingsForProjectType(int projectType);
+  void updateJSONSettingsForProjectType(int projectType, int synthesisTool);
   void updateJSONSettingsForDeviceTarget(QLDeviceTarget device_target);
   void parseJSONSettings();
   void parseSDCFilePath();

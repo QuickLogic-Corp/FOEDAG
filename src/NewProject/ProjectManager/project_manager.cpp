@@ -53,6 +53,7 @@ void ProjectManager::CreateProject(const ProjectOptions& opt) {
   CreateProject(opt.projectName, opt.projectPath, opt.currentFileSet);
 
   setProjectType(opt.projectType);
+  setSynthesisTool(opt.synthesisTool);
   UpdateProjectInternal(opt, true);
 
   DesignFileWatcher::Instance()->emitDesignCreated();
@@ -449,6 +450,19 @@ ProjectType ProjectManager::projectType() const {
   ProjectConfiguration* projectConfig = Project::Instance()->projectConfig();
   return projectConfig ? static_cast<ProjectType>(projectConfig->projectType())
                        : RTL;
+}
+
+SynthesisTool ProjectManager::synthesisTool() const {
+  ProjectConfiguration* projectConfig = Project::Instance()->projectConfig();
+  return projectConfig ? static_cast<SynthesisTool>(projectConfig->synthesisTool())
+                       : Yosys;
+}
+
+int ProjectManager::setSynthesisTool(int strType) {
+  int ret = 0;
+  ProjectConfiguration* projectConfig = Project::Instance()->projectConfig();
+  projectConfig->setSynthesisTool(strType);
+  return ret;
 }
 
 ProjectManager::ErrorInfo ProjectManager::addFiles(

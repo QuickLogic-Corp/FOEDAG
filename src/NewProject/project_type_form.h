@@ -22,6 +22,10 @@ class projectTypeForm : public QWidget {
   QString projectTypeStr() const;
   static QString projectTypeStr(ProjectType type);
 
+  SynthesisTool synthesisTool() const;
+  QString synthesisToolStr() const;
+  static QString synthesisToolStr(SynthesisTool type);
+
   QComboBox* m_combobox_synthesis_tool;
   
  signals:

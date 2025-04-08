@@ -116,6 +116,7 @@ struct ProjectOptions {
   QString projectName;
   QString projectPath;
   int projectType;
+  int synthesisTool;
   FileData sourceFileData;
   FileData constrFileData;
   FileData simFileData;
@@ -136,7 +137,11 @@ enum ProjectType {
   RTL = 0,
   PostSynth = 1,
   PostMapSynplify = 2,
-  Synplify = 3,
+};
+
+enum SynthesisTool {
+  Yosys = 0,
+  Synplify = 1,
 };
 
 class ProjectManager : public QObject {
@@ -185,6 +190,9 @@ class ProjectManager : public QObject {
 
   int setProjectType(int strType);
   ProjectType projectType() const;
+  
+  int setSynthesisTool(int strType);
+  SynthesisTool synthesisTool() const;
 
   ErrorInfo addFiles(const QString &commands, const QString &libs,
                      const QString &fileNames, int lang, const QString &grName,

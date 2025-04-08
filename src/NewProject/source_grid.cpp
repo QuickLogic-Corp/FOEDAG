@@ -513,7 +513,7 @@ bool sourceGrid::CheckPinFileExists(const QString &suffix) {
 bool sourceGrid::CheckNetlistFileExists(const QStringList &files) {
   const bool good{true};
   const bool fail{false};
-  if (CurrentProjectType() == RTL || CurrentProjectType() == Synplify) return good;
+  if (CurrentProjectType() == RTL) return good;
 
   int netlistCount{0};
   for (const QString &file : files) {
@@ -540,8 +540,6 @@ QString sourceGrid::Filter(int projectType, GridType gType) const {
       return DESIGN_SOURCES_FILTER_POS;
     case PostMapSynplify:
       return DESIGN_SOURCES_FILTER_SYN; 
-    case Synplify:
-      return DESIGN_SOURCES_FILTER; 
   }
   return DESIGN_SOURCES_FILTER;
 }
