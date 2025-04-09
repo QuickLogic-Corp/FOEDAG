@@ -79,7 +79,7 @@ class sourceGrid : public QWidget {
   QString m_currentFileSet;
   ProjectManager *m_projectManager{nullptr};
   int m_projectType{NO_PROJECT_TYPE};
-  int m_synthesisTool{NO_PROJECT_TYPE};
+  int m_synthesisTool{NO_SYNTHESIS_TOOl};
   static const QStringList uniqueExtentions;
 
  private:

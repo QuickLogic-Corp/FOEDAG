@@ -1,4 +1,5 @@
 #include "project_configuration.h"
+#include "project_manager.h"
 
 #include <QTime>
 
@@ -7,8 +8,8 @@ using namespace FOEDAG;
 ProjectConfiguration::ProjectConfiguration(QObject *parent)
     : ProjectOption(parent) {
   initProjectID();
-  m_projectType = 0;  // RTL
-  m_synthesisTool = 0;  // Yosys
+  m_projectType = RTL;
+  m_synthesisTool = Yosys;
   m_activeSimSet = "";
 }
 

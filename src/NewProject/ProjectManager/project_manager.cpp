@@ -458,10 +458,10 @@ SynthesisTool ProjectManager::synthesisTool() const {
                        : Yosys;
 }
 
-int ProjectManager::setSynthesisTool(int strType) {
+int ProjectManager::setSynthesisTool(int synthesisTool) {
   int ret = 0;
   ProjectConfiguration* projectConfig = Project::Instance()->projectConfig();
-  projectConfig->setSynthesisTool(strType);
+  projectConfig->setSynthesisTool(synthesisTool);
   return ret;
 }
 
