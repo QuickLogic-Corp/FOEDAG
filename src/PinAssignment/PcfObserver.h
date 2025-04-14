@@ -37,6 +37,7 @@ class PcfObserver : public QObject {
   const QString DUPLICATED_PIN_ERROR_TEMPLATE = "Pin '%1' is already being used on line '%2'";
   const QString MIXING_INPUT_PORT_AND_OUTPUT_PIN_TEMPLATE = "Mixing input port '%1' and output pin '%2'";
   const QString MIXING_OUTPUT_PORT_AND_INPUT_PIN_TEMPLATE = "Mixing output port '%1' and input pin '%2'";
+  const QString PINS_SHARE_SAME_PHYSICAL_LOCATION_TEMPLATE = "Pin '%1' and pin '%2' shares same physical location '%3'";
 
 public:
   PcfObserver(QObject* parent, const QString& filePath, PortsModel* portsModel, PackagePinsModel* pinsModel);
@@ -70,6 +71,7 @@ private:
   void checkPortsAndPinsAvailability();
   void checkPortsAndPinsDuplication();
   void checkInputOutputMix();
+  void checkPinsShareSamePhysicalLocation();
 
   void regError(int lineNum, const QString& line, const QString& errorMsg);
 };

@@ -26,8 +26,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #endif
 
-#define RESOLVE_LOCATION_COLLISIONS
-
 namespace FOEDAG {
 
 PinsBaseModel::PinsBaseModel(QObject *parent) : QObject(parent) {}
@@ -58,25 +56,6 @@ void PinsBaseModel::update(const QString &port, const QString &pin, int index) {
   if (port.isEmpty() && pin.isEmpty()) {
     return;
   }
-#ifdef RESOLVE_LOCATION_COLLISIONS
-  if (m_collisionDetector && !port.isEmpty()) {
-    QSet<QString> pinsToReset = m_collisionDetector->getOverlappedPins(pin);
-    if (!pinsToReset.isEmpty()) {
-      pinsToReset.remove(pin); // to not discard current connection
-      auto connections = findConnectionsForPins(pinsToReset);
-      for (const auto& connection: connections) {
-        qWarning() << "WARNING: Conflicting pin usage detected: Two different pins are attempting to occupy the same location."
-                  << "The existing connection at port" << connection.port
-                  << "and pin" << connection.pin
-                  << "will be cleared to free up the location for the new pin" << pin;
-
-        m_pinsMap.remove(connection.port);
-        emit portAssignmentRemoved(connection.port);
-        emit pinAssignmentRemoved(connection.pin);
-      }
-    }
-  }
-#endif // RESOLVE_LOCATION_COLLISIONS
 
   if (pin.isEmpty()) {
     auto values = m_pinsMap.value(port);
