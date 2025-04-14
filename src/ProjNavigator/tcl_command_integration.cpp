@@ -354,8 +354,8 @@ bool TclCommandIntegration::TclAddIpToDesign(const std::string &ipName,
     out << "Command validation fail: internal error\n";
     return false;
   }
-  if (m_projManager->projectType() != RTL) {
-    out << "Wrong project type. IP can be added to RTL project only\n";
+  if (!(m_projManager->projectType() == RTL || m_projManager->projectType() == Synplify)) {
+    out << "Wrong project type. IP can be added to RTL or Synplify project only\n";
     return false;
   }
   if (m_IPGenerator) {
