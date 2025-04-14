@@ -114,6 +114,7 @@ class PackagePinsModel : public QObject {
   void appendUserGroup(const QString &userGroup);
 
   void setBaseModel(PinsBaseModel *m);
+  PinsBaseModel* baseModel() const { return m_baseModel; }
 
   void setUseBallId(bool useBallId);
   bool useBallId() const;

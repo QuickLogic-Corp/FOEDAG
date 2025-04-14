@@ -5432,7 +5432,7 @@ std::pair<std::filesystem::path, std::string> CompilerOpenFPGA_ql::findCurrentDe
   return std::make_pair(filepath_pin_table_csv, "");
 }
 
-std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath() {
+std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOutside) {
 
     // remember where we are
     std::filesystem::path current_path = std::filesystem::current_path();
@@ -5469,7 +5469,9 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath() {
     std::filesystem::current_path(current_path);
 
     // add to our cleanup list
-    m_TempFileList.push_back(temp_file_path);
+    if (!managedOutside) {
+      m_TempFileList.push_back(temp_file_path);
+    }
     
     // return the temp file path we obtained
     return temp_file_path;
