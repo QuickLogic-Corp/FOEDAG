@@ -64,6 +64,11 @@ std::filesystem::path IPGenerator::IPCatalogPath() const {
   return std::filesystem::weakly_canonical(ExecPath() / ".." / "IP_Catalog");
 }
 
+void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation)
+{
+  m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
+}
+
 IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler) {
   m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
 #ifndef __WIN32
@@ -266,12 +271,6 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       compiler->ErrorMessage("Create a design first: create_design <name>");
       return TCL_ERROR;
     }
-    if (argc < 6) {
-      compiler->ErrorMessage(
-          "Incorrect syntax for configure_ip <IP_NAME> -mod_name <name> "
-          "-out_file <filename> -version <ver_name> -P<param>=\"<value>\"...");
-      return TCL_ERROR;
-    }
 
     // Load IPs if no definitions are available
     if (!compiler->HasIPDefinitions()) {
@@ -284,9 +283,15 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
                                      path.lexically_normal().string() + "}");
     }
 
+    auto printWrongUsageMsgHelperFn = [compiler](const std::string& msg){
+        compiler->ErrorMessage(msg +
+          "\n\nUsage:\nconfigure_ip <IP_NAME> -mod_name <name> "
+          "-out_location <path> -version <ver_name> -P<param>=\"<value>\"...");
+    };
+
     std::string ip_name;
     std::string mod_name;
-    std::string out_file;
+    std::filesystem::path out_location;
     std::string version;
     std::vector<SParameter> parameters;
     bool generated{true};
@@ -297,9 +302,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       } else if (arg == "-mod_name") {
         i++;
         mod_name = argv[i];
-      } else if (arg == "-out_file") {
+      } else if (arg == "-out_location") {
         i++;
-        out_file = argv[i];
+        out_location = argv[i];
       } else if (arg == "-version") {
         i++;
         version = argv[i];
@@ -319,6 +324,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           SParameter param(def, value);
           parameters.push_back(param);
         }
+      } else {
+        printWrongUsageMsgHelperFn("Unsupported parameter " + std::string(argv[i]));
+        return TCL_ERROR;
       }
     }
     IPDefinition* def = generator->Catalog()->Definition(ip_name);
@@ -327,8 +335,27 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       ok = false;
       return TCL_ERROR;
     }
+    if (!out_location.empty()) {
+      generator->setIpOutputLocation(mod_name, version, out_location);
+    } else {
+      out_location = generator->GetProjectIPsPath();
+    }
+
+    if (ip_name.empty()) {
+      printWrongUsageMsgHelperFn("ip_name is not set (must be first argument)");
+      return TCL_ERROR;
+    }
+    if (mod_name.empty()) {
+      printWrongUsageMsgHelperFn("-mod_name is not set");
+      return TCL_ERROR;
+    }
+    if (version.empty()) {
+      printWrongUsageMsgHelperFn("-version is not set");
+      return TCL_ERROR;
+    }
+
     IPInstance* instance =
-        new IPInstance(ip_name, version, def, parameters, mod_name, out_file);
+        new IPInstance(ip_name, version, def, parameters, mod_name, out_location);
     instance->Generated(generated);
     if (!generator->AddIPInstance(instance)) {
       ok = false;
@@ -571,9 +598,9 @@ bool IPGenerator::Generate() {
 
   for (IPInstance* inst : instances) {
     // Create output directory
-    const std::filesystem::path& out_path = inst->OutputFile();
+    const std::filesystem::path& out_path = inst->OutputLocation();
     if (!std::filesystem::exists(out_path)) {
-      std::filesystem::create_directories(out_path.parent_path());
+      std::filesystem::create_directories(out_path);
     }
 
     const IPDefinition* def = inst->Definition();
@@ -628,9 +655,9 @@ bool IPGenerator::Generate() {
           jsonF << "   \"" << param.Name() << "\": " << value << ","
                 << std::endl;
         }
-        jsonF << "   \"build_dir\": " << inst->OutputFile().parent_path() << ","
+        jsonF << "   \"build_dir\": \"" << inst->OutputLocation().string() << "\","
               << std::endl;
-        jsonF << "   \"build_name\": " << inst->OutputFile().filename() << ","
+        jsonF << "   \"build_name\": \"" << inst->ModuleName() << "\","
               << std::endl;
         jsonF << "   \"build\": true," << std::endl;
         jsonF << "   \"json\": \"" << jsonFile.filename().string() << "\","
@@ -775,9 +802,9 @@ std::pair<bool, std::string> IPGenerator::OpenWaveForm(
 
 // This will return the expected VLNV path for the given instance
 std::filesystem::path IPGenerator::GetBuildDir(IPInstance* instance) const {
-  auto projectIPsPath = GetProjectIPsPath();
+  auto projectIPsPath = GetProjectIPsPath(instance->ModuleName(), instance->Version());
   if (!projectIPsPath.empty())
-    return GetMetaPath(projectIPsPath, instance) / instance->ModuleName();
+    return GetMetaPath(projectIPsPath, instance);
   return {};
 }
 
@@ -790,8 +817,7 @@ std::filesystem::path IPGenerator::GetSimArtifactsDir(
   std::filesystem::path dir{};
   auto projectIPsPath = GetProjectIPsPath();
   if (!projectIPsPath.empty())
-    dir = GetMetaPath(projectIPsPath / "simulation", instance) /
-          instance->ModuleName();
+    dir = GetMetaPath(projectIPsPath / "simulation", instance);
   return dir;
 }
 
@@ -813,7 +839,7 @@ std::filesystem::path IPGenerator::GetCachePath(IPInstance* instance) const {
 std::filesystem::path IPGenerator::GetTmpCachePath(IPInstance* instance) const {
   std::filesystem::path dir{};
   if (m_compiler && m_compiler->ProjManager()) {
-    auto ipPath = GetMetaPath(GetTmpPath(), instance) / instance->ModuleName();
+    auto ipPath = GetMetaPath(GetTmpPath(), instance);
     auto def = instance->Definition();
     std::string ip_config_file =
         def->Name() + "_" + instance->ModuleName() + ".json";
@@ -828,6 +854,17 @@ std::filesystem::path IPGenerator::GetTmpPath() const {
   return {};
 }
 
+std::filesystem::path IPGenerator::GetProjectIPsPath(const std::string& moduleName, const std::string& version) const {
+  if (auto it = m_ipOutputLocations.find(moduleName + "_" + version); it != m_ipOutputLocations.end()) {
+    return it->second;
+  }
+  if (m_compiler && m_compiler->ProjManager()) {
+    ProjectManager* projManager{m_compiler->ProjManager()};
+    return ProjectManager::projectIPsPath(projManager->projectPath());
+  }
+  return {};
+}
+
 std::filesystem::path IPGenerator::GetProjectIPsPath() const {
   if (m_compiler && m_compiler->ProjManager()) {
     ProjectManager* projManager{m_compiler->ProjManager()};
@@ -839,7 +876,7 @@ std::filesystem::path IPGenerator::GetProjectIPsPath() const {
 std::filesystem::path IPGenerator::GetMetaPath(
     const std::filesystem::path& base, IPInstance* inst) const {
   auto meta = FOEDAG::getIpInfoFromPath(inst->Definition()->FilePath());
-  auto ipPath = base / meta.vendor / meta.library / meta.name / meta.version;
+  auto ipPath = base / meta.vendor / meta.library / meta.name / meta.version / inst->ModuleName();
   return ipPath;
 }
 

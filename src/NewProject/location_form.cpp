@@ -1,6 +1,8 @@
 #include "location_form.h"
 
 #include <QFileDialog>
+#include <QCompleter>
+#include <QFileSystemModel>
 
 #include "ui_location_form.h"
 using namespace FOEDAG;
@@ -36,6 +38,15 @@ locationForm::locationForm(const QString &defaultPath, QWidget *parent)
   ui->m_lineEditPpath->setText(homePath);
   ui->m_labelPath1->setText(ui->m_lineEditPpath->text());
   ui->m_checkBox->setCheckState(Qt::CheckState::Checked);
+
+  QCompleter* completer = new QCompleter;
+  m_fsModel = new QFileSystemModel;
+  m_fsModel->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot);
+  m_fsModel->setRootPath(homePath);
+  completer->setModel(m_fsModel);
+  completer->setCompletionMode(QCompleter::PopupCompletion);
+  completer->setCaseSensitivity(Qt::CaseInsensitive);
+  ui->m_lineEditPpath->setCompleter(completer);
 }
 
 locationForm::~locationForm() { delete ui; }
@@ -64,41 +75,46 @@ bool locationForm::IsProjectNameExit() {
 }
 
 void locationForm::on_m_btnBrowse_clicked() {
-  QString pathName = QFileDialog::getExistingDirectory(
+  QString path = QFileDialog::getExistingDirectory(
       this, tr("Select Directory"),
       ui->m_lineEditPpath->text() == "" ? QDir::homePath()
                                         : ui->m_lineEditPpath->text(),
       QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
 
-  if ("" == pathName) {
+  if ("" == path) {
     return;
   }
-  ui->m_lineEditPpath->setText(pathName);
+  ui->m_lineEditPpath->setText(path);
+  m_fsModel->setRootPath(path);
 
   QString name = ui->m_lineEditPname->text();
   Qt::CheckState state = ui->m_checkBox->checkState();
-  if (Qt::CheckState::Checked == state && "" != pathName && "" != name) {
-    ui->m_labelPath1->setText(pathName + "/" + name);
-  } else {
-    ui->m_labelPath1->setText(pathName);
-  }
+  updateProjectLocation(name, path, Qt::CheckState::Checked == state);
 }
 
-void locationForm::on_m_checkBox_stateChanged(int arg1) {
+void locationForm::on_m_checkBox_stateChanged(int state) {
   QString name = ui->m_lineEditPname->text();
   QString path = ui->m_lineEditPpath->text();
-  if (Qt::CheckState::Checked == arg1 && "" != name && "" != path) {
+  updateProjectLocation(name, path, Qt::CheckState::Checked == state);
+}
+
+void locationForm::on_m_lineEditPname_textChanged(const QString &name) {
+  QString path = ui->m_lineEditPpath->text();
+  Qt::CheckState state = ui->m_checkBox->checkState();
+  updateProjectLocation(name, path, Qt::CheckState::Checked == state);
+}
+
+void locationForm::on_m_lineEditPpath_textChanged(const QString &path)
+{
+  QString name = ui->m_lineEditPname->text();
+  Qt::CheckState state = ui->m_checkBox->checkState();
+  updateProjectLocation(name, path, Qt::CheckState::Checked == state);
+}
+
+void locationForm::updateProjectLocation(const QString& name, const QString& path, bool createSubDir)
+{
+  if (createSubDir && "" != name && "" != path) {
     ui->m_labelPath1->setText(path + "/" + name);
-  } else {
-    ui->m_labelPath1->setText(path);
-  }
-}
-
-void locationForm::on_m_lineEditPname_textChanged(const QString &arg1) {
-  QString path = ui->m_lineEditPpath->text();
-  Qt::CheckState state = ui->m_checkBox->checkState();
-  if (Qt::CheckState::Checked == state && "" != arg1 && "" != path) {
-    ui->m_labelPath1->setText(path + "/" + arg1);
   } else {
     ui->m_labelPath1->setText(path);
   }

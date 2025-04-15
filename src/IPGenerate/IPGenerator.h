@@ -45,6 +45,7 @@ class IPGenerator {
   IPGenerator(IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
   
+  void setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation);
   void shareContext();
   const std::map<std::string, std::string>& environment() const { return m_environment; }
   
@@ -78,6 +79,7 @@ class IPGenerator {
   std::filesystem::path GetCachePath(IPInstance* instance) const;
   std::filesystem::path GetTmpCachePath(IPInstance* instance) const;
   std::filesystem::path GetTmpPath() const;
+  std::filesystem::path GetProjectIPsPath(const std::string& moduleName, const std::string& version) const;
   std::filesystem::path GetProjectIPsPath() const;
   std::filesystem::path GetMetaPath(const std::filesystem::path& base,
                                     IPInstance* inst) const;
@@ -96,6 +98,8 @@ class IPGenerator {
   std::map<std::string, std::string> m_environment;
 
 private:
+  std::map<std::string, std::filesystem::path> m_ipOutputLocations;
+
   void dumpDeviceInfo(const std::filesystem::path&);
   void dumpParameterModifications(const std::filesystem::path&);
   void saveJsonFile(const nlohmann::json& data, const std::filesystem::path& filepath);

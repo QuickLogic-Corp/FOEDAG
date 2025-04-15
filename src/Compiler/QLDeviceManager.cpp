@@ -886,10 +886,13 @@ void QLDeviceManager::collectDeviceVariantAvailableResources(const QLDeviceVaria
   QProcess* process = compiler->ExecuteCommand(vpr_command);
 
   // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
-  QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, device_variant](int exitCode) {
+  QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, device_variant, architectureFile](int exitCode) {
     std::vector<std::shared_ptr<LayoutInfoHelper>> layoutsInfo =
         ExtractDeviceAvailableResourcesFromVprLogContent(process->readAllStandardOutput().toStdString());
     process->deleteLater();
+    if (std::filesystem::exists(architectureFile)) {
+      std::filesystem::remove(architectureFile);
+    }
 
     if (exitCode == 0) {
       for (const std::shared_ptr<LayoutInfoHelper>& layoutInfo: layoutsInfo) {
@@ -1605,7 +1608,7 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
 
     std::filesystem::path vpr_xml_en_path =
           std::filesystem::path(device_variant_dir_path / std::string("vpr.xml.en"));
-    architectureFile = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath();
+    architectureFile = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath(true);
 
     std::filesystem::path cryptdbPath =
         CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
