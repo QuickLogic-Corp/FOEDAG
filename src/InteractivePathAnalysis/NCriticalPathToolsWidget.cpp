@@ -95,8 +95,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
           &NCriticalPathToolsWidget::tryRunPnRView);
   connect(&m_vprProcess, &Process::runStatusChanged, this,
           [this](bool isRunning) {
-            m_bnRunPnRView->setEnabled(!isRunning &&
-                                       !m_parameters->getIsFlatRouting());
+            m_bnRunPnRView->setEnabled(!isRunning);
             emit PnRViewRunStatusChanged(isRunning);
           });
   connect(&m_vprProcess, &Process::innerErrorOccurred, this,
@@ -154,25 +153,19 @@ void NCriticalPathToolsWidget::refreshCritPathContextOnSettingsChanged() {
   if (m_parameters->isLogToFileChanged()) {
     SimpleLogger::instance().setEnabled(m_parameters->getIsLogToFileEnabled());
   }
-  if (m_parameters->isFlatRoutingChanged()) {
-    if (m_parameters->getIsFlatRouting()) {
-      emit isFlatRoutingOnDetected();
-    } else {
-      emit isFlatRoutingOffDetected();
-      if (!m_vprProcess.isRunning()) {
-        tryRunPnRView();
-      }
-    }
-  } else {
-    if (m_parameters->isPathListConfigChanged()) {
-      emit pathListRequested(
-          "autorefresh because path list configuration changed");
-    }
-    if (m_parameters->isHightLightModeChanged() ||
-        m_parameters->isDrawCriticalPathContourChanged()) {
-      emit highLightModeChanged();
-    }
+  if (!m_vprProcess.isRunning()) {
+    tryRunPnRView();
   }
+
+  if (m_parameters->isPathListConfigChanged()) {
+    emit pathListRequested(
+        "autorefresh because path list configuration changed");
+  }
+  if (m_parameters->isHightLightModeChanged() ||
+      m_parameters->isDrawCriticalPathContourChanged()) {
+    emit highLightModeChanged();
+  }
+
   m_parameters->resetChangedFlags();
 }
 
@@ -200,7 +193,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
     m_parameters->setPathType(m_cbPathType->currentText().toStdString());
     m_parameters->setPathDetailLevel(m_cbDetail->currentText().toStdString());
     m_parameters->setCriticalPathNum(m_leNCriticalPathNum->text().toInt());
-    m_parameters->setIsFlatRouting(m_cbIsFlatRouting->isChecked());
+
     m_parameters->setIsLogToFileEnabled(m_cbIsLogToFileEnabled->isChecked());
     m_parameters->setIsDrawCriticalPathContourEnabled(
         m_cbDrawCritPathContour->isChecked());
@@ -262,12 +255,6 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
   addRowToFormLayout(formLayout, tr("Timing report npaths:"),
                      m_leNCriticalPathNum);
 
-  m_cbIsFlatRouting = new QCheckBox("");
-  m_cbIsFlatRouting->setMinimumHeight(25);
-  m_cbIsFlatRouting->setToolTip(
-      m_parameters->getIsFlatRoutingToolTip().c_str());
-  addRowToFormLayout(formLayout, tr("Flat routing:"), m_cbIsFlatRouting);
-
   m_cbIsLogToFileEnabled = new QCheckBox("");
   m_cbIsLogToFileEnabled->setMinimumHeight(25);
   m_cbIsLogToFileEnabled->setToolTip(
@@ -286,7 +273,6 @@ void NCriticalPathToolsWidget::resetConfigurationUI() {
   m_cbDetail->setCurrentText(m_parameters->getPathDetailLevel().c_str());
   m_leNCriticalPathNum->setText(
       QString::number(m_parameters->getCriticalPathNum()));
-  m_cbIsFlatRouting->setChecked(m_parameters->getIsFlatRouting());
   m_cbIsLogToFileEnabled->setChecked(m_parameters->getIsLogToFileEnabled());
   m_cbDrawCritPathContour->setChecked(
       m_parameters->getIsDrawCriticalPathContourEnabled());
@@ -310,45 +296,39 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
     return;
   }
 
-  if (m_parameters->getIsFlatRouting()) {
-    SimpleLogger::instance().log(
-        "skip P&R View process run, because vpr set using flat routing");
-    emit isFlatRoutingOnDetected();
-  } else {
-    m_vprProcess.setWorkingDirectory(projectLocation());
-    SimpleLogger::instance().log("set working dir", projectLocation());
+  m_vprProcess.setWorkingDirectory(projectLocation());
+  SimpleLogger::instance().log("set working dir", projectLocation());
 
-    int portNum = client::ServerFreePortDetector().detectAvailablePortNum();
-    emit serverPortNumDetected(portNum);
+  int portNum = client::ServerFreePortDetector().detectAvailablePortNum();
+  emit serverPortNumDetected(portNum);
 
-    QString fullCmd = vprBaseCommand();
-    if (!fullCmd.isEmpty()) {
+  QString fullCmd = vprBaseCommand();
+  if (!fullCmd.isEmpty()) {
 #ifdef IPA_RR_GRAPH_IMPORT_OPTIMIZATION
-      if (isRRGraphOptimizationOn()) {
-        QString fileName{rrGraphFileName()};
-        if (QFile::exists(projectLocation() + "/" + fileName)) {
-          // remove --write_rr_graph cmdline argument if rr_graph already exists
-          fullCmd = fullCmd.replace(QString(" --write_rr_graph %1").arg(fileName), "");
+    if (isRRGraphOptimizationOn()) {
+      QString fileName{rrGraphFileName()};
+      if (QFile::exists(projectLocation() + "/" + fileName)) {
+        // remove --write_rr_graph cmdline argument if rr_graph already exists
+        fullCmd = fullCmd.replace(QString(" --write_rr_graph %1").arg(fileName), "");
 
-          fullCmd += QString(" --read_rr_graph %1").arg(fileName);
-        }
+        fullCmd += QString(" --read_rr_graph %1").arg(fileName);
       }
+    }
 #endif
 
 #ifdef _WIN32
-      // under WIN32, running the analysis stage alone causes issues, hence we
-      // call the route and analysis stages together
-      fullCmd += " --route";
+    // under WIN32, running the analysis stage alone causes issues, hence we
+    // call the route and analysis stages together
+    fullCmd += " --route";
 #endif
-      fullCmd += " --analysis";
-      fullCmd += " --server";
-      fullCmd += QString(" --port %1").arg(portNum);
-      fullCmd += " --disp on";
+    fullCmd += " --analysis";
+    fullCmd += " --server";
+    fullCmd += QString(" --port %1").arg(portNum);
+    fullCmd += " --disp on";
 
-      m_vprProcess.start(fullCmd);
-    } else {
-      emit vprProcessErrorOccured("P&R View is not found");
-    }
+    m_vprProcess.start(fullCmd);
+  } else {
+    emit vprProcessErrorOccured("P&R View is not found");
   }
 }
 

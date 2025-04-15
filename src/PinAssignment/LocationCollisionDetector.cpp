@@ -25,13 +25,21 @@ LocationCollisionDetector::LocationCollisionDetector(const QMap<QString, QString
   }
 }
 
-QSet<QString> LocationCollisionDetector::getOverlappedPins(const QString& pin) {
+QSet<QString> LocationCollisionDetector::getOverlappedPins(const QString& pin) const {
   QSet<QString> overlappedPins;
   if (m_overlappedPinToLocationMap.contains(pin)) {
     QString location{m_overlappedPinToLocationMap.value(pin)};
     overlappedPins = m_overlappedLocationToPinsMap.value(location);
   }
   return overlappedPins;
+}
+
+QString LocationCollisionDetector::getOverlappedLocation(const QString& pin) const {
+  QString location{};
+  if (m_overlappedPinToLocationMap.contains(pin)) {
+    location = m_overlappedPinToLocationMap.value(pin);
+  }
+  return location;
 }
 
 }  // namespace FOEDAG
