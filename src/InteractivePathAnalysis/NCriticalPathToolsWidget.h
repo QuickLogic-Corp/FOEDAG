@@ -67,8 +67,6 @@ class NCriticalPathToolsWidget : public QWidget {
   void pathListRequested(const QString&);
   void PnRViewRunStatusChanged(bool);
   void highLightModeChanged();
-  void isFlatRoutingOnDetected();
-  void isFlatRoutingOffDetected();
   void vprProcessErrorOccured(QString);
   void serverPortNumDetected(int);
 
@@ -80,7 +78,6 @@ class NCriticalPathToolsWidget : public QWidget {
   QCheckBox* m_cbDrawCritPathContour = nullptr;
   QComboBox* m_cbPathType = nullptr;
   QComboBox* m_cbDetail = nullptr;
-  QCheckBox* m_cbIsFlatRouting = nullptr;
   QCheckBox* m_cbIsLogToFileEnabled = nullptr;
 
   Process m_vprProcess;

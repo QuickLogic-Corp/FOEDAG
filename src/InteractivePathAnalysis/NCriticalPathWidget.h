@@ -44,13 +44,9 @@ class NCriticalPathWidget : public QWidget {
   ~NCriticalPathWidget();
 
  private slots:
-  void onFlatRoutingOnDetected();
-  void onFlatRoutingOffDetected();
   void requestPathList(const QString& initiator);
 
  private:
-  bool m_prevIsFlatRoutingFlag = false;
-
   class NCriticalPathView* m_view = nullptr;
   class NCriticalPathToolsWidget* m_toolsWidget = nullptr;
   class NCriticalPathStatusBar* m_statusBar = nullptr;

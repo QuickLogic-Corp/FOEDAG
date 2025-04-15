@@ -3726,15 +3726,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
     TimingAnalysisOpt(STAOpt::None);
     
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      Message("");
-      Message("");
-      Message("##################################################");
-      Message("Place&Route View is disabled since flat_routing is enabled in VPR!");
-      Message("##################################################");
-      return true;
-    }
-
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
@@ -5432,7 +5423,7 @@ std::pair<std::filesystem::path, std::string> CompilerOpenFPGA_ql::findCurrentDe
   return std::make_pair(filepath_pin_table_csv, "");
 }
 
-std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath() {
+std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOutside) {
 
     // remember where we are
     std::filesystem::path current_path = std::filesystem::current_path();
@@ -5469,7 +5460,9 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath() {
     std::filesystem::current_path(current_path);
 
     // add to our cleanup list
-    m_TempFileList.push_back(temp_file_path);
+    if (!managedOutside) {
+      m_TempFileList.push_back(temp_file_path);
+    }
     
     // return the temp file path we obtained
     return temp_file_path;
