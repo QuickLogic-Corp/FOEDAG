@@ -307,9 +307,10 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
 #ifdef IPA_RR_GRAPH_IMPORT_OPTIMIZATION
     if (isRRGraphOptimizationOn()) {
       QString fileName{rrGraphFileName()};
-      if (QFile::exists(projectLocation() + "/" + fileName)) {
+      QString filePath{projectLocation() + "/" + fileName};
+      if (QFile::exists(filePath)) {
         // remove --write_rr_graph cmdline argument if rr_graph already exists
-        fullCmd = fullCmd.replace(QString(" --write_rr_graph %1").arg(fileName), "");
+        fullCmd = fullCmd.replace(QString(" --write_rr_graph %1").arg(filePath), "");
 
         fullCmd += QString(" --read_rr_graph %1").arg(fileName);
       }
