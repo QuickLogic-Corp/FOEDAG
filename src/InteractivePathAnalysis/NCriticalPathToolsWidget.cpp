@@ -314,7 +314,7 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
         if (!fullCmd.contains("--read_rr_graph")) {
           fullCmd += QString(" --read_rr_graph %1").arg(fileName);
         } else {
-          qWarning() << QString("skip appling IPA --read_rr_graph %1 optimization, because base vpr command already use --read_rr_graph parameter").arg(fileName)
+          qWarning() << QString("skip appling IPA --read_rr_graph %1 optimization, because base vpr command already use --read_rr_graph parameter").arg(fileName);
         }
       }
     }
