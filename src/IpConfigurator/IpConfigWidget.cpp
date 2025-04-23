@@ -199,7 +199,7 @@ void IpConfigWidget::Generate(const QString& outputPath) {
             : outputPath;
 
 #ifdef _WIN32
-    outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outLocationStr.toStdString()));
+    outLocationStr = QString::fromStdString(FileUtils::resolvePathStr(outLocationStr.toStdString()));
 #endif
 
     // Build up a cmd string to generate the IP
