@@ -47,6 +47,8 @@
 #include <locale>
 #include <fstream>
 #include <cmath>
+#include <unordered_set>
+#include <unordered_map>
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
@@ -2475,7 +2477,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " synthesis failed");
+    " synthesis failed");
     return false;
   } else {
     m_state = State::Synthesized;
@@ -2985,6 +2987,10 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
   return command;
 #endif // #if UPSTREAM_UNUSED
+
+  if (GenerateIOFloorPlanConstraints())
+    vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
+
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
@@ -5230,6 +5236,146 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   // set the PinConstraints file path to be used by the caller.
   filepath_fpga_fix_pins_place_str = filepath_fpga_fix_pins_place.string();
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
+}
+
+bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
+  std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
+  std::string(ProjManager()->projectName() + "_constraints.xml");
+  
+  if (fs::exists(io_floor_planningpath)){
+    Message(ProjManager()->projectName() + "_constraints.xml" + 
+            " Already Exists. Using the Existing Constraint File.");
+    return true;
+  }
+
+  if (!ProjManager()->HasDesign()) {
+    ErrorMessage("No design specified");
+    return false;
+  }
+
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return false;
+  }
+
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return false;
+  }
+
+  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) / 
+                                      std::string(ProjManager()->projectName() + "_post_synth.blif");
+
+  if (!fs::exists(netlist_path)){
+    ErrorMessage("Post Synthesis blif Was Not Found!\n");
+    ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
+    return false;
+  }
+  
+  std::filesystem::path floor_planning_constraint_file = ProjManager()->projectName() + std::string(".qdc");
+  if (!fs::exists(std::filesystem::path(floor_planning_constraint_file))){
+    Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
+    return false;
+  }
+
+  std::string line;
+  std::ifstream infile(floor_planning_constraint_file);
+  std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
+  std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
+    {"left", &leftSet},
+    {"right", &rightSet},
+    {"top", &topSet},
+    {"bottom", &bottomSet}
+  };
+
+  while (std::getline(infile, line)) {
+    std::istringstream iss(line);
+    std::string token, signalName;
+    iss >> token;
+
+    if (token != "set_io_side") continue;
+
+    iss >> signalName;
+    std::string side;
+    while (iss >> side) {
+        std::transform(side.begin(), side.end(), side.begin(), ::tolower); 
+        auto it = sideMap.find(side);
+        if (it != sideMap.end()) {
+            it->second->insert(signalName); // insert avoids duplicates
+        }
+    }
+  }
+
+  // Convert sets to comma-separated strings
+  auto setToString = [](const std::unordered_set<std::string>& set) {
+      std::string result;
+      for (const auto& sig : set) {
+          result += sig + ",";
+      }
+      if (!result.empty()) {
+        result.erase(result.size() - 1); // remove the last ","
+      }
+      return result;
+  };
+
+  std::string leftStr   = setToString(leftSet);
+  std::string rightStr  = setToString(rightSet);
+  std::string topStr    = setToString(topSet);
+  std::string bottomStr = setToString(bottomSet);
+
+  // Output results
+  if (!leftStr.empty())
+    leftStr = std::string(" left:"   + leftStr);
+  if (!rightStr.empty())
+    rightStr = std::string(" right:"  + rightStr);
+  if (!topStr.empty())
+    topStr = std::string(" top:"    + topStr);
+  if (!bottomStr.empty())
+    bottomStr = std::string(" bottom:" + bottomStr);
+  
+  std::filesystem::path generate_floorplanning_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("generate_floorplanning.py");
+      
+      
+  std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
+  std::string output_path = std::string("--output_path " + ProjManager()->projectName() + "_constraints.xml");
+  std::string architectureFile = m_architectureFile.string();
+  std::string command = std::string ("python3 " + 
+                        std::string(generate_floorplanning_script_path) + " " +
+                        netlistFile + " " + 
+                        architectureFile + " " +
+                        QLSettingsManager::getStringValue("general", "device", "layout") + 
+                        leftStr + rightStr + topStr + bottomStr + " " + 
+                        output_path); 
+
+  int status = ExecuteAndMonitorSystemCommand(command);
+
+  if (status) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                " IO Floor Plan Generation Failed!");
+    return false;
+  }
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
