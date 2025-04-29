@@ -123,7 +123,7 @@ class CompilerOpenFPGA_ql : public Compiler {
 
   std::pair<std::filesystem::path, std::string> findCurrentDevicePinTableCsv() const;
 
-  std::filesystem::path GenerateTempFilePath();
+  std::filesystem::path GenerateTempFilePath(bool managedOutside = false);
   int CleanTempFiles();
   void CleanScripts();
 

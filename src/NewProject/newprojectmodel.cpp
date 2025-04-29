@@ -163,7 +163,7 @@ const QString &NewProjectModel::projectType() const { return m_projectType; }
 
 void NewProjectModel::setProjectType(const QString &newProjectType) {
   if (m_projectType == newProjectType) return;
-
+  
   m_projectType = newProjectType;
   emit projectTypeChanged();
 }

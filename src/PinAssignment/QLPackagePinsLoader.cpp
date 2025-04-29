@@ -197,10 +197,7 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
   LocationCollisionDetectorPtr collisionDetector = std::make_shared<LocationCollisionDetector>(pinToLocationMap);
   QMap<QString, QSet<QString>> overlappedLocationToPinsMap = collisionDetector->overlappedLocationToPinsMap();
   if (!overlappedLocationToPinsMap.isEmpty()) {
-    logWarning(QString("%1 contains mapping issues").arg(ioMapFilePath));
-    for (auto it = overlappedLocationToPinsMap.begin(); it != overlappedLocationToPinsMap.end(); ++it) {
-      logWarning(QString("The following pins: %1, share the same location: %2").arg(QStringList(it.value().values()).join(", ")).arg(it.key()));
-    }
+    logWarning(QString("%1 physical locations point to more than one pin in file %2.\nThese collisions are handled by the Pin Planner UI").arg(overlappedLocationToPinsMap.size()).arg(ioMapFilePath));
   }
 
   return collisionDetector;

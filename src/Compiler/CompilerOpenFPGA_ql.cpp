@@ -213,7 +213,7 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
   (*out) << "   ip_catalog ?<ip_name>?     : Lists all available IPs, and "
             "their parameters if <ip_name> is given "
          << std::endl;
-  (*out) << "   configure_ip <ip_name> -mod_name <name> -out_file <filename> "
+  (*out) << "   configure_ip <ip_name> -mod_name <name> -out_location <path> "
             "-version <ver_name> -P<param>=\"<value>\"..."
          << std::endl;
   (*out) << "                              : Configures an IP <ip_name> and "
@@ -1591,7 +1591,7 @@ bool CompilerOpenFPGA_ql::Analyze() {
   }
 
 
-  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->projectType() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
     m_useVerific = true;
   }
   else {
@@ -1729,7 +1729,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
 
-  if(m_projManager->projectType() == Synplify)
+  if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
     std::string synplifyScript; 
     m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
@@ -1918,7 +1918,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::string yosysScript = InitSynthesisScript();
 
 
-  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->projectType() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
     m_useVerific = true;
   }
   else {
@@ -1938,7 +1938,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
   }
   
-  if(m_projManager->projectType() != Synplify)
+  if(m_projManager->synthesisTool() != Synplify)
   {
     if (m_useVerific) {
       // Verific parser
@@ -2381,7 +2381,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     yosys_options += " -use_dsp_cfg_params";
   }
 
-  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || m_projManager->projectType() == Synplify) {
+  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
 
     yosys_options += " -synplify";
   }
@@ -3732,15 +3732,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
     TimingAnalysisOpt(STAOpt::None);
     
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      Message("");
-      Message("");
-      Message("##################################################");
-      Message("Place&Route View is disabled since flat_routing is enabled in VPR!");
-      Message("##################################################");
-      return true;
-    }
-
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
@@ -5578,7 +5569,7 @@ std::pair<std::filesystem::path, std::string> CompilerOpenFPGA_ql::findCurrentDe
   return std::make_pair(filepath_pin_table_csv, "");
 }
 
-std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath() {
+std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOutside) {
 
     // remember where we are
     std::filesystem::path current_path = std::filesystem::current_path();
@@ -5615,7 +5606,9 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath() {
     std::filesystem::current_path(current_path);
 
     // add to our cleanup list
-    m_TempFileList.push_back(temp_file_path);
+    if (!managedOutside) {
+      m_TempFileList.push_back(temp_file_path);
+    }
     
     // return the temp file path we obtained
     return temp_file_path;

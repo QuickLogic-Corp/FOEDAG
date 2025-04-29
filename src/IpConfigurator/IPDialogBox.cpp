@@ -75,7 +75,7 @@ class ImageViewer : public QObject {
   QLabel* label{nullptr};
 };
 
-std::filesystem::path getUserProjectPath() {
+std::filesystem::path getProjectIPsPath() {
   return ProjectManager::projectIPsPath(
       GlobalSession->GetCompiler()->ProjManager()->projectPath());
 }
@@ -208,8 +208,7 @@ void IPDialogBox::handleEditorChanged(const QString& customId,
   bool ok{true};
   Compiler* compiler = GlobalSession->GetCompiler();
   auto generator = compiler->GetIPGenerator();
-  std::filesystem::path baseDir{generator->GetTmpPath()};
-  std::filesystem::path outFile = baseDir / ModuleNameStd();
+  std::filesystem::path outFile = generator->GetTmpPath();
   QString outFileStr =
       QString::fromStdString(FileUtils::GetFullPath(outFile).string());
   Generate(false, outFileStr);
@@ -535,9 +534,9 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
     if (inst->IPName() != ipName.toStdString()) continue;
 
     // Create output directory
-    const std::filesystem::path& out_path = inst->OutputFile();
+    const std::filesystem::path& out_path = inst->OutputLocation();
     if (!std::filesystem::exists(out_path)) {
-      std::filesystem::create_directories(out_path.parent_path());
+      std::filesystem::create_directories(out_path);
     }
 
     const IPDefinition* def = inst->Definition();
@@ -587,8 +586,9 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
           }
           jsonF.insert(param.Name(), value);
         }
-        jsonF["build_dir"] = inst->OutputFile().parent_path().string();
-        jsonF["build_name"] = inst->OutputFile().filename().string();
+
+        jsonF["build_dir"] = inst->OutputLocation().string();
+        jsonF["build_name"] = inst->ModuleName();
         jsonF["build"] = false;
         jsonF["json"] = jsonFile.filename().string();
         jsonF["json_template"] = false;
@@ -656,22 +656,21 @@ bool IPDialogBox::Generate(bool addToProject, const QString& outputPath) {
     return false;
   } else {
     // If all enabled fields are valid, configure and generate IP
-    std::filesystem::path baseDir(getUserProjectPath());
-    std::filesystem::path outFile = baseDir / ModuleNameStd();
-    QString outFileStr =
+    std::filesystem::path outLocation = getProjectIPsPath();
+    QString outLocationStr =
         outputPath.isEmpty()
-            ? QString::fromStdString(FileUtils::GetFullPath(outFile).string())
+            ? QString::fromStdString(FileUtils::GetFullPath(outLocation).string())
             : outputPath;
 
 #ifdef _WIN32
-    outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outFileStr.toStdString()));
+    outLocationStr = QString::fromStdString(FileUtils::resolvePathStr(outLocationStr.toStdString()));
 #endif
 
     // Build up a cmd string to generate the IP
     QString cmd = "configure_ip " + this->m_requestedIpName + " -mod_name " +
                   ModuleName() + " -version " +
                   QString::fromStdString(m_meta.version) + " " + params +
-                  " -out_file " + outFileStr;
+                  " -out_location " + outLocationStr;
     if (addToProject)
       cmd += "\nipgenerate -modules " + ModuleName() + "\n";
     else
@@ -731,9 +730,8 @@ void IPDialogBox::AddIpToProject(const QString& cmd) {
 }
 
 QString IPDialogBox::outPath() const {
-  std::filesystem::path baseDir(getUserProjectPath());
   std::filesystem::path vlnvPath =
-      baseDir / m_meta.vendor / m_meta.library / m_meta.name / m_meta.version;
+      getProjectIPsPath() / m_meta.vendor / m_meta.library / m_meta.name / m_meta.version;
 
   // Add the module wrapper
   std::filesystem::path outPath = vlnvPath / ModuleNameStd();

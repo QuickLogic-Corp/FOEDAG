@@ -851,7 +851,7 @@ void QLSettingsManager::populateSettingsWidget() {
 }
 
 
-void QLSettingsManager::updateJSONSettingsForProjectType(int projectType){
+void QLSettingsManager::updateJSONSettingsForProjectType(int projectType, int synthesisTool){
     if(projectType == PostMapSynplify){
       postMapSynplifyProject = true;
     }
@@ -859,7 +859,7 @@ void QLSettingsManager::updateJSONSettingsForProjectType(int projectType){
       postMapSynplifyProject = false;
     }
 
-    if(projectType == Synplify){
+    if(projectType == RTL && synthesisTool == Synplify){
       synplifyProject = true;
     }
     else{

@@ -166,8 +166,7 @@ void IpConfigWidget::generateDetailedInformation() {
   bool ok{true};
   Compiler* compiler = GlobalSession->GetCompiler();
   auto generator = compiler->GetIPGenerator();
-  std::filesystem::path baseDir{generator->GetTmpPath()};
-  std::filesystem::path outFile = baseDir / m_moduleName.toStdString();
+  std::filesystem::path outFile = generator->GetTmpPath();
   QString outFileStr =
       QString::fromStdString(FileUtils::GetFullPath(outFile).string());
   Generate(outFileStr);
@@ -193,21 +192,21 @@ void IpConfigWidget::Generate(const QString& outputPath) {
   } else {
     // If all enabled fields are valid, configure and generate IP
     std::filesystem::path baseDir(m_baseDirDefault);
-    std::filesystem::path outFile = baseDir / m_moduleName.toStdString();
-    QString outFileStr =
+    std::filesystem::path outLocation = baseDir / m_moduleName.toStdString();
+    QString outLocationStr =
         outputPath.isEmpty()
-            ? QString::fromStdString(FileUtils::GetFullPath(outFile).string())
+            ? QString::fromStdString(FileUtils::GetFullPath(outLocation).string())
             : outputPath;
 
 #ifdef _WIN32
-    outFileStr = QString::fromStdString(FileUtils::resolvePathStr(outFileStr.toStdString()));
+    outLocationStr = QString::fromStdString(FileUtils::resolvePathStr(outLocationStr.toStdString()));
 #endif
 
     // Build up a cmd string to generate the IP
     QString cmd = "configure_ip " + this->m_requestedIpName + " -mod_name " +
                   m_moduleName + " -version " +
                   QString::fromStdString(m_meta.version) + " " + params +
-                  " -out_file " + outFileStr;
+                  " -out_location " + outLocationStr;
     cmd += " -template";
 
     int returnVal{false};

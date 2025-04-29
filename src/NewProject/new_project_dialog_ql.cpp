@@ -353,6 +353,8 @@ void newProjectDialog::on_buttonBox_accepted() {
                      : m_projectManager->getProjectPath(),
       m_proTypeForm ? m_proTypeForm->projectType()
                     : m_projectManager->projectType(),
+      m_proTypeForm ? m_proTypeForm->synthesisTool()
+                    : m_projectManager->synthesisTool(),
       {m_addSrcForm->getFileData(), m_addSrcForm->IsCopySource()},
       {m_addConstrsForm->getFileData(), m_addConstrsForm->IsCopySource()},
       {m_addSimForm->getFileData(), m_addSimForm->IsCopySource()},
@@ -420,7 +422,7 @@ void newProjectDialog::on_next() {
       m_addSrcForm->clear();
     }
     m_addSrcForm->setProjectType(m_proTypeForm->projectType());
-    QLSettingsManager::getInstance()->updateJSONSettingsForProjectType(m_addSrcForm->projectType());
+    QLSettingsManager::getInstance()->updateJSONSettingsForProjectType(m_proTypeForm->projectType(), m_proTypeForm->synthesisTool());
   }
   if (m_skipSources && m_index == INDEX_PROJTYPE)
     m_index = INDEX_DEVICEPL;  // omit design and constraint files

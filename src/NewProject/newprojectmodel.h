@@ -123,7 +123,7 @@ class NewProjectModel : public QObject {
  protected:
   QString m_projectName{"project_1"};
   QString m_projectLocation;
-  QString m_projectType{"RTL"};  // QString "RTL" or "Post-synthesis" or "Synplify" or "PostMapSynplify"
+  QString m_projectType{"RTL"};  // QString "RTL" or "Post-synthesis" or "PostMapSynplify"
   bool m_needToCreateProjrctSubDirectory{false};
 };
 

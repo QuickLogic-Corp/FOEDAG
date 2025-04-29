@@ -269,7 +269,7 @@ void PackagePinsView::insertData(const QStringList &data, int index, int column,
   if (data.count() > index) item->setText(column, data.at(index));
 }
 
-#ifdef UPSTREAM_PINPLANNERs
+#ifdef UPSTREAM_PINPLANNER
 void PackagePinsView::updateModeCombo(const QString &port,
                                       const QModelIndex &index) {
   auto modeIndex = model()->index(index.row(), ModeCol, index.parent());

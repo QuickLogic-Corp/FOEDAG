@@ -74,7 +74,7 @@ void ProjectFileSet::deleteFile(const QString &strFileName) {
     auto searchPath = [](const QStringList &source,
                          const QString &searchStr) -> int {
       auto tmp = searchStr;
-      tmp.replace(PROJECT_OSRCDIR, QString{});
+      tmp.replace(QString{PROJECT_OSRCDIR} + "/", QString{});
       for (int i = 0; i < source.size(); i++) {
         if (source.at(i).endsWith(tmp)) return i;
       }

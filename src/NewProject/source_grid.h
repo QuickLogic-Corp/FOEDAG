@@ -28,6 +28,7 @@ typedef struct tagFileData {
 typedef FILEDATA filedata;
 class ProjectManager;
 constexpr int NO_PROJECT_TYPE{-1};
+constexpr int NO_SYNTHESIS_TOOl{-1};
 
 class sourceGrid : public QWidget {
   Q_OBJECT
@@ -78,6 +79,7 @@ class sourceGrid : public QWidget {
   QString m_currentFileSet;
   ProjectManager *m_projectManager{nullptr};
   int m_projectType{NO_PROJECT_TYPE};
+  int m_synthesisTool{NO_SYNTHESIS_TOOl};
   static const QStringList uniqueExtentions;
 
  private:

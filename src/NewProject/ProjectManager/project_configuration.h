@@ -16,11 +16,15 @@ class ProjectConfiguration : public ProjectOption {
   int projectType() const;
   void setProjectType(int projectType);
 
+  int synthesisTool() const;
+  void setSynthesisTool(int synthesisTool);
+
   QString activeSimSet() const;
   void setActiveSimSet(const QString &activeSimSet);
 
  private:
   int m_projectType;
+  int m_synthesisTool;
   QString m_id;
   QString m_activeSimSet;
 

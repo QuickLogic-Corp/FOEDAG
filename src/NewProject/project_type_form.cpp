@@ -33,16 +33,21 @@ projectTypeForm::~projectTypeForm() { delete ui; }
 
 ProjectType projectTypeForm::projectType() const {
   if (ui->m_radioBtnRTL->isChecked()) {
-    if (ui->m_combobox_synthesis_tool->currentText().toLower() == "yosys")
-      return RTL;
-    else if (ui->m_combobox_synthesis_tool->currentText().toLower() == "synplify")
-      return Synplify;
+    return RTL;
   } else if (ui->m_radioBtnPost->isChecked()) {
     return PostSynth;
   } else if (ui->m_radioBtnPostMapSynp->isChecked()) {
     return PostMapSynplify;
   }
   return RTL;
+}
+
+SynthesisTool projectTypeForm::synthesisTool() const {
+    if (ui->m_combobox_synthesis_tool->currentText().toLower() == "yosys")
+      return Yosys;
+    else if (ui->m_combobox_synthesis_tool->currentText().toLower() == "synplify")
+      return Synplify;
+    return Yosys;
 }
 
 QString projectTypeForm::projectTypeStr() const {
@@ -55,11 +60,23 @@ QString projectTypeForm::projectTypeStr(ProjectType type) {
       return "RTL";
     case PostSynth:
       return "Post-synthesis";
-    case Synplify:
-      return "Synplify";
     case PostMapSynplify:
       return "PostMapSynplify";
 
+  }
+  return QString{};
+}
+
+QString projectTypeForm::synthesisToolStr() const {
+  return synthesisToolStr(synthesisTool());
+}
+
+QString projectTypeForm::synthesisToolStr(SynthesisTool type) {
+  switch (type) {
+    case Yosys:
+      return "Yosys";
+    case Synplify:
+      return "Synplify";
   }
   return QString{};
 }

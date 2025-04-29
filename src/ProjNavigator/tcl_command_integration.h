@@ -65,7 +65,7 @@ class TclCommandIntegration : public QObject {
   void closeDesign();
 
  private:
-  void createNewDesign(const QString &design, int projectType = 0);
+  void createNewDesign(const QString &design, int projectType = 0, int synthesisTool = 0);
 
  private:
   bool validate() const;
