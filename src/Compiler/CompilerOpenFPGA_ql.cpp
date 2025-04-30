@@ -5352,7 +5352,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string output_path = std::string("--output_path " + ProjManager()->projectName() + "_constraints.xml");
   std::string architectureFile = m_architectureFile.string();
   std::string command = std::string ("python3 " + 
-                        std::string(generate_floorplanning_script_path) + " " +
+                        generate_floorplanning_script_path.string() + " " +
                         netlistFile + " " + 
                         architectureFile + " " +
                         QLSettingsManager::getStringValue("general", "device", "layout") + 
