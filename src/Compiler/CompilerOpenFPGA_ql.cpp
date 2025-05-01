@@ -5280,14 +5280,15 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     return false;
   }
   
-  std::filesystem::path floor_planning_constraint_file = ProjManager()->projectName() + std::string(".qdc");
-  if (!fs::exists(std::filesystem::path(floor_planning_constraint_file))){
+  std::filesystem::path floor_planning_constraint_filepath = std::filesystem::path(ProjManager()->projectPath()) / 
+                                                            std::string(ProjManager()->projectName() + ".qdc");
+  if (!fs::exists(std::filesystem::path(floor_planning_constraint_filepath))){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
     return false;
   }
 
   std::string line;
-  std::ifstream infile(floor_planning_constraint_file);
+  std::ifstream infile(floor_planning_constraint_filepath);
   std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
   std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
     {"left", &leftSet},
