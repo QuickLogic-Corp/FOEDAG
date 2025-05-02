@@ -302,6 +302,108 @@ std::filesystem::path QLSettingsManager::getPCFFilePath() {
   return pcf_file_path;
 }
 
+std::filesystem::path QLSettingsManager::getQDCFilePath()
+{
+  return getFilePathByExt("qdc");
+}
+
+std::filesystem::path QLSettingsManager::getFilePathByExt(const std::string& ext) {
+
+  std::filesystem::path ext_file_path;
+
+  if( (instance->settings_json).empty() ) {
+    // settings json is not parsed yet, nothing to do.
+    return ext_file_path;
+  }
+
+  // ---------------------------------------------------------------- <ext>_file ++
+  // <ext>_file can come from Settings JSON -or- automatically picked up if named: <project_name>.<ext>
+  // <ext>_file path can be absolute or relative
+  // >> note: if <ext> file specified in the Settings, and not found, then we flag this as an error!
+  // if relative path, heuristic to find the <ext>_file:
+  //   1. check project_path, to see if <ext>_file exists, use that
+  //   2. check tcl_script_dir_path (if driven by TCL script), to see if <ext>_file exists, use that
+  //   3. check current dir, to see if <ext>_file exists exists, use that
+
+
+  // 1. check if an <ext> file is specified in the json: (can be relative/absolute)
+  if( !getStringValue("openfpga", "general", ext).empty() ) {
+
+    ext_file_path = 
+        std::filesystem::path(getStringValue("openfpga", "general", ext));
+  }
+  // 2. else, check for a <ext> file with the naming convention (<project_name>.<ext>)
+  // note that this will always be a 'relative_path' case
+  else {
+
+    ext_file_path = 
+      std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectName() + std::string(".") + ext);
+  }
+
+  // check if the path specified is absolute:
+  if (ext_file_path.is_absolute()) {
+    // check if the file exists:
+    if (!FileUtils::FileExists(ext_file_path)) {
+      // currently, we ignore it, if the <ext> file path is not found, instead of flagging an error.
+      ext_file_path.clear();
+    }
+  }
+  // we have a relative path, needs further processing to determine where to pick it from:
+  else {
+    std::filesystem::path ext_file_path_absolute;
+    
+    // 1. check project_path -> for generated <ext> from other tool
+    // 2. check tcl_script_dir_path (if driven by TCL script)
+    // 3. check current_dir_path
+
+    // 1. project path
+    std::filesystem::path project_path = 
+        std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
+    ext_file_path_absolute = project_path / ext_file_path;
+    if(!FileUtils::FileExists(ext_file_path_absolute)) {
+      ext_file_path_absolute.clear();
+    }
+
+    // 2. check tcl_script_dir_path
+    if(ext_file_path_absolute.empty()) {
+      std::filesystem::path tcl_script_dir_path = getTCLScriptDirPath();
+      if(!tcl_script_dir_path.empty()) {
+        ext_file_path_absolute = tcl_script_dir_path / ext_file_path;
+        if(!FileUtils::FileExists(ext_file_path_absolute)) {
+          ext_file_path_absolute.clear();
+        }
+      }
+    }
+
+    // 3. check current working dir path
+    if(ext_file_path_absolute.empty()) {
+      ext_file_path_absolute = std::filesystem::current_path() / ext_file_path;
+      if(!FileUtils::FileExists(ext_file_path_absolute)) {
+        ext_file_path_absolute.clear();
+      }
+    }
+
+
+    // final: check if we have a valid <ext> file path:
+    if(!ext_file_path_absolute.empty()) {
+      // assign the absolute path to the <ext>_file_path variable:
+      ext_file_path = ext_file_path_absolute;
+    }
+    else {
+      // currently, we ignore it, if the <ext> file path is not found.
+      ext_file_path.clear();
+    }
+  }
+  // relative file path processing done.
+
+  // if we have a valid <ext>_file_path at this point, store that:
+  if(!ext_file_path.empty()) {
+    // std::cout << extension << " file available: " << ext_file_path << std::endl;
+    instance->file_path_map[ext] = ext_file_path;
+  }
+
+  return ext_file_path;
+}
 
 std::string QLSettingsManager::getStringValue(std::string category, std::string subcategory, std::string parameter) {
 

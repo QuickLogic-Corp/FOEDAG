@@ -5288,14 +5288,14 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     return false;
   }
   
-  std::filesystem::path floor_planning_constraint_file = ProjManager()->projectName() + std::string(".qdc");
-  if (!fs::exists(std::filesystem::path(floor_planning_constraint_file))){
+  std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
+  if (!fs::exists(floor_planning_constraint_filepath)){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
     return false;
   }
 
   std::string line;
-  std::ifstream infile(floor_planning_constraint_file);
+  std::ifstream infile(floor_planning_constraint_filepath);
   std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
   std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
     {"left", &leftSet},
@@ -5359,7 +5359,25 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
   std::string output_path = std::string("--output_path " + ProjManager()->projectName() + "_constraints.xml");
   std::string architectureFile = m_architectureFile.string();
-  std::string command = std::string ("python3 " + 
+  #ifdef _WIN32
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+  #ifdef USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
+    // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
+    pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
+  #else // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
+    ErrorMessage("System " + python_exec.string() +
+                " is not found, Please install " + python_exec.string() + " and make sure it's in the PATH variable."
+                " IO Floor Plan Generation Failed!");
+    return false;
+  #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
+  }
+
+  std::string command = std::string(python_exec.string() + " " +
                         generate_floorplanning_script_path.string() + " " +
                         netlistFile + " " + 
                         architectureFile + " " +

@@ -55,6 +55,8 @@ public:
   void parseJSONSettings();
   void parseSDCFilePath();
   std::filesystem::path getPCFFilePath();
+  std::filesystem::path getQDCFilePath();
+
   bool areJSONSettingsChanged();
   bool saveJSONSettings();
 
@@ -81,6 +83,7 @@ public:
   bool sdc_file_path_from_json = false;
 
   std::filesystem::path pcf_file_path;
+  std::map<std::string, std::filesystem::path> file_path_map; // as a part of unification getFilePathByExt()
 
   // GUI elements and GUI related variables
   QWidget* settings_manager_widget = nullptr;
@@ -103,6 +106,7 @@ public:
   json settings_json_newproject;
   json power_estimation_json_newproject;
 
+  std::filesystem::path getFilePathByExt(const std::string& ext);
 };
 
 
