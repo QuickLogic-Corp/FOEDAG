@@ -2870,7 +2870,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail");
   }
 
-  if(m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
     if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
       // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
       // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
