@@ -5361,7 +5361,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   #else
   std::filesystem::path pythonExec{"python3"};
   #endif // _WIN32
-  std::string command = std::string (pythonExec.string() + " " +
+  std::string command = std::string(pythonExec.string() + " " +
                         generate_floorplanning_script_path.string() + " " +
                         netlistFile + " " + 
                         architectureFile + " " +
