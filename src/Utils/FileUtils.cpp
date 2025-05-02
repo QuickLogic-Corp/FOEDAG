@@ -147,9 +147,18 @@ std::filesystem::path FileUtils::LocateExecFile(
     const std::filesystem::path& path) {
   std::filesystem::path result;
   char* envpath = getenv("PATH");
+  if (envpath == nullptr) return result;
+  std::string path_copy = envpath;
+
   char* dir = nullptr;
 
-  for (dir = strtok(envpath, ":"); dir; dir = strtok(NULL, ":")) {
+#ifdef _WIN32
+    const char* envar_separator = ";";
+#else
+    const char* envar_separator = ":";
+#endif
+
+  for (dir = strtok(path_copy.data(), envar_separator); dir; dir = strtok(NULL, envar_separator)) {
     std::filesystem::path a_path = std::string(dir) / path;
     if (FileUtils::FileExists(a_path)) {
       return a_path;
