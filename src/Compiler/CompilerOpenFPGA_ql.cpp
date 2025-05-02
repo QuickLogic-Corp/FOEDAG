@@ -5352,7 +5352,16 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
   std::string output_path = std::string("--output_path " + ProjManager()->projectName() + "_constraints.xml");
   std::string architectureFile = m_architectureFile.string();
-  std::string command = std::string ("python3 " + 
+  #ifdef _WIN32
+  std::filesystem::path pythonExec = FileUtils::LocateExecFile("python3");
+  if (pythonExec.empty()) {
+    // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
+    pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
+  }
+  #else
+  std::filesystem::path pythonExec{"python3"};
+  #endif // _WIN32
+  std::string command = std::string (pythonExec.string() + " " +
                         generate_floorplanning_script_path.string() + " " +
                         netlistFile + " " + 
                         architectureFile + " " +
