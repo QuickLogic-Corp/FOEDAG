@@ -5363,7 +5363,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
   #else // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
     ErrorMessage("System " + python_exec.string() +
-                " is not found, Please reinstall" + python_exec.string() + " and make sure it's in the PATH variable."
+                " is not found, Please install " + python_exec.string() + " and make sure it's in the PATH variable."
                 " IO Floor Plan Generation Failed!");
     return false;
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
