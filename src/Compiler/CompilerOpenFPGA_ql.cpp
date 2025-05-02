@@ -2824,14 +2824,6 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations");
   }
 
-  if(m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      // print warning that we ignore flat_routing
-      // TODO: look for control file ${AURORA_INSTALL_PATH}/disable_synplify_flatrouting.au
-    }
-    vpr_options += std::string(" --flat_routing off");
-  } else {
-
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
     vpr_options += std::string(" --flat_routing on");
     if( QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
@@ -2844,8 +2836,6 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   }
   else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
     vpr_options += std::string(" --flat_routing off");
-  }
-
   }
 
   // parse vpr analysis options
@@ -2878,6 +2868,15 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     vpr_options += std::string(" --timing_report_detail") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail");
+  }
+
+  if(m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
+      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
+      // until Synplify side is fixed to resolve the root cause of the error.
+      vpr_options += std::string(" --skip_sync_clustering_and_routing_results on");
+    }
   }
 
   // custom vpr command-line options for *all* stages
@@ -4868,14 +4867,6 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return true;
   }
 
-  if(m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      // print warning that we ignore flat_routing
-      // TODO: look for control file ${AURORA_INSTALL_PATH}/disable_synplify_flatrouting.au
-    }
-    // continue as usual with bitstream generation.
-  } else {
-
   // if flat_routing is enabled in VPR, skip bitstream generation
   // OpenFPGA does not support bitstream generation with flat_routing (fully, yet)
   // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/issues/2256#issuecomment-1498007179
@@ -4896,8 +4887,6 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
       Message("##################################################");
       return true;
     }
-  }
-
   }
 
 #if UPSTREAM_UNUSED
