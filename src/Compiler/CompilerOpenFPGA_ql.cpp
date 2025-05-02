@@ -2824,6 +2824,14 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations");
   }
 
+  if(m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      // print warning that we ignore flat_routing
+      // TODO: look for control file ${AURORA_INSTALL_PATH}/disable_synplify_flatrouting.au
+    }
+    vpr_options += std::string(" --flat_routing off");
+  } else {
+
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
     vpr_options += std::string(" --flat_routing on");
     if( QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
@@ -2836,6 +2844,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   }
   else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
     vpr_options += std::string(" --flat_routing off");
+  }
+
   }
 
   // parse vpr analysis options
@@ -4858,6 +4868,13 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return true;
   }
 
+  if(m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      // print warning that we ignore flat_routing
+      // TODO: look for control file ${AURORA_INSTALL_PATH}/disable_synplify_flatrouting.au
+    }
+    // continue as usual with bitstream generation.
+  } else {
 
   // if flat_routing is enabled in VPR, skip bitstream generation
   // OpenFPGA does not support bitstream generation with flat_routing (fully, yet)
@@ -4879,6 +4896,8 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
       Message("##################################################");
       return true;
     }
+  }
+
   }
 
 #if UPSTREAM_UNUSED
