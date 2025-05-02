@@ -5352,15 +5352,24 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string output_path = std::string("--output_path " + ProjManager()->projectName() + "_constraints.xml");
   std::string architectureFile = m_architectureFile.string();
   #ifdef _WIN32
-  std::filesystem::path pythonExec = FileUtils::LocateExecFile("python3");
-  if (pythonExec.empty()) {
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+  #ifdef USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
     // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
     pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
+  #else // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
+    ErrorMessage("System " + python_exec.string() +
+                " is not found, Please reinstall" + python_exec.string() + " and make sure it's in the PATH variable."
+                " IO Floor Plan Generation Failed!");
+    return false;
+  #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
-  #else
-  std::filesystem::path pythonExec{"python3"};
-  #endif // _WIN32
-  std::string command = std::string(pythonExec.string() + " " +
+
+  std::string command = std::string(python_exec.string() + " " +
                         generate_floorplanning_script_path.string() + " " +
                         netlistFile + " " + 
                         architectureFile + " " +
