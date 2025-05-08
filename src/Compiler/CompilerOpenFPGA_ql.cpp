@@ -5385,6 +5385,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
                         leftStr + rightStr + topStr + bottomStr + " " + 
                         output_path); 
 
+  std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
+  if (fs::exists(floor_planning_constraint_filepath)) {
+    command += std::string(" --pcf_file ") + pin_constraint_filepath.string();
+  }
+
   int status = ExecuteAndMonitorSystemCommand(command);
 
   if (status) {
