@@ -3110,6 +3110,14 @@ bool CompilerOpenFPGA_ql::Packing() {
   ofssdc.close();
 #endif // #if UPSTREAM_UNUSED
 
+  std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
+                std::string(ProjManager()->projectName() + "_constraints.xml");
+  if (fs::exists(io_floor_planningpath)) {
+    fs::remove(io_floor_planningpath);
+    Message("Deleted the previous existing " + ProjManager()->projectName() + "_constraints.xml" + 
+        " Before Packing");
+  }
+
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand() + " --pack";
 #endif // #if UPSTREAM_UNUSED
