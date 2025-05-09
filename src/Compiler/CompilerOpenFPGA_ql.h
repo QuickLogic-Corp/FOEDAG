@@ -40,6 +40,12 @@ namespace FOEDAG {
 //enum class SynthesisType { Yosys, QL, RS };
 #endif // #if UPSTREAM_UNUSED
 
+enum class IOFloorPlanStatus {
+  Ok,
+  Failed,
+  Skipped
+};
+
 class CompilerOpenFPGA_ql : public Compiler {
     friend class QLSettingsManager;
     friend class QLMetricsManager;
@@ -148,7 +154,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
-  bool GenerateIOFloorPlanConstraints();
+  IOFloorPlanStatus GenerateIOFloorPlanConstraints();
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,

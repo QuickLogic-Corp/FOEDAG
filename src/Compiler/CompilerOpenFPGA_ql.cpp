@@ -2997,8 +2997,16 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints())
+  IOFloorPlanStatus ioFloorPlanStatus = GenerateIOFloorPlanConstraints();
+  if (ioFloorPlanStatus == IOFloorPlanStatus::Ok) {
     vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
+  } else if (ioFloorPlanStatus == IOFloorPlanStatus::Failed) {
+    // error message is already printed inside GenerateIOFloorPlanConstraints()
+    return std::string("");
+  } else if (ioFloorPlanStatus == IOFloorPlanStatus::Skipped) {
+    Message("IO Floor Planning Skipped because of <reason>");
+    // aurora flow continue without io floor plan
+  }
 
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
@@ -5237,19 +5245,19 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
-bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
+IOFloorPlanStatus CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
   if (fs::exists(io_floor_planningpath)){
     Message(ProjManager()->projectName() + "_constraints.xml" + 
             " Already Exists. Using the Existing Constraint File.");
-    return true;
+    return IOFloorPlanStatus::Ok;
   }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
-    return false;
+    return IOFloorPlanStatus::Failed;
   }
 
   QLSettingsManager::reloadJSONSettings();
@@ -5257,7 +5265,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return false;
+    return IOFloorPlanStatus::Failed;
   }
 
   if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
@@ -5276,7 +5284,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
-    return false;
+    return IOFloorPlanStatus::Failed;
   }
 
   std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) / 
@@ -5285,13 +5293,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   if (!fs::exists(netlist_path)){
     ErrorMessage("Post Synthesis blif Was Not Found!\n");
     ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
-    return false;
+    return IOFloorPlanStatus::Failed;
   }
   
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
-    return false;
+    return IOFloorPlanStatus::Skipped;
   }
 
   std::string line;
@@ -5373,7 +5381,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     ErrorMessage("System " + python_exec.string() +
                 " is not found, Please install " + python_exec.string() + " and make sure it's in the PATH variable."
                 " IO Floor Plan Generation Failed!");
-    return false;
+    return IOFloorPlanStatus::Failed;
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
 
@@ -5391,13 +5399,15 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   }
 
   int status = ExecuteAndMonitorSystemCommand(command);
-
-  if (status) {
+  if (status == (int)IOFloorPlanStatus::Failed) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                 " IO Floor Plan Generation Failed!");
-    return false;
+    return IOFloorPlanStatus::Failed;
+  } else if (status == (int)IOFloorPlanStatus::Skipped) {
+    // todo: Message(why it's skipped)
+    return IOFloorPlanStatus::Skipped;
   }
-  return true;
+  return IOFloorPlanStatus::Ok;
 }
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
