@@ -5307,7 +5307,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
-    return false;
+    return true;
   }
 
   std::string line;
