@@ -2997,8 +2997,16 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints())
-    vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
+  if (GenerateIOFloorPlanConstraints()){
+    std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
+    std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    if (fs::exists(fp_constraint_filepath_absolute)) {
+      vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
+    }
+  }
+  else { //IO floorplanning generation failed, must stop the flow
+    return std::string("");
+  }
 
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
@@ -5356,6 +5364,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     topStr = std::string(" top:"    + topStr);
   if (!bottomStr.empty())
     bottomStr = std::string(" bottom:" + bottomStr);
+
+  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty()) {
+    Message("QDC file either does not contain a valid side or the side is empty, passing top side as the default value!\n");
+  }
   
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
@@ -5400,12 +5412,18 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   int status = ExecuteAndMonitorSystemCommand(command);
 
-  if (status) {
+  if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
                 " IO Floor Plan Generation Failed!");
     return false;
   }
-  return true;
+  else if (status == 2){ //Skipped
+    Message("All of the atoms on the QDC have been overwritten by PCF file; Thus, no partition has been created!");
+    return true;
+  }
+  else { //Success
+    return true;
+  }
 }
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
