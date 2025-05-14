@@ -5325,7 +5325,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     std::string token, signalName;
     iss >> token;
 
-    if (token != "set_io_side") continue;
+    if (token != "set_io_side"){
+      ErrorMessage("Invalid QDC command. Expected 'set_io_side' command.");
+      return false;
+    }
 
     iss >> signalName;
     std::string side;
@@ -5366,7 +5369,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     bottomStr = std::string(" bottom:" + bottomStr);
 
   if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty()) {
-    Message("QDC file either does not contain a valid side or the side is empty, passing top side as the default value!\n");
+    ErrorMessage("QDC file either does not contain a valid side or the side is empty\n");
+    return false;
   }
   
   std::filesystem::path generate_floorplanning_script_path =
