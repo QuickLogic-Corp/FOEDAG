@@ -2210,7 +2210,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           continue;
       }
       std::string options = lang;
-      options += " -nolatches";
       filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
       filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
       filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
@@ -2238,14 +2237,15 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string filesScript =
             "read_verilog ${READ_VERILOG_OPTIONS} "
             "${VERILOG_FILES}";
-    std::string options = " -nolatches";
+    std::string options = "";
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
   }
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+  
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
