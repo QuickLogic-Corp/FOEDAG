@@ -3007,8 +3007,16 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints())
-    vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
+  if (GenerateIOFloorPlanConstraints()){
+    std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
+    std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    if (fs::exists(fp_constraint_filepath_absolute)) {
+      vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
+    }
+  }
+  else { //IO floorplanning generation failed, must stop the flow
+    return std::string("");
+  }
 
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
@@ -5309,7 +5317,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
-    return false;
+    return true;
   }
 
   std::string line;
@@ -5327,7 +5335,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     std::string token, signalName;
     iss >> token;
 
-    if (token != "set_io_side") continue;
+    if (token != "set_io_side"){
+      ErrorMessage("Invalid QDC command. Expected 'set_io_side' command.");
+      return false;
+    }
 
     iss >> signalName;
     std::string side;
@@ -5366,6 +5377,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     topStr = std::string(" top:"    + topStr);
   if (!bottomStr.empty())
     bottomStr = std::string(" bottom:" + bottomStr);
+
+  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty()) {
+    ErrorMessage("QDC file either does not contain a valid side or the side is empty\n");
+    return false;
+  }
   
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
@@ -5410,12 +5426,18 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   int status = ExecuteAndMonitorSystemCommand(command);
 
-  if (status) {
+  if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
                 " IO Floor Plan Generation Failed!");
     return false;
   }
-  return true;
+  else if (status == 2){ //Skipped
+    Message("All of the atoms on the QDC have been overwritten by PCF file; Thus, no partition has been created!");
+    return true;
+  }
+  else { //Success
+    return true;
+  }
 }
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
