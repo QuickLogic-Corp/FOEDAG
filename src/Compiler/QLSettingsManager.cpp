@@ -188,7 +188,7 @@ void QLSettingsManager::parseSDCFilePath() {
       std::filesystem::path tcl_file_name{project_name + std::string(".tcl")};
       std::filesystem::path tcl_file_path_candidate = parent_project_path / tcl_file_name;
       if (project_name == parent_project_path.filename().string() && FileUtils::FileExists(tcl_file_path_candidate)) {
-        sdc_file_path_absolute = parent_project_path / pcf_file_path;
+        sdc_file_path_absolute = parent_project_path / sdc_file_path;
         if(!FileUtils::FileExists(sdc_file_path_absolute)) {
           sdc_file_path_absolute.clear();
         }
