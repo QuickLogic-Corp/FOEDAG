@@ -5335,6 +5335,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     std::string token, signalName;
     iss >> token;
 
+    if (token.empty()){
+      Message("Empty line found in QDC file. Skipping...\n");
+      continue; // Skip empty lines
+    }
+    
     if (token != "set_io_side"){
       ErrorMessage("Invalid QDC command. Expected 'set_io_side' command.");
       return false;
