@@ -1837,19 +1837,29 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       synplifyScript = 
             ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
     }
-    std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
-    // if we have a valid sdc_file_path at this point, pass it on to vpr:
-    if(!synth_sdc_filepath.empty()) {
-      // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
 
-      synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
-                                                                std::string(" -constraint ") + 
-                                                                synth_sdc_filepath.string());
+    std::filesystem::path synth_sdc_filepath;
+
+    if (synplify_mode == "speed"){
+      synth_sdc_filepath = QLSettingsManager::getSDCFilePath();
+
+      // if we have a valid sdc_file_path at this point, pass it on to vpr:
+      if(!synth_sdc_filepath.empty()) {
+        // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
+
+        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
+                                                                  std::string(" -constraint ") + 
+                                                                  synth_sdc_filepath.string());
+      }
+      else {
+        //std::cout << "synth sdc file not available." << std::endl;
+
+        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+      }
     }
-    else {
-      //std::cout << "synth sdc file not available." << std::endl;
-
-      synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+    else
+    {
+       synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
     }
 
     std::string synplify_script_path = ProjManager()->projectName() + ".prj";
@@ -5325,7 +5335,15 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     std::string token, signalName;
     iss >> token;
 
-    if (token != "set_io_side") continue;
+    if (token.empty()){
+      Message("Empty line found in QDC file. Skipping...\n");
+      continue; // Skip empty lines
+    }
+    
+    if (token != "set_io_side"){
+      ErrorMessage("Invalid QDC command. Expected 'set_io_side' command.");
+      return false;
+    }
 
     iss >> signalName;
     std::string side;
@@ -5366,7 +5384,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     bottomStr = std::string(" bottom:" + bottomStr);
 
   if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty()) {
-    Message("QDC file either does not contain a valid side or the side is empty, passing top side as the default value!\n");
+    ErrorMessage("QDC file either does not contain a valid side or the side is empty\n");
+    return false;
   }
   
   std::filesystem::path generate_floorplanning_script_path =
