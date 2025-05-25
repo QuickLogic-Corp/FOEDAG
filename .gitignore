@@ -79,3 +79,12 @@ third_party/tcl8.6.12/unix/tclConfig.sh
 third_party/tcl8.6.12/unix/tclsh
 third_party/tcl8.6.12/unix/configure
 gtkwaveTCL.tar.gz
+
+# MacOS generated files
+**/.DS_Store
+third_party/tcl8.6.12/unix/Tcl-Info.plist
+third_party/tcl8.6.12/unix/Tclsh-Info.plist
+third_party/tcl8.6.12/unix/libtcl8.6.dylib
+third_party/zlib/libz.1.2.11.dylib
+third_party/zlib/libz.1.dylib
+third_party/zlib/libz.dylib
