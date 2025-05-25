@@ -113,7 +113,8 @@ class FileUtils final {
 
   static std::string resolvePathStr(const std::string& pathStr);
 
-  static std::filesystem::path getExecutablePath();
+// should be removed, we have a better way with GlobalSession
+//   static std::filesystem::path getExecutablePath();
 
  private:
   FileUtils() = delete;
