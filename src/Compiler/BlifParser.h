@@ -65,6 +65,7 @@ public:
   std::shared_ptr<HierNode> load(const std::filesystem::path& filepath);
   std::shared_ptr<HierNode> parseLines(const std::vector<std::string>& lines);
   bool isFileChanged(const std::filesystem::path& filepath) const;
+  bool contains(const std::string& pattern);
 
 private:
   std::shared_ptr<HierNode> m_rootNodePtr;

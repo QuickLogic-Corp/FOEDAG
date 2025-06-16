@@ -5313,6 +5313,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
     return false;
   }
+
+  m_blifParser.load(netlist_path);
   
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
@@ -5330,31 +5332,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     {"bottom", &bottomSet}
   };
 
-  while (std::getline(infile, line)) {
-    std::istringstream iss(line);
-    std::string token, signalName;
-    iss >> token;
-
-    if (token.empty()){
-      Message("Empty line found in QDC file. Skipping...\n");
-      continue; // Skip empty lines
-    }
-    
-    if (token != "set_io_side"){
-      ErrorMessage("Invalid QDC command. Expected 'set_io_side' command.");
-      return false;
-    }
-
-    iss >> signalName;
-    std::string side;
-    while (iss >> side) {
-        std::transform(side.begin(), side.end(), side.begin(), ::tolower); 
-        auto it = sideMap.find(side);
-        if (it != sideMap.end()) {
-            it->second->insert(signalName); // insert avoids duplicates
-        }
-    }
-  }
+  std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
 
   // Convert sets to comma-separated strings
   auto setToString = [](const std::unordered_set<std::string>& set) {
@@ -5368,10 +5346,65 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       return result;
   };
 
+  while (std::getline(infile, line)) {
+    std::istringstream iss(line);
+    std::string token, signalName;
+    iss >> token;
+
+    if (token.empty()){
+      Message("Empty line found in QDC file. Skipping...\n");
+      continue; // Skip empty lines
+    }
+    
+    static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
+    if (supportedCommands.find(token) == supportedCommands.end()){
+      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + setToString(supportedCommands)+ "].");
+      return false;
+    }
+
+    if (token == "set_io_side") {
+      iss >> signalName;
+      std::string side;
+      while (iss >> side) {
+        StringUtils::toLower(side); 
+        auto it = sideMap.find(side);
+        if (it != sideMap.end()) {
+            it->second->insert(signalName); // insert avoids duplicates
+        }
+      }
+    } else if (token == "set_region") {
+      iss >> signalName;
+      std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
+      for (const std::string& pattern: patterns) {
+        if (!m_blifParser.contains(pattern)) {
+          ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
+          return false;
+        }
+      }
+
+      std::string region;
+      while (iss >> region) {
+        StringUtils::toLower(region);
+        if (regionMap.find(region) == regionMap.end()) {
+          regionMap[region] = {};
+        }
+        for (const std::string& pattern: patterns) {
+          regionMap[region].insert(pattern);
+        }
+      }
+    }
+  }
+
   std::string leftStr   = setToString(leftSet);
   std::string rightStr  = setToString(rightSet);
   std::string topStr    = setToString(topSet);
   std::string bottomStr = setToString(bottomSet);
+
+  std::string regionStr;
+  for (const auto& [region, patternsSet]: regionMap) {
+    regionStr += " " + region + "=" + setToString(patternsSet);
+  }
+  Message("~~~ regionStr=" + regionStr);
 
   // Output results
   if (!leftStr.empty())
@@ -5383,8 +5416,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   if (!bottomStr.empty())
     bottomStr = std::string(" bottom:" + bottomStr);
 
-  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty()) {
-    ErrorMessage("QDC file either does not contain a valid side or the side is empty\n");
+  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
+    ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
     return false;
   }
   
@@ -5421,7 +5454,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
                         netlistFile + " " + 
                         architectureFile + " " +
                         QLSettingsManager::getStringValue("general", "device", "layout") + 
-                        leftStr + rightStr + topStr + bottomStr + " " + 
+                        leftStr + rightStr + topStr + bottomStr + regionStr + " " + 
                         output_path); 
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();

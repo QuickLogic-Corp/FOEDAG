@@ -277,6 +277,14 @@ std::shared_ptr<HierNode> BlifParser::parseLines(const std::vector<std::string>&
     return m_rootNodePtr;
 }
 
+bool BlifParser::contains(const std::string& pattern)
+{
+    if (m_rootNodePtr) {
+        return m_rootNodePtr->contains(pattern); 
+    }
+    return false;
+}
+
 
 // test
 std::vector<std::string> getFakeBlifLines()
