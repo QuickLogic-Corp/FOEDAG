@@ -4692,41 +4692,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   Message( std::string("Using openfpga.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
 
   // call vpr to execute analysis
-  std::string vpr_options;
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-    vpr_options += std::string(" --net_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "net_file");
-  }
-  else {
-    vpr_options += std::string(" --net_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".net");
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-  }
-  else {
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".place");
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-  }
-  else {
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".route");
-  }
 
   std::string vpr_analysis_command = BaseVprCommand();
   if(vpr_analysis_command.empty()) {
@@ -4734,7 +4700,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     // empty string returned on error.
     return std::string("");
   }
-  vpr_analysis_command += vpr_options +
+  vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
 // route and analysis stages together
