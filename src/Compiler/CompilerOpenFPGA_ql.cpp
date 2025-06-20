@@ -2671,7 +2671,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommand() {
+std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2684,6 +2684,12 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     return std::string("");
   }
 
+  // if device_target is explicitly specified (STA does this):
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(device_target) ) {
+    device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  }
+
+  // this check continues as is for the original target device as specified in the JSON.
   if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
     ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
@@ -2940,14 +2946,14 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
 #endif // #if UPSTREAM_UNUSED
 
-  QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
   // use rr_graph and router_lookahead files, if available in the device data:
   std::filesystem::path rr_graph_file_path = 
-      QLDeviceManager::getInstance()->deviceVPRRRGraphFile();
+      QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
 
   std::filesystem::path router_lookahead_file_path = 
-      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile();
+      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
     vpr_options +=  " --read_rr_graph " +
@@ -2958,7 +2964,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
 
   m_architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
   if(m_architectureFile.empty()) {
 
     ErrorMessage("Cannot proceed without VPR Architecture file.");
@@ -2971,8 +2977,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     m_architectureFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -2987,7 +2993,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     }
   }
 
-  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
+  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
 
   // add the *internal* option to allow dangling nodes in the logic.
   // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
@@ -3763,6 +3769,55 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
 
+
+  // Check the STA specified device, and if it is different from the current target device
+  // explicitly ask to form the base vpr command using the specific variant instead of the
+  // current target device:
+  // currently we only expect the p_v_t_corner to be specified in JSON, but the code
+  // supports voltage_threshold also, if it is added to the JSON.
+  QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+  std::string current_device_sta_vt = "";
+  std::string current_device_sta_p_v_t_corner = "";
+  std::string sta_vpr_options = "";
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold").empty() ) {
+    current_device_sta_vt = QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold");
+  }
+  else {
+    current_device_sta_vt = current_device.device_variant.voltage_threshold;
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner").empty() ) {
+    current_device_sta_p_v_t_corner = QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner");
+  }
+  else {
+    current_device_sta_p_v_t_corner = current_device.device_variant.p_v_t_corner;
+  }
+
+  QLDeviceTarget current_device_sta = QLDeviceTarget();
+
+  if(current_device.device_variant.voltage_threshold != current_device_sta_vt ||
+     current_device.device_variant.p_v_t_corner != current_device_sta_p_v_t_corner) {
+
+    current_device_sta = 
+      QLDeviceManager::getInstance()->convertToDeviceTarget(current_device.device_variant.family,
+                                                            current_device.device_variant.foundry,
+                                                            current_device.device_variant.node,
+                                                            current_device.device_variant.devicename,
+                                                            current_device_sta_vt,
+                                                            current_device_sta_p_v_t_corner,
+                                                            current_device.device_variant_layout.name);
+    // As the architecture file for PnR will not match the architecture file for STA in this case,
+    // vpr will fail on verifying the file hashes, so explicitly ask vpr to ignore the 
+    // file hash checks.
+    // example error message:
+    // >> Netlist was generated from a different architecture file (loaded architecture ID: SHA256:f73c6dffee1739f500e80ed13797d3bb78fb14ef9904f06368c8c0a407205617, netlist file architecture ID: SHA256:af8742ca39cc2f748b691015adaef1561ea258f433904565b2f84e00954c9e87)
+    sta_vpr_options += " --verify_file_digests off";
+  }
+
+
+
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
@@ -3770,11 +3825,24 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    std::string command = BaseVprCommand() + " --route --analysis --disp on";
+    std::string taCommand = BaseVprCommand() + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::string command = BaseVprCommand() + " --analysis --disp on";
+    std::string taCommand = BaseVprCommand(current_device_sta) + " --analysis --disp on";
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      taCommand += std::string(" --route");
+    }
 #endif // #ifdef _WIN32
-    const int status = ExecuteAndMonitorSystemCommand(command);
+
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
+    }
+
+    const int status = ExecuteAndMonitorSystemCommand(taCommand);
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -3886,7 +3954,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
                     netlistFilePrefix + std::string(".route");
     }
 
-    taCommand = BaseVprCommand();
+    taCommand = BaseVprCommand(current_device_sta);
     if(taCommand.empty()) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
@@ -3902,15 +3970,32 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
       vpr_options += std::string(" ") + vpr_custom_options_string;
     }
 
-    taCommand += vpr_options +
-    #ifdef _WIN32
+    taCommand += vpr_options;
+
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
+    }
+    
+#ifdef _WIN32
+
     // under WIN32, running the analysis stage along causes issues, hence we call the
     // route and analysis stages together
-                std::string(" ") + 
-                std::string("--route") +
-    #endif // #ifdef _WIN32
-                std::string(" ") + 
-                std::string("--analysis");
+    taCommand += std::string(" --route");
+
+#else // #ifdef _WIN32
+
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      taCommand += std::string(" --route");
+    }
+
+#endif // #ifdef _WIN32
+
+    taCommand += std::string(" --analysis");
 
     std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
                         std::string(ProjManager()->projectName() + "_sta.cmd"))
