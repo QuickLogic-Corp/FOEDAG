@@ -3833,8 +3833,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     // due to mismatch in switch blocks, which needs to be fixed yet.
     // https://github.com/QL-Proprietary/aurora2/issues/1267
     // Until this is fixed, we need to run the route and analysis stages together.
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      taCommand += std::string(" --route");
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
     }
 #endif // #ifdef _WIN32
 
@@ -3989,8 +3991,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     // due to mismatch in switch blocks, which needs to be fixed yet.
     // https://github.com/QL-Proprietary/aurora2/issues/1267
     // Until this is fixed, we need to run the route and analysis stages together.
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      taCommand += std::string(" --route");
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
     }
 
 #endif // #ifdef _WIN32
