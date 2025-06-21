@@ -5402,7 +5402,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   std::string regionStr;
   for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += " " + region + "=" + setToString(patternsSet);
+    regionStr += " region:" + region + "=" + setToString(patternsSet);
   }
   Message("~~~ regionStr=" + regionStr);
 
