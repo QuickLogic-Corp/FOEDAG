@@ -1996,6 +1996,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
+
+          // include au file for copy (.bitstream_enable.au etc.)
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                std::regex(".+\\.au",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
       }
 
       if(ec) {
