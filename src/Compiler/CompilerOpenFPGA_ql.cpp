@@ -4656,6 +4656,37 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     }
   }
 
+
+  // [optional] bitstream remapping file
+  m_OpenFpgaBitstreamRemappingFile = 
+      QLDeviceManager::getInstance()->deviceOpenFPGABitstreamRemappingFile();
+
+  if(!m_OpenFpgaBitstreamRemappingFile.empty()) {
+
+      if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_OpenFpgaBitstreamRemappingFile)) {
+      
+      std::filesystem::path bitstream_remapping_xml_en_path = m_OpenFpgaBitstreamRemappingFile;
+      m_OpenFpgaBitstreamRemappingFile = GenerateTempFilePath();
+
+      m_cryptdbPath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
+
+      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+        Message("load cryptdb failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
+
+      if (!CRFileCryptProc::getInstance()->decryptFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile)) {
+        ErrorMessage("decryption failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
+    }
+  }
+
+
   Message( std::string("Using openfpga.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
 
   // call vpr to execute analysis
@@ -4854,6 +4885,28 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
         ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}",
                    "--load_fabric_key " + m_OpenFpgaFabricKeyFile.string());
   }
+
+  // bitstream_remapping is optional. and if it exists:
+  // build_reordered_fabric_bitstream --reorder_map bitstream_remapping.xml --file reordered_bitstream.bin
+  // write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit
+  // write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml
+  if (m_OpenFpgaBitstreamRemappingFile.empty()) {
+    result = ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}", std::string("#skipped"));
+    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}",
+                                std::string("write_fabric_bitstream --format plain_text --file fabric_bitstream.bit"));
+    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}",
+                                std::string("write_fabric_bitstream --format xml --file fabric_bitstream.xml"));
+  } else {
+    result =
+        ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}",
+                   std::string("build_reordered_fabric_bitstream --reorder_map ") + m_OpenFpgaBitstreamRemappingFile.string() +
+                   std::string(" --file reordered_bitstream.bin"));
+        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}", 
+                                    std::string("write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit"));
+        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}", 
+                                    std::string("write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml"));
+  }
+
 
   // call openfpga to output the fpga_io_map XML file *always*
   // write_fabric_io_info --file ${OPENFPGA_IO_MAP_FILE} --verbose
