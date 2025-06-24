@@ -5224,17 +5224,17 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   std::string script = qlOpenFPGApcf2placeScript;
   script = ReplaceAll(script, "${OPENFPGA_PCF2PLACE_COMMAND}", openfpga_pcf2place_command);
   
-  std::string pin_constaints_openfpga_script_name = ProjManager()->projectName() + 
+  std::string pin_constraints_openfpga_script_name = ProjManager()->projectName() +
                                                     std::string("_pinconstraints") + 
                                                     std::string(".openfpga");
   std::string command = m_openFpgaExecutablePath.string() + 
                         std::string(" -f") +
                         std::string(" ") +
-                        pin_constaints_openfpga_script_name;
+                        pin_constraints_openfpga_script_name;
 
   // Create OpenFpga command and execute
   std::filesystem::path script_path =
-      (std::filesystem::path(ProjManager()->projectPath()) / pin_constaints_openfpga_script_name)
+      (std::filesystem::path(ProjManager()->projectPath()) / pin_constraints_openfpga_script_name)
           .string();
   std::ofstream sofs(script_path);
   sofs << script;
