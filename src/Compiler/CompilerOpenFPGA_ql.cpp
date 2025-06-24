@@ -5353,7 +5353,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
     if (token.empty()){
       Message("Empty line found in QDC file. Skipping...\n");
-      continue; // Skip empty lines
+      continue; // Skip empty line
+    }
+
+    if (token.find("#") == 0) {
+      Message("Commented line found in QDC file. Skipping...\n");
+      continue; // Skip commented line
     }
     
     static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
