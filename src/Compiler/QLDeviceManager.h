@@ -200,6 +200,7 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceVPRRouterLookaheadFile(QLDeviceTarget device_target = QLDeviceTarget());
 
   // future use (not file access APIs, but used together with them)
+  QLDeviceType deviceTypeTreeElement(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::string> deviceCorners(QLDeviceTarget device_target);
   std::vector<std::filesystem::path> deviceCornerPowerDataFiles(QLDeviceTarget device_target);
 

@@ -3631,6 +3631,32 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
 }
 
 
+QLDeviceType QLDeviceManager::deviceTypeTreeElement(QLDeviceTarget device_target) {
+
+  QLDeviceType devicetype = QLDeviceType();
+
+  std::string device_string = convertToDeviceString(device_target);
+
+  for (QLDeviceType device: device_list) {
+    for (QLDeviceVariant device_variant: device.device_variants) {
+      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
+        std::string current_device_string = DeviceString(device_variant.family,
+                                                         device_variant.foundry,
+                                                         device_variant.node,
+                                                         device_variant.devicename,
+                                                         device_variant.voltage_threshold,
+                                                         device_variant.p_v_t_corner,
+                                                         device_variant_layout.name);
+        if(current_device_string == device_string) {
+          return device;
+        }
+      }
+    }
+  }
+
+  return devicetype;
+}
+
   // future use (not file access APIs, but used together with them)
 std::vector<std::string> QLDeviceManager::deviceCorners(QLDeviceTarget device_target) {
 
