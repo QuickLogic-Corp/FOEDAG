@@ -67,6 +67,12 @@ public:
   bool isFileChanged(const std::filesystem::path& filepath) const;
   bool contains(const std::string& pattern);
 
+  void printHierachy() {
+    if (m_rootNodePtr) {
+      m_rootNodePtr->printTree();
+    }
+  }
+
 private:
   std::shared_ptr<HierNode> m_rootNodePtr;
 };

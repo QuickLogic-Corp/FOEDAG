@@ -5315,6 +5315,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   }
 
   m_blifParser.load(netlist_path);
+  m_blifParser.printHierachy();
   
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
@@ -5347,20 +5348,22 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   };
 
   while (std::getline(infile, line)) {
-    std::istringstream iss(line);
-    std::string token, signalName;
-    iss >> token;
+    line = StringUtils::trim(line);
 
-    if (token.empty()){
+    // drop comment part
+    if (auto pos = line.find("#"); pos != std::string::npos) {
+      line = line.substr(0, pos); // drop commented part of line
+    }
+
+    if (line.empty()){
       Message("Empty line found in QDC file. Skipping...\n");
       continue; // Skip empty line
     }
 
-    if (token.find("#") == 0) {
-      Message("Commented line found in QDC file. Skipping...\n");
-      continue; // Skip commented line
-    }
-    
+    std::istringstream iss(line);
+    std::string token, signalName;
+    iss >> token;
+   
     static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
     if (supportedCommands.find(token) == supportedCommands.end()){
       ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + setToString(supportedCommands)+ "].");
