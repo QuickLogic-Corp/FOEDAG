@@ -18,6 +18,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 #include "BlifParser.h"
 
 #include <sstream>
@@ -25,37 +26,87 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <iostream>
 #include <regex>
 #include <cassert>
+#include <unordered_set>
 
 namespace FOEDAG {
 
 HierNode::HierNode(const std::string& name): m_name{name} 
 {
-    //std::cout << "HierNode(" << name << ")" << std::endl;
 }
 
 HierNode::~HierNode() 
 {
-    //std::cout << "~HierNode(" << m_name << ")" << std::endl;
     for (auto& [name, child]: m_children) {
         delete child;
     }
 }
 
-bool HierNode::contains(const std::string& full_name) 
+std::vector<std::string> HierNode::findMatchingNames(const std::string& pattern)
 {
-    bool has_match = false;
-    for (const auto& [name, node]: getChildren()) {
-        std::string copy_full_name = full_name;
-        if (node->containsRecursive(copy_full_name)) {
-            has_match = true;
+    std::vector<std::string> names;
+    std::vector<std::string> parts = splitHierarchy(pattern);
+
+    if (parts.empty()) {
+        return names;
+    }
+
+    const std::string& first = parts[0];
+    for (const auto& [name, child] : m_children) {
+        if (matches(name, first)) {
+            std::string path = name;
+            if (parts.size() == 1 && (parts[0] == "*")) {
+                collectAllLeafPaths("", names);
+                break;
+            } else {
+                child->expandRecursive(parts, 1, path, names);
+            }
         }
     }
-    return has_match;
+
+    return names;
 }
 
-void HierNode::insert(const std::string& full_name) 
+void HierNode::expandRecursive(const std::vector<std::string>& parts, std::size_t index,
+                               const std::string& path, std::vector<std::string>& names) const
 {
-    auto parts = splitHierarchy(full_name);
+    if (index >= parts.size()) {
+        return;
+    }
+
+    const std::string& pattern = parts[index];
+
+    for (const auto& [name, child]: m_children) {
+        if (!matches(name, pattern)) {
+            continue;
+        }
+
+        std::string fullPath = path.empty()? name: path + "." + name;
+
+        if (index == parts.size() - 1) {
+            // handle last segment of pattern, by collecting all leafs below
+            child->collectAllLeafPaths(fullPath, names);
+        } else {
+            // continue recursion
+            child->expandRecursive(parts, index + 1, fullPath, names);
+        }
+    }
+}
+
+void HierNode::collectAllLeafPaths(const std::string& path, std::vector<std::string>& names) const {
+    if (isLeaf()) {
+        names.push_back(path);
+        return;
+    }
+
+    for (const auto& [name, child] : m_children) {
+        std::string fullPath = path.empty() ? name : path + "." + name;
+        child->collectAllLeafPaths(fullPath, names);
+    }
+}
+
+void HierNode::insert(const std::string& fullName)
+{
+    auto parts = splitHierarchy(fullName);
     HierNode* node = this;
     for (const std::string& part: parts) {
         node = node->getOrCreateChild(part);
@@ -78,7 +129,7 @@ std::vector<std::string> HierNode::splitHierarchy(const std::string& name) const
     return parts;
 }
 
-std::vector<HierNode*> HierNode::findChildren(const std::string& wildCardPattern) const 
+std::vector<HierNode*> HierNode::findChildren(const std::string& wildCardPattern) const
 {
     std::vector<HierNode*> result;
 
@@ -89,15 +140,6 @@ std::vector<HierNode*> HierNode::findChildren(const std::string& wildCardPattern
     }
 
     return result;
-}
-
-HierNode* HierNode::getChild(const std::string& name) const 
-{
-    if (auto it = m_children.find(name); it != m_children.end()) {
-        return it->second;
-    }
-
-    return nullptr;
 }
 
 HierNode* HierNode::getOrCreateChild(const std::string& name) 
@@ -111,93 +153,60 @@ HierNode* HierNode::getOrCreateChild(const std::string& name)
 void HierNode::printTreeRecursive(const HierNode* node, int depth) 
 {
     std::string indent(depth * 2, ' ');
-    if (node->hasChildren()) {
-        std::cout << indent << node->getName() << "/" << std::endl;
-    } else {
+    if (node->isLeaf()) {
         std::cout << indent << node->getName() << std::endl;
+    } else {
+        std::cout << indent << node->getName() << "/" << std::endl;
     }
-    for (const auto& [name, child] : node->getChildren()) {
+    for (const auto& [name, child]: node->getChildren()) {
         printTreeRecursive(child, depth + 1);
     }
 }
 
-std::string HierNode::wildcardToRegex(const std::string& pattern) const 
+std::string HierNode::wildcardToRegex(const std::string& pattern)
 {
-    std::string regex_pattern;
-    regex_pattern += "^";
+    std::string regexPattern;
+    regexPattern += "^";
     for (char c : pattern) {
         switch (c) {
-        case '*': regex_pattern += ".*"; break;
-        case '.': regex_pattern += "\\."; break;
-        case '^': regex_pattern += "\\^"; break;
-        case '$': regex_pattern += "\\$"; break;
-        case '|': regex_pattern += "\\|"; break;
-        case '(': regex_pattern += "\\("; break;
-        case ')': regex_pattern += "\\)"; break;
-        case '[': regex_pattern += "\\["; break;
-        case ']': regex_pattern += "\\]"; break;
-        case '{': regex_pattern += "\\{"; break;
-        case '}': regex_pattern += "\\}"; break;
-        case '?': regex_pattern += "\\?"; break;
-        case '+': regex_pattern += "\\+"; break;
-        case '\\': regex_pattern += "\\\\"; break;
-        default: regex_pattern += c; break;
+        case '*': regexPattern += ".*"; break;
+        case '.': regexPattern += "\\."; break;
+        case '^': regexPattern += "\\^"; break;
+        case '$': regexPattern += "\\$"; break;
+        case '|': regexPattern += "\\|"; break;
+        case '(': regexPattern += "\\("; break;
+        case ')': regexPattern += "\\)"; break;
+        case '[': regexPattern += "\\["; break;
+        case ']': regexPattern += "\\]"; break;
+        case '{': regexPattern += "\\{"; break;
+        case '}': regexPattern += "\\}"; break;
+        case '?': regexPattern += "\\?"; break;
+        case '+': regexPattern += "\\+"; break;
+        case '\\': regexPattern += "\\\\"; break;
+        default: regexPattern += c; break;
         }
     }
-    regex_pattern += "$";
-    return regex_pattern;
+    regexPattern += "$";
+    return regexPattern;
 }
 
-bool HierNode::matchesWildcard(const std::string& text, const std::string& pattern) const 
-{
-    std::regex regex(wildcardToRegex(pattern));
-    return std::regex_match(text, regex);
-}
-
-std::string HierNode::popFirstSegment(std::string& str) 
-{
-    std::string firstSegment;
-    size_t pos = str.find('.');
-    if (pos == std::string::npos) {
-        firstSegment = str;
-        str.clear();
-    } else {
-        firstSegment = str.substr(0, pos);
-        str = str.substr(pos + 1);
-    }
-    return firstSegment;
-}
-
-std::string HierNode::getFirstSegment(const std::string& str) 
-{
-    std::string firstSegment;
-    size_t pos = str.find('.');
-    if (pos == std::string::npos) {
-        firstSegment = str;
-    } else {
-        firstSegment = str.substr(0, pos);
-    }
-    return firstSegment;
-}
-
-bool HierNode::containsRecursive(std::string& full_name) 
-{
-    std::string segment = popFirstSegment(full_name);
-
-    if (!matches(getName(), segment)) {
+bool HierNode::containsPath(const std::vector<std::string>& parts, std::size_t index) const {
+    if (index >= parts.size()) {
         return false;
     }
 
-    if (full_name.empty()) {
-        return true;
+    const std::string& current = parts[index];
+    if (!matches(getName(), current)) {
+        return false;
     }
 
-    std::string next_segment = getFirstSegment(full_name);
-    std::vector<HierNode*> children = findChildren(next_segment);
+    if (index == parts.size() - 1) {
+        return true;  // full match
+    }
 
-    for (HierNode* child : children) {
-        std::string full_name_copy = full_name;
-        if (child->containsRecursive(full_name_copy)) {
+    const std::string& next = parts[index + 1];
+    for (HierNode* child : findChildren(next)) {
+        if (child->containsPath(parts, index + 1)) {
             return true;
         }
     }
@@ -210,10 +219,19 @@ bool HierNode::matches(const std::string& name, const std::string& pattern) cons
     if (pattern == "*") {
         return true;
     } else if (pattern.find("*") != std::string::npos) {
-        return matchesWildcard(name, pattern);
+        std::regex regex(wildcardToRegex(pattern));
+        return std::regex_match(name, regex);
     } else {
         return (name == pattern);
     }
+}
+
+std::vector<std::string> BlifParser::findMatchingNames(const std::string& pattern)
+{
+    if (m_rootNodePtr) {
+        return m_rootNodePtr->findMatchingNames(pattern);
+    }
+    return {};
 }
 
 bool BlifParser::isFileChanged(const std::filesystem::path& filepath) const
@@ -262,8 +280,8 @@ std::shared_ptr<HierNode> BlifParser::parseLines(const std::vector<std::string>&
                 while (iss >> token) {
                     auto eq = token.find('=');
                     if (eq != std::string::npos) {
-                        std::string full_name = token.substr(eq + 1);
-                        m_rootNodePtr->insert(full_name);
+                        std::string fullName = token.substr(eq + 1);
+                        m_rootNodePtr->insert(fullName);
                     }
                 }
             } else if (token == ".names") {
@@ -277,21 +295,16 @@ std::shared_ptr<HierNode> BlifParser::parseLines(const std::vector<std::string>&
     return m_rootNodePtr;
 }
 
-bool BlifParser::contains(const std::string& pattern)
-{
-    if (m_rootNodePtr) {
-        return m_rootNodePtr->contains(pattern); 
-    }
-    return false;
-}
+#ifdef TEST_BLIFLOADER
 
+namespace {
 
-// test
 std::vector<std::string> getFakeBlifLines()
 {
     std::vector<std::string> lines = {
         ".subckt sdffre C=clk D=do_sdffre_Q_D E=$true Q=do R=$true",
-        ".names ld dut.u0.u0.d[6] dut.u0.w[0][30] dut.u0.r0.out[30] dut.key[126] dut.u0.w[0]_sdffre_Q_1_D"
+        ".names d.l.l[0] d.l.l[1] d.z.l dut.u0.z0.d[4] dut.u0.z0.d[5] dut.u1.z1.d[4] dut.u2.z2.d[4]",
+        ".names ld dut.u0.z0.d[6] dut.u0.w[0][30] dut.u0.w[0][31] dut.u0.w[0][32] dut.u0.w[1][30] dut.u0.w[1][31] dut.u0.r0.out[30] dut.key[126] dut.u0.w[0]_sdffre_Q_1_D"
     };
     return lines;
 }
@@ -301,6 +314,46 @@ void expect_equal(bool expected, bool actual)
     assert(actual == expected);
 }
 
+
+std::vector<std::string> diff(const std::vector<std::string>& expected, const std::vector<std::string>& actual) {
+    std::unordered_set<std::string> actualSet(actual.begin(), actual.end());
+    std::vector<std::string> missing;
+
+    for (const auto& expectedItem : expected) {
+        if (std::find(actual.begin(), actual.end(), expectedItem) == actual.end()) {
+            missing.push_back(expectedItem);
+        }
+    }
+    return missing;
+}
+
+void print_vector(const std::string& label, const std::vector<std::string>& v)
+{
+    std::cout << label << ": ";
+    for (const std::string& e: v) {
+        std::cout << e << ",";
+    }
+    std::cout << std::endl;
+}
+
+void expect_equal(const std::vector<std::string>& expected, const std::vector<std::string>& actual)
+{
+    auto missing = diff(expected, actual);
+    if (!missing.empty()) {
+        print_vector("missing elements", missing);
+    }
+    assert(missing.empty() && (expected.size() == actual.size()));
+}
+
+void find(const std::string& pattern, const std::shared_ptr<HierNode>& node, const std::vector<std::string>& expected)
+{
+    auto found = node->findMatchingNames(pattern);
+    print_vector(pattern, found);
+    expect_equal(expected, found);
+}
+
+} // namespace
+
 void run_blif_test()
 {
     std::shared_ptr<HierNode> rootNode = BlifParser().parseLines(getFakeBlifLines());
@@ -308,17 +361,30 @@ void run_blif_test()
         rootNode->printTree();
     }
 
-    expect_equal(true, rootNode->contains("dut.u0.u0.d[6]"));
-    expect_equal(true, rootNode->contains("dut.u0.u0.*"));
-    expect_equal(true, rootNode->contains("dut.*.u0.d[6]"));
-    expect_equal(true, rootNode->contains("dut.u*.u*.d[6]"));
-    expect_equal(true, rootNode->contains("dut.u*.u*.d[*]"));
-    expect_equal(true, rootNode->contains("dut.*"));
+    find("dut.u*.z*.d[*]", rootNode, {"dut.u0.z0.d[4]", "dut.u0.z0.d[5]", "dut.u0.z0.d[6]", "dut.u1.z1.d[4]", "dut.u2.z2.d[4]"});
+    find("dut.u0.z0.*", rootNode, {"dut.u0.z0.d[4]", "dut.u0.z0.d[5]", "dut.u0.z0.d[6]"});
+    find("dut.u0.z0.d[6]", rootNode, {"dut.u0.z0.d[6]"});
+    find("dut.u0.w*", rootNode, {"dut.u0.w[0][30]", "dut.u0.w[0][31]", "dut.u0.w[0][32]", "dut.u0.w[0]_sdffre_Q_1_D", "dut.u0.w[1][30]", "dut.u0.w[1][31]"});
+    find("dut.u0.w[0][*]", rootNode, {"dut.u0.w[0][30]", "dut.u0.w[0][31]", "dut.u0.w[0][32]"});
+    find("dut.u0.w[1][*]", rootNode, {"dut.u0.w[1][30]", "dut.u0.w[1][31]"});
+    find("dut.u0.w[*][*]", rootNode, {"dut.u0.w[0][30]", "dut.u0.w[0][31]", "dut.u0.w[0][32]", "dut.u0.w[1][30]", "dut.u0.w[1][31]"});
+    find("dut.u0.w[*][30]", rootNode, {"dut.u0.w[0][30]", "dut.u0.w[1][30]"});
+    find("dut.u0.*", rootNode, {"dut.u0.r0.out[30]","dut.u0.w[0][30]","dut.u0.w[0][31]","dut.u0.w[0][32]","dut.u0.w[0]_sdffre_Q_1_D","dut.u0.w[1][30]","dut.u0.w[1][31]","dut.u0.z0.d[4]","dut.u0.z0.d[5]","dut.u0.z0.d[6]"});
+    find("d.*", rootNode, {"d.l.l[0]","d.l.l[1]","d.z.l"});
+    find("dut.u*", rootNode, {"dut.u0.r0.out[30]","dut.u0.w[0][30]","dut.u0.w[0][31]","dut.u0.w[0][32]","dut.u0.w[0]_sdffre_Q_1_D","dut.u0.w[1][30]","dut.u0.w[1][31]","dut.u0.z0.d[4]","dut.u0.z0.d[5]","dut.u0.z0.d[6]","dut.u1.z1.d[4]","dut.u2.z2.d[4]"});
 
-    expect_equal(false, rootNode->contains("dut.u0.u0.d[7]"));
-    expect_equal(false, rootNode->contains("dut.u.u0.d[6]"));
-    expect_equal(false, rootNode->contains("du.u0.u0.d[6]"));
+    // attempt to find absent node
+    find("dut.u0.z0.d[7]", rootNode, {});
+    find("dut.u.z0.d[6]", rootNode, {});
+    find("du.u0.z0.d[6]", rootNode, {});
+
+    auto found = rootNode->findMatchingNames("dut.*");
+    print_vector("dut.*", found);
+
+    found = rootNode->findMatchingNames("*");
+    print_vector("*", found);
 }
-//
+
+#endif 
 
 }  // namespace FOEDAG

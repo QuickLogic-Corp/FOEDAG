@@ -33,13 +33,13 @@ public:
   HierNode(const std::string& name = "");
   ~HierNode();
 
-  bool hasChildren() const { return !m_children.empty(); }
+  bool isLeaf() const { return m_children.empty(); }
 
   const std::string& getName() const { return m_name; }
-  const std::map<std::string, HierNode*>& getChildren() const { return m_children; }
 
-  bool contains(const std::string& full_name);
-  void insert(const std::string& full_name);
+  std::vector<std::string> findMatchingNames(const std::string& pattern);
+
+  void insert(const std::string& fullName);
 
   void printTree();
 
@@ -49,23 +49,27 @@ private:
 
   std::vector<std::string> splitHierarchy(const std::string& name) const;
   std::vector<HierNode*> findChildren(const std::string& wildCardPattern) const;
-  HierNode* getChild(const std::string& name) const;
   HierNode* getOrCreateChild(const std::string& name);
-  void printTreeRecursive(const HierNode* node, int depth = 0);
-  std::string wildcardToRegex(const std::string& pattern) const;
-  bool matchesWildcard(const std::string& text, const std::string& pattern) const;
-  std::string popFirstSegment(std::string& str);
-  std::string getFirstSegment(const std::string& str);
-  bool containsRecursive(std::string& full_name);
+  static std::string wildcardToRegex(const std::string& pattern);
+  bool containsPath(const std::vector<std::string>& parts, std::size_t index = 0) const;
+  void expandRecursive(const std::vector<std::string>& parts, std::size_t index,
+                                 const std::string& path, std::vector<std::string>& names) const;
+  void collectAllLeafPaths(const std::string& path, std::vector<std::string>& names) const;
   bool matches(const std::string& name, const std::string& pattern) const;
+
+  const std::map<std::string, HierNode*>& getChildren() const { return m_children; }
+
+  // debug hierarchy
+  void printTreeRecursive(const HierNode* node, int depth = 0);
 };
 
 class BlifParser {
 public:
+  std::vector<std::string> findMatchingNames(const std::string& pattern);
+
   std::shared_ptr<HierNode> load(const std::filesystem::path& filepath);
   std::shared_ptr<HierNode> parseLines(const std::vector<std::string>& lines);
   bool isFileChanged(const std::filesystem::path& filepath) const;
-  bool contains(const std::string& pattern);
 
   void printHierachy() {
     if (m_rootNodePtr) {
@@ -77,6 +81,8 @@ private:
   std::shared_ptr<HierNode> m_rootNodePtr;
 };
 
+#ifdef TEST_BLIFLOADER
 void run_blif_test();
+#endif
 
 }  // namespace FOEDAG

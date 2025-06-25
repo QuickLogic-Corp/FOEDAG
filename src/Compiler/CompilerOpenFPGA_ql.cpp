@@ -5382,11 +5382,17 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       }
     } else if (token == "set_region") {
       iss >> signalName;
+      std::vector<std::string> elements;
       std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
       for (const std::string& pattern: patterns) {
-        if (!m_blifParser.contains(pattern)) {
+        std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
+        if (patternElements.empty()) {
           ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
           return false;
+        } else {
+          elements.insert(elements.end(),
+              std::make_move_iterator(patternElements.begin()),
+              std::make_move_iterator(patternElements.end()));
         }
       }
 
@@ -5396,8 +5402,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
         if (regionMap.find(region) == regionMap.end()) {
           regionMap[region] = {};
         }
-        for (const std::string& pattern: patterns) {
-          regionMap[region].insert(pattern);
+        for (const std::string& element: elements) {
+          regionMap[region].insert(element);
         }
       }
     }
