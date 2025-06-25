@@ -236,8 +236,7 @@ std::vector<std::string> BlifParser::findMatchingNames(const std::string& patter
 
 bool BlifParser::isFileChanged(const std::filesystem::path& filepath) const
 {
-    /* TODO: check md5sum of file content read previously with the current attempt */
-    return true;
+    return m_lastWriteTime != std::filesystem::last_write_time(filepath);
 }
 
 std::shared_ptr<HierNode> BlifParser::load(const std::filesystem::path& filepath) 
@@ -261,6 +260,7 @@ std::shared_ptr<HierNode> BlifParser::load(const std::filesystem::path& filepath
             lines.push_back(std::move(line));
         }
         m_rootNodePtr = parseLines(lines);
+        m_lastWriteTime = std::filesystem::last_write_time(filepath);
     }    
 
     return m_rootNodePtr;
