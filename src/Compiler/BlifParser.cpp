@@ -30,18 +30,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
-HierNode::HierNode(const std::string& name): m_name{name} 
+BlifNode::BlifNode(const std::string& name): m_name{name}
 {
 }
 
-HierNode::~HierNode() 
+BlifNode::~BlifNode()
 {
     for (auto& [name, child]: m_children) {
         delete child;
     }
 }
 
-std::vector<std::string> HierNode::findMatchingNames(const std::string& pattern)
+std::vector<std::string> BlifNode::findMatchingNames(const std::string& pattern)
 {
     std::vector<std::string> names;
     std::vector<std::string> parts = splitHierarchy(pattern);
@@ -66,7 +66,7 @@ std::vector<std::string> HierNode::findMatchingNames(const std::string& pattern)
     return names;
 }
 
-void HierNode::expandRecursive(const std::vector<std::string>& parts, std::size_t index,
+void BlifNode::expandRecursive(const std::vector<std::string>& parts, std::size_t index,
                                const std::string& path, std::vector<std::string>& names) const
 {
     if (index >= parts.size()) {
@@ -95,7 +95,7 @@ void HierNode::expandRecursive(const std::vector<std::string>& parts, std::size_
     }
 }
 
-void HierNode::collectAllLeafPaths(const std::string& path, std::vector<std::string>& names) const {
+void BlifNode::collectAllLeafPaths(const std::string& path, std::vector<std::string>& names) const {
     if (isLeaf()) {
         names.push_back(path);
         return;
@@ -107,21 +107,21 @@ void HierNode::collectAllLeafPaths(const std::string& path, std::vector<std::str
     }
 }
 
-void HierNode::insert(const std::string& fullName)
+void BlifNode::insert(const std::string& fullName)
 {
     auto parts = splitHierarchy(fullName);
-    HierNode* node = this;
+    BlifNode* node = this;
     for (const std::string& part: parts) {
         node = node->getOrCreateChild(part);
     }
 }
 
-void HierNode::printTree() 
+void BlifNode::printTree()
 {
     printTreeRecursive(this);
 }
 
-std::vector<std::string> HierNode::splitHierarchy(const std::string& name) const 
+std::vector<std::string> BlifNode::splitHierarchy(const std::string& name) const
 {
     std::vector<std::string> parts;
     std::stringstream ss(name);
@@ -132,9 +132,9 @@ std::vector<std::string> HierNode::splitHierarchy(const std::string& name) const
     return parts;
 }
 
-std::vector<HierNode*> HierNode::findChildren(const std::string& wildCardPattern) const
+std::vector<BlifNode*> BlifNode::findChildren(const std::string& wildCardPattern) const
 {
-    std::vector<HierNode*> result;
+    std::vector<BlifNode*> result;
 
     for (const auto& [name, child]: m_children) {
         if (matches(child->getName(), wildCardPattern)) {
@@ -145,15 +145,15 @@ std::vector<HierNode*> HierNode::findChildren(const std::string& wildCardPattern
     return result;
 }
 
-HierNode* HierNode::getOrCreateChild(const std::string& name) 
+BlifNode* BlifNode::getOrCreateChild(const std::string& name)
 {
     if (!m_children.count(name)) {
-        m_children[name] = new HierNode{name};
+        m_children[name] = new BlifNode{name};
     }
     return m_children[name];
 }
 
-void HierNode::printTreeRecursive(const HierNode* node, int depth) 
+void BlifNode::printTreeRecursive(const BlifNode* node, int depth)
 {
     std::string indent(depth * 2, ' ');
     if (node->isLeaf()) {
@@ -166,7 +166,7 @@ void HierNode::printTreeRecursive(const HierNode* node, int depth)
     }
 }
 
-std::string HierNode::wildcardToRegex(const std::string& pattern)
+std::string BlifNode::wildcardToRegex(const std::string& pattern)
 {
     std::string regexPattern;
     regexPattern += "^";
@@ -193,7 +193,7 @@ std::string HierNode::wildcardToRegex(const std::string& pattern)
     return regexPattern;
 }
 
-bool HierNode::containsPath(const std::vector<std::string>& parts, std::size_t index) const {
+bool BlifNode::containsPath(const std::vector<std::string>& parts, std::size_t index) const {
     if (index >= parts.size()) {
         return false;
     }
@@ -208,7 +208,7 @@ bool HierNode::containsPath(const std::vector<std::string>& parts, std::size_t i
     }
 
     const std::string& next = parts[index + 1];
-    for (HierNode* child : findChildren(next)) {
+    for (BlifNode* child : findChildren(next)) {
         if (child->containsPath(parts, index + 1)) {
             return true;
         }
@@ -217,7 +217,7 @@ bool HierNode::containsPath(const std::vector<std::string>& parts, std::size_t i
     return false;
 }
 
-bool HierNode::matches(const std::string& name, const std::string& pattern) const 
+bool BlifNode::matches(const std::string& name, const std::string& pattern) const
 {
     if (pattern == "*") {
         return true;
@@ -242,7 +242,7 @@ bool BlifParser::isFileChanged(const std::filesystem::path& filepath) const
     return m_lastWriteTime != std::filesystem::last_write_time(filepath);
 }
 
-std::shared_ptr<HierNode> BlifParser::load(const std::filesystem::path& filepath) 
+std::shared_ptr<BlifNode> BlifParser::load(const std::filesystem::path& filepath)
 {
     if (!std::filesystem::exists(filepath)) {
         return nullptr;
@@ -269,9 +269,9 @@ std::shared_ptr<HierNode> BlifParser::load(const std::filesystem::path& filepath
     return m_rootNodePtr;
 }
 
-std::shared_ptr<HierNode> BlifParser::parseLines(const std::vector<std::string>& lines) 
+std::shared_ptr<BlifNode> BlifParser::parseLines(const std::vector<std::string>& lines)
 {
-    m_rootNodePtr = std::make_shared<HierNode>();
+    m_rootNodePtr = std::make_shared<BlifNode>();
 
     for (const std::string& line: lines) {
         if (line.empty()) continue;
@@ -348,7 +348,7 @@ void expect_equal(const std::vector<std::string>& expected, const std::vector<st
     assert(missing.empty() && (expected.size() == actual.size()));
 }
 
-void find(const std::string& pattern, const std::shared_ptr<HierNode>& node, const std::vector<std::string>& expected)
+void find(const std::string& pattern, const std::shared_ptr<BlifNode>& node, const std::vector<std::string>& expected)
 {
     auto found = node->findMatchingNames(pattern);
     print_vector(pattern, found);
@@ -359,7 +359,7 @@ void find(const std::string& pattern, const std::shared_ptr<HierNode>& node, con
 
 void run_blif_test()
 {
-    std::shared_ptr<HierNode> rootNode = BlifParser().parseLines(getFakeBlifLines());
+    std::shared_ptr<BlifNode> rootNode = BlifParser().parseLines(getFakeBlifLines());
     if (rootNode) {
         rootNode->printTree();
     }

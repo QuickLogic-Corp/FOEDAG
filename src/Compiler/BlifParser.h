@@ -28,10 +28,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
-class HierNode {
+class BlifNode {
 public:
-  HierNode(const std::string& name = "");
-  ~HierNode();
+  BlifNode(const std::string& name = "");
+  ~BlifNode();
 
   bool isLeaf() const { return m_children.empty(); }
 
@@ -45,11 +45,11 @@ public:
 
 private:
   std::string m_name;
-  std::map<std::string, HierNode*> m_children;
+  std::map<std::string, BlifNode*> m_children;
 
   std::vector<std::string> splitHierarchy(const std::string& name) const;
-  std::vector<HierNode*> findChildren(const std::string& wildCardPattern) const;
-  HierNode* getOrCreateChild(const std::string& name);
+  std::vector<BlifNode*> findChildren(const std::string& wildCardPattern) const;
+  BlifNode* getOrCreateChild(const std::string& name);
   static std::string wildcardToRegex(const std::string& pattern);
   bool containsPath(const std::vector<std::string>& parts, std::size_t index = 0) const;
   void expandRecursive(const std::vector<std::string>& parts, std::size_t index,
@@ -57,18 +57,18 @@ private:
   void collectAllLeafPaths(const std::string& path, std::vector<std::string>& names) const;
   bool matches(const std::string& name, const std::string& pattern) const;
 
-  const std::map<std::string, HierNode*>& getChildren() const { return m_children; }
+  const std::map<std::string, BlifNode*>& getChildren() const { return m_children; }
 
   // debug hierarchy
-  void printTreeRecursive(const HierNode* node, int depth = 0);
+  void printTreeRecursive(const BlifNode* node, int depth = 0);
 };
 
 class BlifParser {
 public:
   std::vector<std::string> findMatchingNames(const std::string& pattern);
 
-  std::shared_ptr<HierNode> load(const std::filesystem::path& filepath);
-  std::shared_ptr<HierNode> parseLines(const std::vector<std::string>& lines);
+  std::shared_ptr<BlifNode> load(const std::filesystem::path& filepath);
+  std::shared_ptr<BlifNode> parseLines(const std::vector<std::string>& lines);
   bool isFileChanged(const std::filesystem::path& filepath) const;
 
   void printHierachy() {
@@ -78,7 +78,7 @@ public:
   }
 
 private:
-  std::shared_ptr<HierNode> m_rootNodePtr;
+  std::shared_ptr<BlifNode> m_rootNodePtr;
   std::filesystem::file_time_type m_lastWriteTime;
 };
 
