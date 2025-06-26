@@ -51,7 +51,7 @@ std::vector<std::string> HierNode::findMatchingNames(const std::string& pattern)
     }
 
     const std::string& first = parts[0];
-    for (const auto& [name, child] : m_children) {
+    for (const auto& [name, child]: m_children) {
         if (matches(name, first)) {
             std::string path = name;
             if (parts.size() == 1 && (parts[0] == "*")) {
@@ -70,6 +70,9 @@ void HierNode::expandRecursive(const std::vector<std::string>& parts, std::size_
                                const std::string& path, std::vector<std::string>& names) const
 {
     if (index >= parts.size()) {
+        if (isLeaf()) { // this is needed to capture the root leaf nodes
+            names.push_back(path);
+        }
         return;
     }
 
@@ -303,7 +306,7 @@ std::vector<std::string> getFakeBlifLines()
 {
     std::vector<std::string> lines = {
         ".subckt sdffre C=clk D=do_sdffre_Q_D E=$true Q=do R=$true",
-        ".names d.l.l[0] d.l.l[1] d.z.l dut.u0.z0.d[4] dut.u0.z0.d[5] dut.u1.z1.d[4] dut.u2.z2.d[4]",
+        ".names $some d.l.l[0] d.l.l[1] d.z.l dut.u0.z0.d[4] dut.u0.z0.d[5] dut.u1.z1.d[4] dut.u2.z2.d[4]",
         ".names ld dut.u0.z0.d[6] dut.u0.w[0][30] dut.u0.w[0][31] dut.u0.w[0][32] dut.u0.w[1][30] dut.u0.w[1][31] dut.u0.r0.out[30] dut.key[126] dut.u0.w[0]_sdffre_Q_1_D"
     };
     return lines;
@@ -364,6 +367,8 @@ void run_blif_test()
     find("dut.u*.z*.d[*]", rootNode, {"dut.u0.z0.d[4]", "dut.u0.z0.d[5]", "dut.u0.z0.d[6]", "dut.u1.z1.d[4]", "dut.u2.z2.d[4]"});
     find("dut.u0.z0.*", rootNode, {"dut.u0.z0.d[4]", "dut.u0.z0.d[5]", "dut.u0.z0.d[6]"});
     find("dut.u0.z0.d[6]", rootNode, {"dut.u0.z0.d[6]"});
+    find("clk", rootNode, {"clk"});
+    find("$some", rootNode, {"$some"});
     find("dut.u0.w*", rootNode, {"dut.u0.w[0][30]", "dut.u0.w[0][31]", "dut.u0.w[0][32]", "dut.u0.w[0]_sdffre_Q_1_D", "dut.u0.w[1][30]", "dut.u0.w[1][31]"});
     find("dut.u0.w[0][*]", rootNode, {"dut.u0.w[0][30]", "dut.u0.w[0][31]", "dut.u0.w[0][32]"});
     find("dut.u0.w[1][*]", rootNode, {"dut.u0.w[1][30]", "dut.u0.w[1][31]"});
