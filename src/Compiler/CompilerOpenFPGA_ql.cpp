@@ -5442,9 +5442,9 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  std::string output_path = std::string("--output_path " + ProjManager()->projectName() + "_constraints.xml");
-  std::string architectureFile = m_architectureFile.string();
+  std::string netlistFile = std::string("--blif_file ") + ProjManager()->projectName() + "_post_synth.blif";
+  std::string output_path = std::string("--output_path ") + ProjManager()->projectName() + "_constraints.xml";
+  std::string architectureFile = std::string("--arch_file ") + m_architectureFile.string();
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
   #else // _WIN32
@@ -5467,8 +5467,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
                         generate_floorplanning_script_path.string() + " " +
                         netlistFile + " " + 
                         architectureFile + " " +
-                        QLSettingsManager::getStringValue("general", "device", "layout") + 
-                        leftStr + rightStr + topStr + bottomStr + regionStr + " " + 
+                        std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
+                        std::string("--io_side_map ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " + 
                         output_path); 
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
