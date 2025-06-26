@@ -5416,19 +5416,19 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   std::string regionStr;
   for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += " region:" + region + "=" + setToString(patternsSet);
+    regionStr += "region:" + region + "=" + setToString(patternsSet) + ";";
   }
   Message("~~~ regionStr=" + regionStr);
 
   // Output results
   if (!leftStr.empty())
-    leftStr = std::string(" left:"   + leftStr);
+    leftStr = std::string("left:"   + leftStr + ";");
   if (!rightStr.empty())
-    rightStr = std::string(" right:"  + rightStr);
+    rightStr = std::string("right:"  + rightStr + ";");
   if (!topStr.empty())
-    topStr = std::string(" top:"    + topStr);
+    topStr = std::string("top:"    + topStr + ";");
   if (!bottomStr.empty())
-    bottomStr = std::string(" bottom:" + bottomStr);
+    bottomStr = std::string("bottom:" + bottomStr + ";");
 
   if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
     ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
@@ -5442,9 +5442,9 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::string netlistFile = std::string("--blif_file ") + ProjManager()->projectName() + "_post_synth.blif";
-  std::string output_path = std::string("--output_path ") + ProjManager()->projectName() + "_constraints.xml";
-  std::string architectureFile = std::string("--arch_file ") + m_architectureFile.string();
+  std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
+  std::string output_path = ProjManager()->projectName() + "_constraints.xml";
+  std::string architectureFile = m_architectureFile.string();
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
   #else // _WIN32
@@ -5465,11 +5465,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   std::string command = std::string(python_exec.string() + " " +
                         generate_floorplanning_script_path.string() + " " +
-                        netlistFile + " " + 
-                        architectureFile + " " +
+                        std::string("--blif_file ") + netlistFile + " " + 
+                        std::string("--arch_file ") + architectureFile + " " +
                         std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
-                        std::string("--io_side_map ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " + 
-                        output_path); 
+                        std::string("--region_groups ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " +
+                        std::string("--output_path ") + output_path); 
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
   if (fs::exists(floor_planning_constraint_filepath)) {
