@@ -82,8 +82,4 @@ private:
   std::filesystem::file_time_type m_lastWriteTime;
 };
 
-#ifdef TEST_BLIFLOADER
-void run_blif_test();
-#endif
-
 }  // namespace FOEDAG
