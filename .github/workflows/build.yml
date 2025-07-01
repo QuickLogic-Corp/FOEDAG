@@ -312,3 +312,7 @@ jobs:
     - name: Build
       run: |
         make -f Makefile.au install -j$(nproc)
+
+    - name: Test
+      run: |
+        make -f Makefile.au test -j$(nproc)
