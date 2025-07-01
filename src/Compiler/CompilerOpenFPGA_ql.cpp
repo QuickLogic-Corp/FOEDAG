@@ -5315,7 +5315,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   }
 
   m_blifParser.load(netlist_path);
-  m_blifParser.printHierachy();
+  //m_blifParser.printHierachy(); // debug
   
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
