@@ -315,4 +315,4 @@ jobs:
 
     - name: Test
       run: |
-        make -f Makefile.au test -j$(nproc)
+        make test -j$(nproc)
