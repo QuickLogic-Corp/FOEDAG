@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "gtest/gtest.h"
 
 #include <unordered_set>
+#include <algorithm>
 
 //#define DEBUG_BLIF_PARSER
 
