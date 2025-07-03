@@ -33,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "NewProject/ProjectManager/project_manager.h"
 #include "TaskGlobal.h"
 #include "TaskManager.h"
+#include "Utils/FileUtils.h"
 
 #ifdef USE_IPA
 #include "CompilerDefines.h"
@@ -200,10 +201,25 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   QString viewLogStr = "View " + title + " Logs";
   QAction *viewLog = new QAction(viewLogStr, this);
   logFilePath.replace(PROJECT_OSRCDIR, Project::Instance()->projectPath());
-  auto logExists = QFile::exists(logFilePath);
-  viewLog->setEnabled(logExists);
-  connect(viewLog, &QAction::triggered, this,
-          [this, logFilePath]() { emit ViewFileRequested(logFilePath); });
+
+bool logExists = false;
+  if (logFilePath.contains("*")) {
+    // handle pattern
+    std::vector<std::filesystem::path> logFiles = FileUtils::findFilesByWildcard(logFilePath.toStdString());
+    logExists = !logFiles.empty();
+    viewLog->setEnabled(logExists);
+    connect(viewLog, &QAction::triggered, this,
+            [this, logFiles]() {
+              for (const std::filesystem::path logFile: logFiles) { 
+                emit ViewFileRequested(QString::fromStdString(logFile.string()));
+              }
+            });
+  } else {
+    logExists = QFile::exists(logFilePath);
+    viewLog->setEnabled(logExists);
+    connect(viewLog, &QAction::triggered, this,
+            [this, logFilePath]() { emit ViewFileRequested(logFilePath); });
+  }
   menu->addAction(viewLog);
 
   auto taskId = m_taskManager->taskId(task);

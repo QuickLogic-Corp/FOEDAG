@@ -1339,7 +1339,7 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                "PinMapping.xml",
                "post_place_timing.rpt",
                "post_route_timing.rpt",
-               "post_ta_timing.rpt",
+               TA_TIMING_LOG,
                TA_REPORT_TIMING_HOLD,
                TA_REPORT_TIMING_SETUP,
                "report_unconstrained_timing.hold.rpt",

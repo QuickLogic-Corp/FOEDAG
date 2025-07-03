@@ -139,7 +139,7 @@ TaskManager::TaskManager(Compiler *compiler, QObject *parent)
   //     "$OSRCDIR/global_placement.rpt");
   m_tasks[PLACEMENT]->setLogFileReadPath("$OSRCDIR/placement.rpt");
   m_tasks[ROUTING]->setLogFileReadPath("$OSRCDIR/routing.rpt");
-  m_tasks[TIMING_SIGN_OFF]->setLogFileReadPath("$OSRCDIR/timing_analysis.rpt");
+  m_tasks[TIMING_SIGN_OFF]->setLogFileReadPath("$OSRCDIR/"+QString::fromStdString(TIMING_ANALYSIS_LOG_PATTERN));
   m_tasks[POWER]->setLogFileReadPath("$OSRCDIR/power_analysis.rpt");
   m_tasks[BITSTREAM]->setLogFileReadPath("$OSRCDIR/bitstream.rpt");
   m_tasks[SIMULATE_RTL]->setLogFileReadPath("$OSRCDIR/simulation_rtl.rpt");
