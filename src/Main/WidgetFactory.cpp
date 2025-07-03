@@ -20,6 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "WidgetFactory.h"
+#include "Widgets/MultiComboBox.h"
+#include "Utils/StringUtils.h"
 
 #include <QApplication>
 #include <QBoxLayout>
@@ -220,6 +222,10 @@ void setVal(QTextEdit* ptr, const QString& userVal) {
 void setVal(QComboBox* ptr, const QString& userVal) {
   if (int index = ptr->findData(userVal); index != -1)
     ptr->setCurrentIndex(index);
+  DBG_PRINT_VAL_SET(ptr, userVal);
+}
+void setVal(MultiComboBox* ptr, const QString& userVal) {
+  ptr->setCurrentText(userVal);
   DBG_PRINT_VAL_SET(ptr, userVal);
 }
 void setVal(QSpinBox* ptr, int userVal) {
@@ -1028,8 +1034,8 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       // Create Widget
       QString sysDefaultValLookUp =
           lookupStr(comboOptions, comboLookup, sysDefaultVal);
-      auto ptr = createComboBox(objName, comboOptions, comboLookup,
-                                sysDefaultValLookUp, addUnset, handleChange);
+      QComboBox* ptr = createComboBox(objName, comboOptions, comboLookup,
+                                  sysDefaultValLookUp, addUnset, handleChange);
       createdWidget = ptr;
 
       if (tclArgPassed) {
@@ -1043,7 +1049,67 @@ QWidget* FOEDAG::createWidget(const json& widgetJsonObj, const QString& objName,
       }
 
       targetObject = createdWidget;
-    } else if (type == "spinbox") {
+    } 
+    //
+ else if (type == "multidropdown" || type == "multicombobox") {
+      // MultiComboBox - "multidropdown" or "multicombobox"
+      // default value should be in the options list
+      QString sysDefaultVal =
+          QString::fromStdString(getDefault<std::string>(widgetJsonObj));
+
+      QStringList comboOptions =
+          JsonArrayToQStringList(widgetJsonObj.value("options", json::array()));
+      QStringList comboLookup = JsonArrayToQStringList(
+          widgetJsonObj.value("optionsLookup", json::array()));
+
+      // Callback to handle value changes
+      std::function<void(MultiComboBox*, const QString&)> handleChange =
+          [arg, comboOptions, comboLookup, lookupStr](MultiComboBox* ptr,
+                                                      const QString& val) {
+            json changeJson;
+            QString userVal = lookupStr(comboLookup, comboOptions,
+                                        ptr->currentText());
+            changeJson["userValue"] = userVal.toStdString();
+            ptr->setProperty("value", ptr->currentText());
+            storeJsonPatch(ptr, changeJson);
+
+            ptr->setProperty("tclArg", {});  // clear previous vals
+            // store a tcl arg/value string if an arg was provided
+            if (!arg.isEmpty()) {
+              QString argStr = "-" + arg + " " +
+                               lookupStr(comboOptions, comboLookup, userVal);
+              storeTclArg(ptr, argStr);
+            }
+            WidgetFactoryDependencyNotifier::Instance()->emitEditorChanged(ptr);
+          };
+
+      // Determine if this combobox should add <unset> option
+#if UPSTREAM_UNUSED
+      bool addUnset = widgetJsonObj.value("addUnset", addUnsetDefault);
+#endif // #if UPSTREAM_UNUSED
+      bool addUnset = widgetJsonObj.value("addUnset", false);
+
+      // Create Widget
+      QString sysDefaultValLookUp =
+          lookupStr(comboOptions, comboLookup, sysDefaultVal);
+      MultiComboBox* ptr = createMultiComboBox(objName, comboOptions, comboLookup,
+                                       sysDefaultValLookUp, addUnset, handleChange);
+      createdWidget = ptr;
+
+      if (tclArgPassed) {
+        // Do a reverse lookup to convert the tcl value to a display value
+        setVal(ptr, lookupStr(comboOptions, comboLookup, argVal));
+      } else if (widgetJsonObj.contains("userValue")) {
+        // Load and set user value
+        QString userVal = QString::fromStdString(
+            widgetJsonObj["userValue"].get<std::string>());
+        setVal(ptr, lookupStr(comboLookup, comboOptions, userVal));
+      }
+
+      targetObject = createdWidget;
+    }
+    // multi    
+    else if (type == "spinbox") {
       // QSpinBox - "spinbox"
       int minVal = widgetJsonObj.value("minVal", 0);
       int maxVal =
@@ -1371,6 +1437,40 @@ QComboBox* FOEDAG::createComboBox(
           onChange(widget, newText);
         };
     QObject::connect(widget, &QComboBox::currentTextChanged, changeCb);
+  }
+
+  return widget;
+}
+
+MultiComboBox* FOEDAG::createMultiComboBox(
+    const QString& objectName, const QStringList& options,
+    const QStringList& lookup, const QString& selectedValue, bool addUnset,
+    std::function<void(MultiComboBox*, const QString&)> onChange) {
+  MultiComboBox* widget = new MultiComboBox();
+  widget->setObjectName(objectName);
+
+  QStringList lookupValues = lookup;
+  if (lookupValues.isEmpty()) {
+    // if lookup values are not provided we will take as lookup values actual
+    // text. This is equivalent to search items by text.
+    lookupValues = options;
+  }
+
+  for (int i = 0; i < options.count() && i < lookupValues.count(); i++) {
+    auto text = options.at(i);
+    widget->addItem(text);
+  }
+
+  widget->setCurrentText(selectedValue);
+
+  if (onChange != nullptr) {
+    // onChange needs the widget so we capture that in a closure we
+    // can then pass to the normal qt handler
+    std::function<void(const QString&)> changeCb =
+        [onChange, widget](const QString& newText) {
+          onChange(widget, newText);
+        };
+    QObject::connect(widget, &MultiComboBox::currentTextChanged, changeCb);
   }
 
   return widget;

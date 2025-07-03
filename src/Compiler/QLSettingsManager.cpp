@@ -32,6 +32,7 @@
 #include "Utils/StringUtils.h"
 #include "MainWindow/Session.h"
 #include "Main/WidgetFactory.h"
+#include "Widgets/MultiComboBox.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "QLDeviceManager.h"
 
@@ -845,6 +846,14 @@ void QLSettingsManager::populateSettingsWidget() {
                               [=](){ this->handleSettingsChanged(); });
             }
           }
+          else if (widgetType == std::string("multidropdown") ) {
+            MultiComboBox* multidropdown_widget = containerWidget->findChild<MultiComboBox*>(QString(), Qt::FindChildrenRecursively);
+            if(multidropdown_widget) {
+
+              QObject::connect(multidropdown_widget, &MultiComboBox::currentTextChanged, 
+                              [=](){ this->handleSettingsChanged(); });
+            }
+          }
           else {
             // unhandled widgetType!
             std::cout << ">>> warning: unhandled widgetType: " << widgetType << " widgetId:" << widgetId << std::endl;
@@ -1279,6 +1288,18 @@ bool QLSettingsManager::areJSONSettingsChanged() {
             if(dropdown_widget) {
               std::string value_string = (dropdown_widget->currentText()).toStdString();
               // std::cout << ">>>      dropdown_widget value: " << value_string << std::endl;
+              if(categoryId == "power") {
+                power_estimation_json_updated[categoryId][subcategoryId][widgetId]["userValue"] = value_string;
+              }
+              else {
+                settings_json_updated[categoryId][subcategoryId][widgetId]["userValue"] = value_string;
+              }
+            }
+          }
+          else if (widgetType == std::string("multidropdown") ) {
+            MultiComboBox* multidropdown_widget = container_widget->findChild<MultiComboBox*>(QString(), Qt::FindChildrenRecursively);
+            if(multidropdown_widget) {
+              std::string value_string = (multidropdown_widget->currentText()).toStdString();
               if(categoryId == "power") {
                 power_estimation_json_updated[categoryId][subcategoryId][widgetId]["userValue"] = value_string;
               }

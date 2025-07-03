@@ -73,6 +73,7 @@ set (SRC_CPP_LIST ../Main/Foedag_ql.cpp
   ../MainWindow/PathEdit.cpp
   ../Main/DialogProvider.cpp
   ../MainWindow/MessageItemParser.cpp
+  ../Widgets/MultiComboBox.cpp
 )
 
 set (SRC_H_LIST ../Main/Foedag.h
@@ -106,6 +107,7 @@ set (SRC_H_LIST ../Main/Foedag.h
   ../MainWindow/PathEdit.h
   ../Main/DialogProvider.h
   ../MainWindow/MessageItemParser.h
+  ../Widgets/MultiComboBox.h
 )
 
 set (SRC_UI_LIST "")

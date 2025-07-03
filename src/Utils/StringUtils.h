@@ -151,6 +151,6 @@ class StringUtils final {
  private:
 };
 
-};  // namespace FOEDAG
+}  // namespace FOEDAG
 
 #endif /* FOEDAG_STRINGUTILS_H */
