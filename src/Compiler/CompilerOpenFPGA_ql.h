@@ -145,6 +145,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool ConvertSdcPinConstrainToPcf(std::vector<std::string>&);
   virtual bool Route();
   virtual bool TimingAnalysis();
+  bool TimingAnalysisHelper(const QLDeviceTarget&, const std::string&);
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);

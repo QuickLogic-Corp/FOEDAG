@@ -3832,8 +3832,11 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     sta_vpr_options += " --verify_file_digests off";
   }
 
+  return TimingAnalysisHelper(current_device_sta, sta_vpr_options);
+}
 
-
+bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options)
+{
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
