@@ -1300,8 +1300,8 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                "packing_pin_util.rpt",
                "post_place_timing.rpt",
                "post_route_timing.rpt",
-               "report_timing.hold.rpt",
-               "report_timing.setup.rpt",
+               TA_REPORT_TIMING_HOLD,
+               TA_REPORT_TIMING_SETUP,
                "report_unconstrained_timing.hold.rpt",
                "report_unconstrained_timing.setup.rpt",
                ROUTING_LOG,
@@ -1312,22 +1312,22 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                std::string{topModule + "_post_synthesis.blif"},
                std::string{topModule + "_post_synthesis.sdf"},
                std::string{topModule + "_post_synthesis.v"},
-               std::string{projectName + "_sta.cmd"},
+               std::string{projectName + "*_sta.cmd"},
                std::string{projectName + "_post_synth_ports.json"},
                "packing_pin_util.rpt",
                "post_place_timing.rpt",
                "post_route_timing.rpt",
-               "post_ta_timing.rpt",
-               "report_timing.hold.rpt",
-               "report_timing.setup.rpt",
+               TA_TIMING_LOG_PATTERN,
+               TA_REPORT_TIMING_HOLD_PATTERN,
+               TA_REPORT_TIMING_SETUP_PATTERN,
                "report_unconstrained_timing.hold.rpt",
                "report_unconstrained_timing.setup.rpt",
-               TIMING_ANALYSIS_LOG,
+               TIMING_ANALYSIS_LOG_PATTERN,
                "vpr_stdout.log"};
       break;
     case Compiler::Action::Power:
       files = {"post_place_timing.rpt", "post_route_timing.rpt",
-               "post_ta_timing.rpt", "vpr_stdout.log", POWER_ANALYSIS_LOG};
+               TA_TIMING_LOG, "vpr_stdout.log", POWER_ANALYSIS_LOG};
       break;
     case Compiler::Action::Bitstream:
       files = {std::string{projectName + ".openfpga"},
@@ -1340,8 +1340,8 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                "post_place_timing.rpt",
                "post_route_timing.rpt",
                "post_ta_timing.rpt",
-               "report_timing.hold.rpt",
-               "report_timing.setup.rpt",
+               TA_REPORT_TIMING_HOLD,
+               TA_REPORT_TIMING_SETUP,
                "report_unconstrained_timing.hold.rpt",
                "report_unconstrained_timing.setup.rpt",
                "vpr_stdout.log",
@@ -3672,13 +3672,6 @@ bool CompilerOpenFPGA_ql::Route() {
 }
 
 bool CompilerOpenFPGA_ql::TimingAnalysis() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", TIMING_ANALYSIS_LOG);
-  });
-
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3775,7 +3768,11 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   // currently we only expect the p_v_t_corner to be specified in JSON, but the code
   // supports voltage_threshold also, if it is added to the JSON.
   QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
-  std::vector<QLDeviceTarget> devices = {current_device};
+
+  auto staSuffix = [](const QLDeviceTarget& device)->std::string{
+    return "_" + device.device_variant.voltage_threshold + "_" + device.device_variant.p_v_t_corner;
+  };
+  std::map<std::string, QLDeviceTarget> devices = {{staSuffix(current_device), current_device}};
 
   std::set<std::string> device_sta_vt_variants{current_device.device_variant.voltage_threshold};
   std::set<std::string> device_sta_p_v_t_corner_variants{current_device.device_variant.p_v_t_corner};
@@ -3831,7 +3828,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
           ErrorMessage("STA Corner Device in Settings JSON is invalid!");
           return false;
         }
-        devices.push_back(device_sta);
+        devices[staSuffix(device_sta)] = device_sta;
       }
     }
   }
@@ -3845,17 +3842,41 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     sta_vpr_options += " --verify_file_digests off";
   }
 
-  for (const QLDeviceTarget& device: devices) {
-    if (!TimingAnalysisHelper(device, sta_vpr_options)) {
+  for (const auto& [sta_suffix, device]: devices) {
+    if (!TimingAnalysisHelper(device, sta_vpr_options, sta_suffix)) {
       return false;
     }
   }
   return true;
 }
 
-bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options)
+bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix)
 {
-  qDebug() << "~~~ running sta for device" << QString::fromStdString(QLDeviceManager::getInstance()->convertToDeviceString(current_device_sta));
+  if (sta_vpr_options.empty()) {
+    sta_suffix = "";
+  }
+  
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this, sta_suffix] {
+    if (sta_suffix.empty()) {
+      // Rename log file
+      copyLog(ProjManager(), "vpr_stdout.log", TIMING_ANALYSIS_LOG);
+    } else {
+      std::string corner_timing_analysis_log = StringUtils::replaceAll(TIMING_ANALYSIS_LOG_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), "vpr_stdout.log", corner_timing_analysis_log);
+
+      std::string corner_report_timing_hold = StringUtils::replaceAll(TA_REPORT_TIMING_HOLD_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), TA_REPORT_TIMING_HOLD, corner_report_timing_hold);
+
+      std::string corner_report_timing_setup = StringUtils::replaceAll(TA_REPORT_TIMING_SETUP_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), TA_REPORT_TIMING_SETUP, corner_report_timing_setup);
+    }
+  });
+
+  std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
+
+  qDebug() << "~~~ running sta for device" << QString::fromStdString(sta_suffix) << QString::fromStdString(QLDeviceManager::getInstance()->convertToDeviceString(current_device_sta));
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
@@ -3908,9 +3929,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
     std::string command = BaseVprCommand() + " --gen_post_synthesis_netlist on";
-    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                       std::string(ProjManager()->projectName() + "_sta.cmd"))
-                          .string());
+    std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
     int status = ExecuteAndMonitorSystemCommand(command);
     if (status) {
@@ -3943,9 +3962,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       taCommand =
           BaseStaCommand() + " " +
           BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName);
-      std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                         std::string(ProjManager()->projectName() + "_sta.cmd"))
-                            .string());
+      std::ofstream ofs(sta_cmd_filepath);
       ofs << taCommand << std::endl;
       ofs.close();
     } else {
@@ -4039,9 +4056,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     taCommand += std::string(" --analysis");
 
-    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                        std::string(ProjManager()->projectName() + "_sta.cmd"))
-                            .string());
+    std::ofstream ofs(sta_cmd_filepath);
     ofs << taCommand << std::endl;
     ofs.close();
   }

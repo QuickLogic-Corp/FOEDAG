@@ -471,8 +471,19 @@ void FileUtils::printArgs(int argc, const char* argv[]) {
 }
 
 bool FileUtils::removeFile(const std::string& file) noexcept {
-  const std::filesystem::path path{file};
-  return removeFile(path);
+  bool result = true;
+  if (file.find("*") != std::string::npos) {
+    std::vector<std::filesystem::path> foundFiles = findFilesByWildcard(file);
+    for (const std::filesystem::path& found: foundFiles) {
+      if (!removeFile(found)) {
+        result = false;
+      }
+    }
+  } else {
+    const std::filesystem::path path{file};
+    result = removeFile(path);
+  }
+  return result;
 }
 
 bool FileUtils::removeFile(const std::filesystem::path& file) noexcept {
@@ -536,6 +547,39 @@ std::filesystem::path FileUtils::getExecutablePath() {
 #endif
 
   return result.parent_path();
+}
+
+std::vector<std::filesystem::path> FileUtils::findFilesByWildcard(const std::string& wildCardPattern) 
+{
+  auto matchesPatternHelperFn = [](const std::string& text, const std::string& pattern)->bool {
+    // Only support '*' wildcard
+    size_t pos = pattern.find('*');
+    if (pos == std::string::npos) {
+        return text == pattern;
+    }
+
+    std::string prefix = pattern.substr(0, pos);
+    std::string suffix = pattern.substr(pos + 1);
+
+    return StringUtils::startsWith(text, prefix) && StringUtils::endsWith(text, suffix);
+  };
+
+  std::vector<std::filesystem::path> result;
+
+  std::filesystem::path patternPath(wildCardPattern);
+  std::filesystem::path dir = patternPath.has_parent_path() ? patternPath.parent_path() : std::filesystem::current_path();
+  std::string filenamePattern = patternPath.filename().string();
+
+  for (const auto& entry: std::filesystem::directory_iterator(dir)) {
+    if (entry.is_regular_file()) {
+      std::string name = entry.path().filename().string();
+      if (matchesPatternHelperFn(name, filenamePattern)) {
+        result.push_back(entry.path());
+      }
+    }
+  }
+
+  return result;
 }
 
 }  // namespace FOEDAG

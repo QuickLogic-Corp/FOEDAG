@@ -114,6 +114,7 @@ class FileUtils final {
   static std::string resolvePathStr(const std::string& pathStr);
 
   static std::filesystem::path getExecutablePath();
+  static std::vector<std::filesystem::path> findFilesByWildcard(const std::string& wildCardPattern);
 
  private:
   FileUtils() = delete;
