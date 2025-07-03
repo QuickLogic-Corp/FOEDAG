@@ -3769,61 +3769,74 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
 
-
   // Check the STA specified device, and if it is different from the current target device
   // explicitly ask to form the base vpr command using the specific variant instead of the
   // current target device:
   // currently we only expect the p_v_t_corner to be specified in JSON, but the code
   // supports voltage_threshold also, if it is added to the JSON.
   QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  std::vector<QLDeviceTarget> devices = {current_device};
 
-  std::string current_device_sta_vt = "";
-  std::string current_device_sta_p_v_t_corner = "";
+  std::set<std::string> device_sta_vt_variants{current_device.device_variant.voltage_threshold};
+  std::set<std::string> device_sta_p_v_t_corner_variants{current_device.device_variant.p_v_t_corner};
   std::string sta_vpr_options = "";
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold").empty() ) {
-    current_device_sta_vt = QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold");
-  }
-  else {
-    current_device_sta_vt = current_device.device_variant.voltage_threshold;
+    std::string sta_vt_variants_str = QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold");
+    if (!sta_vt_variants_str.empty()) {
+      std::vector<std::string> elements = StringUtils::tokenize(sta_vt_variants_str, ",");
+      device_sta_vt_variants.insert(
+          std::make_move_iterator(elements.begin()),
+          std::make_move_iterator(elements.end())
+      );
+    }
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner").empty() ) {
-    current_device_sta_p_v_t_corner = QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner");
-  }
-  else {
-    current_device_sta_p_v_t_corner = current_device.device_variant.p_v_t_corner;
-  }
-
-  QLDeviceTarget current_device_sta = QLDeviceTarget();
-
-  if(current_device.device_variant.voltage_threshold != current_device_sta_vt ||
-     current_device.device_variant.p_v_t_corner != current_device_sta_p_v_t_corner) {
-
-    current_device_sta = 
-      QLDeviceManager::getInstance()->convertToDeviceTarget(current_device.device_variant.family,
-                                                            current_device.device_variant.foundry,
-                                                            current_device.device_variant.node,
-                                                            current_device.device_variant.devicename,
-                                                            current_device_sta_vt,
-                                                            current_device_sta_p_v_t_corner,
-                                                            current_device.device_variant_layout.name);
-
-    // Verify that the JSON value of the STA corner selection is valid
-    if(!QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
-      // TODO: print out the options to the user to set the sta_vt and sta_p_v_t_corner in the JSON.
-      // we can update the JSON options automatically too, should we do this, or ask user to do this?
-      // it seems better UX to print out the json options and user can edit the JSON file, so it is 
-      // not opaque to the user?
-      Message("Please ensure that the userValue in Settings JSON is one of the below available\n"
-              "for 'vpr > analysis > sta_p_v_t_corner':");
-      QLDeviceType devicetype = QLDeviceManager::getInstance()->deviceTypeTreeElement(current_device);
-      for (QLDeviceVariant device_variant: devicetype.device_variants) {
-        Message(device_variant.p_v_t_corner);
-      }
-      ErrorMessage("STA Corner Device in Settings JSON is invalid!");
-      return false;
+    std::string sta_p_v_t_corner_variants_str = QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner");
+    if (!sta_p_v_t_corner_variants_str.empty()) {
+      std::vector<std::string> elements = StringUtils::tokenize(sta_p_v_t_corner_variants_str, ",");
+      device_sta_p_v_t_corner_variants.insert(
+          std::make_move_iterator(elements.begin()),
+          std::make_move_iterator(elements.end())
+      );
     }
+  }
+
+  for (const std::string& device_sta_vt_variant: device_sta_vt_variants) {
+    for (const std::string& device_sta_p_v_t_corner_variant: device_sta_p_v_t_corner_variants) {
+      if(current_device.device_variant.voltage_threshold != device_sta_vt_variant ||
+        current_device.device_variant.p_v_t_corner != device_sta_p_v_t_corner_variant) {
+        qInfo() << "~~~ adding device_sta" << device_sta_vt_variant.c_str() << device_sta_p_v_t_corner_variant.c_str();
+        QLDeviceTarget device_sta = QLDeviceManager::getInstance()->convertToDeviceTarget(current_device.device_variant.family,
+                                                                  current_device.device_variant.foundry,
+                                                                  current_device.device_variant.node,
+                                                                  current_device.device_variant.devicename,
+                                                                  device_sta_vt_variant,
+                                                                  device_sta_p_v_t_corner_variant,
+                                                                  current_device.device_variant_layout.name);
+
+        // Verify that the JSON value of the STA corner selection is valid
+        if(!QLDeviceManager::getInstance()->isDeviceTargetValid(device_sta)) {
+          // TODO: print out the options to the user to set the sta_vt and sta_p_v_t_corner in the JSON.
+          // we can update the JSON options automatically too, should we do this, or ask user to do this?
+          // it seems better UX to print out the json options and user can edit the JSON file, so it is 
+          // not opaque to the user?
+          Message("Please ensure that the userValue in Settings JSON is one of the below available\n"
+                  "for 'vpr > analysis > sta_p_v_t_corner':");
+          QLDeviceType devicetype = QLDeviceManager::getInstance()->deviceTypeTreeElement(current_device);
+          for (const QLDeviceVariant& device_variant: devicetype.device_variants) {
+            Message(device_variant.p_v_t_corner);
+          }
+          ErrorMessage("STA Corner Device in Settings JSON is invalid!");
+          return false;
+        }
+        devices.push_back(device_sta);
+      }
+    }
+  }
+
+  if (devices.size() > 1) {
     // As the architecture file for PnR will not match the architecture file for STA in this case,
     // vpr will fail on verifying the file hashes, so explicitly ask vpr to ignore the 
     // file hash checks.
@@ -3832,11 +3845,17 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     sta_vpr_options += " --verify_file_digests off";
   }
 
-  return TimingAnalysisHelper(current_device_sta, sta_vpr_options);
+  for (const QLDeviceTarget& device: devices) {
+    if (!TimingAnalysisHelper(device, sta_vpr_options)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options)
 {
+  qDebug() << "~~~ running sta for device" << QString::fromStdString(QLDeviceManager::getInstance()->convertToDeviceString(current_device_sta));
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
