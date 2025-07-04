@@ -205,7 +205,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   bool logExists = false;
   if (logFilePath.contains("*")) {
     // handle pattern
-    std::vector<std::filesystem::path> logFiles = FileUtils::findFilesByWildcard(logFilePath.toStdString());
+    std::vector<std::filesystem::path> logFiles = FileUtils::findFilePathesByWildcard(logFilePath.toStdString());
     logExists = !logFiles.empty();
     viewLog->setEnabled(logExists);
     connect(viewLog, &QAction::triggered, this,

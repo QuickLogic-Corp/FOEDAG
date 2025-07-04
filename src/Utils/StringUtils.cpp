@@ -269,4 +269,17 @@ std::string StringUtils::toUpper(const std::string& text) {
   return result;
 }
 
+bool StringUtils::matchesStarPattern(const std::string& text, const std::string& pattern) {
+  // Only support '*' wildcard
+  size_t pos = pattern.find('*');
+  if (pos == std::string::npos) {
+      return text == pattern;
+  }
+
+  std::string prefix = pattern.substr(0, pos);
+  std::string suffix = pattern.substr(pos + 1);
+
+  return startsWith(text, prefix) && endsWith(text, suffix);
+}
+
 }  // namespace FOEDAG

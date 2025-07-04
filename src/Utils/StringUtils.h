@@ -141,6 +141,8 @@ class StringUtils final {
     return string;
   }
 
+  static bool matchesStarPattern(const std::string& text, const std::string& pattern);
+
  private:
   StringUtils() = delete;
   StringUtils(const StringUtils& orig) = delete;

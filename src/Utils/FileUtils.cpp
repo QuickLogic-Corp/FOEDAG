@@ -473,7 +473,7 @@ void FileUtils::printArgs(int argc, const char* argv[]) {
 bool FileUtils::removeFile(const std::string& file) noexcept {
   bool result = true;
   if (file.find("*") != std::string::npos) {
-    std::vector<std::filesystem::path> foundFiles = findFilesByWildcard(file);
+    std::vector<std::filesystem::path> foundFiles = findFilePathesByWildcard(file);
     for (const std::filesystem::path& found: foundFiles) {
       if (!removeFile(found)) {
         result = false;
@@ -549,32 +549,40 @@ std::filesystem::path FileUtils::getExecutablePath() {
   return result.parent_path();
 }
 
-std::vector<std::filesystem::path> FileUtils::findFilesByWildcard(const std::string& wildCardPattern) 
+std::vector<std::filesystem::path> FileUtils::findFilePathesByWildcard(const std::string& wildCardFilePathPattern) 
 {
-  auto matchesPatternHelperFn = [](const std::string& text, const std::string& pattern)->bool {
-    // Only support '*' wildcard
-    size_t pos = pattern.find('*');
-    if (pos == std::string::npos) {
-        return text == pattern;
-    }
-
-    std::string prefix = pattern.substr(0, pos);
-    std::string suffix = pattern.substr(pos + 1);
-
-    return StringUtils::startsWith(text, prefix) && StringUtils::endsWith(text, suffix);
-  };
-
   std::vector<std::filesystem::path> result;
 
-  std::filesystem::path patternPath(wildCardPattern);
-  std::filesystem::path dir = patternPath.has_parent_path() ? patternPath.parent_path() : std::filesystem::current_path();
+  std::filesystem::path patternPath(wildCardFilePathPattern);
+  std::filesystem::path dir = patternPath.has_parent_path() ? patternPath.parent_path(): std::filesystem::current_path();
   std::string filenamePattern = patternPath.filename().string();
 
   for (const auto& entry: std::filesystem::directory_iterator(dir)) {
     if (entry.is_regular_file()) {
       std::string name = entry.path().filename().string();
-      if (matchesPatternHelperFn(name, filenamePattern)) {
+      if (StringUtils::matchesStarPattern(name, filenamePattern)) {
         result.push_back(entry.path());
+      }
+    }
+  }
+
+  return result;
+}
+
+std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& path, const std::string& wildCardFileNamePattern)
+{
+  std::vector<std::string> result;
+
+  std::filesystem::path patternPath(path);
+  patternPath /= wildCardFileNamePattern;
+  std::filesystem::path dir = patternPath.has_parent_path() ? patternPath.parent_path(): std::filesystem::current_path();
+  std::string filenamePattern = patternPath.filename().string();
+
+  for (const auto& entry: std::filesystem::directory_iterator(dir)) {
+    if (entry.is_regular_file()) {
+      std::string name = entry.path().filename().string();
+      if (StringUtils::matchesStarPattern(name, filenamePattern)) {
+        result.push_back(name);
       }
     }
   }

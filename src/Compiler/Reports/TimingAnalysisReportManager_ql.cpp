@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
 #include "Utils/FileUtils.h"
+#include "NewProject/ProjectManager/project.h"
 #include <QDebug>
 
 namespace {
@@ -177,25 +178,28 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void TimingAnalysisReportManager::parseLogFile() {
-  std::vector<std::filesystem::path> logFilePathes = FileUtils::findFilesByWildcard(TIMING_ANALYSIS_LOG_PATTERN);
-  for (const std::filesystem::path& logFilePath: logFilePathes) {
-    parseLogFileHelper(QString::fromStdString(logFilePath.string()));
+  qInfo() << "~~~ TimingAnalysisReportManager::parseLogFile()";
+  auto projectPath = Project::Instance()->projectPath().toStdString();
+  std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
+  qInfo() << "~~~ TimingAnalysisReportManager::parseLogFile()";
+  for (const std::string& logFileName: logFileNames) {
+    parseLogFileHelper(QString::fromStdString(logFileName));
   }
 }
 
-void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFilePath) {
+void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName) {
   messages().clear();
   histograms().clear();
   resourceData().clear();
   timingData().clear();
   circuitData().clear();
-
+  qInfo() << "~~~ TimingAnalysisReportManager::parseLogFileHelper logFilePath=" << logFileName;
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
-    parseOpenSTALog(logFilePath);
+    parseOpenSTALog(logFileName);
     return;
   }
-  auto logFile = createLogFile(logFilePath);
+  auto logFile = createLogFile(logFileName);
   if (!logFile) return;
 
   auto timings = QStringList{};
