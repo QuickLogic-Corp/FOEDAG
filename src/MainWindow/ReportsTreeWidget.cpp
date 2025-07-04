@@ -6,6 +6,7 @@
 #include "Compiler/TaskManager.h"
 #include "Main/Tasks.h"
 #include "TextEditor/text_editor_form.h"
+#include <QDebug>
 
 namespace FOEDAG {
 
@@ -47,6 +48,7 @@ ReportsTreeWidget::ReportsTreeWidget(Compiler *compiler,
 
 void ReportsTreeWidget::onReportRequested(const QTreeWidgetItem *item,
                                           int col) {
+  qInfo() << "~~~onReportRequested";
   if (item->childCount()) return;  // only leaf items represent reports
   auto reportId = item->text(col);
   auto tabWidget = TextEditorForm::Instance()->GetTabWidget();

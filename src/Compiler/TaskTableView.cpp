@@ -202,7 +202,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   QAction *viewLog = new QAction(viewLogStr, this);
   logFilePath.replace(PROJECT_OSRCDIR, Project::Instance()->projectPath());
 
-bool logExists = false;
+  bool logExists = false;
   if (logFilePath.contains("*")) {
     // handle pattern
     std::vector<std::filesystem::path> logFiles = FileUtils::findFilesByWildcard(logFilePath.toStdString());
@@ -231,6 +231,7 @@ bool logExists = false;
       auto *viewReport = new QAction(viewReportStr, this);
       viewReport->setEnabled(logExists);
       connect(viewReport, &QAction::triggered, this, [this, task, reportId]() {
+        qInfo() << "~~~ request view for reportId=" << reportId;
         emit ViewReportRequested(task, reportId);
       });
       menu->addAction(viewReport);

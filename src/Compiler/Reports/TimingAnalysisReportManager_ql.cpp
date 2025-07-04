@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
+#include <QDebug>
 
 namespace {
 static constexpr const char *RESOURCE_REPORT_NAME{
@@ -103,6 +104,7 @@ QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
 
 std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     const QString &reportId) {
+  qInfo() << "~~~ TimingAnalysisReportManager::createReport" << reportId;
   if (!isFileParsed()) parseLogFile();
 
   ITaskReport::DataReports dataReports;
@@ -112,8 +114,9 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
         m_resourceColumns, m_resourceData, QString{"Resource Utilization"}));
   } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, m_circuitData, QString{"Circuit Statistics"}));
-
+        m_circuitColumns, circuitData(), QString{"Circuit Statistics - 1"}));
+    dataReports.push_back(std::make_unique<TableReport>(
+        m_circuitColumns, circuitData(), QString{"Circuit Statistics - 2"}));
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
         m_timingColumns, m_timingData, QString{"Timing Data"}));
@@ -177,7 +180,7 @@ void TimingAnalysisReportManager::parseLogFile() {
   m_histograms.clear();
   m_resourceData.clear();
   m_timingData.clear();
-  m_circuitData.clear();
+  circuitData().clear();
 
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
@@ -205,7 +208,7 @@ void TimingAnalysisReportManager::parseLogFile() {
     else if (line.startsWith(LOAD_TIM_CONSTR))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_TIM_CONSTR, {});
     else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
-      m_circuitData = parseCircuitStats(in, lineNr);
+      setCircuitData(parseCircuitStats(in, lineNr));
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
       m_messages.insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
