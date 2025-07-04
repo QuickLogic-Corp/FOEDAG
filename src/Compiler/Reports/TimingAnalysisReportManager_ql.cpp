@@ -112,13 +112,23 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
 
   ITaskReport::DataReports dataReports;
 
+  auto prettifyProfileNameFn = [](const std::string& profile)->QString {
+    QString prettyProfile{QString::fromStdString(profile)};
+    if (prettyProfile.startsWith("_")) {
+      prettyProfile.remove(0, 1);
+    }
+    return prettyProfile;
+  };
+
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, resourceData(), QString{"Resource Utilization"}));
+    for (const std::string& profile: profiles()) {
+      dataReports.push_back(std::make_unique<TableReport>(
+        m_resourceColumns, resourceData(profile), QString("Resource Utilization - %1").arg(prettifyProfileNameFn(profile))));
+    }
   } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
     for (const std::string& profile: profiles()) {
       dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, circuitData(profile), QString("Circuit Statistics - %1").arg(QString::fromStdString(profile))));
+        m_circuitColumns, circuitData(profile), QString("Circuit Statistics - %1").arg(prettifyProfileNameFn(profile))));
     }
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
