@@ -125,6 +125,9 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   IDataReport::TableData& resourceData() {
     return m_dataProfiles.current()->resourceData;
   }
+  IDataReport::TableData& timingData(const std::string& profile) {
+    return m_dataProfiles.get(profile)->timingData;
+  }
   IDataReport::TableData& timingData() {
     return m_dataProfiles.current()->timingData;
   }
