@@ -560,7 +560,7 @@ std::vector<std::filesystem::path> FileUtils::findFilePathesByWildcard(const std
   for (const auto& entry: std::filesystem::directory_iterator(dir)) {
     if (entry.is_regular_file()) {
       std::string name = entry.path().filename().string();
-      if (StringUtils::matchesStarPattern(name, filenamePattern)) {
+      if (StringUtils::matchesWildcardPattern(name, filenamePattern)) {
         result.push_back(entry.path());
       }
     }
@@ -581,7 +581,7 @@ std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& p
   for (const auto& entry: std::filesystem::directory_iterator(dir)) {
     if (entry.is_regular_file()) {
       std::string name = entry.path().filename().string();
-      if (StringUtils::matchesStarPattern(name, filenamePattern)) {
+      if (StringUtils::matchesWildcardPattern(name, filenamePattern)) {
         result.push_back(name);
       }
     }

@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
 #include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
 #include <QDebug>
 
@@ -181,19 +182,30 @@ void TimingAnalysisReportManager::parseLogFile() {
   qInfo() << "~~~ TimingAnalysisReportManager::parseLogFile()";
   auto projectPath = Project::Instance()->projectPath().toStdString();
   std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
-  qInfo() << "~~~ TimingAnalysisReportManager::parseLogFile()";
   for (const std::string& logFileName: logFileNames) {
     parseLogFileHelper(QString::fromStdString(logFileName));
   }
+  
+  setFileParsed(true);
 }
 
 void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName) {
+  std::string profile;
+  if (logFileName.contains("*")) {
+    profile = StringUtils::extractWildcardSegment(logFileName.toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
+  }
+
+  m_dataProfiles.setCurrentKey(profile);
+  setActiveProfile(profile);
+
   messages().clear();
   histograms().clear();
   resourceData().clear();
   timingData().clear();
   circuitData().clear();
+
   qInfo() << "~~~ TimingAnalysisReportManager::parseLogFileHelper logFilePath=" << logFileName;
+
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
     parseOpenSTALog(logFileName);
@@ -251,8 +263,6 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName)
   if (!timings.isEmpty()) fillTimingData(timings);
 
   logFile->close();
-
-  setFileParsed(true);
 }
 
 void TimingAnalysisReportManager::parseOpenSTALog(const QString& logFilePath) {

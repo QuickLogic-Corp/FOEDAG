@@ -141,7 +141,8 @@ class StringUtils final {
     return string;
   }
 
-  static bool matchesStarPattern(const std::string& text, const std::string& pattern);
+  static bool matchesWildcardPattern(const std::string& text, const std::string& pattern);
+  static std::string extractWildcardSegment(const std::string& text, const std::string& pattern);
 
  private:
   StringUtils() = delete;

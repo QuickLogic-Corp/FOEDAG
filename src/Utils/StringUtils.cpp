@@ -269,17 +269,41 @@ std::string StringUtils::toUpper(const std::string& text) {
   return result;
 }
 
-bool StringUtils::matchesStarPattern(const std::string& text, const std::string& pattern) {
+bool StringUtils::matchesWildcardPattern(const std::string& text, const std::string& pattern) {
   // Only support '*' wildcard
-  size_t pos = pattern.find('*');
-  if (pos == std::string::npos) {
+  std::size_t starPos = pattern.find('*');
+  if (starPos == std::string::npos) {
       return text == pattern;
   }
 
-  std::string prefix = pattern.substr(0, pos);
-  std::string suffix = pattern.substr(pos + 1);
+  std::string prefix = pattern.substr(0, starPos);
+  std::string suffix = pattern.substr(starPos + 1);
 
   return startsWith(text, prefix) && endsWith(text, suffix);
+}
+
+std::string StringUtils::extractWildcardSegment(const std::string& text, const std::string& pattern)
+{
+  // Only support '*' wildcard
+  std::size_t starPos = pattern.find('*');
+  if (starPos == std::string::npos) {
+      return "";
+  }
+
+  std::string prefix = pattern.substr(0, starPos);
+  std::string suffix = pattern.substr(starPos + 1);
+
+  // Check prefix and suffix match at expected positions
+  if (text.size() < prefix.size() + suffix.size()) {
+    return "";
+  }
+
+  if (!startsWith(text, prefix) || !endsWith(text, suffix)) {
+    return "";
+  }
+
+  // Extract the segment between prefix and suffix
+  return text.substr(prefix.size(), text.size() - prefix.size() - suffix.size());
 }
 
 }  // namespace FOEDAG

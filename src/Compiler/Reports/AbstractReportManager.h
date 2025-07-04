@@ -154,7 +154,11 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   IDataReport::ColumnValues m_timingColumns;
   IDataReport::ColumnValues m_histogramColumns;
 
-  // new interface
+// new interface
+  void setActiveProfile(const std::string& profile) {
+    m_dataProfiles.setCurrentKey(profile);
+  }
+
   void setResourceData(const IDataReport::TableData& resourceData) {
     m_dataProfiles.current()->resourceData = resourceData;
   }
