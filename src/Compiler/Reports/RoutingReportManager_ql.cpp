@@ -70,7 +70,7 @@ std::unique_ptr<ITaskReport> RoutingReportManager::createReport(
 
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, m_resourceData, QString{"Resource Utilization"}));
+        m_resourceColumns, resourceData(), QString{"Resource Utilization"}));
     dataReports.push_back(std::make_unique<TableReport>(
         m_detailedUtilizationColumns, m_detailedUtilizationData, QString{"Detailed Resource Utilization"}));
   }
@@ -79,8 +79,8 @@ std::unique_ptr<ITaskReport> RoutingReportManager::createReport(
         m_circuitColumns, m_circuitData, QString{"Circuit Statistics"}));
   else {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, m_timingData, "Static Timing"));
-    for (auto &hgrm : m_histograms)
+        m_timingColumns, timingData(), "Static Timing"));
+    for (auto &hgrm : histograms())
       dataReports.push_back(std::make_unique<TableReport>(
           m_histogramColumns, hgrm.second, hgrm.first));
   }
@@ -112,17 +112,17 @@ void RoutingReportManager::parseLogFile() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-      m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
     else if (line.startsWith(ROUTING_SECTION))
       lineNr =
           parseErrorWarningSection(in, lineNr, ROUTING_SECTION, m_routingKeys);
     else if (ROUTING_SUMMARY.indexIn(line) != -1)
-      m_messages.insert(lineNr, TaskMessage{lineNr,
+      messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
                                             ROUTING_SUMMARY.cap(),
                                             {}});
     else if (TIMING_INFO.indexIn(line) != -1)
-      m_messages.insert(
+      messages().insert(
           lineNr,
           TaskMessage{
               lineNr, MessageSeverity::INFO_MESSAGE, TIMING_INFO.cap(), {}});
@@ -317,11 +317,11 @@ QString RoutingReportManager::getTimingLogFileName() const {
 }
 
 void RoutingReportManager::reset() {
-  m_messages.clear();
+  messages().clear();
   m_circuitData.clear();
-  m_histograms.clear();
-  m_resourceData.clear();
-  m_timingData.clear();
+  histograms().clear();
+  resourceData().clear();
+  timingData().clear();
 }
 
 bool RoutingReportManager::isStatisticalTimingHistogram(const QString &line) {
@@ -337,7 +337,7 @@ void RoutingReportManager::splitTimingData(const QString &timingStr) {
   auto valueIndex = 0;
   while (matchIt.hasNext() && valueIndex < TIMING_FIELDS.size()) {
     auto match = matchIt.next();
-    m_timingData.push_back({TIMING_FIELDS[valueIndex++], match.captured()});
+    timingData().push_back({TIMING_FIELDS[valueIndex++], match.captured()});
   }
 }
 

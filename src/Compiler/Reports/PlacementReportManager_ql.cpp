@@ -86,11 +86,11 @@ std::unique_ptr<ITaskReport> PlacementReportManager::createReport(
 
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, m_resourceData, QString{"Resource Utilization"}));
+        m_resourceColumns, resourceData(), QString{"Resource Utilization"}));
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, m_timingData, QString{"Static Timing"}));
-    for (auto &hgrm : m_histograms)
+        m_timingColumns, timingData(), QString{"Static Timing"}));
+    for (auto &hgrm : histograms())
       dataReports.push_back(std::make_unique<TableReport>(
           m_histogramColumns, hgrm.second, hgrm.first));
   }
@@ -101,10 +101,10 @@ std::unique_ptr<ITaskReport> PlacementReportManager::createReport(
 }
 
 void PlacementReportManager::parseLogFile() {
-  m_messages.clear();
-  m_histograms.clear();
-  m_resourceData.clear();
-  m_timingData.clear();
+  messages().clear();
+  histograms().clear();
+  resourceData().clear();
+  timingData().clear();
 
   auto logFile = createLogFile(QString(PLACEMENT_LOG));
   if (!logFile) return;
@@ -118,7 +118,7 @@ void PlacementReportManager::parseLogFile() {
     if (FIND_RESOURCES.indexIn(line) != -1)
       parseResourceUsage(in, lineNr);
     else if (LOAD_PACKING_REGEXP.exactMatch(line))
-      m_messages.insert(lineNr, TaskMessage{lineNr,
+      messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
                                             line.remove('#').simplified(),
                                             {}});
@@ -152,7 +152,7 @@ void PlacementReportManager::splitTimingData(const QString &timingStr) {
   auto valueIndex = 0;
   while (matchIt.hasNext() && valueIndex < TIMING_FIELDS.size()) {
     auto match = matchIt.next();
-    m_timingData.push_back({TIMING_FIELDS[valueIndex++], match.captured()});
+    timingData().push_back({TIMING_FIELDS[valueIndex++], match.captured()});
   }
 }
 

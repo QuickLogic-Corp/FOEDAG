@@ -112,7 +112,7 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
 
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, m_resourceData, QString{"Resource Utilization"}));
+        m_resourceColumns, resourceData(), QString{"Resource Utilization"}));
   } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
         m_circuitColumns, circuitData(), QString{"Circuit Statistics - 1"}));
@@ -120,14 +120,14 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
         m_circuitColumns, circuitData(), QString{"Circuit Statistics - 2"}));
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, m_timingData, QString{"Timing Data"}));
+        m_timingColumns, timingData(), QString{"Timing Data"}));
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (auto &hgrm : m_histograms)
+      for (auto &hgrm : histograms())
         dataReports.push_back(std::make_unique<TableReport>(
             m_openSTATimingColumns, hgrm.second, hgrm.first));
     } else {
-      for (auto &hgrm : m_histograms)
+      for (auto &hgrm : histograms())
         dataReports.push_back(std::make_unique<TableReport>(
             m_histogramColumns, hgrm.second, hgrm.first));
     }
@@ -162,8 +162,8 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
     // TODO: This is ugly, but at this point there is no clear view on timings.
     // We expect it to consist of two KEY VALUE pairs.
     if (timings.size() == 4) {
-      m_timingData.push_back({timings[0], timings[1]});
-      m_timingData.push_back({timings[2], timings[3]});
+      timingData().push_back({timings[0], timings[1]});
+      timingData().push_back({timings[2], timings[3]});
     }
     return;
   }
@@ -172,7 +172,7 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
   auto valueIndex = 0;
   while (matchIt.hasNext() && valueIndex < TIMING_FIELDS.size()) {
     auto match = matchIt.next();
-    m_timingData.push_back({TIMING_FIELDS[valueIndex++], match.captured()});
+    timingData().push_back({TIMING_FIELDS[valueIndex++], match.captured()});
   }
 }
 
@@ -184,10 +184,10 @@ void TimingAnalysisReportManager::parseLogFile() {
 }
 
 void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFilePath) {
-  m_messages.clear();
-  m_histograms.clear();
-  m_resourceData.clear();
-  m_timingData.clear();
+  messages().clear();
+  histograms().clear();
+  resourceData().clear();
+  timingData().clear();
   circuitData().clear();
 
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
@@ -195,7 +195,7 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFilePath)
     parseOpenSTALog(logFilePath);
     return;
   }
-  auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
+  auto logFile = createLogFile(logFilePath);
   if (!logFile) return;
 
   auto timings = QStringList{};
@@ -218,17 +218,17 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFilePath)
     else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
       setCircuitData(parseCircuitStats(in, lineNr));
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
-      m_messages.insert(lineNr, TaskMessage{lineNr,
+      messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
                                             VPR_ROUTING_OPT.cap(),
                                             {}});
     else if (line.endsWith(BUILD_TIM_GRAPH))
-      m_messages.insert(
+      messages().insert(
           lineNr,
           TaskMessage{
               lineNr, MessageSeverity::INFO_MESSAGE, BUILD_TIM_GRAPH, {}});
     else if (line.endsWith(LOAD_PACKING))
-      m_messages.insert(
+      messages().insert(
           lineNr,
           TaskMessage{lineNr, MessageSeverity::INFO_MESSAGE, LOAD_PACKING, {}});
     else if (line.startsWith(CREATE_DEVICE_SECTION))
@@ -241,7 +241,7 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFilePath)
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-      m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
@@ -270,7 +270,7 @@ void TimingAnalysisReportManager::parseOpenSTALog(const QString& logFilePath) {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (line.contains(OPENSTA_TIMING))
-      m_histograms.push_back(qMakePair(QString("Timing table"),
+      histograms().push_back(qMakePair(QString("Timing table"),
                                        parseOpenSTATimingTable(in, lineNr)));
     ++lineNr;
   }
