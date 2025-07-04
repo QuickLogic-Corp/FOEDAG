@@ -21,8 +21,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "AbstractReportManager.h"
+#include "DataProfiles.h"
 
-#include <map>
 #include <QDebug>
 
 namespace FOEDAG {
@@ -37,51 +37,6 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   struct DataProfile {
     IDataReport::TableData circuitData;
   };
-  using DataProfilePtr = std::shared_ptr<DataProfile>;
-
-  class DataProfiles {
-  public:
-    DataProfiles() {
-      create(); // create default
-    }
-    DataProfilePtr getOrCreate(const std::string& key) {
-      if (!contain(key)) {
-        create(key);
-      }
-      return m_data[key];
-
-      m_currentKey = key;
-      DataProfilePtr profile = std::make_shared<DataProfile>();
-      m_data[key] = profile;
-      return profile;
-    }
-
-    bool contain(const std::string& key) {
-      return m_data.find(key) != m_data.end();
-    }
-
-    void create(const std::string& key = "") {
-      qDebug() << "~~~ create new key" << QString::fromStdString(key);
-      m_data[key] = std::make_shared<DataProfile>();
-      m_currentKey = key;
-    }
-
-    void setCurrentKey(const std::string& key) {
-      if (m_data.find(key) != m_data.end()) {
-        m_currentKey = key;
-      } else {
-        qDebug() << "~~~ attempt to use not registered key" << QString::fromStdString(key);
-      }
-    }
-
-    DataProfilePtr current() const {
-      return m_data.at(m_currentKey);
-    }
-
-  private:
-    std::string m_currentKey;
-    std::map<std::string, DataProfilePtr> m_data;
-  };
 
  public:
   TimingAnalysisReportManager(const TaskManager &taskManager,
@@ -95,7 +50,7 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   bool isStatisticalTimingHistogram(const QString &line) override;
   void splitTimingData(const QString &timingStr) override;
   void parseLogFile() override;
-  void parseLogFileHelper(const QString& logFileName);
+  void parseLogFileHelper(const QString& logFileName, const std::string& profile);
   
   void parseOpenSTALog(const QString& logFileName);
   IDataReport::TableData parseOpenSTATimingTable(QTextStream &in,
@@ -103,15 +58,19 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
 
   // interface
   void setCircuitData(const IDataReport::TableData& data, const std::string& key = "") {
-    m_dataProfiles.getOrCreate(key)->circuitData = data;
+    qInfo() << "~~~ setCircuitData for profile" << key.c_str();
+    m_dataProfiles.get(key)->circuitData = data;
   }
 
-  IDataReport::TableData& circuitData() const {
+  IDataReport::TableData& circuitData() {
     return m_dataProfiles.current()->circuitData;
+  }
+  IDataReport::TableData& circuitData(const std::string& key) {
+    return m_dataProfiles.get(key)->circuitData;
   }
   //
 
-  DataProfiles m_dataProfiles;
+  DataProfiles<DataProfile> m_dataProfiles;
 
   SectionKeys m_createDeviceKeys;
 

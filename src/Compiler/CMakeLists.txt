@@ -107,6 +107,7 @@ set (SRC_H_INSTALL_LIST
   Reports/SynthesisReportManager.h
   Reports/TimingAnalysisReportManager.h
   Reports/PowerAnalysisReportManager_ql.h
+  Reports/DataProfiles.h
   TaskGlobal.h
   QLDeviceManager.h
   QLSettingsManager.h

@@ -116,10 +116,10 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     dataReports.push_back(std::make_unique<TableReport>(
         m_resourceColumns, resourceData(), QString{"Resource Utilization"}));
   } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, circuitData(), QString{"Circuit Statistics - 1"}));
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, circuitData(), QString{"Circuit Statistics - 2"}));
+    for (const std::string& profile: profiles()) {
+      dataReports.push_back(std::make_unique<TableReport>(
+        m_circuitColumns, circuitData(profile), QString("Circuit Statistics - %1").arg(QString::fromStdString(profile))));
+    }
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
         m_timingColumns, timingData(), QString{"Timing Data"}));
@@ -183,18 +183,17 @@ void TimingAnalysisReportManager::parseLogFile() {
   auto projectPath = Project::Instance()->projectPath().toStdString();
   std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
   for (const std::string& logFileName: logFileNames) {
-    parseLogFileHelper(QString::fromStdString(logFileName));
+    std::string profile;
+    if (logFileNames.size() > 1) {
+      profile = StringUtils::extractWildcardSegment(logFileName, TIMING_ANALYSIS_LOG_PATTERN);
+    }
+    parseLogFileHelper(QString::fromStdString(logFileName), profile);
   }
-  
+
   setFileParsed(true);
 }
 
-void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName) {
-  std::string profile;
-  if (logFileName.contains("*")) {
-    profile = StringUtils::extractWildcardSegment(logFileName.toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
-  }
-
+void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName, const std::string& profile) {
   m_dataProfiles.setCurrentKey(profile);
   setActiveProfile(profile);
 
@@ -232,7 +231,7 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName)
     else if (line.startsWith(LOAD_TIM_CONSTR))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_TIM_CONSTR, {});
     else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
-      setCircuitData(parseCircuitStats(in, lineNr));
+      setCircuitData(parseCircuitStats(in, lineNr), profile);
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
       messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,

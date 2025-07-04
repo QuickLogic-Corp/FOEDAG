@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IDataReport.h"
 #include "ITaskReportManager.h"
+#include "DataProfiles.h"
 
 #include <QDebug>
 
@@ -49,52 +50,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
     QVector<QPair<QString, IDataReport::TableData>> histograms;
     Messages messages;
   };
-  using DataProfilePtr = std::shared_ptr<DataProfile>;
-
-  class DataProfiles {
-  public:
-    DataProfiles() {
-      create(); // create default
-    }
-    DataProfilePtr getOrCreate(const std::string& key) {
-      if (!contain(key)) {
-        create(key);
-      }
-      return m_data[key];
-
-      m_currentKey = key;
-      DataProfilePtr profile = std::make_shared<DataProfile>();
-      m_data[key] = profile;
-      return profile;
-    }
-
-    bool contain(const std::string& key) {
-      return m_data.find(key) != m_data.end();
-    }
-
-    void create(const std::string& key = "") {
-      qDebug() << "~~~ create new key" << QString::fromStdString(key);
-      m_data[key] = std::make_shared<DataProfile>();
-      m_currentKey = key;
-    }
-
-    void setCurrentKey(const std::string& key) {
-      if (m_data.find(key) != m_data.end()) {
-        m_currentKey = key;
-      } else {
-        qDebug() << "~~~ attempt to use not registered key" << QString::fromStdString(key);
-      }
-    }
-
-    DataProfilePtr current() const {
-      return m_data.at(m_currentKey);
-    }
-
-  private:
-    std::string m_currentKey;
-    std::map<std::string, DataProfilePtr> m_data;
-  };
-
+  
  public:
   AbstractReportManager(const TaskManager &taskManager);
 
@@ -163,24 +119,25 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
     m_dataProfiles.current()->resourceData = resourceData;
   }
 
-  IDataReport::TableData& resourceData() const {
+  IDataReport::TableData& resourceData() {
     return m_dataProfiles.current()->resourceData;
   }
-  IDataReport::TableData& timingData() const {
+  IDataReport::TableData& timingData() {
     return m_dataProfiles.current()->timingData;
   }
-  QVector<QPair<QString, IDataReport::TableData>>& histograms() const {
+  QVector<QPair<QString, IDataReport::TableData>>& histograms() {
     return m_dataProfiles.current()->histograms;
   }
-  Messages& messages() const {
+  Messages& messages() {
     return m_dataProfiles.current()->messages;
   }
+  std::vector<std::string> profiles() const { return m_dataProfiles.keys(); }
   //
 
  private:
   bool m_fileParsed{false};
 
-  DataProfiles m_dataProfiles;
+  DataProfiles<DataProfile> m_dataProfiles;
 };
 
 }  // namespace FOEDAG
