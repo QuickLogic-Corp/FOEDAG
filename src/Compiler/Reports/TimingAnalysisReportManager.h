@@ -95,8 +95,9 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   bool isStatisticalTimingHistogram(const QString &line) override;
   void splitTimingData(const QString &timingStr) override;
   void parseLogFile() override;
-
-  void parseOpenSTALog();
+  void parseLogFileHelper(const QString& logFilePath);
+  
+  void parseOpenSTALog(const QString& logFilePath);
   IDataReport::TableData parseOpenSTATimingTable(QTextStream &in,
                                                  int &lineNr) const;
 

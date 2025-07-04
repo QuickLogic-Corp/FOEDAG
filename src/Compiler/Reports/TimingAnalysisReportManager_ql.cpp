@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
+#include "Utils/FileUtils.h"
 #include <QDebug>
 
 namespace {
@@ -176,6 +177,13 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void TimingAnalysisReportManager::parseLogFile() {
+  std::vector<std::filesystem::path> logFilePathes = FileUtils::findFilesByWildcard(TIMING_ANALYSIS_LOG_PATTERN);
+  for (const std::filesystem::path& logFilePath: logFilePathes) {
+    parseLogFileHelper(QString::fromStdString(logFilePath.string()));
+  }
+}
+
+void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFilePath) {
   m_messages.clear();
   m_histograms.clear();
   m_resourceData.clear();
@@ -184,7 +192,7 @@ void TimingAnalysisReportManager::parseLogFile() {
 
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
-    parseOpenSTALog();
+    parseOpenSTALog(logFilePath);
     return;
   }
   auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
@@ -243,8 +251,8 @@ void TimingAnalysisReportManager::parseLogFile() {
   setFileParsed(true);
 }
 
-void TimingAnalysisReportManager::parseOpenSTALog() {
-  auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
+void TimingAnalysisReportManager::parseOpenSTALog(const QString& logFilePath) {
+  auto logFile = createLogFile(logFilePath);
   if (!logFile) return;
 
   auto in = QTextStream(logFile.get());
