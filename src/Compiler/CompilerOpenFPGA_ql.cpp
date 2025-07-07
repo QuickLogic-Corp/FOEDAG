@@ -1118,6 +1118,21 @@ bool CompilerOpenFPGA_ql::VerifyTargetDevice() const {
   return target || archFile;
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::removeLog(
+    FOEDAG::ProjectManager* projManager, const std::string& fileName) {
+
+  if (projManager) {
+    std::filesystem::path projectPath(projManager->projectPath());
+    std::filesystem::path filePath = projectPath / fileName;
+    if (FileUtils::FileExists(filePath)) {
+      std::filesystem::remove(filePath);
+      return filePath;
+    }
+  }
+
+  return "";
+}
+
 std::filesystem::path CompilerOpenFPGA_ql::copyLog(
     FOEDAG::ProjectManager* projManager, const std::string& srcFileName,
     const std::string& destFileName) {
@@ -3777,8 +3792,8 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return "_" + device.device_variant.voltage_threshold + "_" + device.device_variant.p_v_t_corner;
   };
 
-  std::set<std::string> device_sta_vt_variants{current_device.device_variant.voltage_threshold};
-  std::set<std::string> device_sta_p_v_t_corner_variants{current_device.device_variant.p_v_t_corner};
+  std::set<std::string> device_sta_vt_variants{};
+  std::set<std::string> device_sta_p_v_t_corner_variants{};
   std::string sta_vpr_options = "";
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold").empty() ) {
@@ -3801,6 +3816,11 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
           std::make_move_iterator(elements.end())
       );
     }
+  }
+
+  if (!device_sta_p_v_t_corner_variants.empty() && device_sta_vt_variants.empty()) {
+    // if pvt corner is specified but vt corner is not, then use vt configuration from the current device
+    device_sta_vt_variants.insert(current_device.device_variant.voltage_threshold);
   }
 
   for (const std::string& device_sta_vt_variant: device_sta_vt_variants) {
@@ -3868,12 +3888,15 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     } else {
       std::string corner_timing_analysis_log = StringUtils::replaceAll(TIMING_ANALYSIS_LOG_PATTERN, "*", sta_suffix);
       copyLog(ProjManager(), "vpr_stdout.log", corner_timing_analysis_log);
+      removeLog(ProjManager(), "vpr_stdout.log");
 
       std::string corner_report_timing_hold = StringUtils::replaceAll(TA_REPORT_TIMING_HOLD_PATTERN, "*", sta_suffix);
       copyLog(ProjManager(), TA_REPORT_TIMING_HOLD, corner_report_timing_hold);
-
+      removeLog(ProjManager(), TA_REPORT_TIMING_HOLD);
+      
       std::string corner_report_timing_setup = StringUtils::replaceAll(TA_REPORT_TIMING_SETUP_PATTERN, "*", sta_suffix);
       copyLog(ProjManager(), TA_REPORT_TIMING_SETUP, corner_report_timing_setup);
+      removeLog(ProjManager(), TA_REPORT_TIMING_SETUP);
     }
   });
 

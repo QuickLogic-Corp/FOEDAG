@@ -170,6 +170,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
       const std::string& size) const;
   bool VerifyTargetDevice() const;
+  static std::filesystem::path removeLog(FOEDAG::ProjectManager* projManager,
+                                       const std::string& fileName);
   static std::filesystem::path copyLog(FOEDAG::ProjectManager* projManager,
                                        const std::string& srcFileName,
                                        const std::string& destFileName);
