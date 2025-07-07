@@ -78,8 +78,7 @@ void PackingReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void PackingReportManager::parseLogFile() {
-  messages().clear();
-  resourceData().clear();
+  clearDataProfiles();
   m_circuitData.clear();
 
   auto logFile = createLogFile(QString(PACKING_LOG));

@@ -317,11 +317,8 @@ QString RoutingReportManager::getTimingLogFileName() const {
 }
 
 void RoutingReportManager::reset() {
-  messages().clear();
+  clearDataProfiles();
   m_circuitData.clear();
-  histograms().clear();
-  resourceData().clear();
-  timingData().clear();
 }
 
 bool RoutingReportManager::isStatisticalTimingHistogram(const QString &line) {

@@ -40,6 +40,9 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   TimingAnalysisReportManager(const TaskManager &taskManager,
                               Compiler *compiler);
 
+ protected:
+  void clearDataProfiles() override final;
+
  private:
   QStringList getAvailableReportIds() const override;
   std::unique_ptr<ITaskReport> createReport(const QString &reportId) override;

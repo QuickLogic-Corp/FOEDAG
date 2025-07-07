@@ -101,10 +101,7 @@ std::unique_ptr<ITaskReport> PlacementReportManager::createReport(
 }
 
 void PlacementReportManager::parseLogFile() {
-  messages().clear();
-  histograms().clear();
-  resourceData().clear();
-  timingData().clear();
+  clearDataProfiles();
 
   auto logFile = createLogFile(QString(PLACEMENT_LOG));
   if (!logFile) return;

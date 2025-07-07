@@ -57,6 +57,11 @@ public:
     return get(m_currentKey);
   }
 
+  void clear() {
+    m_data.clear();
+    m_currentKey = "";
+  }
+
 private:
   std::string m_currentKey;
   std::map<std::string, std::shared_ptr<T>> m_data;

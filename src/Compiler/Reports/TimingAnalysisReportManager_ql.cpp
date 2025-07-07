@@ -143,15 +143,15 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     }
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms(profile)) {
+      for (auto &hgrm : histograms(profile)) {
+        for (const std::string& profile: profiles()) {
           dataReports.push_back(std::make_unique<TableReport>(
               m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
         }
       }
     } else {
-      for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms(profile)) {
+      for (auto &hgrm : histograms(profile)) {
+        for (const std::string& profile: profiles()) {
           dataReports.push_back(std::make_unique<TableReport>(
               m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
         }
@@ -203,6 +203,8 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void TimingAnalysisReportManager::parseLogFile() {
+  clearDataProfiles();
+
   auto projectPath = Project::Instance()->projectPath().toStdString();
   std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
   for (const std::string& logFileName: logFileNames) {
@@ -219,13 +221,7 @@ void TimingAnalysisReportManager::parseLogFile() {
 void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName, const std::string& profile) {
   m_dataProfiles.setCurrentKey(profile);
   setActiveProfile(profile);
-
-  messages().clear();
-  histograms().clear();
-  resourceData().clear();
-  timingData().clear();
-  circuitData().clear();
-
+ 
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
     parseOpenSTALog(logFileName);
@@ -340,6 +336,12 @@ IDataReport::TableData TimingAnalysisReportManager::parseOpenSTATimingTable(
     if (tableLine.size() == 3) result.push_back(std::move(tableLine));
   }
   return result;
+}
+
+void TimingAnalysisReportManager::clearDataProfiles()
+{
+  AbstractReportManager::clearDataProfiles();
+  m_dataProfiles.clear();
 }
 
 }  // namespace FOEDAG

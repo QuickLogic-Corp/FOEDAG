@@ -108,7 +108,10 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   IDataReport::ColumnValues m_timingColumns;
   IDataReport::ColumnValues m_histogramColumns;
 
-// new interface
+  virtual void clearDataProfiles() {
+    m_dataProfiles.clear();
+  }
+
   void setActiveProfile(const std::string& profile) {
     m_dataProfiles.setCurrentKey(profile);
   }
@@ -139,7 +142,6 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
     return m_dataProfiles.current()->messages;
   }
   std::vector<std::string> profiles() const { return m_dataProfiles.keys(); }
-  //
 
  private:
   bool m_fileParsed{false};

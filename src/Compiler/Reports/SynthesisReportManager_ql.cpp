@@ -122,8 +122,7 @@ std::unique_ptr<ITaskReport> SynthesisReportManager::createReport(
 }
 
 void SynthesisReportManager::parseLogFile() {
-  resourceData().clear();
-  messages().clear();
+  clearDataProfiles();
 
   auto logFile = createLogFile(QString(SYNTHESIS_LOG));
   if (!logFile) return;

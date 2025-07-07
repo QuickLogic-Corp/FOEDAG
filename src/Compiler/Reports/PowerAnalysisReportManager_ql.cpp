@@ -74,9 +74,7 @@ std::unique_ptr<ITaskReport> PowerAnalysisReportManager::createReport(
 }
 
 void PowerAnalysisReportManager::parseLogFile() {
-  resourceData().clear();
-  timingData().clear();
-  messages().clear();
+  clearDataProfiles();
 
   // read power analysis rpt
   auto logFile = createLogFile(QString(POWER_ANALYSIS_LOG));
