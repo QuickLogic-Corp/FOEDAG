@@ -119,20 +119,23 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
     m_dataProfiles.current()->resourceData = resourceData;
   }
 
-  IDataReport::TableData& resourceData(const std::string& profile) {
-    return m_dataProfiles.get(profile)->resourceData;
-  }
   IDataReport::TableData& resourceData() {
     return m_dataProfiles.current()->resourceData;
   }
-  IDataReport::TableData& timingData(const std::string& profile) {
-    return m_dataProfiles.get(profile)->timingData;
+  IDataReport::TableData& resourceData(const std::string& profile) {
+    return m_dataProfiles.get(profile)->resourceData;
   }
   IDataReport::TableData& timingData() {
     return m_dataProfiles.current()->timingData;
   }
+  IDataReport::TableData& timingData(const std::string& profile) {
+    return m_dataProfiles.get(profile)->timingData;
+  }
   QVector<QPair<QString, IDataReport::TableData>>& histograms() {
     return m_dataProfiles.current()->histograms;
+  }
+  QVector<QPair<QString, IDataReport::TableData>>& histograms(const std::string& profile) {
+    return m_dataProfiles.get(profile)->histograms;
   }
   Messages& messages() {
     return m_dataProfiles.current()->messages;
