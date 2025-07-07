@@ -209,7 +209,7 @@ void TimingAnalysisReportManager::parseLogFile() {
   std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
   for (const std::string& logFileName: logFileNames) {
     std::string profile;
-    if (logFileNames.size() > 1) {
+    if (logFileName != TIMING_ANALYSIS_LOG) {
       profile = StringUtils::extractWildcardSegment(logFileName, TIMING_ANALYSIS_LOG_PATTERN);
     }
     parseLogFileHelper(QString::fromStdString(logFileName), profile);
