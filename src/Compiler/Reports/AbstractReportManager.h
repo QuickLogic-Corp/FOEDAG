@@ -28,8 +28,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ITaskReportManager.h"
 #include "DataProfiles.h"
 
-#include <QDebug>
-
 class QFile;
 class QRegExp;
 class QTextStream;
