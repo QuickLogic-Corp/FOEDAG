@@ -143,15 +143,15 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     }
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (auto &hgrm : histograms(profile)) {
-        for (const std::string& profile: profiles()) {
+      for (const std::string& profile: profiles()) {
+        for (auto &hgrm : histograms(profile)) {
           dataReports.push_back(std::make_unique<TableReport>(
               m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
         }
       }
     } else {
-      for (auto &hgrm : histograms(profile)) {
-        for (const std::string& profile: profiles()) {
+      for (const std::string& profile: profiles()) {
+        for (auto &hgrm : histograms(profile)) {
           dataReports.push_back(std::make_unique<TableReport>(
               m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
         }
