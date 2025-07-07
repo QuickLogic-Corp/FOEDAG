@@ -3804,7 +3804,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     for (const std::string& device_sta_p_v_t_corner_variant: device_sta_p_v_t_corner_variants) {
       if(current_device.device_variant.voltage_threshold != device_sta_vt_variant ||
         current_device.device_variant.p_v_t_corner != device_sta_p_v_t_corner_variant) {
-        qInfo() << "~~~ adding device_sta" << device_sta_vt_variant.c_str() << device_sta_p_v_t_corner_variant.c_str();
         QLDeviceTarget device_sta = QLDeviceManager::getInstance()->convertToDeviceTarget(current_device.device_variant.family,
                                                                   current_device.device_variant.foundry,
                                                                   current_device.device_variant.node,
@@ -3880,7 +3879,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
   std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
 
-  qDebug() << "~~~ running sta for device" << QString::fromStdString(sta_suffix) << QString::fromStdString(QLDeviceManager::getInstance()->convertToDeviceString(current_device_sta));
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
