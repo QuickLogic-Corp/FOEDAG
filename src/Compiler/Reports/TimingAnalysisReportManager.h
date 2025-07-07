@@ -23,8 +23,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "AbstractReportManager.h"
 #include "DataProfiles.h"
 
-#include <QDebug>
-
 namespace FOEDAG {
 
 class Compiler;
@@ -56,9 +54,7 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   IDataReport::TableData parseOpenSTATimingTable(QTextStream &in,
                                                  int &lineNr) const;
 
-  // interface
   void setCircuitData(const IDataReport::TableData& data, const std::string& key = "") {
-    qInfo() << "~~~ setCircuitData for profile" << key.c_str();
     m_dataProfiles.get(key)->circuitData = data;
   }
 
@@ -68,7 +64,6 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   IDataReport::TableData& circuitData(const std::string& key) {
     return m_dataProfiles.get(key)->circuitData;
   }
-  //
 
   DataProfiles<DataProfile> m_dataProfiles;
 

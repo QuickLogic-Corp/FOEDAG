@@ -25,8 +25,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <map>
 #include <string>
 
-#include <QDebug>
-
 namespace FOEDAG {
 
 template<typename T>
@@ -68,7 +66,6 @@ private:
   }
 
   void create(const std::string& key = "") {
-    qDebug() << "~~~ create new key" << QString::fromStdString(key);
     m_data[key] = std::make_shared<T>();
   }
 };

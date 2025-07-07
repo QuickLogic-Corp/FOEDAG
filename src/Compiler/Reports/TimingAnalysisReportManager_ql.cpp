@@ -32,7 +32,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
-#include <QDebug>
 
 namespace {
 static constexpr const char *RESOURCE_REPORT_NAME{
@@ -107,7 +106,6 @@ QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
 
 std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     const QString &reportId) {
-  qInfo() << "~~~ TimingAnalysisReportManager::createReport" << reportId;
   if (!isFileParsed()) parseLogFile();
 
   ITaskReport::DataReports dataReports;
@@ -205,7 +203,6 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void TimingAnalysisReportManager::parseLogFile() {
-  qInfo() << "~~~ TimingAnalysisReportManager::parseLogFile()";
   auto projectPath = Project::Instance()->projectPath().toStdString();
   std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
   for (const std::string& logFileName: logFileNames) {

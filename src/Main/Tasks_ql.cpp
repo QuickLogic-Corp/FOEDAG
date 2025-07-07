@@ -71,7 +71,6 @@ QLabel* createTitleLabel(const QString& text) {
 }
 
 void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
-  qInfo() << "~~~ generateReport";
   QLabel* reportTablesSelectionLabel = new QLabel("Select Data Table:");
   QComboBox* reportTablesSelectionComboBox = new QComboBox();
   QStackedWidget* reportTablesStackedWidget = new QStackedWidget();
@@ -322,7 +321,6 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
 void openReportView(Compiler* compiler, const Task* task,
                     const ITaskReport& report) {
   auto reportName = report.getName();
-  qInfo() << "~~~ openReportView" << reportName;
   bool newReport{true};
   auto tabWidget = TextEditorForm::Instance()->GetTabWidget();
   for (int i = 0; i < tabWidget->count(); i++) {

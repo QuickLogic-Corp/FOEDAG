@@ -331,7 +331,6 @@ void FOEDAG::handleViewFileRequested(const QString& filePath) {
 void FOEDAG::handleViewReportRequested(Compiler* compiler, const Task* task,
                                        const QString& reportId,
                                        ITaskReportManager& reportManager) {
-  qInfo() << "~~~ handleViewReportRequested";
   auto report = reportManager.createReport(reportId);
   if (!report) return;
 

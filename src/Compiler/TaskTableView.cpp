@@ -231,7 +231,6 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
       auto *viewReport = new QAction(viewReportStr, this);
       viewReport->setEnabled(logExists);
       connect(viewReport, &QAction::triggered, this, [this, task, reportId]() {
-        qInfo() << "~~~ request view for reportId=" << reportId;
         emit ViewReportRequested(task, reportId);
       });
       menu->addAction(viewReport);
