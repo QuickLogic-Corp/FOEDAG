@@ -226,8 +226,6 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName,
   timingData().clear();
   circuitData().clear();
 
-  qInfo() << "~~~ TimingAnalysisReportManager::parseLogFileHelper logFilePath=" << logFileName;
-
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
     parseOpenSTALog(logFileName);
