@@ -3676,6 +3676,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     ErrorMessage("No design specified");
     return false;
   }
+
+  CleanFiles(Action::STA); // this is required to remove the not actual multi corner reports left from previous run
+
 #if UPSTREAM_UNUSED
   if (!HasTargetDevice()) return false;
 #endif // #if UPSTREAM_UNUSED
