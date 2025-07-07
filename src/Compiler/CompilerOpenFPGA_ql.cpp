@@ -3770,12 +3770,12 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   // current target device:
   // currently we only expect the p_v_t_corner to be specified in JSON, but the code
   // supports voltage_threshold also, if it is added to the JSON.
+  std::map<std::string, QLDeviceTarget> devices;
   QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
   auto staSuffix = [](const QLDeviceTarget& device)->std::string{
     return "_" + device.device_variant.voltage_threshold + "_" + device.device_variant.p_v_t_corner;
   };
-  std::map<std::string, QLDeviceTarget> devices = {{staSuffix(current_device), current_device}};
 
   std::set<std::string> device_sta_vt_variants{current_device.device_variant.voltage_threshold};
   std::set<std::string> device_sta_p_v_t_corner_variants{current_device.device_variant.p_v_t_corner};
@@ -3807,7 +3807,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     for (const std::string& device_sta_p_v_t_corner_variant: device_sta_p_v_t_corner_variants) {
       if(current_device.device_variant.voltage_threshold != device_sta_vt_variant ||
         current_device.device_variant.p_v_t_corner != device_sta_p_v_t_corner_variant) {
-        qInfo() << "~~~ adding device_sta" << device_sta_vt_variant.c_str() << device_sta_p_v_t_corner_variant.c_str();
         QLDeviceTarget device_sta = QLDeviceManager::getInstance()->convertToDeviceTarget(current_device.device_variant.family,
                                                                   current_device.device_variant.foundry,
                                                                   current_device.device_variant.node,
@@ -3836,13 +3835,17 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     }
   }
 
-  if (devices.size() > 1) {
+  bool is_multicorner_sta_setup = !devices.empty();
+  if (is_multicorner_sta_setup) {
     // As the architecture file for PnR will not match the architecture file for STA in this case,
     // vpr will fail on verifying the file hashes, so explicitly ask vpr to ignore the 
     // file hash checks.
     // example error message:
     // >> Netlist was generated from a different architecture file (loaded architecture ID: SHA256:f73c6dffee1739f500e80ed13797d3bb78fb14ef9904f06368c8c0a407205617, netlist file architecture ID: SHA256:af8742ca39cc2f748b691015adaef1561ea258f433904565b2f84e00954c9e87)
     sta_vpr_options += " --verify_file_digests off";
+  } else {
+    // run sta with current device
+    devices[""] = current_device;
   }
 
   for (const auto& [sta_suffix, device]: devices) {
@@ -3879,7 +3882,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
   std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
 
-  qDebug() << "~~~ running sta for device" << QString::fromStdString(sta_suffix) << QString::fromStdString(QLDeviceManager::getInstance()->convertToDeviceString(current_device_sta));
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
