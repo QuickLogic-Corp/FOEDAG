@@ -5952,6 +5952,15 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {
     return power_dynamic;
   }
 
+  // check if the user has explicitly enabled power estimation:
+  if( QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") != "checked" ) {
+
+    // user has not enabled power analysis
+    Message("\n>> dynamic_power is disabled in JSON, skipping power analysis!");
+
+    return power_dynamic;
+  }
+
   // set everything to be printed in fixed point instead of scientific notation:
   std::cout.setf (std::ios::fixed);
 
@@ -6770,6 +6779,24 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   long double calculator_d7       = QLMetricsManager::getDoubleValue("routing", "device_size_y");        // array_y
   long double calculator_d29      = QLMetricsManager::getDoubleValue("routing", "num_dsp");              // num_dsp
   long double calculator_d30      = QLMetricsManager::getDoubleValue("routing", "num_bram");             // num_bram
+
+  // check for user inputs power json:
+  if( QLSettingsManager::getJson("power") == nullptr ) {
+
+    // there are no power_inputs parameters required for power analysis!
+    Message("\n>> power_inputs in JSON unavailable, skipping power analysis!");
+
+    return power_leakage;
+  }
+
+  // check if the user has explicitly enabled power estimation:
+  if( QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") != "checked" ) {
+
+    // user has not enabled power analysis
+    Message("\n>> leakage_power is disabled in JSON, skipping power analysis!");
+
+    return power_leakage;
+  }
 
   // enable debug prints if specified in JSON
   bool power_estimation_dbg = false;
