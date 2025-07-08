@@ -67,6 +67,8 @@ class CommandLine {
   void ErrorAndExit(const std::string& message);
   bool FileExists(const std::filesystem::path& name);
   bool Mute() const { return m_mute; }
+  bool SynplifyLicenseWait() const { return m_synplify_license_wait; }
+
 
   void Clear();
 
@@ -85,6 +87,7 @@ class CommandLine {
   bool m_version = false;
   bool m_useVerific = false;
   bool m_mute = false;
+  bool m_synplify_license_wait = false;
 };
 
 }  // namespace FOEDAG

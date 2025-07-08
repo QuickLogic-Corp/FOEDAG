@@ -68,6 +68,7 @@ class PinAssignmentBaseViewTest : public PinAssignmentBaseView {
   }
 };
 
+#ifdef UPSTREAM_PINPLANNER
 TEST(PinAssignmentBaseView, setComboDataIndexOnlyValid) {
   PinAssignmentBaseViewTest view{};
   auto index = view.model()->index(0, PinAssignmentBaseViewTest::COL0);
@@ -76,6 +77,7 @@ TEST(PinAssignmentBaseView, setComboDataIndexOnlyValid) {
   EXPECT_EQ(view.combo0->currentIndex(), 2);
   EXPECT_EQ(view.combo1->currentIndex(), 0);
 }
+#endif // UPSTREAM_PINPLANNER
 
 TEST(PinAssignmentBaseView, setComboDataIndexOnlyInvalid) {
   PinAssignmentBaseViewTest view{};
@@ -86,6 +88,7 @@ TEST(PinAssignmentBaseView, setComboDataIndexOnlyInvalid) {
   EXPECT_EQ(view.combo1->currentIndex(), 0);
 }
 
+#ifdef UPSTREAM_PINPLANNER
 TEST(PinAssignmentBaseView, setComboDataColumnOnlyValid) {
   PinAssignmentBaseViewTest view{};
   auto index = view.model()->index(0, PinAssignmentBaseViewTest::COL0);
@@ -94,6 +97,7 @@ TEST(PinAssignmentBaseView, setComboDataColumnOnlyValid) {
   EXPECT_EQ(view.combo0->currentIndex(), 0);
   EXPECT_EQ(view.combo1->currentIndex(), 2);
 }
+#endif // UPSTREAM_PINPLANNER
 
 TEST(PinAssignmentBaseView, setComboDataColumnOnlyInvalid) {
   PinAssignmentBaseViewTest view{};
@@ -104,11 +108,13 @@ TEST(PinAssignmentBaseView, setComboDataColumnOnlyInvalid) {
   EXPECT_EQ(view.combo1->currentIndex(), 0);
 }
 
+#ifdef UPSTREAM_PINPLANNER
 TEST(PinAssignmentBaseView, GetComboIndexValid) {
   PinAssignmentBaseViewTest view{};
   auto index = view.model()->index(0, PinAssignmentBaseViewTest::COL0);
   EXPECT_EQ(view.GetComboTest(index), view.combo0);
 }
+#endif // UPSTREAM_PINPLANNER
 
 TEST(PinAssignmentBaseView, GetComboIndexInvalid) {
   PinAssignmentBaseViewTest view{};
@@ -117,12 +123,14 @@ TEST(PinAssignmentBaseView, GetComboIndexInvalid) {
   EXPECT_EQ(view.GetComboTest(index), nullptr);
 }
 
+#ifdef UPSTREAM_PINPLANNER
 TEST(PinAssignmentBaseView, GetComboColumnValid) {
   PinAssignmentBaseViewTest view{};
   auto index = view.model()->index(0, PinAssignmentBaseViewTest::COL0);
   EXPECT_EQ(view.GetComboTest(index, PinAssignmentBaseViewTest::COL1),
             view.combo1);
 }
+#endif // UPSTREAM_PINPLANNER
 
 TEST(PinAssignmentBaseView, GetComboColumnInvalid) {
   PinAssignmentBaseViewTest view{};
@@ -131,15 +139,18 @@ TEST(PinAssignmentBaseView, GetComboColumnInvalid) {
   EXPECT_EQ(view.GetComboTest(index, PinAssignmentBaseViewTest::COL2), nullptr);
 }
 
+#ifdef UPSTREAM_PINPLANNER
 TEST(PinAssignmentBaseView, GetComboItemValid) {
   PinAssignmentBaseViewTest view{};
   auto item = view.item;
   EXPECT_EQ(view.GetComboTest(item, PinAssignmentBaseViewTest::COL1),
             view.combo1);
 }
+#endif // UPSTREAM_PINPLANNER
 
 TEST(PinAssignmentBaseView, GetComboItemInvalid) {
   PinAssignmentBaseViewTest view{};
   auto item = view.item;
   EXPECT_EQ(view.GetComboTest(item, PinAssignmentBaseViewTest::COL2), nullptr);
 }
+

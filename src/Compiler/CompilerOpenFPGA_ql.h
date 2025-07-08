@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 #include "Compiler/Compiler.h"
+#include "Compiler/BlifParser.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -226,6 +227,8 @@ class CompilerOpenFPGA_ql : public Compiler {
 private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
+
+  BlifParser m_blifParser;
 };
 
 }  // namespace FOEDAG
