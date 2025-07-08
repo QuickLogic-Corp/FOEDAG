@@ -1892,13 +1892,19 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
 
     const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
+
+    std::string synplify_license_wait = "";
+
+    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
+      synplify_license_wait = "-license_wait ";
+
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
-    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " +
+    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " -log " + synplifyLogFilePath;
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " +
+    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " >> " + synplifyLogFilePath;
 #endif
     Message("Synthesis command: " + command);
@@ -2220,7 +2226,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           continue;
       }
       std::string options = lang;
-      options += " -nolatches";
       filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
       filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
       filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
@@ -2248,14 +2253,15 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string filesScript =
             "read_verilog ${READ_VERILOG_OPTIONS} "
             "${VERILOG_FILES}";
-    std::string options = " -nolatches";
+    std::string options = "";
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
   }
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+  
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
@@ -2768,22 +2774,55 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
                    QLSettingsManager::getStringValue("vpr", "filename", "circuit_format");
   }
 
+  std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
+
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        ErrorMessage("Could not find the net file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        return "";
+      }
     vpr_options += std::string(" --net_file") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "filename", "net_file");
+  } else {
+        vpr_options += std::string(" --net_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".net");
   }
 
+
   if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        ErrorMessage("Could not find the place file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        return "";
+      }
     vpr_options += std::string(" --place_file") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "filename", "place_file");
   }
 
+  else {
+        vpr_options += std::string(" --place_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".place");
+  }
+
   if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        ErrorMessage("Could not find the route file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        return "";
+      }
     vpr_options += std::string(" --route_file") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "filename", "route_file");
+  }
+  else {
+        vpr_options += std::string(" --route_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".route");
   }
 
 
@@ -3269,6 +3308,27 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   // state check: requires "Packed"/"GloballyPlaced" to be completed.
   // we should be *atleast* at "Packed"/"GloballyPlaced" or later state.
+  std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+    Message("Attempting to read the net file from: " + 
+      QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+    if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+      Message("Found the net file in: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      m_state = State::Packed;
+    } else {
+      ErrorMessage("Could not find the net file in: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+    }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + net_file_path.string());
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + net_file_path.string());
+      m_state = State::Packed;
+    }
+  }
   if( (m_state == State::Packed) ||
       (m_state == State::GloballyPlaced) ||
       (m_state == State::Placed) ||
@@ -3596,6 +3656,47 @@ bool CompilerOpenFPGA_ql::Route() {
 
   // state check: requires "Placed" to be completed.
   // we should be *atleast* at "Placed" or later state.
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + net_file_path.string());
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + net_file_path.string());
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + place_file_path.string());
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + place_file_path.string());
+      m_state = State::Placed;
+    }
+  }
   if( (m_state == State::Placed) ||
       (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
@@ -3722,6 +3823,68 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + std::string(net_file_path));
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + std::string(net_file_path));
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + std::string(place_file_path));
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + std::string(place_file_path));
+      m_state = State::Placed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      Message("Attempting to read the route file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        Message("Found the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+        m_state = State::Routed;
+      } else {
+        ErrorMessage("Could not find the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      }
+  } else { 
+    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.route");
+    Message("Attempting to read the route file from: " + route_file_path.string());
+    if (fs::exists(route_file_path)) {
+      Message("Found the route file in: " + route_file_path.string());
+      m_state = State::Routed;
+    }
+  }
   if( (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
       (m_state == State::PowerAnalyzed) ||
@@ -3937,40 +4100,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     // use vpr/tatum engine
 
     std::string vpr_options;
-    std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
-
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-        vpr_options += std::string(" --net_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "net_file");
-    }
-    else {
-        vpr_options += std::string(" --net_file") + 
-                    std::string(" ") + 
-                    netlistFilePrefix + std::string(".net");
-    }
-
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-        vpr_options += std::string(" --place_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-    }
-    else {
-        vpr_options += std::string(" --place_file") + 
-                    std::string(" ") + 
-                    netlistFilePrefix + std::string(".place");
-    }
-
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-        vpr_options += std::string(" --route_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-    }
-    else {
-        vpr_options += std::string(" --route_file") + 
-                    std::string(" ") + 
-                    netlistFilePrefix + std::string(".route");
-    }
 
     taCommand = BaseVprCommand(current_device_sta);
     if(taCommand.empty()) {
@@ -4706,41 +4835,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   Message( std::string("Using openfpga.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
 
   // call vpr to execute analysis
-  std::string vpr_options;
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-    vpr_options += std::string(" --net_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "net_file");
-  }
-  else {
-    vpr_options += std::string(" --net_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".net");
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-  }
-  else {
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".place");
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-  }
-  else {
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".route");
-  }
 
   std::string vpr_analysis_command = BaseVprCommand();
   if(vpr_analysis_command.empty()) {
@@ -4748,7 +4843,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     // empty string returned on error.
     return std::string("");
   }
-  vpr_analysis_command += vpr_options +
+  vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
 // route and analysis stages together
