@@ -3839,7 +3839,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
         // we can update the JSON options automatically too, should we do this, or ask user to do this?
         // it seems better UX to print out the json options and user can edit the JSON file, so it is 
         // not opaque to the user?
-        Message("Please ensure that the userValue in Settings JSON is one of the below available\n"
+        Message("Invalid combination of vt_threshold: [" + device_sta_vt_variant +  "] "
+                "and sta_p_v_t_corner: [" + device_sta_p_v_t_corner_variant + "]\n" +
+                "Please ensure that the userValue in Settings JSON is one of the below available\n" +
                 "for 'vpr > analysis > sta_p_v_t_corner':");
         QLDeviceType devicetype = QLDeviceManager::getInstance()->deviceTypeTreeElement(current_device);
         for (const QLDeviceVariant& device_variant: devicetype.device_variants) {
