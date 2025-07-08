@@ -2220,7 +2220,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           continue;
       }
       std::string options = lang;
-      options += " -nolatches";
       filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
       filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
       filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
@@ -2248,14 +2247,15 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string filesScript =
             "read_verilog ${READ_VERILOG_OPTIONS} "
             "${VERILOG_FILES}";
-    std::string options = " -nolatches";
+    std::string options = "";
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
   }
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+  
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
@@ -5335,6 +5335,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     std::string token, signalName;
     iss >> token;
 
+    if (token.empty()){
+      Message("Empty line found in QDC file. Skipping...\n");
+      continue; // Skip empty lines
+    }
+    
     if (token != "set_io_side"){
       ErrorMessage("Invalid QDC command. Expected 'set_io_side' command.");
       return false;
@@ -5943,6 +5948,15 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {
 
     // there are no power_inputs parameters required for power analysis!
     Message("\n>> power_inputs in JSON unavailable, skipping power analysis!");
+
+    return power_dynamic;
+  }
+
+  // check if the user has explicitly enabled power estimation:
+  if( QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") != "checked" ) {
+
+    // user has not enabled power analysis
+    Message("\n>> dynamic_power is disabled in JSON, skipping power analysis!");
 
     return power_dynamic;
   }
@@ -6765,6 +6779,24 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   long double calculator_d7       = QLMetricsManager::getDoubleValue("routing", "device_size_y");        // array_y
   long double calculator_d29      = QLMetricsManager::getDoubleValue("routing", "num_dsp");              // num_dsp
   long double calculator_d30      = QLMetricsManager::getDoubleValue("routing", "num_bram");             // num_bram
+
+  // check for user inputs power json:
+  if( QLSettingsManager::getJson("power") == nullptr ) {
+
+    // there are no power_inputs parameters required for power analysis!
+    Message("\n>> power_inputs in JSON unavailable, skipping power analysis!");
+
+    return power_leakage;
+  }
+
+  // check if the user has explicitly enabled power estimation:
+  if( QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") != "checked" ) {
+
+    // user has not enabled power analysis
+    Message("\n>> leakage_power is disabled in JSON, skipping power analysis!");
+
+    return power_leakage;
+  }
 
   // enable debug prints if specified in JSON
   bool power_estimation_dbg = false;
