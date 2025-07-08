@@ -1892,13 +1892,19 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
 
     const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
+
+    std::string synplify_license_wait = "";
+
+    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
+      synplify_license_wait = "-license_wait ";
+
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
-    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " +
+    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " -log " + synplifyLogFilePath;
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " +
+    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " >> " + synplifyLogFilePath;
 #endif
     Message("Synthesis command: " + command);
@@ -2220,7 +2226,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           continue;
       }
       std::string options = lang;
-      options += " -nolatches";
       filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
       filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
       filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
@@ -2248,14 +2253,15 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string filesScript =
             "read_verilog ${READ_VERILOG_OPTIONS} "
             "${VERILOG_FILES}";
-    std::string options = " -nolatches";
+    std::string options = "";
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
   }
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+  
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
@@ -2671,7 +2677,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommand() {
+std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2684,6 +2690,12 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     return std::string("");
   }
 
+  // if device_target is explicitly specified (STA does this):
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(device_target) ) {
+    device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  }
+
+  // this check continues as is for the original target device as specified in the JSON.
   if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
     ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
@@ -2762,22 +2774,55 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
                    QLSettingsManager::getStringValue("vpr", "filename", "circuit_format");
   }
 
+  std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
+
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        ErrorMessage("Could not find the net file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        return "";
+      }
     vpr_options += std::string(" --net_file") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "filename", "net_file");
+  } else {
+        vpr_options += std::string(" --net_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".net");
   }
 
+
   if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        ErrorMessage("Could not find the place file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        return "";
+      }
     vpr_options += std::string(" --place_file") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "filename", "place_file");
   }
 
+  else {
+        vpr_options += std::string(" --place_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".place");
+  }
+
   if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        ErrorMessage("Could not find the route file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        return "";
+      }
     vpr_options += std::string(" --route_file") + 
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("vpr", "filename", "route_file");
+  }
+  else {
+        vpr_options += std::string(" --route_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".route");
   }
 
 
@@ -2940,14 +2985,14 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
   if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
 #endif // #if UPSTREAM_UNUSED
 
-  QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
   // use rr_graph and router_lookahead files, if available in the device data:
   std::filesystem::path rr_graph_file_path = 
-      QLDeviceManager::getInstance()->deviceVPRRRGraphFile();
+      QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
 
   std::filesystem::path router_lookahead_file_path = 
-      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile();
+      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
     vpr_options +=  " --read_rr_graph " +
@@ -2958,7 +3003,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
 
 
   m_architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
   if(m_architectureFile.empty()) {
 
     ErrorMessage("Cannot proceed without VPR Architecture file.");
@@ -2971,8 +3016,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     m_architectureFile = GenerateTempFilePath();
 
     m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
@@ -2987,7 +3032,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand() {
     }
   }
 
-  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
+  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
 
   // add the *internal* option to allow dangling nodes in the logic.
   // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
@@ -3263,6 +3308,27 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   // state check: requires "Packed"/"GloballyPlaced" to be completed.
   // we should be *atleast* at "Packed"/"GloballyPlaced" or later state.
+  std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+    Message("Attempting to read the net file from: " + 
+      QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+    if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+      Message("Found the net file in: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      m_state = State::Packed;
+    } else {
+      ErrorMessage("Could not find the net file in: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+    }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + net_file_path.string());
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + net_file_path.string());
+      m_state = State::Packed;
+    }
+  }
   if( (m_state == State::Packed) ||
       (m_state == State::GloballyPlaced) ||
       (m_state == State::Placed) ||
@@ -3590,6 +3656,47 @@ bool CompilerOpenFPGA_ql::Route() {
 
   // state check: requires "Placed" to be completed.
   // we should be *atleast* at "Placed" or later state.
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + net_file_path.string());
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + net_file_path.string());
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + place_file_path.string());
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + place_file_path.string());
+      m_state = State::Placed;
+    }
+  }
   if( (m_state == State::Placed) ||
       (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
@@ -3716,6 +3823,68 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + std::string(net_file_path));
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + std::string(net_file_path));
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + std::string(place_file_path));
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + std::string(place_file_path));
+      m_state = State::Placed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      Message("Attempting to read the route file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        Message("Found the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+        m_state = State::Routed;
+      } else {
+        ErrorMessage("Could not find the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      }
+  } else { 
+    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.route");
+    Message("Attempting to read the route file from: " + route_file_path.string());
+    if (fs::exists(route_file_path)) {
+      Message("Found the route file in: " + route_file_path.string());
+      m_state = State::Routed;
+    }
+  }
   if( (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
       (m_state == State::PowerAnalyzed) ||
@@ -3763,6 +3932,71 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
 
+
+  // Check the STA specified device, and if it is different from the current target device
+  // explicitly ask to form the base vpr command using the specific variant instead of the
+  // current target device:
+  // currently we only expect the p_v_t_corner to be specified in JSON, but the code
+  // supports voltage_threshold also, if it is added to the JSON.
+  QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+  std::string current_device_sta_vt = "";
+  std::string current_device_sta_p_v_t_corner = "";
+  std::string sta_vpr_options = "";
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold").empty() ) {
+    current_device_sta_vt = QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold");
+  }
+  else {
+    current_device_sta_vt = current_device.device_variant.voltage_threshold;
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner").empty() ) {
+    current_device_sta_p_v_t_corner = QLSettingsManager::getStringValue("vpr", "analysis", "sta_p_v_t_corner");
+  }
+  else {
+    current_device_sta_p_v_t_corner = current_device.device_variant.p_v_t_corner;
+  }
+
+  QLDeviceTarget current_device_sta = QLDeviceTarget();
+
+  if(current_device.device_variant.voltage_threshold != current_device_sta_vt ||
+     current_device.device_variant.p_v_t_corner != current_device_sta_p_v_t_corner) {
+
+    current_device_sta = 
+      QLDeviceManager::getInstance()->convertToDeviceTarget(current_device.device_variant.family,
+                                                            current_device.device_variant.foundry,
+                                                            current_device.device_variant.node,
+                                                            current_device.device_variant.devicename,
+                                                            current_device_sta_vt,
+                                                            current_device_sta_p_v_t_corner,
+                                                            current_device.device_variant_layout.name);
+
+    // Verify that the JSON value of the STA corner selection is valid
+    if(!QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      // TODO: print out the options to the user to set the sta_vt and sta_p_v_t_corner in the JSON.
+      // we can update the JSON options automatically too, should we do this, or ask user to do this?
+      // it seems better UX to print out the json options and user can edit the JSON file, so it is 
+      // not opaque to the user?
+      Message("Please ensure that the userValue in Settings JSON is one of the below available\n"
+              "for 'vpr > analysis > sta_p_v_t_corner':");
+      QLDeviceType devicetype = QLDeviceManager::getInstance()->deviceTypeTreeElement(current_device);
+      for (QLDeviceVariant device_variant: devicetype.device_variants) {
+        Message(device_variant.p_v_t_corner);
+      }
+      ErrorMessage("STA Corner Device in Settings JSON is invalid!");
+      return false;
+    }
+    // As the architecture file for PnR will not match the architecture file for STA in this case,
+    // vpr will fail on verifying the file hashes, so explicitly ask vpr to ignore the 
+    // file hash checks.
+    // example error message:
+    // >> Netlist was generated from a different architecture file (loaded architecture ID: SHA256:f73c6dffee1739f500e80ed13797d3bb78fb14ef9904f06368c8c0a407205617, netlist file architecture ID: SHA256:af8742ca39cc2f748b691015adaef1561ea258f433904565b2f84e00954c9e87)
+    sta_vpr_options += " --verify_file_digests off";
+  }
+
+
+
   if (TimingAnalysisOpt() == STAOpt::View) {
 
     TimingAnalysisOpt(STAOpt::None);
@@ -3770,11 +4004,26 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    std::string command = BaseVprCommand() + " --route --analysis --disp on";
+    std::string taCommand = BaseVprCommand() + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::string command = BaseVprCommand() + " --analysis --disp on";
+    std::string taCommand = BaseVprCommand(current_device_sta) + " --analysis --disp on";
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
+    }
 #endif // #ifdef _WIN32
-    const int status = ExecuteAndMonitorSystemCommand(command);
+
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
+    }
+
+    const int status = ExecuteAndMonitorSystemCommand(taCommand);
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -3851,42 +4100,8 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     // use vpr/tatum engine
 
     std::string vpr_options;
-    std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
 
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-        vpr_options += std::string(" --net_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "net_file");
-    }
-    else {
-        vpr_options += std::string(" --net_file") + 
-                    std::string(" ") + 
-                    netlistFilePrefix + std::string(".net");
-    }
-
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-        vpr_options += std::string(" --place_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-    }
-    else {
-        vpr_options += std::string(" --place_file") + 
-                    std::string(" ") + 
-                    netlistFilePrefix + std::string(".place");
-    }
-
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-        vpr_options += std::string(" --route_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-    }
-    else {
-        vpr_options += std::string(" --route_file") + 
-                    std::string(" ") + 
-                    netlistFilePrefix + std::string(".route");
-    }
-
-    taCommand = BaseVprCommand();
+    taCommand = BaseVprCommand(current_device_sta);
     if(taCommand.empty()) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
@@ -3902,15 +4117,34 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
       vpr_options += std::string(" ") + vpr_custom_options_string;
     }
 
-    taCommand += vpr_options +
-    #ifdef _WIN32
+    taCommand += vpr_options;
+
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
+    }
+    
+#ifdef _WIN32
+
     // under WIN32, running the analysis stage along causes issues, hence we call the
     // route and analysis stages together
-                std::string(" ") + 
-                std::string("--route") +
-    #endif // #ifdef _WIN32
-                std::string(" ") + 
-                std::string("--analysis");
+    taCommand += std::string(" --route");
+
+#else // #ifdef _WIN32
+
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
+    }
+
+#endif // #ifdef _WIN32
+
+    taCommand += std::string(" --analysis");
 
     std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
                         std::string(ProjManager()->projectName() + "_sta.cmd"))
@@ -4567,44 +4801,41 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     }
   }
 
+
+  // [optional] bitstream remapping file
+  m_OpenFpgaBitstreamRemappingFile = 
+      QLDeviceManager::getInstance()->deviceOpenFPGABitstreamRemappingFile();
+
+  if(!m_OpenFpgaBitstreamRemappingFile.empty()) {
+
+      if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_OpenFpgaBitstreamRemappingFile)) {
+      
+      std::filesystem::path bitstream_remapping_xml_en_path = m_OpenFpgaBitstreamRemappingFile;
+      m_OpenFpgaBitstreamRemappingFile = GenerateTempFilePath();
+
+      m_cryptdbPath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
+
+      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+        Message("load cryptdb failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
+
+      if (!CRFileCryptProc::getInstance()->decryptFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile)) {
+        ErrorMessage("decryption failed!");
+        // empty string returned on error.
+        return std::string("");
+      }
+    }
+  }
+
+
   Message( std::string("Using openfpga.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
 
   // call vpr to execute analysis
-  std::string vpr_options;
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-    vpr_options += std::string(" --net_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "net_file");
-  }
-  else {
-    vpr_options += std::string(" --net_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".net");
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-  }
-  else {
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".place");
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-  }
-  else {
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   netlistFilePrefix + std::string(".route");
-  }
 
   std::string vpr_analysis_command = BaseVprCommand();
   if(vpr_analysis_command.empty()) {
@@ -4612,7 +4843,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     // empty string returned on error.
     return std::string("");
   }
-  vpr_analysis_command += vpr_options +
+  vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
 // route and analysis stages together
@@ -4765,6 +4996,28 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
         ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}",
                    "--load_fabric_key " + m_OpenFpgaFabricKeyFile.string());
   }
+
+  // bitstream_remapping is optional. and if it exists:
+  // build_reordered_fabric_bitstream --reorder_map bitstream_remapping.xml --file reordered_bitstream.bin
+  // write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit
+  // write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml
+  if (m_OpenFpgaBitstreamRemappingFile.empty()) {
+    result = ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}", std::string("#skipped"));
+    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}",
+                                std::string("write_fabric_bitstream --format plain_text --file fabric_bitstream.bit"));
+    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}",
+                                std::string("write_fabric_bitstream --format xml --file fabric_bitstream.xml"));
+  } else {
+    result =
+        ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}",
+                   std::string("build_reordered_fabric_bitstream --reorder_map ") + m_OpenFpgaBitstreamRemappingFile.string() +
+                   std::string(" --file reordered_bitstream.bin"));
+        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}", 
+                                    std::string("write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit"));
+        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}", 
+                                    std::string("write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml"));
+  }
+
 
   // call openfpga to output the fpga_io_map XML file *always*
   // write_fabric_io_info --file ${OPENFPGA_IO_MAP_FILE} --verbose

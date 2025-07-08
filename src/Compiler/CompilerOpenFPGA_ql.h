@@ -134,7 +134,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommand();
+  virtual std::string BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
 
  protected:
   virtual bool IPGenerate();
@@ -207,6 +207,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaRepackConstraintsFile = "";
   std::filesystem::path m_OpenFpgaFabricKeyFile = "";
   std::filesystem::path m_OpenFpgaPinMapXml = "";
+  std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
   std::string m_deviceSize;
   std::string m_yosysScript;
   std::string m_synplifyScript;

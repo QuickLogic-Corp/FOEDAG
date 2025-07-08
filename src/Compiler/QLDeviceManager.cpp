@@ -1996,6 +1996,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
+
+          // include au file for copy (.bitstream_enable.au etc.)
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                std::regex(".+\\.au",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
       }
 
       if(ec) {
@@ -3024,6 +3031,53 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAFabricKeyFile(QLDeviceTarge
 }
 
 
+std::filesystem::path QLDeviceManager::deviceOpenFPGABitstreamRemappingFile(QLDeviceTarget device_target) {
+
+  // CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path empty_path;
+  std::filesystem::path bitstream_remapping_file_path;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // use the device specific bitstream remapping file, and note that we may have
+  // unencrypted (first priority) or encrypted file
+
+  // use config.json if it exists
+  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
+  if(FileUtils::FileExists(device_target_config_json_filepath)) {
+
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string json_value;
+    if( device_target_config_json.contains("BITSTREAM_REMAPPING")  ) {
+
+      json_value = device_target_config_json["BITSTREAM_REMAPPING"].get<std::string>();
+    }
+    // check for unencrypted file
+    bitstream_remapping_file_path = 
+        deviceTypeDirPath(device_target) / json_value;
+    if(!FileUtils::FileExists(bitstream_remapping_file_path)) {
+
+      // check for encrypted file
+      bitstream_remapping_file_path += ".en";
+      if(!FileUtils::FileExists(bitstream_remapping_file_path)) {
+
+        // compiler->Message("Cannot find device bitstream_remapping file: " + bitstream_remapping_file_path.string());
+        return empty_path;
+      }
+    }
+  }
+
+  // std::cout << "[zyxw]" << "using bitstream_remapping file: " << bitstream_remapping_file_path.string() << std::endl;
+
+  return bitstream_remapping_file_path;
+}
+
+
 std::filesystem::path QLDeviceManager::deviceOpenFPGAPinTableFile(QLDeviceTarget device_target) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
@@ -3576,6 +3630,32 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
   return vpr_router_lookahead_file_path;
 }
 
+
+QLDeviceType QLDeviceManager::deviceTypeTreeElement(QLDeviceTarget device_target) {
+
+  QLDeviceType devicetype = QLDeviceType();
+
+  std::string device_string = convertToDeviceString(device_target);
+
+  for (QLDeviceType device: device_list) {
+    for (QLDeviceVariant device_variant: device.device_variants) {
+      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
+        std::string current_device_string = DeviceString(device_variant.family,
+                                                         device_variant.foundry,
+                                                         device_variant.node,
+                                                         device_variant.devicename,
+                                                         device_variant.voltage_threshold,
+                                                         device_variant.p_v_t_corner,
+                                                         device_variant_layout.name);
+        if(current_device_string == device_string) {
+          return device;
+        }
+      }
+    }
+  }
+
+  return devicetype;
+}
 
   // future use (not file access APIs, but used together with them)
 std::vector<std::string> QLDeviceManager::deviceCorners(QLDeviceTarget device_target) {

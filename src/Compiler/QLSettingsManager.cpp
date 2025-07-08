@@ -153,7 +153,8 @@ void QLSettingsManager::parseSDCFilePath() {
     // 1. check project_path
     // 2. check tcl_script_dir_path (if driven by TCL script)
     // 3. check current_dir_path
-
+    // 4. check if parent_project_path ends with <project_name> and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
+   
     std::filesystem::path project_path = std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
     sdc_file_path_absolute = project_path / sdc_file_path;
     if(!FileUtils::FileExists(sdc_file_path_absolute)) {
@@ -179,7 +180,20 @@ void QLSettingsManager::parseSDCFilePath() {
       }
     }
 
-    
+    // 4. check if parent_project_path ends with <project_name> and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
+    if(sdc_file_path_absolute.empty()) {
+            std::filesystem::path parent_project_path = 
+      std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath()).parent_path();
+      std::string project_name = GlobalSession->GetCompiler()->ProjManager()->projectName();
+      std::filesystem::path tcl_file_name{project_name + std::string(".tcl")};
+      std::filesystem::path tcl_file_path_candidate = parent_project_path / tcl_file_name;
+      if (project_name == parent_project_path.filename().string() && FileUtils::FileExists(tcl_file_path_candidate)) {
+        sdc_file_path_absolute = parent_project_path / sdc_file_path;
+        if(!FileUtils::FileExists(sdc_file_path_absolute)) {
+          sdc_file_path_absolute.clear();
+        }
+      }
+    }
 
     // final: check if we have a valid sdc file path:
     if(!sdc_file_path_absolute.empty()) {
@@ -221,6 +235,7 @@ std::filesystem::path QLSettingsManager::getPCFFilePath() {
   //   1. check project_path, to see if sdc_file exists, use that
   //   2. check tcl_script_dir_path (if driven by TCL script), to see if sdc_file exists, use that
   //   3. check current dir, to see if sdc_file exists exists, use that
+  //   4. check if root dir of project_path has <project_name> name and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
 
 
   // 1. check if an sdc file is specified in the json: (can be relative/absolute)
@@ -252,7 +267,8 @@ std::filesystem::path QLSettingsManager::getPCFFilePath() {
     // 1. check project_path -> for generated PCF from pinconstraints manager
     // 2. check tcl_script_dir_path (if driven by TCL script)
     // 3. check current_dir_path
-
+    // 4. check if parent_project_path ends with <project_name> and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
+   
     // 1. project path
     std::filesystem::path project_path = 
         std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
@@ -280,6 +296,20 @@ std::filesystem::path QLSettingsManager::getPCFFilePath() {
       }
     }
 
+    // 4. check if parent_project_path ends with <project_name> and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
+    if(pcf_file_path_absolute.empty()) {
+            std::filesystem::path parent_project_path = 
+      std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath()).parent_path();
+      std::string project_name = GlobalSession->GetCompiler()->ProjManager()->projectName();
+      std::filesystem::path tcl_file_name{project_name + std::string(".tcl")};
+      std::filesystem::path tcl_file_path_candidate = parent_project_path / tcl_file_name;
+      if (project_name == parent_project_path.filename().string() && FileUtils::FileExists(tcl_file_path_candidate)) {
+        pcf_file_path_absolute = parent_project_path / pcf_file_path;
+        if(!FileUtils::FileExists(pcf_file_path_absolute)) {
+          pcf_file_path_absolute.clear();
+        }
+      }
+    }
 
     // final: check if we have a valid sdc file path:
     if(!pcf_file_path_absolute.empty()) {
@@ -355,7 +385,8 @@ std::filesystem::path QLSettingsManager::getFilePathByExt(const std::string& ext
     // 1. check project_path -> for generated <ext> from other tool
     // 2. check tcl_script_dir_path (if driven by TCL script)
     // 3. check current_dir_path
-
+    // 4. check if parent_project_path ends with <project_name> and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
+   
     // 1. project path
     std::filesystem::path project_path = 
         std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath());
@@ -383,6 +414,20 @@ std::filesystem::path QLSettingsManager::getFilePathByExt(const std::string& ext
       }
     }
 
+    // 4. check if parent_project_path ends with <project_name> and contains <project_name>.tcl (to enhance step 2, which is valid withing single runtime session)
+    if(ext_file_path_absolute.empty()) {
+            std::filesystem::path parent_project_path = 
+      std::filesystem::path(GlobalSession->GetCompiler()->ProjManager()->projectPath()).parent_path();
+      std::string project_name = GlobalSession->GetCompiler()->ProjManager()->projectName();
+      std::filesystem::path tcl_file_name{project_name + std::string(".tcl")};
+      std::filesystem::path tcl_file_path_candidate = parent_project_path / tcl_file_name;
+      if (project_name == parent_project_path.filename().string() && FileUtils::FileExists(tcl_file_path_candidate)) {
+        ext_file_path_absolute = parent_project_path / ext_file_path;
+        if(!FileUtils::FileExists(ext_file_path_absolute)) {
+          ext_file_path_absolute.clear();
+        }
+      }
+    }
 
     // final: check if we have a valid <ext> file path:
     if(!ext_file_path_absolute.empty()) {
