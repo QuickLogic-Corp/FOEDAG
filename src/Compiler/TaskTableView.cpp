@@ -210,7 +210,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
     viewLog->setEnabled(logExists);
     connect(viewLog, &QAction::triggered, this,
             [this, logFiles]() {
-              for (const std::filesystem::path logFile: logFiles) { 
+              for (const std::filesystem::path& logFile: logFiles) {
                 emit ViewFileRequested(QString::fromStdString(logFile.string()));
               }
             });
