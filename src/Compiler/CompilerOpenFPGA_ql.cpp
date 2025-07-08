@@ -1892,13 +1892,19 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
 
     const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
+
+    std::string synplify_license_wait = "";
+
+    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
+      synplify_license_wait = "-license_wait ";
+
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
-    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " +
+    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " -log " + synplifyLogFilePath;
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " +
+    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " >> " + synplifyLogFilePath;
 #endif
     Message("Synthesis command: " + command);
@@ -2220,7 +2226,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
           continue;
       }
       std::string options = lang;
-      options += " -nolatches";
       filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
       filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
       filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
@@ -2248,14 +2253,15 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     std::string filesScript =
             "read_verilog ${READ_VERILOG_OPTIONS} "
             "${VERILOG_FILES}";
-    std::string options = " -nolatches";
+    std::string options = "";
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
     yosysScript =
         ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
   }
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+  
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
