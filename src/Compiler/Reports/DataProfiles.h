@@ -37,6 +37,8 @@ public:
     return m_data[key];
   }
 
+  const std::string& currentKey() const { return m_currentKey; }
+  
   void setCurrentKey(const std::string& key) {
     if (!contain(key)) {
       create(key);

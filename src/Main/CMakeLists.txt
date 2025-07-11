@@ -74,7 +74,8 @@ set (SRC_CPP_LIST ../Main/Foedag_ql.cpp
   ../Main/DialogProvider.cpp
   ../MainWindow/MessageItemParser.cpp
   ../Widgets/MultiComboBox.cpp
-)
+  ../Widgets/SelectionDialog.cpp
+  )
 
 set (SRC_H_LIST ../Main/Foedag.h
   ../Tcl/TclInterpreter.h
@@ -108,6 +109,7 @@ set (SRC_H_LIST ../Main/Foedag.h
   ../Main/DialogProvider.h
   ../MainWindow/MessageItemParser.h
   ../Widgets/MultiComboBox.h
+  ../Widgets/SelectionDialog.h
 )
 
 set (SRC_UI_LIST "")

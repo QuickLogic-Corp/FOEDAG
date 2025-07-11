@@ -6,7 +6,11 @@
 #include <set>
 
 #include "Compiler/TaskManager.h"
+#include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
+
+#include <QDebug>
 
 namespace {
 static constexpr const char *RESOURCES_SPLIT{"blocks of type:"};
@@ -306,6 +310,38 @@ bool AbstractReportManager::isStatisticalTimingLine(const QString &line) {
 
 bool AbstractReportManager::isStatisticalTimingHistogram(const QString &line) {
   return false;
+}
+
+std::map<std::string, std::string> 
+AbstractReportManager::findFileNameVariants(const std::string& baseFileName, const std::string& patternFileName)
+{
+  std::map<std::string, std::string> result;
+  auto projectPath = Project::Instance()->projectPath().toStdString();
+  std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(projectPath, patternFileName);
+  for (const std::string& fileName: fileNames) {
+    std::string profile;
+    if (fileName != baseFileName) {
+      profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
+      result[profile] = fileName;
+    }
+  }
+  return result;
+}
+
+std::vector<std::string> AbstractReportManager::findProfilesBasedOnExistedFiles(const std::string& baseFileName, const std::string& patternFileName)
+{
+  std::vector<std::string> profiles;
+  auto projectPath = Project::Instance()->projectPath().toStdString();
+  std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(projectPath, patternFileName);
+  for (const std::string& fileName: fileNames) {
+    qInfo() << "~~~ fileName" << fileName.c_str();
+    std::string profile;
+    if (fileName != baseFileName) {
+      profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
+      profiles.push_back(profile);
+    }
+  }
+  return profiles;
 }
 
 }  // namespace FOEDAG

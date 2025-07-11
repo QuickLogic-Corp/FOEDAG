@@ -29,8 +29,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
-#include "Utils/FileUtils.h"
-#include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
 
 namespace {
@@ -104,10 +102,17 @@ QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
           QString(TIMING_REPORT_NAME)};
 }
 
+QString TimingAnalysisReportManager::timingReportId() { return QString(TIMING_REPORT_NAME); }
+
+std::vector<std::string> TimingAnalysisReportManager::profilesBasedOnExistedFiles() const {
+  return findProfilesBasedOnExistedFiles(TIMING_ANALYSIS_LOG, TIMING_ANALYSIS_LOG_PATTERN);
+}
+
 std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
-    const QString &reportId) {
+    const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
 
+  setCurrentProfile(profile);
   ITaskReport::DataReports dataReports;
 
   auto extendReportNameWithSuffix = [](QString reportName, const std::string& suffix)->QString {
@@ -133,25 +138,25 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     dataReports.push_back(std::make_unique<TableReport>(
       m_circuitColumns, circuitData(), "Circuit Statistics"));
   } else {
-    for (const std::string& profile: profiles()) {
+    //for (const std::string& profile: profiles()) {
       dataReports.push_back(std::make_unique<TableReport>(
-          m_timingColumns, timingData(profile), extendReportNameWithSuffix("Timing Data", profile)));
-    }
+          m_timingColumns, timingData(), extendReportNameWithSuffix("Timing Data", currentProfile())));
+    //}
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms(profile)) {
+      //for (const std::string& profile: profiles()) {
+        for (auto &hgrm : histograms()) {
           dataReports.push_back(std::make_unique<TableReport>(
-              m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
+              m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, currentProfile())));
         }
-      }
+      //}
     } else {
-      for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms(profile)) {
+      //for (const std::string& profile: profiles()) {
+        for (auto &hgrm : histograms()) {
           dataReports.push_back(std::make_unique<TableReport>(
-              m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
+              m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, currentProfile())));
         }
-      }
+      //}
     }
   }
 
@@ -201,13 +206,8 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 void TimingAnalysisReportManager::parseLogFile() {
   clearDataProfiles();
 
-  auto projectPath = Project::Instance()->projectPath().toStdString();
-  std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
-  for (const std::string& logFileName: logFileNames) {
-    std::string profile;
-    if (logFileName != TIMING_ANALYSIS_LOG) {
-      profile = StringUtils::extractWildcardSegment(logFileName, TIMING_ANALYSIS_LOG_PATTERN);
-    }
+  std::map<std::string, std::string> taLogVariants = findFileNameVariants(TIMING_ANALYSIS_LOG, TIMING_ANALYSIS_LOG_PATTERN);
+  for (const auto& [profile, logFileName]: taLogVariants) {
     parseLogFileHelper(QString::fromStdString(logFileName), profile);
   }
 

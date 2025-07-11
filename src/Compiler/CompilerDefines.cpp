@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QHeaderView>
 
 #include "Compiler.h"
+#include "Reports/TimingAnalysisReportManager.h"
 #include "Main/Tasks.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project.h"
@@ -34,6 +35,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TaskTableView.h"
 #include "Utils/FileUtils.h"
 #include "Utils/QtUtils.h"
+#include "Widgets/SelectionDialog.h"
+
+#include <QDebug>
 
 extern FOEDAG::Session *GlobalSession;
 
@@ -52,9 +56,31 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
         auto &reportManagerRegistry = tManager->getReportManagerRegistry();
         auto reportManager =
             reportManagerRegistry.getReportManager(tManager->taskId(task));
-        if (reportManager)
-          FOEDAG::handleViewReportRequested(compiler, task, reportId,
+        if (reportManager) {
+          QString profile = "";
+          TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
+          if (taReportManager) {            
+            if (reportId == taReportManager->timingReportId()) {
+              // we cannot reply on profiles() method because it's empty before log files parse event.
+              std::vector<std::string> profiles = taReportManager->profilesBasedOnExistedFiles();
+
+              bool is_sta_multicorner_enabled = profiles.size() > 1 || ((profiles.size() == 1) && (!profiles[0].empty()));
+              if (is_sta_multicorner_enabled) {
+                // profile = "_LVT_SSPG_0P72_M40C";
+                SelectionDialog dialog("Select sta multicorner variants", profiles, nullptr);
+                if (dialog.exec() == QDialog::Accepted) {
+                  profile = dialog.selectedText();
+                }
+              }
+              // for (const auto& profile: profiles) {
+              //   qInfo() << "~~~ 000, profile=" << profile.c_str();
+              // }
+            }
+          }
+          qInfo() << "~~~ 111, reportId=" << reportId;
+          FOEDAG::handleViewReportRequested(compiler, task, reportId, profile,
                                             *reportManager);
+        }
       });
 #ifdef USE_IPA
   QObject::connect(view, &TaskTableView::ViewInteractivePathAnalysisRequested, [compiler](){

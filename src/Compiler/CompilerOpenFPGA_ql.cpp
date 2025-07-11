@@ -3957,7 +3957,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
   std::set<std::string> device_sta_vt_variants{};
   std::set<std::string> device_sta_p_v_t_corner_variants{};
-  std::string sta_vpr_options = "";
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold").empty() ) {
     std::string sta_vt_variants_str = QLSettingsManager::getStringValue("vpr", "analysis", "sta_voltage_threshold");
@@ -4017,6 +4016,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     }
   }
 
+  std::string sta_vpr_options = "";
   bool is_multicorner_sta_setup = !devices.empty();
   if (is_multicorner_sta_setup) {
     // As the architecture file for PnR will not match the architecture file for STA in this case,

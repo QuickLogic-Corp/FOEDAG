@@ -36,7 +36,7 @@ class PackingReportManager final : public AbstractReportManager {
 
  private:
   QStringList getAvailableReportIds() const override;
-  std::unique_ptr<ITaskReport> createReport(const QString &reportId) override;
+  std::unique_ptr<ITaskReport> createReport(const QString &reportId, const QString& profile) override;
   QString getTimingLogFileName() const override;
   bool isStatisticalTimingLine(const QString &line) override;
   bool isStatisticalTimingHistogram(const QString &line) override;

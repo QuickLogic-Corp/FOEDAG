@@ -79,7 +79,7 @@ QStringList PlacementReportManager::getAvailableReportIds() const {
 }
 
 std::unique_ptr<ITaskReport> PlacementReportManager::createReport(
-    const QString &reportId) {
+    const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
 
   ITaskReport::DataReports dataReports;

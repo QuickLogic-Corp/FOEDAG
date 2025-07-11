@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QMap>
 #include <QStringList>
 #include <memory>
+#include <vector>
 
 namespace FOEDAG {
 
@@ -56,9 +57,10 @@ class ITaskReportManager {
   // Creates the report. This call will most likely result in log file parsing
   // and potentially caching, so it's not const.
   virtual std::unique_ptr<ITaskReport> createReport(
-      const QString &reportId) = 0;
+      const QString &reportId, const QString &profile) = 0;
   // Returns retrieved from a log file messages per line number.
   virtual const Messages &getMessages() = 0;
+  virtual std::vector<std::string> profiles() const = 0;
 };
 
 }  // namespace FOEDAG

@@ -51,6 +51,8 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   
  public:
   AbstractReportManager(const TaskManager &taskManager);
+  static std::map<std::string, std::string> findFileNameVariants(const std::string& baseFileName, const std::string& patternFileName);
+  static std::vector<std::string> findProfilesBasedOnExistedFiles(const std::string& baseFileName, const std::string& patternFileName);
 
  protected:
   // Launches file parsing, if needed. Returns messages.
@@ -141,7 +143,8 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   Messages& messages() {
     return m_dataProfiles.current()->messages;
   }
-  std::vector<std::string> profiles() const { return m_dataProfiles.keys(); }
+  std::vector<std::string> profiles() const override final { return m_dataProfiles.keys(); }
+  std::string currentProfile() const { return m_dataProfiles.currentKey(); }
 
  private:
   bool m_fileParsed{false};

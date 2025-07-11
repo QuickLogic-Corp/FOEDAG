@@ -7,6 +7,8 @@
 #include "Main/Tasks.h"
 #include "TextEditor/text_editor_form.h"
 
+#include <QDebug>
+
 namespace FOEDAG {
 
 ReportsTreeWidget::ReportsTreeWidget(Compiler *compiler,
@@ -60,8 +62,9 @@ void ReportsTreeWidget::onReportRequested(const QTreeWidgetItem *item,
   auto reportsManager =
       m_taskManager.getReportManagerRegistry().getReportManager(taskId);
   if (!reportsManager) return;
+  qInfo() << "~~~ 222";
   FOEDAG::handleViewReportRequested(m_compiler, m_taskManager.task(taskId),
-                                    reportId, *reportsManager);
+                                    reportId, "_LVT_SSPG_0P72_M40C", *reportsManager);
 }
 
 }  // namespace FOEDAG
