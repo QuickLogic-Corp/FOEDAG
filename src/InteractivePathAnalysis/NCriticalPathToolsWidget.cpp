@@ -53,10 +53,11 @@
 namespace FOEDAG {
 
 NCriticalPathToolsWidget::NCriticalPathToolsWidget(
-    FOEDAG::Compiler* compiler, const std::filesystem::path& settingsFilePath,
+    FOEDAG::Compiler* compiler, const QString& profile, const std::filesystem::path& settingsFilePath,
     QWidget* parent)
     : QWidget(parent),
       m_compiler(compiler),
+      m_profile(profile),
       m_vprProcess("vpr"),
       m_parameters(
           std::make_shared<NCriticalPathParameters>(settingsFilePath)) {

@@ -38,7 +38,7 @@ void handleViewReportRequested(Compiler* compiler, const Task* task,
                                const QString& profile,
                                ITaskReportManager& reportManager);
 #ifdef USE_IPA
-void handleViewInteractivePathAnalysisRequested(Compiler* compiler);
+void handleViewInteractivePathAnalysisRequested(Compiler* compiler, const QString& profile);
 #endif  // USE_IPA
 
 // Setters/Getters for tclArgs

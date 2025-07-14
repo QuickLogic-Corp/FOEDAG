@@ -36,7 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TaskTableView.h"
 #include "Utils/FileUtils.h"
 #include "Utils/QtUtils.h"
-#include "Widgets/SelectionDialog.h"
+#include "Compiler/DialogUtils.h"
 
 #include <QDebug>
 
@@ -58,17 +58,11 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
         auto reportManager =
             reportManagerRegistry.getReportManager(tManager->taskId(task));
         if (reportManager) {
-          QString profile = ""; // default profile, when no multiple report is enabled
+          QString profile{""}; 
           TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
           if (taReportManager) {            
             if (reportId == taReportManager->timingReportId()) {
-              std::set<std::string> profiles = WildcardFileFinder::findProfilesBasedOnExistedFiles(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
-              if (!profiles.empty()) {
-                SelectionDialog dialog("Select profile", profiles, nullptr);
-                if (dialog.exec() == QDialog::Accepted) {
-                  profile = dialog.selectedText();
-                }
-              }
+              profile = DialogUtils::execUserSelectionOfActiveStaProfile();
             }
           }
           FOEDAG::handleViewReportRequested(compiler, task, reportId, profile,
@@ -76,8 +70,8 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
         }
       });
 #ifdef USE_IPA
-  QObject::connect(view, &TaskTableView::ViewInteractivePathAnalysisRequested, [compiler](){
-      FOEDAG::handleViewInteractivePathAnalysisRequested(compiler);
+  QObject::connect(view, &TaskTableView::ViewInteractivePathAnalysisRequested, [compiler](const QString& profile){
+      FOEDAG::handleViewInteractivePathAnalysisRequested(compiler, profile);
   });
 #endif  // USE_IPA
   QObject::connect(view, &TaskTableView::ViewWaveform, [compiler](Task *task) {

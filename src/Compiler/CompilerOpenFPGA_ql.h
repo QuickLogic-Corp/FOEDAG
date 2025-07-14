@@ -135,6 +135,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Leakage();
 
   virtual std::string BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
+  bool collectStaDevices(std::map<std::string, QLDeviceTarget>& devices) const;
 
  protected:
   virtual bool IPGenerate();

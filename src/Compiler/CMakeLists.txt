@@ -82,6 +82,7 @@ set (SRC_CPP_LIST
   QLMetricsManager.cpp
   BlifParser.cpp
   WildcardFileFinder.cpp
+  DialogUtils.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -116,6 +117,7 @@ set (SRC_H_INSTALL_LIST
   QLMetricsManager.h
   BlifParser.h
   WildcardFileFinder.h
+  DialogUtils.h
 )
 
 set (SRC_H_LIST

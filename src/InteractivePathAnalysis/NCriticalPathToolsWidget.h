@@ -27,6 +27,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QString>
 
 #include "../Compiler/Compiler.h"
 #include "NCriticalPathParameters.h"
@@ -47,7 +48,7 @@ class RefreshIndicatorButton;
 class NCriticalPathToolsWidget : public QWidget {
   Q_OBJECT
  public:
-  NCriticalPathToolsWidget(FOEDAG::Compiler*,
+  NCriticalPathToolsWidget(FOEDAG::Compiler*, const QString& profile,
                            const std::filesystem::path& settingsFilePath,
                            QWidget* parent = nullptr);
   ~NCriticalPathToolsWidget() = default;
@@ -72,6 +73,7 @@ class NCriticalPathToolsWidget : public QWidget {
 
  private:
   FOEDAG::Compiler* m_compiler = nullptr;
+  QString m_profile;
 
   QLineEdit* m_leNCriticalPathNum = nullptr;
   QComboBox* m_cbHighlightMode = nullptr;
