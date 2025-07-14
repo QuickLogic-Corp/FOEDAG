@@ -57,27 +57,23 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
         auto reportManager =
             reportManagerRegistry.getReportManager(tManager->taskId(task));
         if (reportManager) {
-          QString profile = "";
+          QString profile = ""; // default profile, when no multiple report is enabled
           TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
           if (taReportManager) {            
             if (reportId == taReportManager->timingReportId()) {
               // we cannot reply on profiles() method because it's empty before log files parse event.
-              std::vector<std::string> profiles = taReportManager->profilesBasedOnExistedFiles();
+              // that is why we search existed log files and extract profile names from there.
+              std::set<std::string> profiles = taReportManager->profilesBasedOnExistedFiles();
 
-              bool is_sta_multicorner_enabled = profiles.size() > 1 || ((profiles.size() == 1) && (!profiles[0].empty()));
+              bool is_sta_multicorner_enabled = profiles.size() > 1 || ((profiles.size() == 1) && (!profiles.begin()->empty()));
               if (is_sta_multicorner_enabled) {
-                // profile = "_LVT_SSPG_0P72_M40C";
-                SelectionDialog dialog("Select sta multicorner variants", profiles, nullptr);
+                SelectionDialog dialog("Select p_v_t_corner", profiles, nullptr);
                 if (dialog.exec() == QDialog::Accepted) {
                   profile = dialog.selectedText();
                 }
               }
-              // for (const auto& profile: profiles) {
-              //   qInfo() << "~~~ 000, profile=" << profile.c_str();
-              // }
             }
           }
-          qInfo() << "~~~ 111, reportId=" << reportId;
           FOEDAG::handleViewReportRequested(compiler, task, reportId, profile,
                                             *reportManager);
         }

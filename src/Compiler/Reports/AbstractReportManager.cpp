@@ -328,9 +328,9 @@ AbstractReportManager::findFileNameVariants(const std::string& baseFileName, con
   return result;
 }
 
-std::vector<std::string> AbstractReportManager::findProfilesBasedOnExistedFiles(const std::string& baseFileName, const std::string& patternFileName)
+std::set<std::string> AbstractReportManager::findProfilesBasedOnExistedFiles(const std::string& baseFileName, const std::string& patternFileName)
 {
-  std::vector<std::string> profiles;
+  std::set<std::string> profiles;
   auto projectPath = Project::Instance()->projectPath().toStdString();
   std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(projectPath, patternFileName);
   for (const std::string& fileName: fileNames) {
@@ -338,7 +338,7 @@ std::vector<std::string> AbstractReportManager::findProfilesBasedOnExistedFiles(
     std::string profile;
     if (fileName != baseFileName) {
       profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
-      profiles.push_back(profile);
+      profiles.insert(profile);
     }
   }
   return profiles;

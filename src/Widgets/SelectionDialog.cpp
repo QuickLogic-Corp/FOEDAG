@@ -6,13 +6,18 @@
 
 namespace FOEDAG {
 
-SelectionDialog::SelectionDialog(const QString& title, const std::vector<std::string>& items, QWidget* parent)
+SelectionDialog::SelectionDialog(const QString& title, const std::set<std::string>& items, QWidget* parent)
     : QDialog(parent), m_layout(new QVBoxLayout(this))
 {
     setWindowTitle(title);
 
     for (const auto& item: items) {
-        auto* button = new QPushButton(QString::fromStdString(item), this);
+        QString prettyItem = QString::fromStdString(item);
+        if (prettyItem.startsWith("_")) {
+            prettyItem.remove(0, 1);
+        }
+
+        auto* button = new QPushButton(prettyItem, this);
         m_layout->addWidget(button);
 
         connect(button, &QPushButton::clicked, this, [this, item]() {
@@ -22,11 +27,22 @@ SelectionDialog::SelectionDialog(const QString& title, const std::vector<std::st
     }
 
     setLayout(m_layout);
+
+    setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint); // hide close button
 }
 
 SelectionDialog::~SelectionDialog()
 {
 
+}
+
+void SelectionDialog::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Escape) {
+        event->ignore();
+        return;
+    }
+    QDialog::keyPressEvent(event);
 }
 
 } // namespace FOEDAG

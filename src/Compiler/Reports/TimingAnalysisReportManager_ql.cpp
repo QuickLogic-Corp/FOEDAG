@@ -104,7 +104,7 @@ QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
 
 QString TimingAnalysisReportManager::timingReportId() { return QString(TIMING_REPORT_NAME); }
 
-std::vector<std::string> TimingAnalysisReportManager::profilesBasedOnExistedFiles() const {
+std::set<std::string> TimingAnalysisReportManager::profilesBasedOnExistedFiles() const {
   return findProfilesBasedOnExistedFiles(TIMING_ANALYSIS_LOG, TIMING_ANALYSIS_LOG_PATTERN);
 }
 
@@ -112,7 +112,7 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
 
-  setCurrentProfile(profile);
+  setActiveProfile(profile.toStdString());
   ITaskReport::DataReports dataReports;
 
   auto extendReportNameWithSuffix = [](QString reportName, const std::string& suffix)->QString {

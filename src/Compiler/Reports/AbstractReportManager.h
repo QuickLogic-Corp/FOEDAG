@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QObject>
 #include <QVector>
 #include <map>
+#include <set>
 
 #include "IDataReport.h"
 #include "ITaskReportManager.h"
@@ -52,7 +53,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
  public:
   AbstractReportManager(const TaskManager &taskManager);
   static std::map<std::string, std::string> findFileNameVariants(const std::string& baseFileName, const std::string& patternFileName);
-  static std::vector<std::string> findProfilesBasedOnExistedFiles(const std::string& baseFileName, const std::string& patternFileName);
+  static std::set<std::string> findProfilesBasedOnExistedFiles(const std::string& baseFileName, const std::string& patternFileName);
 
  protected:
   // Launches file parsing, if needed. Returns messages.
