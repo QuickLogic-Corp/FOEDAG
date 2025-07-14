@@ -34,6 +34,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TaskGlobal.h"
 #include "TaskManager.h"
 #include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
+#include "Widgets/SelectionDialog.h"
+#include "Compiler/WildcardFileFinder.h"
+
+#include <set>
 
 #ifdef USE_IPA
 #include "CompilerDefines.h"
@@ -204,17 +209,25 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
 
   bool logExists = false;
   if (logFilePath.contains("*")) {
-    // handle pattern
-    std::vector<std::filesystem::path> logFiles = FileUtils::findFilePathesByWildcard(logFilePath.toStdString());
-    logExists = !logFiles.empty();
-    viewLog->setEnabled(logExists);
-    connect(viewLog, &QAction::triggered, this,
-            [this, logFiles]() {
-              for (const std::filesystem::path& logFile: logFiles) {
-                emit ViewFileRequested(QString::fromStdString(logFile.string()));
-              }
-            });
+    // handle multiple reports
+    std::string logFileName = FileUtils::Basename(std::filesystem::path{logFilePath.toStdString()});
+    std::set<std::string> profiles = WildcardFileFinder::findProfilesBasedOnExistedFiles(Project::Instance()->projectPath().toStdString(), logFileName);
+    logExists = !profiles.empty();
+    if (!profiles.empty()) {
+      viewLog->setEnabled(logExists);
+      connect(viewLog, &QAction::triggered, this,
+        [this, profiles, logFilePath]() {
+          QString profile{""};
+          SelectionDialog dialog("Select profile", profiles, nullptr);
+          if (dialog.exec() == QDialog::Accepted) {
+            profile = dialog.selectedText();
+          }
+          std::string resolvedLogFilePath = StringUtils::replaceAll(logFilePath.toStdString(), "*", profile.toStdString());
+          emit ViewFileRequested(QString::fromStdString(resolvedLogFilePath));
+      });
+    }
   } else {
+    // handle single report
     logExists = QFile::exists(logFilePath);
     viewLog->setEnabled(logExists);
     connect(viewLog, &QAction::triggered, this,

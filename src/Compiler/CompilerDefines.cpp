@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Reports/TimingAnalysisReportManager.h"
 #include "Main/Tasks.h"
 #include "MainWindow/Session.h"
+#include "WildcardFileFinder.h"
 #include "NewProject/ProjectManager/project.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Simulation/Simulator.h"
@@ -61,9 +62,9 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
           TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
           if (taReportManager) {            
             if (reportId == taReportManager->timingReportId()) {
-              std::set<std::string> profiles = taReportManager->profilesBasedOnExistedFiles();
+              std::set<std::string> profiles = WildcardFileFinder::findProfilesBasedOnExistedFiles(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
               if (!profiles.empty()) {
-                SelectionDialog dialog("Select p_v_t_corner", profiles, nullptr);
+                SelectionDialog dialog("Select profile", profiles, nullptr);
                 if (dialog.exec() == QDialog::Accepted) {
                   profile = dialog.selectedText();
                 }

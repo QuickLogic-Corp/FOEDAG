@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
 #include "NewProject/ProjectManager/project.h"
+#include "WildcardFileFinder.h"
 
 namespace {
 static constexpr const char *RESOURCE_REPORT_NAME{
@@ -103,10 +104,6 @@ QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
 }
 
 QString TimingAnalysisReportManager::timingReportId() { return QString(TIMING_REPORT_NAME); }
-
-std::set<std::string> TimingAnalysisReportManager::profilesBasedOnExistedFiles() const {
-  return findProfilesBasedOnExistedFiles(TIMING_ANALYSIS_LOG, TIMING_ANALYSIS_LOG_PATTERN);
-}
 
 std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     const QString &reportId, const QString& profile) {
@@ -184,7 +181,7 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 void TimingAnalysisReportManager::parseLogFile() {
   clearDataProfiles();
 
-  std::map<std::string, std::string> taLogVariants = findFileNameVariants(TIMING_ANALYSIS_LOG, TIMING_ANALYSIS_LOG_PATTERN);
+  std::map<std::string, std::string> taLogVariants = WildcardFileFinder::findFileNameVariants(std::filesystem::path{Project::Instance()->projectPath().toStdString()}, std::string{TIMING_ANALYSIS_LOG_PATTERN});
   for (const auto& [profile, logFileName]: taLogVariants) {
     parseLogFileHelper(QString::fromStdString(logFileName), profile);
   }
