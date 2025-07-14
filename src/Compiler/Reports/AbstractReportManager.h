@@ -144,7 +144,6 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   Messages& messages() {
     return m_dataProfiles.current()->messages;
   }
-  std::vector<std::string> profiles() const override final { return m_dataProfiles.keys(); }
   std::string currentProfile() const { return m_dataProfiles.currentKey(); }
 
  private:

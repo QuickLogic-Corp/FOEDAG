@@ -60,7 +60,6 @@ class ITaskReportManager {
       const QString &reportId, const QString &profile) = 0;
   // Returns retrieved from a log file messages per line number.
   virtual const Messages &getMessages() = 0;
-  virtual std::vector<std::string> profiles() const = 0;
 };
 
 }  // namespace FOEDAG
