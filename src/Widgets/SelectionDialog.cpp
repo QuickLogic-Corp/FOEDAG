@@ -9,6 +9,7 @@ namespace FOEDAG {
 SelectionDialog::SelectionDialog(const QString& title, const std::set<std::string>& items, QWidget* parent)
     : QDialog(parent), m_layout(new QVBoxLayout(this))
 {
+    setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowTitleHint); // hide close button
     setWindowTitle(title);
 
     for (const auto& item: items) {
@@ -27,8 +28,6 @@ SelectionDialog::SelectionDialog(const QString& title, const std::set<std::strin
     }
 
     setLayout(m_layout);
-
-    setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint); // hide close button
 }
 
 SelectionDialog::~SelectionDialog()

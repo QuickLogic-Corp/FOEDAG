@@ -43,6 +43,9 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
                               Compiler *compiler);
 
   static QString timingReportId();
+  
+  // we cannot reply on profiles() method because it's empty before log files parse event.
+  // that is why we search existed log files and extract profile names from there.
   std::set<std::string> profilesBasedOnExistedFiles() const;
 
  protected:

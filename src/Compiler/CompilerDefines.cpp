@@ -61,12 +61,8 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
           TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
           if (taReportManager) {            
             if (reportId == taReportManager->timingReportId()) {
-              // we cannot reply on profiles() method because it's empty before log files parse event.
-              // that is why we search existed log files and extract profile names from there.
               std::set<std::string> profiles = taReportManager->profilesBasedOnExistedFiles();
-
-              bool is_sta_multicorner_enabled = profiles.size() > 1 || ((profiles.size() == 1) && (!profiles.begin()->empty()));
-              if (is_sta_multicorner_enabled) {
+              if (!profiles.empty()) {
                 SelectionDialog dialog("Select p_v_t_corner", profiles, nullptr);
                 if (dialog.exec() == QDialog::Accepted) {
                   profile = dialog.selectedText();

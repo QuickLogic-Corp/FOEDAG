@@ -115,22 +115,6 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
   setActiveProfile(profile.toStdString());
   ITaskReport::DataReports dataReports;
 
-  auto extendReportNameWithSuffix = [](QString reportName, const std::string& suffix)->QString {
-    if (suffix.empty()) {
-      return reportName;
-    }
-    QString prettySuffix{QString::fromStdString(suffix)};
-    if (prettySuffix.startsWith("_")) {
-      prettySuffix.remove(0, 1);
-    }
-    if (reportName.endsWith(":")) {
-      reportName += " " + prettySuffix;
-    } else {
-      reportName += " - " + prettySuffix;
-    }
-    return reportName;
-  };
-
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
       m_resourceColumns, resourceData(), "Resource Utilization"));
@@ -138,25 +122,19 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
     dataReports.push_back(std::make_unique<TableReport>(
       m_circuitColumns, circuitData(), "Circuit Statistics"));
   } else {
-    //for (const std::string& profile: profiles()) {
-      dataReports.push_back(std::make_unique<TableReport>(
-          m_timingColumns, timingData(), extendReportNameWithSuffix("Timing Data", currentProfile())));
-    //}
+    dataReports.push_back(std::make_unique<TableReport>(
+        m_timingColumns, timingData(), "Timing Data"));
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      //for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms()) {
-          dataReports.push_back(std::make_unique<TableReport>(
-              m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, currentProfile())));
-        }
-      //}
+      for (auto &hgrm : histograms()) {
+        dataReports.push_back(std::make_unique<TableReport>(
+          m_openSTATimingColumns, hgrm.second, hgrm.first));
+      }
     } else {
-      //for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms()) {
-          dataReports.push_back(std::make_unique<TableReport>(
-              m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, currentProfile())));
-        }
-      //}
+      for (auto &hgrm : histograms()) {
+        dataReports.push_back(std::make_unique<TableReport>(
+          m_histogramColumns, hgrm.second, hgrm.first));
+      }
     }
   }
 
