@@ -9,10 +9,9 @@
 
 namespace FOEDAG {
 
-QString DialogUtils::execUserSelectionOfActiveStaProfile()
+QString DialogUtils::execUserSelectionOfActiveProfile(const std::set<std::string>& profiles)
 {
     QString profile{""}; // default profile, when no multiple report is enabled
-    std::set<std::string> profiles = WildcardFileFinder::findProfilesBasedOnExistedFiles(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
     if (!profiles.empty()) {
         SelectionDialog dialog("Select profile", profiles, nullptr);
         if (dialog.exec() == QDialog::Accepted) {

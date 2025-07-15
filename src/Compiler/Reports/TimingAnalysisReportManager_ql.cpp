@@ -181,8 +181,9 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 void TimingAnalysisReportManager::parseLogFile() {
   clearDataProfiles();
 
-  std::map<std::string, std::string> taLogVariants = WildcardFileFinder::findFileNameVariants(std::filesystem::path{Project::Instance()->projectPath().toStdString()}, std::string{TIMING_ANALYSIS_LOG_PATTERN});
-  for (const auto& [profile, logFileName]: taLogVariants) {
+  WildcardFileFinder finder(std::filesystem::path{Project::Instance()->projectPath().toStdString()}, std::string{TIMING_ANALYSIS_LOG_PATTERN});
+
+  for (const auto& [profile, logFileName]: finder.profileToFileNameMap()) {
     parseLogFileHelper(QString::fromStdString(logFileName), profile);
   }
 

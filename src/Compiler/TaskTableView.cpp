@@ -208,28 +208,29 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   logFilePath.replace(PROJECT_OSRCDIR, Project::Instance()->projectPath());
 
   std::string logFileName = FileUtils::Basename(std::filesystem::path{logFilePath.toStdString()});
-  std::set<std::string> profiles = WildcardFileFinder::findProfilesBasedOnExistedFiles(Project::Instance()->projectPath().toStdString(), logFileName);
-   
+  WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), logFileName);
+
   bool logExists = false;
-  if (logFilePath.contains("*")) {
+  if (finder.isBaseFileNameAvailableOnly()) {
+    // handle single report
+    logFilePath = QString::fromStdString(finder.baseFilePath());
+    logExists = true;
+    connect(viewLog, &QAction::triggered, this,
+            [this, logFilePath]() { emit ViewFileRequested(logFilePath); });
+  } else {
     // handle multiple reports
-    logExists = !profiles.empty();
-    if (!profiles.empty()) {
-      viewLog->setEnabled(logExists);
+    if (finder.hasProfiles()) {
+      logExists = true;
+      std::set<std::string> profiles = finder.profiles();
       connect(viewLog, &QAction::triggered, this,
         [this, profiles, logFilePath]() {
-          QString selectedProfile = DialogUtils::execUserSelectionOfActiveStaProfile();
+          QString selectedProfile = DialogUtils::execUserSelectionOfActiveProfile(profiles);
           std::string resolvedLogFilePath = StringUtils::replaceAll(logFilePath.toStdString(), "*", "_" + selectedProfile.toStdString());
           emit ViewFileRequested(QString::fromStdString(resolvedLogFilePath));
       });
     }
-  } else {
-    // handle single report
-    logExists = QFile::exists(logFilePath);
-    viewLog->setEnabled(logExists);
-    connect(viewLog, &QAction::triggered, this,
-            [this, logFilePath]() { emit ViewFileRequested(logFilePath); });
   }
+  viewLog->setEnabled(logExists);
   menu->addAction(viewLog);
 
   auto taskId = m_taskManager->taskId(task);
@@ -249,10 +250,11 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
 
 #ifdef USE_IPA
   if (taskId == TIMING_SIGN_OFF) {
+    std::set<std::string> profiles = finder.profiles();
     QAction *interactivePathAnalysisAction = new QAction(tr("View Interactive Path Analysis"), this);
     connect(interactivePathAnalysisAction, &QAction::triggered, this,
             [this, profiles]() {
-              QString selectedProfile = DialogUtils::execUserSelectionOfActiveStaProfile();
+              QString selectedProfile = DialogUtils::execUserSelectionOfActiveProfile(profiles);
               emit ViewInteractivePathAnalysisRequested(selectedProfile); 
             });
     interactivePathAnalysisAction->setEnabled(logExists);

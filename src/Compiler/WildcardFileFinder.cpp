@@ -28,10 +28,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
-std::map<std::string, std::string> WildcardFileFinder::findFileNameVariants(const std::filesystem::path& path, const std::string& patternFileName)
+WildcardFileFinder::WildcardFileFinder(const std::filesystem::path& path, const std::string& patternFileName)
+:
+  m_path(path)
 {
-  std::map<std::string, std::string> result;
-  
   std::string baseFileName = StringUtils::replaceAll(patternFileName, "*", ""); 
   qInfo() << "~~~ baseFileName" << baseFileName.c_str();
   
@@ -41,30 +41,11 @@ std::map<std::string, std::string> WildcardFileFinder::findFileNameVariants(cons
     if (fileName != baseFileName) {
       profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
       StringUtils::removePrefix(profile, "_");
-      result[profile] = fileName;
+      m_profileToFileNameMap[profile] = fileName;
+    } else {
+      m_baseFileName = baseFileName;
     }
   }
-  return result;
-}
-
-std::set<std::string> WildcardFileFinder::findProfilesBasedOnExistedFiles(const std::filesystem::path& path, const std::string& patternFileName)
-{
-  std::set<std::string> profiles;
-
-  std::string baseFileName = StringUtils::replaceAll(patternFileName, "*", ""); 
-  qInfo() << "~~~ baseFileName" << baseFileName.c_str();
-
-  std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(path, patternFileName);
-  for (const std::string& fileName: fileNames) {
-    qInfo() << "~~~ fileName" << fileName.c_str();
-    std::string profile;
-    if (fileName != baseFileName) {
-      profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
-      StringUtils::removePrefix(profile, "_");
-      profiles.insert(profile);
-    }
-  }
-  return profiles;
 }
 
 }  // namespace FOEDAG

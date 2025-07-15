@@ -29,8 +29,26 @@ namespace FOEDAG {
 
 class WildcardFileFinder {
 public:
-  static std::map<std::string, std::string> findFileNameVariants(const std::filesystem::path& path, const std::string& patternFileName);
-  static std::set<std::string> findProfilesBasedOnExistedFiles(const std::filesystem::path& path, const std::string& patternFileName);
+  WildcardFileFinder(const std::filesystem::path& path, const std::string& patternFileName);
+
+  std::map<std::string, std::string> profileToFileNameMap() { return m_profileToFileNameMap; }
+  std::set<std::string> profiles() {
+    std::set<std::string> keys;
+    for (const auto& [key, _]: m_profileToFileNameMap) {
+      keys.insert(key);
+    }
+    return keys;
+  }
+
+  std::filesystem::path baseFilePath() const { return m_path / m_baseFileName; }
+  std::string baseFileName() const { return m_baseFileName; }
+  bool hasProfiles() const { return !m_profileToFileNameMap.empty(); }
+  bool isBaseFileNameAvailableOnly() const { return !m_baseFileName.empty() && !hasProfiles(); }
+
+private:
+  std::filesystem::path m_path;
+  std::string m_baseFileName;
+  std::map<std::string, std::string> m_profileToFileNameMap;
 };
 
 }  // namespace FOEDAG
