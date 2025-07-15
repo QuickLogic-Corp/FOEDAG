@@ -13,12 +13,7 @@ SelectionDialog::SelectionDialog(const QString& title, const std::set<std::strin
     setWindowTitle(title);
 
     for (const auto& item: items) {
-        QString prettyItem = QString::fromStdString(item);
-        if (prettyItem.startsWith("_")) {
-            prettyItem.remove(0, 1);
-        }
-
-        auto* button = new QPushButton(prettyItem, this);
+        auto* button = new QPushButton(QString::fromStdString(item), this);
         m_layout->addWidget(button);
 
         connect(button, &QPushButton::clicked, this, [this, item]() {

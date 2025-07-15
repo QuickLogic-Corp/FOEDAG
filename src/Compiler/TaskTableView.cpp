@@ -219,7 +219,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
       connect(viewLog, &QAction::triggered, this,
         [this, profiles, logFilePath]() {
           QString selectedProfile = DialogUtils::execUserSelectionOfActiveStaProfile();
-          std::string resolvedLogFilePath = StringUtils::replaceAll(logFilePath.toStdString(), "*", selectedProfile.toStdString());
+          std::string resolvedLogFilePath = StringUtils::replaceAll(logFilePath.toStdString(), "*", "_" + selectedProfile.toStdString());
           emit ViewFileRequested(QString::fromStdString(resolvedLogFilePath));
       });
     }

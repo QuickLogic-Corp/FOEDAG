@@ -306,4 +306,11 @@ std::string StringUtils::extractWildcardSegment(const std::string& text, const s
   return text.substr(prefix.size(), text.size() - prefix.size() - suffix.size());
 }
 
+void StringUtils::removePrefix(std::string& str, const std::string& prefix)
+{
+  if (str.compare(0, prefix.length(), prefix) == 0) {
+    str.erase(0, prefix.length());
+  }
+}
+
 }  // namespace FOEDAG

@@ -3789,7 +3789,7 @@ bool CompilerOpenFPGA_ql::Route() {
 
 std::string CompilerOpenFPGA_ql::staProfile(const QLDeviceTarget& device) const
 {
-  return "_" + device.device_variant.voltage_threshold + "_" + device.device_variant.p_v_t_corner;
+  return device.device_variant.voltage_threshold + "_" + device.device_variant.p_v_t_corner;
 }
 
 bool CompilerOpenFPGA_ql::collectStaDevices(std::map<std::string, QLDeviceTarget>& devices) const
@@ -4053,6 +4053,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
         return false;
       }
     } else {
+      ErrorMessage("Attempt to run STA on invalid device");
       return false;
     }
   }
@@ -4085,7 +4086,7 @@ std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
 
 bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& profile)
 {
-  std::string sta_suffix = profile;
+  std::string sta_suffix = "_" + profile;
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
   auto guard = sg::make_scope_guard([this, sta_suffix] {

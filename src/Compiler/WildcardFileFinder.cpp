@@ -40,6 +40,7 @@ std::map<std::string, std::string> WildcardFileFinder::findFileNameVariants(cons
     std::string profile;
     if (fileName != baseFileName) {
       profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
+      StringUtils::removePrefix(profile, "_");
       result[profile] = fileName;
     }
   }
@@ -59,6 +60,7 @@ std::set<std::string> WildcardFileFinder::findProfilesBasedOnExistedFiles(const 
     std::string profile;
     if (fileName != baseFileName) {
       profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
+      StringUtils::removePrefix(profile, "_");
       profiles.insert(profile);
     }
   }
