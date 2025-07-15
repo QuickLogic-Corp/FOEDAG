@@ -6,8 +6,6 @@
 
 #include <set>
 
-class QVBoxLayout;
-
 namespace FOEDAG {
 
 class SelectionDialog : public QDialog {
@@ -24,7 +22,6 @@ protected:
 
 private:
     QString m_selectedText;
-    QVBoxLayout* m_layout{nullptr};
 };
 
 }  // namespace FOEDAG

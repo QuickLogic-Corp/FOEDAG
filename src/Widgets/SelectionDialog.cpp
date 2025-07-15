@@ -7,22 +7,23 @@
 namespace FOEDAG {
 
 SelectionDialog::SelectionDialog(const QString& title, const std::set<std::string>& items, QWidget* parent)
-    : QDialog(parent), m_layout(new QVBoxLayout(this))
+    : QDialog(parent)
 {
     setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowTitleHint); // hide close button
     setWindowTitle(title);
 
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    setLayout(layout);
+
     for (const auto& item: items) {
         auto* button = new QPushButton(QString::fromStdString(item), this);
-        m_layout->addWidget(button);
+        layout->addWidget(button);
 
         connect(button, &QPushButton::clicked, this, [this, item]() {
             m_selectedText = QString::fromStdString(item);
             accept(); // Close the dialog and unblock exec()
         });
     }
-
-    setLayout(m_layout);
 }
 
 SelectionDialog::~SelectionDialog()
