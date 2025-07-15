@@ -4,8 +4,16 @@
 #include <QTreeWidget>
 
 #include "Compiler/TaskManager.h"
+#include "Compiler/WildcardFileFinder.h"
+#include "Compiler/DialogUtils.h"
+#include "Compiler/CompilerDefines.h"
+
+#include "Compiler/Reports/TimingAnalysisReportManager.h"
+
 #include "Main/Tasks.h"
 #include "TextEditor/text_editor_form.h"
+
+#include "NewProject/ProjectManager/project.h"
 
 #include <QDebug>
 
@@ -61,10 +69,21 @@ void ReportsTreeWidget::onReportRequested(const QTreeWidgetItem *item,
   auto taskId = item->data(col, Qt::UserRole).toUInt();
   auto reportsManager =
       m_taskManager.getReportManagerRegistry().getReportManager(taskId);
-  if (!reportsManager) return;
-  qInfo() << "~~~ 222";
-  FOEDAG::handleViewReportRequested(m_compiler, m_taskManager.task(taskId),
-                                    reportId, "_LVT_SSPG_0P72_M40C", *reportsManager);
+
+  if (reportsManager) {
+    WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
+    QString profile = QString::fromStdString(finder.defaultProfile());
+    if (finder.hasProfiles()) {
+      TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportsManager.get());
+      if (taReportManager) {
+        if (reportId == taReportManager->timingReportId()) {
+          profile = DialogUtils::execUserSelectionOfActiveProfile(finder.profiles());
+        }
+      }
+    }
+    FOEDAG::handleViewReportRequested(m_compiler, m_taskManager.task(taskId), reportId, profile,
+                                      *reportsManager);
+  }
 }
 
 }  // namespace FOEDAG
