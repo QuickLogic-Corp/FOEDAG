@@ -43,7 +43,7 @@ public:
   std::filesystem::path baseFilePath() const { return m_path / m_baseFileName; }
   std::string baseFileName() const { return m_baseFileName; }
   bool hasProfiles() const { return !m_profileToFileNameMap.empty(); }
-  bool isBaseFileNameAvailableOnly() const { return !m_baseFileName.empty() && !hasProfiles(); }
+  bool isBaseFileNameOnlyAvailable() const { return !m_baseFileName.empty() && !hasProfiles(); }
 
 private:
   std::filesystem::path m_path;

@@ -211,7 +211,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), logFileName);
 
   bool logExists = false;
-  if (finder.isBaseFileNameAvailableOnly()) {
+  if (finder.isBaseFileNameOnlyAvailable()) {
     // handle single report
     logFilePath = QString::fromStdString(finder.baseFilePath());
     logExists = true;

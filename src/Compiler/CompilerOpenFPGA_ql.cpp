@@ -4086,7 +4086,11 @@ std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
 
 bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& profile)
 {
-  std::string sta_suffix = "_" + profile;
+  std::string sta_suffix{};
+  if (!profile.empty()) {
+    sta_suffix = "_" + profile;
+  } 
+
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
   auto guard = sg::make_scope_guard([this, sta_suffix] {

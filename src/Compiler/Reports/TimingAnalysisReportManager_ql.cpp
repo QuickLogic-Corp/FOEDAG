@@ -183,14 +183,19 @@ void TimingAnalysisReportManager::parseLogFile() {
 
   WildcardFileFinder finder(std::filesystem::path{Project::Instance()->projectPath().toStdString()}, std::string{TIMING_ANALYSIS_LOG_PATTERN});
 
-  for (const auto& [profile, logFileName]: finder.profileToFileNameMap()) {
-    parseLogFileHelper(QString::fromStdString(logFileName), profile);
+  if (finder.isBaseFileNameOnlyAvailable()) {
+    parseLogFileHelper(QString::fromStdString(finder.baseFileName()));
+  } else {
+    for (const auto& [profile, logFileName]: finder.profileToFileNameMap()) {
+      parseLogFileHelper(QString::fromStdString(logFileName), profile);
+    }
   }
 
   setFileParsed(true);
 }
 
 void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName, const std::string& profile) {
+  qInfo() << "~~~ logFileName=" << logFileName;
   m_dataProfiles.setCurrentKey(profile);
   setActiveProfile(profile);
  
