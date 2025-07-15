@@ -45,9 +45,14 @@ public:
   bool hasProfiles() const { return !m_profileToFileNameMap.empty(); }
   bool isBaseFileNameOnlyAvailable() const { return !m_baseFileName.empty() && !hasProfiles(); }
 
+  std::string defaultProfile() const;
+
 private:
   std::filesystem::path m_path;
   std::string m_baseFileName;
+
+  std::string m_firstProfile;
+
   std::map<std::string, std::string> m_profileToFileNameMap;
 };
 

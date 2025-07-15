@@ -113,7 +113,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
     m_dataProfiles.clear();
   }
 
-  void setActiveProfile(const std::string& profile) {
+  virtual void setActiveProfile(const std::string& profile) {
     m_dataProfiles.setCurrentKey(profile);
   }
 

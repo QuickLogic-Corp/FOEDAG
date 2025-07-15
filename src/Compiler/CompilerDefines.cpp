@@ -58,12 +58,14 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
         auto reportManager =
             reportManagerRegistry.getReportManager(tManager->taskId(task));
         if (reportManager) {
-          QString profile{""}; 
-          TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
-          if (taReportManager) {            
-            if (reportId == taReportManager->timingReportId()) {
-              WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
-              profile = DialogUtils::execUserSelectionOfActiveProfile(finder.profiles());
+          WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
+          QString profile = QString::fromStdString(finder.defaultProfile());
+          if (finder.hasProfiles()) {
+            TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
+            if (taReportManager) {
+              if (reportId == taReportManager->timingReportId()) {
+                profile = DialogUtils::execUserSelectionOfActiveProfile(finder.profiles());
+              }
             }
           }
           FOEDAG::handleViewReportRequested(compiler, task, reportId, profile,

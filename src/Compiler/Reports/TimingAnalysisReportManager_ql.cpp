@@ -110,25 +110,26 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
   if (!isFileParsed()) parseLogFile();
 
   setActiveProfile(profile.toStdString());
+
   ITaskReport::DataReports dataReports;
 
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-      m_resourceColumns, resourceData(), "Resource Utilization"));
+      m_resourceColumns, resourceData(profile.toStdString()), "Resource Utilization"));
   } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-      m_circuitColumns, circuitData(), "Circuit Statistics"));
+      m_circuitColumns, circuitData(profile.toStdString()), "Circuit Statistics"));
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, timingData(), "Timing Data"));
+        m_timingColumns, timingData(profile.toStdString()), "Timing Data"));
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (auto &hgrm : histograms()) {
+      for (auto &hgrm : histograms(profile.toStdString())) {
         dataReports.push_back(std::make_unique<TableReport>(
           m_openSTATimingColumns, hgrm.second, hgrm.first));
       }
     } else {
-      for (auto &hgrm : histograms()) {
+      for (auto &hgrm : histograms(profile.toStdString())) {
         dataReports.push_back(std::make_unique<TableReport>(
           m_histogramColumns, hgrm.second, hgrm.first));
       }
@@ -195,10 +196,8 @@ void TimingAnalysisReportManager::parseLogFile() {
 }
 
 void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName, const std::string& profile) {
-  qInfo() << "~~~ logFileName=" << logFileName;
-  m_dataProfiles.setCurrentKey(profile);
   setActiveProfile(profile);
- 
+
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
     parseOpenSTALog(logFileName);
@@ -319,6 +318,12 @@ void TimingAnalysisReportManager::clearDataProfiles()
 {
   AbstractReportManager::clearDataProfiles();
   m_dataProfiles.clear();
+}
+
+void TimingAnalysisReportManager::setActiveProfile(const std::string& profile)
+{
+  AbstractReportManager::setActiveProfile(profile);
+  m_dataProfiles.setCurrentKey(profile);
 }
 
 }  // namespace FOEDAG

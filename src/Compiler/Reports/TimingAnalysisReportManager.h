@@ -46,6 +46,7 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   
  protected:
   void clearDataProfiles() override final;
+  void setActiveProfile(const std::string& profile) override final;
 
  private:
   QStringList getAvailableReportIds() const override;

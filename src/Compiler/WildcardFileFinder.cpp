@@ -33,7 +33,6 @@ WildcardFileFinder::WildcardFileFinder(const std::filesystem::path& path, const 
   m_path(path)
 {
   std::string baseFileName = StringUtils::replaceAll(patternFileName, "*", ""); 
-  qInfo() << "~~~ baseFileName" << baseFileName.c_str();
   
   std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(path, patternFileName);
   for (const std::string& fileName: fileNames) {
@@ -42,9 +41,27 @@ WildcardFileFinder::WildcardFileFinder(const std::filesystem::path& path, const 
       profile = StringUtils::extractWildcardSegment(fileName, patternFileName);
       StringUtils::removePrefix(profile, "_");
       m_profileToFileNameMap[profile] = fileName;
+      if (m_firstProfile.empty()) {
+        m_firstProfile = profile;
+      }
     } else {
       m_baseFileName = baseFileName;
     }
+  }
+}
+
+std::string WildcardFileFinder::defaultProfile() const
+{
+  // From the user's perspective, for reports which share same data,
+  // we want to display only one report, regardless of the profile.
+  // To achieve this, we simply pick any existing profile and use it.
+  // Note: using an empty string as the profile will not work for multi report case, as it results in an empty report.
+  // In multi report, each report has not empty profile.
+  // An empty profile string only makes sense when we have only a single report.
+  if (hasProfiles()) {
+    return m_firstProfile;
+  } else {
+    return "";
   }
 }
 
