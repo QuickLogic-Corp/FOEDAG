@@ -123,7 +123,14 @@ QString NCriticalPathToolsWidget::vprBaseCommand() {
     FOEDAG::CompilerOpenFPGA_ql* openFpgaCompiler =
         dynamic_cast<FOEDAG::CompilerOpenFPGA_ql*>(m_compiler);
     if (openFpgaCompiler) {
-      return openFpgaCompiler->BaseVprCommand().c_str();
+      if (m_profile.isEmpty()) {
+        return QString::fromStdString(openFpgaCompiler->BaseVprCommand());
+      } else {
+        auto sta_device = openFpgaCompiler->getDeviceByStaProfile(m_profile.toStdString());
+        std::string cmd = openFpgaCompiler->BaseVprCommand(sta_device);
+        cmd += openFpgaCompiler->uniqueStaVprOptions();
+        return QString::fromStdString(cmd);
+      }
     } else {
       qCritical() << "cannot get vpr cmd because of wrong compiler type "
                      "(CompilerOpenFPGA_ql type is expected)";
