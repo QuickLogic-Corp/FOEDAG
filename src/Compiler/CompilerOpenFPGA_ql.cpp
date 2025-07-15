@@ -3822,11 +3822,20 @@ bool CompilerOpenFPGA_ql::collectStaDevices(std::map<std::string, QLDeviceTarget
     }
   }
 
+  // special case 1: not specified sta_vt
   if (!device_sta_p_v_t_corner_variants.empty() && device_sta_vt_variants.empty()) {
     // if pvt corner is specified but vt corner is not, then use vt configuration from the current device
     device_sta_vt_variants.insert(current_device.device_variant.voltage_threshold);
   }
 
+  // special case 2: when multi pvt corner totally matches to current device
+  if ((device_sta_vt_variants.size() == 1) && (device_sta_p_v_t_corner_variants.size() == 1)) {
+    if ((*device_sta_vt_variants.begin() == current_device.device_variant.voltage_threshold) && 
+    (*device_sta_p_v_t_corner_variants.begin() == current_device.device_variant.p_v_t_corner)) {
+      device_sta_vt_variants.clear();
+      device_sta_p_v_t_corner_variants.clear();
+    }
+  }
 
   for (const std::string& device_sta_vt_variant: device_sta_vt_variants) {
     for (const std::string& device_sta_p_v_t_corner_variant: device_sta_p_v_t_corner_variants) {
