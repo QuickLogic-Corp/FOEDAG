@@ -15,8 +15,6 @@
 
 #include "NewProject/ProjectManager/project.h"
 
-#include <QDebug>
-
 namespace FOEDAG {
 
 ReportsTreeWidget::ReportsTreeWidget(Compiler *compiler,

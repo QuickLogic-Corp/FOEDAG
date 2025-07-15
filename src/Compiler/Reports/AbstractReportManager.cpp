@@ -10,7 +10,6 @@
 #include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
 
-#include <QDebug>
 
 namespace {
 static constexpr const char *RESOURCES_SPLIT{"blocks of type:"};
