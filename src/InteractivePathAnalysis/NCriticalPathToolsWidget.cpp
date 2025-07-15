@@ -64,6 +64,8 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
   SimpleLogger::instance().setEnabled(m_parameters->getIsLogToFileEnabled());
 
   m_vprProcess.addInnerErrorToBypass(
+      "warning: PWD environment variable doesn't match current directory");
+  m_vprProcess.addInnerErrorToBypass(
       "gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed");
   m_vprProcess.addInnerErrorToBypass(
       "Couldn't register with accessibility bus: An AppArmor policy prevents "
