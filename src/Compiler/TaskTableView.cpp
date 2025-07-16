@@ -213,7 +213,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   bool logExists = false;
   if (finder.isBaseFileNameOnlyAvailable()) {
     // handle single report
-    logFilePath = QString::fromStdString(finder.baseFilePath());
+    logFilePath = QString::fromStdString(finder.baseFilePath().string());
     logExists = true;
     connect(viewLog, &QAction::triggered, this,
             [this, logFilePath]() { emit ViewFileRequested(logFilePath); });
