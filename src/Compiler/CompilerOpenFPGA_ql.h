@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 #include "Compiler/Compiler.h"
+#include "Compiler/BlifParser.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -133,7 +134,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommand();
+  virtual std::string BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
 
  protected:
   virtual bool IPGenerate();
@@ -145,6 +146,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool ConvertSdcPinConstrainToPcf(std::vector<std::string>&);
   virtual bool Route();
   virtual bool TimingAnalysis();
+  bool TimingAnalysisHelper(const QLDeviceTarget&, const std::string&, std::string);
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
@@ -169,6 +171,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
       const std::string& size) const;
   bool VerifyTargetDevice() const;
+  static std::filesystem::path removeLog(FOEDAG::ProjectManager* projManager,
+                                       const std::string& fileName);
   static std::filesystem::path copyLog(FOEDAG::ProjectManager* projManager,
                                        const std::string& srcFileName,
                                        const std::string& destFileName);
@@ -206,6 +210,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaRepackConstraintsFile = "";
   std::filesystem::path m_OpenFpgaFabricKeyFile = "";
   std::filesystem::path m_OpenFpgaPinMapXml = "";
+  std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
   std::string m_deviceSize;
   std::string m_yosysScript;
   std::string m_synplifyScript;
@@ -222,6 +227,8 @@ class CompilerOpenFPGA_ql : public Compiler {
 private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
+
+  BlifParser m_blifParser;
 };
 
 }  // namespace FOEDAG

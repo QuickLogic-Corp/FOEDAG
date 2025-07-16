@@ -29,6 +29,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
+#include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
+#include "NewProject/ProjectManager/project.h"
 
 namespace {
 static constexpr const char *RESOURCE_REPORT_NAME{
@@ -107,25 +110,52 @@ std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
 
   ITaskReport::DataReports dataReports;
 
-  if (reportId == QString(RESOURCE_REPORT_NAME)) {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, m_resourceData, QString{"Resource Utilization"}));
-  } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, m_circuitData, QString{"Circuit Statistics"}));
+  auto extendReportNameWithSuffix = [](QString reportName, const std::string& suffix)->QString {
+    if (suffix.empty()) {
+      return reportName;
+    }
+    QString prettySuffix{QString::fromStdString(suffix)};
+    if (prettySuffix.startsWith("_")) {
+      prettySuffix.remove(0, 1);
+    }
+    if (reportName.endsWith(":")) {
+      reportName += " " + prettySuffix;
+    } else {
+      reportName += " - " + prettySuffix;
+    }
+    return reportName;
+  };
 
+  if (reportId == QString(RESOURCE_REPORT_NAME)) {
+    for (const std::string& profile: profiles()) {
+      dataReports.push_back(std::make_unique<TableReport>(
+        m_resourceColumns, resourceData(profile), extendReportNameWithSuffix("Resource Utilization", profile)));
+    }
+  } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
+    for (const std::string& profile: profiles()) {
+      dataReports.push_back(std::make_unique<TableReport>(
+        m_circuitColumns, circuitData(profile), extendReportNameWithSuffix("Circuit Statistics", profile)));
+    }
   } else {
-    dataReports.push_back(std::make_unique<TableReport>(
-        m_timingColumns, m_timingData, QString{"Timing Data"}));
+    for (const std::string& profile: profiles()) {
+      dataReports.push_back(std::make_unique<TableReport>(
+          m_timingColumns, timingData(profile), extendReportNameWithSuffix("Timing Data", profile)));
+    }
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (auto &hgrm : m_histograms)
-        dataReports.push_back(std::make_unique<TableReport>(
-            m_openSTATimingColumns, hgrm.second, hgrm.first));
+      for (const std::string& profile: profiles()) {
+        for (auto &hgrm : histograms(profile)) {
+          dataReports.push_back(std::make_unique<TableReport>(
+              m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
+        }
+      }
     } else {
-      for (auto &hgrm : m_histograms)
-        dataReports.push_back(std::make_unique<TableReport>(
-            m_histogramColumns, hgrm.second, hgrm.first));
+      for (const std::string& profile: profiles()) {
+        for (auto &hgrm : histograms(profile)) {
+          dataReports.push_back(std::make_unique<TableReport>(
+              m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
+        }
+      }
     }
   }
 
@@ -158,8 +188,8 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
     // TODO: This is ugly, but at this point there is no clear view on timings.
     // We expect it to consist of two KEY VALUE pairs.
     if (timings.size() == 4) {
-      m_timingData.push_back({timings[0], timings[1]});
-      m_timingData.push_back({timings[2], timings[3]});
+      timingData().push_back({timings[0], timings[1]});
+      timingData().push_back({timings[2], timings[3]});
     }
     return;
   }
@@ -168,23 +198,36 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
   auto valueIndex = 0;
   while (matchIt.hasNext() && valueIndex < TIMING_FIELDS.size()) {
     auto match = matchIt.next();
-    m_timingData.push_back({TIMING_FIELDS[valueIndex++], match.captured()});
+    timingData().push_back({TIMING_FIELDS[valueIndex++], match.captured()});
   }
 }
 
 void TimingAnalysisReportManager::parseLogFile() {
-  m_messages.clear();
-  m_histograms.clear();
-  m_resourceData.clear();
-  m_timingData.clear();
-  m_circuitData.clear();
+  clearDataProfiles();
 
+  auto projectPath = Project::Instance()->projectPath().toStdString();
+  std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
+  for (const std::string& logFileName: logFileNames) {
+    std::string profile;
+    if (logFileName != TIMING_ANALYSIS_LOG) {
+      profile = StringUtils::extractWildcardSegment(logFileName, TIMING_ANALYSIS_LOG_PATTERN);
+    }
+    parseLogFileHelper(QString::fromStdString(logFileName), profile);
+  }
+
+  setFileParsed(true);
+}
+
+void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName, const std::string& profile) {
+  m_dataProfiles.setCurrentKey(profile);
+  setActiveProfile(profile);
+ 
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
-    parseOpenSTALog();
+    parseOpenSTALog(logFileName);
     return;
   }
-  auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
+  auto logFile = createLogFile(logFileName);
   if (!logFile) return;
 
   auto timings = QStringList{};
@@ -205,19 +248,19 @@ void TimingAnalysisReportManager::parseLogFile() {
     else if (line.startsWith(LOAD_TIM_CONSTR))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_TIM_CONSTR, {});
     else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
-      m_circuitData = parseCircuitStats(in, lineNr);
+      setCircuitData(parseCircuitStats(in, lineNr), profile);
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
-      m_messages.insert(lineNr, TaskMessage{lineNr,
+      messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
                                             VPR_ROUTING_OPT.cap(),
                                             {}});
     else if (line.endsWith(BUILD_TIM_GRAPH))
-      m_messages.insert(
+      messages().insert(
           lineNr,
           TaskMessage{
               lineNr, MessageSeverity::INFO_MESSAGE, BUILD_TIM_GRAPH, {}});
     else if (line.endsWith(LOAD_PACKING))
-      m_messages.insert(
+      messages().insert(
           lineNr,
           TaskMessage{lineNr, MessageSeverity::INFO_MESSAGE, LOAD_PACKING, {}});
     else if (line.startsWith(CREATE_DEVICE_SECTION))
@@ -230,18 +273,16 @@ void TimingAnalysisReportManager::parseLogFile() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-      m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
 
   logFile->close();
-
-  setFileParsed(true);
 }
 
-void TimingAnalysisReportManager::parseOpenSTALog() {
-  auto logFile = createLogFile(QString(TIMING_ANALYSIS_LOG));
+void TimingAnalysisReportManager::parseOpenSTALog(const QString& logFilePath) {
+  auto logFile = createLogFile(logFilePath);
   if (!logFile) return;
 
   auto in = QTextStream(logFile.get());
@@ -259,7 +300,7 @@ void TimingAnalysisReportManager::parseOpenSTALog() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (line.contains(OPENSTA_TIMING))
-      m_histograms.push_back(qMakePair(QString("Timing table"),
+      histograms().push_back(qMakePair(QString("Timing table"),
                                        parseOpenSTATimingTable(in, lineNr)));
     ++lineNr;
   }
@@ -295,6 +336,12 @@ IDataReport::TableData TimingAnalysisReportManager::parseOpenSTATimingTable(
     if (tableLine.size() == 3) result.push_back(std::move(tableLine));
   }
   return result;
+}
+
+void TimingAnalysisReportManager::clearDataProfiles()
+{
+  AbstractReportManager::clearDataProfiles();
+  m_dataProfiles.clear();
 }
 
 }  // namespace FOEDAG

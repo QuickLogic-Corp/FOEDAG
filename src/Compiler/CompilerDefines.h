@@ -110,7 +110,13 @@ static constexpr const char *PLACEMENT_TIMING_LOG{"post_place_timing.rpt"};
 static constexpr const char *ROUTING_LOG{"routing.rpt"};
 static constexpr const char *ROUTING_TIMING_LOG{"post_route_timing.rpt"};
 static constexpr const char *TIMING_ANALYSIS_LOG{"timing_analysis.rpt"};
+static constexpr const char *TIMING_ANALYSIS_LOG_PATTERN{"timing_analysis*.rpt"};
 static constexpr const char *TA_TIMING_LOG{"post_ta_timing.rpt"};
+static constexpr const char *TA_TIMING_LOG_PATTERN{"post_ta_timing*.rpt"};
+static constexpr const char *TA_REPORT_TIMING_HOLD{"report_timing.hold.rpt"};
+static constexpr const char *TA_REPORT_TIMING_HOLD_PATTERN{"report_timing.hold*.rpt"};
+static constexpr const char *TA_REPORT_TIMING_SETUP{"report_timing.setup.rpt"};
+static constexpr const char *TA_REPORT_TIMING_SETUP_PATTERN{"report_timing.setup*.rpt"};
 static constexpr const char *POWER_ANALYSIS_LOG{"power_analysis.rpt"};
 static constexpr const char *BITSTREAM_LOG{"bitstream.rpt"};
 

@@ -53,9 +53,6 @@ using ms = std::chrono::milliseconds;
 #define EXCLUDE_MODIFICATION_JSON_FLOW
 
 std::filesystem::path IPGenerator::ExecPath() const {
-  // This one errors out in MacOS
-  // We already have a proven way to get the path, use that instead via GlobalSession.
-  // return FileUtils::getExecutablePath();
   return GlobalSession->Context()->DataPath()/std::filesystem::path("..")/std::filesystem::path("bin");
 }
 

@@ -141,6 +141,9 @@ class StringUtils final {
     return string;
   }
 
+  static bool matchesWildcardPattern(const std::string& text, const std::string& pattern);
+  static std::string extractWildcardSegment(const std::string& text, const std::string& pattern);
+
  private:
   StringUtils() = delete;
   StringUtils(const StringUtils& orig) = delete;
@@ -151,6 +154,6 @@ class StringUtils final {
  private:
 };
 
-};  // namespace FOEDAG
+}  // namespace FOEDAG
 
 #endif /* FOEDAG_STRINGUTILS_H */

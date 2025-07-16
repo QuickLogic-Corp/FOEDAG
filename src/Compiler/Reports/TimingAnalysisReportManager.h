@@ -21,8 +21,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "AbstractReportManager.h"
+#include "DataProfiles.h"
 
 namespace FOEDAG {
+
 class Compiler;
 
 /* Report manager for timing analysis. It works with 'timing_analysis.rpt' log
@@ -30,9 +32,16 @@ class Compiler;
  * this manager is responsible for recognizing messages of both.
  */
 class TimingAnalysisReportManager final : public AbstractReportManager {
+  struct DataProfile {
+    IDataReport::TableData circuitData;
+  };
+
  public:
   TimingAnalysisReportManager(const TaskManager &taskManager,
                               Compiler *compiler);
+
+ protected:
+  void clearDataProfiles() override final;
 
  private:
   QStringList getAvailableReportIds() const override;
@@ -42,15 +51,28 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   bool isStatisticalTimingHistogram(const QString &line) override;
   void splitTimingData(const QString &timingStr) override;
   void parseLogFile() override;
-
-  void parseOpenSTALog();
+  void parseLogFileHelper(const QString& logFileName, const std::string& profile);
+  
+  void parseOpenSTALog(const QString& logFileName);
   IDataReport::TableData parseOpenSTATimingTable(QTextStream &in,
                                                  int &lineNr) const;
+
+  void setCircuitData(const IDataReport::TableData& data, const std::string& key = "") {
+    m_dataProfiles.get(key)->circuitData = data;
+  }
+
+  IDataReport::TableData& circuitData() {
+    return m_dataProfiles.current()->circuitData;
+  }
+  IDataReport::TableData& circuitData(const std::string& key) {
+    return m_dataProfiles.get(key)->circuitData;
+  }
+
+  DataProfiles<DataProfile> m_dataProfiles;
 
   SectionKeys m_createDeviceKeys;
 
   IDataReport::ColumnValues m_circuitColumns;
-  IDataReport::TableData m_circuitData;
   IDataReport::ColumnValues m_openSTATimingColumns;
 
   Compiler *m_compiler;

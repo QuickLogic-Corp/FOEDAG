@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IDataReport.h"
 #include "ITaskReportManager.h"
+#include "DataProfiles.h"
 
 class QFile;
 class QRegExp;
@@ -40,6 +41,14 @@ class TaskManager;
  */
 class AbstractReportManager : public QObject, public ITaskReportManager {
   Q_OBJECT
+
+  struct DataProfile {
+    IDataReport::TableData resourceData;
+    IDataReport::TableData timingData;
+    QVector<QPair<QString, IDataReport::TableData>> histograms;
+    Messages messages;
+  };
+  
  public:
   AbstractReportManager(const TaskManager &taskManager);
 
@@ -96,18 +105,48 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
 
  protected:
   IDataReport::ColumnValues m_resourceColumns;
-  IDataReport::TableData m_resourceData;
-
-  IDataReport::TableData m_timingData;
   IDataReport::ColumnValues m_timingColumns;
-
   IDataReport::ColumnValues m_histogramColumns;
-  QVector<QPair<QString, IDataReport::TableData>> m_histograms;
 
-  Messages m_messages;
+  virtual void clearDataProfiles() {
+    m_dataProfiles.clear();
+  }
+
+  void setActiveProfile(const std::string& profile) {
+    m_dataProfiles.setCurrentKey(profile);
+  }
+
+  void setResourceData(const IDataReport::TableData& resourceData) {
+    m_dataProfiles.current()->resourceData = resourceData;
+  }
+
+  IDataReport::TableData& resourceData() {
+    return m_dataProfiles.current()->resourceData;
+  }
+  IDataReport::TableData& resourceData(const std::string& profile) {
+    return m_dataProfiles.get(profile)->resourceData;
+  }
+  IDataReport::TableData& timingData() {
+    return m_dataProfiles.current()->timingData;
+  }
+  IDataReport::TableData& timingData(const std::string& profile) {
+    return m_dataProfiles.get(profile)->timingData;
+  }
+  QVector<QPair<QString, IDataReport::TableData>>& histograms() {
+    return m_dataProfiles.current()->histograms;
+  }
+  QVector<QPair<QString, IDataReport::TableData>>& histograms(const std::string& profile) {
+    return m_dataProfiles.get(profile)->histograms;
+  }
+  Messages& messages() {
+    return m_dataProfiles.current()->messages;
+  }
+  std::vector<std::string> profiles() const { return m_dataProfiles.keys(); }
 
  private:
   bool m_fileParsed{false};
+
+  DataProfiles<DataProfile> m_dataProfiles;
 };
 
 }  // namespace FOEDAG

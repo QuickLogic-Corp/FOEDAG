@@ -471,8 +471,19 @@ void FileUtils::printArgs(int argc, const char* argv[]) {
 }
 
 bool FileUtils::removeFile(const std::string& file) noexcept {
-  const std::filesystem::path path{file};
-  return removeFile(path);
+  bool result = true;
+  if (file.find("*") != std::string::npos) {
+    std::vector<std::filesystem::path> foundFiles = findFilePathesByWildcard(file);
+    for (const std::filesystem::path& found: foundFiles) {
+      if (!removeFile(found)) {
+        result = false;
+      }
+    }
+  } else {
+    const std::filesystem::path path{file};
+    result = removeFile(path);
+  }
+  return result;
 }
 
 bool FileUtils::removeFile(const std::filesystem::path& file) noexcept {
@@ -523,20 +534,46 @@ std::string FileUtils::resolvePathStr(const std::string& pathStr) {
 #endif
 }
 
-// should be removed, we have a better way with GlobalSession
-// std::filesystem::path FileUtils::getExecutablePath() {
-//   std::filesystem::path result;
-// #ifdef _WIN32
-//     char path[MAX_PATH];
-//     GetModuleFileNameA(NULL, path, MAX_PATH);
-//     result = std::string(path);
-// #else
-//     char path[PATH_MAX];
-//     ssize_t count = readlink("/proc/self/exe", path, PATH_MAX);
-//     result = (count != -1) ? std::string(path, count) : "";
-// #endif
 
-//   return result.parent_path();
-// }
+std::vector<std::filesystem::path> FileUtils::findFilePathesByWildcard(const std::string& wildCardFilePathPattern) 
+{
+  std::vector<std::filesystem::path> result;
+
+  std::filesystem::path patternPath(wildCardFilePathPattern);
+  std::filesystem::path dir = patternPath.has_parent_path() ? patternPath.parent_path(): std::filesystem::current_path();
+  std::string filenamePattern = patternPath.filename().string();
+
+  for (const auto& entry: std::filesystem::directory_iterator(dir)) {
+    if (entry.is_regular_file()) {
+      std::string name = entry.path().filename().string();
+      if (StringUtils::matchesWildcardPattern(name, filenamePattern)) {
+        result.push_back(entry.path());
+      }
+    }
+  }
+
+  return result;
+}
+
+std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& path, const std::string& wildCardFileNamePattern)
+{
+  std::vector<std::string> result;
+
+  std::filesystem::path patternPath(path);
+  patternPath /= wildCardFileNamePattern;
+  std::filesystem::path dir = patternPath.has_parent_path() ? patternPath.parent_path(): std::filesystem::current_path();
+  std::string filenamePattern = patternPath.filename().string();
+
+  for (const auto& entry: std::filesystem::directory_iterator(dir)) {
+    if (entry.is_regular_file()) {
+      std::string name = entry.path().filename().string();
+      if (StringUtils::matchesWildcardPattern(name, filenamePattern)) {
+        result.push_back(name);
+      }
+    }
+  }
+
+  return result;
+}
 
 }  // namespace FOEDAG

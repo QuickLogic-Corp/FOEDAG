@@ -47,6 +47,8 @@ using tclArgFnMap = std::map<std::string, tclArgFns>;
 
 namespace FOEDAG {
 
+class MultiComboBox;
+
 /*!
  * \brief The LineEdit class
  * This class will emit editingFinished() even if input is not accepted.
@@ -94,6 +96,11 @@ QComboBox* createComboBox(
     const QStringList& lookup, const QString& selectedValue = "",
     bool addUnset = addUnsetDefault,
     std::function<void(QComboBox*, const QString&)> onChange = nullptr);
+MultiComboBox* createMultiComboBox(
+    const QString& objectName, const QStringList& options,
+    const QStringList& lookup, const QString& selectedValue = "",
+    bool addUnset = addUnsetDefault,
+    std::function<void(MultiComboBox*, const QString&)> onChange = nullptr);
 QLineEdit* createLineEdit(
     const QString& objectName, const QString& text = "",
     std::function<void(QLineEdit*, const QString&)> onChange = nullptr);

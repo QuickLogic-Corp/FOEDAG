@@ -39,7 +39,7 @@ AbstractReportManager::AbstractReportManager(const TaskManager &taskManager) {
 
 const ITaskReportManager::Messages &AbstractReportManager::getMessages() {
   if (!isFileParsed()) parseLogFile();
-  return m_messages;
+  return messages();
 }
 
 void AbstractReportManager::parseResourceUsage(QTextStream &in, int &lineNr) {
@@ -54,12 +54,12 @@ void AbstractReportManager::parseResourceUsage(QTextStream &in, int &lineNr) {
   // any, or adds a new one.
   auto setValue = [&](const QString &row, const QString &value) {
     auto findIt = std::find_if(
-        m_resourceData.begin(), m_resourceData.end(),
+        resourceData().begin(), resourceData().end(),
         [&row](const auto &lineValues) { return lineValues[0] == row; });
-    if (findIt == m_resourceData.end()) {
+    if (findIt == resourceData().end()) {
       auto lineValues = IDataReport::LineValues{row, {}, {}};
       lineValues[columnIndex] = value;
-      m_resourceData.push_back(std::move(lineValues));
+      resourceData().push_back(std::move(lineValues));
     } else {
       // The resource has been added before - just update the corresponding
       // column
@@ -215,7 +215,7 @@ int AbstractReportManager::parseErrorWarningSection(QTextStream &in, int lineNr,
     } else if (isStatisticalTimingLine(line)) {
       timings << line + "\n";
     } else if (isStatisticalTimingHistogram(line)) {
-      m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
     }
   }
 
@@ -223,7 +223,7 @@ int AbstractReportManager::parseErrorWarningSection(QTextStream &in, int lineNr,
 
   if (!timings.isEmpty()) fillTimingData(timings);
 
-  m_messages.insert(sectionMsg.m_lineNr, std::move(sectionMsg));
+  messages().insert(sectionMsg.m_lineNr, std::move(sectionMsg));
   return lineNr;
 }  // namespace FOEDAG
 
@@ -252,12 +252,12 @@ TaskMessage AbstractReportManager::createWarningErrorItem(
   return item;
 }
 
-void AbstractReportManager::fillTimingData(const QStringList &timingData) {
-  m_timingData.clear();
+void AbstractReportManager::fillTimingData(const QStringList &timingData_) {
+  timingData().clear();
 
-  createTimingDataFile(timingData);
+  createTimingDataFile(timingData_);
 
-  splitTimingData(timingData.join(' '));
+  splitTimingData(timingData_.join(' '));
 }
 
 void AbstractReportManager::createTimingDataFile(

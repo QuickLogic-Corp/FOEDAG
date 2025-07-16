@@ -47,7 +47,7 @@ std::unique_ptr<ITaskReport> PackingReportManager::createReport(
 
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
     dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, m_resourceData, QString{"Resource Utilization"}));
+        m_resourceColumns, resourceData(), QString{"Resource Utilization"}));
   } else {
     dataReports.push_back(std::make_unique<TableReport>(
         m_circuitColumns, m_circuitData, QString{"Circuit Statistics"}));
@@ -78,8 +78,7 @@ void PackingReportManager::splitTimingData(const QString &timingStr) {
 }
 
 void PackingReportManager::parseLogFile() {
-  m_messages.clear();
-  m_resourceData.clear();
+  clearDataProfiles();
   m_circuitData.clear();
 
   auto logFile = createLogFile(QString(PACKING_LOG));
@@ -94,7 +93,7 @@ void PackingReportManager::parseLogFile() {
     if (line.startsWith(LOAD_ARCH_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_ARCH_SECTION, {});
     else if (VPR_ROUTING_OPT.indexIn(line) != -1)
-      m_messages.insert(lineNr, TaskMessage{lineNr,
+      messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
                                             VPR_ROUTING_OPT.cap(),
                                             {}});
@@ -106,7 +105,7 @@ void PackingReportManager::parseLogFile() {
     else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
       m_circuitData = parseCircuitStats(in, lineNr);
     else if (line.endsWith(BUILD_TIM_GRAPH))
-      m_messages.insert(
+      messages().insert(
           lineNr,
           TaskMessage{
               lineNr, MessageSeverity::INFO_MESSAGE, BUILD_TIM_GRAPH, {}});

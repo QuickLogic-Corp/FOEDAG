@@ -116,14 +116,13 @@ std::unique_ptr<ITaskReport> SynthesisReportManager::createReport(
 
   ITaskReport::DataReports dataReports;
   dataReports.push_back(
-      std::make_unique<TableReport>(cols, m_resourceData, QString{"Statistics"}));
+      std::make_unique<TableReport>(cols, resourceData(), QString{"Statistics"}));
   return std::make_unique<DefaultTaskReport>(std::move(dataReports),
                                              reportId);
 }
 
 void SynthesisReportManager::parseLogFile() {
-  m_resourceData.clear();
-  m_messages.clear();
+  clearDataProfiles();
 
   auto logFile = createLogFile(QString(SYNTHESIS_LOG));
   if (!logFile) return;
@@ -134,11 +133,11 @@ void SynthesisReportManager::parseLogFile() {
   auto findStats = QRegExp("Printing statistics.*\n\n===.*===\n\n.*[^\n{2}]+");
 
   if (findStats.lastIndexIn(fileStr) != -1)
-    m_resourceData = getStatistics(findStats.cap());
+    setResourceData(getStatistics(findStats.cap()));
 
   auto findLvls = QRegExp{"DE:([^\n]+)"};
   if (findLvls.lastIndexIn(fileStr) != -1) {
-    fillLevels(findLvls.cap(), m_resourceData);
+    fillLevels(findLvls.cap(), resourceData());
   }
 
   auto line = QString{};
@@ -149,18 +148,18 @@ void SynthesisReportManager::parseLogFile() {
     if (!warnings.empty()) {
       auto warningsItem =
           createWarningErrorItem(MessageSeverity::WARNING_MESSAGE, warnings);
-      m_messages.insert(warningsItem.m_lineNr, warningsItem);
+      messages().insert(warningsItem.m_lineNr, warningsItem);
     }
     if (!errors.empty()) {
       auto errorsItem =
           createWarningErrorItem(MessageSeverity::ERROR_MESSAGE, errors);
-      m_messages.insert(errorsItem.m_lineNr, errorsItem);
+      messages().insert(errorsItem.m_lineNr, errorsItem);
     }
   };
 
   while (in.readLineInto(&line)) {
     if (VERIFIC_INFO_REGEXP.indexIn(line) != -1) {
-      m_messages.insert(lineNr,
+      messages().insert(lineNr,
                         TaskMessage{lineNr,
                                     MessageSeverity::INFO_MESSAGE,
                                     VERIFIC_INFO_REGEXP.cap().simplified(),
@@ -171,7 +170,7 @@ void SynthesisReportManager::parseLogFile() {
       if (!warnings.empty()) {
         auto warningsItem =
             createWarningErrorItem(MessageSeverity::WARNING_MESSAGE, warnings);
-        m_messages.insert(warningsItem.m_lineNr, warningsItem);
+        messages().insert(warningsItem.m_lineNr, warningsItem);
       }
     } else if (VERIFIC_WARN_REGEXP.indexIn(line) != -1) {
       warnings.emplace(lineNr, VERIFIC_WARN_REGEXP.cap().simplified());
@@ -179,7 +178,7 @@ void SynthesisReportManager::parseLogFile() {
       if (!errors.empty()) {
         auto errorsItem =
             createWarningErrorItem(MessageSeverity::ERROR_MESSAGE, errors);
-        m_messages.insert(errorsItem.m_lineNr, errorsItem);
+        messages().insert(errorsItem.m_lineNr, errorsItem);
       }
     }
     ++lineNr;

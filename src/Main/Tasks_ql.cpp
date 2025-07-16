@@ -71,7 +71,6 @@ QLabel* createTitleLabel(const QString& text) {
 }
 
 void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
-
   QLabel* reportTablesSelectionLabel = new QLabel("Select Data Table:");
   QComboBox* reportTablesSelectionComboBox = new QComboBox();
   QStackedWidget* reportTablesStackedWidget = new QStackedWidget();

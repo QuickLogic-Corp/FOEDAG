@@ -80,6 +80,7 @@ set (SRC_CPP_LIST
   QLDeviceManager.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
+  BlifParser.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -107,10 +108,12 @@ set (SRC_H_INSTALL_LIST
   Reports/SynthesisReportManager.h
   Reports/TimingAnalysisReportManager.h
   Reports/PowerAnalysisReportManager_ql.h
+  Reports/DataProfiles.h
   TaskGlobal.h
   QLDeviceManager.h
   QLSettingsManager.h
   QLMetricsManager.h
+  BlifParser.h
 )
 
 set (SRC_H_LIST

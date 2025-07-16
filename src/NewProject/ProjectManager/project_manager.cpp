@@ -971,7 +971,11 @@ QStringList ProjectManager::getDesignFiles() const {
 #ifndef UPSTREAM_PINPLANNER
 QString ProjectManager::getPcfFilePath() const
 {
-  return getProjectPath() + "/" + getProjectName() + ".pcf";
+  std::string pcf_filepath = QLSettingsManager::getInstance()->getPCFFilePath().string();
+  if (pcf_filepath.empty()) {
+    pcf_filepath = projectPath() + "/" + projectName() + ".pcf";
+  }
+  return QString::fromStdString(pcf_filepath);
 }
 #endif
 
