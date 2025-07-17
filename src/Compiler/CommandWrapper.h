@@ -25,8 +25,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 #include <filesystem>
 
-#include "Utils/StringUtils.h"
-
 
 namespace FOEDAG {
 
@@ -34,22 +32,65 @@ class CommandWrapper {
 public:
   const std::string& command() const { return m_command; }
 
-  void appendRegularArg(const std::string& arg) {
-    appendArgument(argument);
+  void append(const std::string& parameter, const std::string& value) {
+    appendArgument(parameter + " " + value);
   }
-  void appendFilePathArg(const std::filesystem::path& path) {
-    m_filePathes.push_back(path);
-    appendArgument(path.string());
+
+  void append(const std::string& parameter) {
+    appendArgument(parameter);
   }
+
+  void appendFile(const std::string& file)=delete;
+  void appendFile(const std::filesystem::path& file) {
+    m_files.push_back(file);
+    appendArgument(file.string());
+  }
+
+  void appendFile(const std::string& parameter, const std::string& file)=delete;
+  void appendFile(const std::string& parameter, const std::filesystem::path& file) {
+    m_files.push_back(file);
+    appendArgument(parameter + "_"  + file.string());
+  }
+
+  void prepend(const std::string& parameter, const std::string& value) {
+    prependArgument(parameter + " " + value);
+  }
+  
+  void prepend(const std::string& parameter) {
+    prependArgument(parameter);
+  }
+
+  void prependFile(const std::string& file)=delete;
+  void prependFile(const std::filesystem::path& file) {
+    m_files.push_back(file);
+    prependArgument(file.string());
+  }
+
+  void prependFile(const std::string& parameter, const std::string& file)=delete;
+  void prependFile(const std::string& parameter, const std::filesystem::path& file) {
+    m_files.push_back(file);
+    prependArgument(parameter + "_"  + file.string());
+  }
+
+  bool isValid() const { return !m_command.empty(); }
+
 private:
-  std::vector<std::filesystem::path> m_filePathes;
+  std::vector<std::filesystem::path> m_files;
   std::string m_command;
 
   void appendArgument(const std::string& arg) {
-    if (!StringUtils::endsWith(m_command, " ")) {
-      m_command += " ";
+    if (!m_command.empty() && m_command.back() != ' ') {
+        m_command += ' ';
     }
     m_command += arg;
+  }
+
+  void prependArgument(const std::string& arg) {
+    if (!m_command.empty() && m_command.front() != ' ') {
+        m_command = arg + " " + m_command;
+    } else {
+        m_command = arg + m_command;
+    }
   }
 };
 

@@ -34,6 +34,7 @@ private:
 public:
   static QLSettingsManager* getInstance();
   static void reloadJSONSettings();
+  static std::filesystem::path getPathValue(std::string category, std::string subcategory, std::string parameter);
   static std::string getStringValue(std::string category, std::string subcategory, std::string parameter);
   static long double getLongDoubleValue(std::string category, std::string subcategory, std::string parameter);
   static std::string getStringToolTip(std::string category, std::string subcategory, std::string parameter);

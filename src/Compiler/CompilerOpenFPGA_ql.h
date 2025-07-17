@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/BlifParser.h"
+#include "Compiler/CommandWrapper.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -135,6 +136,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Leakage();
 
   virtual std::string BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
+  CommandWrapper BaseVprCommandNEW(QLDeviceTarget device_target = QLDeviceTarget());
 
  protected:
   virtual bool IPGenerate();

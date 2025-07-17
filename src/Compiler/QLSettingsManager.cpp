@@ -451,6 +451,10 @@ std::filesystem::path QLSettingsManager::getFilePathByExt(const std::string& ext
   return ext_file_path;
 }
 
+std::filesystem::path QLSettingsManager::getPathValue(std::string category, std::string subcategory, std::string parameter) {
+  return std::filesystem::path{getStringValue(category, subcategory, parameter)};
+}
+
 std::string QLSettingsManager::getStringValue(std::string category, std::string subcategory, std::string parameter) {
 
   std::string value;

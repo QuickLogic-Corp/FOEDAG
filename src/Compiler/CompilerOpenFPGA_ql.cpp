@@ -3087,6 +3087,353 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
   return base_vpr_command;
 }
 
+CommandWrapper CompilerOpenFPGA_ql::BaseVprCommandNEW(QLDeviceTarget device_target) {
+  CommandWrapper command;
+  // note: at this point, the current_path() is the project 'source' directory.
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return CommandWrapper{};
+  }
+
+  // if device_target is explicitly specified (STA does this):
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(device_target) ) {
+    device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  }
+
+  // this check continues as is for the original target device as specified in the JSON.
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return CommandWrapper{};
+  }
+
+  // parse vpr general options
+#if UPSTREAM_UNUSED
+  std::string device_size = "";
+  if (!m_deviceSize.empty()) {
+    device_size = " --device " + m_deviceSize;
+  }
+#endif // #if UPSTREAM_UNUSED
+  if (!m_deviceSize.empty()) {
+    command.append("--device", m_deviceSize);
+  } else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
+    command.append("--device", QLSettingsManager::getStringValue("general", "device", "layout"));
+  } else {
+    std::cout << "Should never be here, we should have a layout specified!" << std::endl;
+    return CommandWrapper{};
+  }
+
+  if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "checked" ) {
+    command.append("--timing_analysis", "on");
+  } else if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "unchecked" ) {
+    command.append("--timing_analysis", "off");
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "general", "constant_net_method").empty() ) {
+    command.append("--constant_net_method", QLSettingsManager::getStringValue("vpr", "general", "constant_net_method"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "general", "clock_modeling").empty() ) {
+    command.append("--clock_modeling", QLSettingsManager::getStringValue("vpr", "general", "clock_modeling"));
+  }
+
+
+  if( QLSettingsManager::getStringValue("vpr", "general", "exit_before_pack") == "checked" ) {
+    command.append("--exit_before_pack", "on");
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "general", "exit_before_pack") == "unchecked" ) {
+    command.append("--exit_before_pack", "off");
+  }
+
+  // parse vpr filename options
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "circuit_format").empty() ) {
+    command.append("--circuit_format", QLSettingsManager::getStringValue("vpr", "filename", "circuit_format"));
+  }
+
+  std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        ErrorMessage("Could not find the net file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        return CommandWrapper{};
+    }
+    command.appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
+  } else {
+    command.appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
+  }
+
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        ErrorMessage("Could not find the place file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        return CommandWrapper{};
+    }
+    command.appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+  }
+
+  else {
+    command.appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        ErrorMessage("Could not find the route file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        return CommandWrapper{};
+      }
+    command.appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+  }
+  else {
+    command.appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+  }
+
+
+  // ---------------------------------------------------------------- sdc_file ++
+
+  std::filesystem::path sdc_file_path = QLSettingsManager::getSDCFilePath();
+
+  // if(QLSettingsManager::getInstance()->sdc_file_path_from_json && sdc_file_path.empty()) {
+  //   // this is ideally an error, and should be notified.
+  //   // current implementation is to ignore any invalid sdc file path.
+  // }
+
+  // if we have a valid sdc_file_path at this point, pass it on to vpr:
+  if(!sdc_file_path.empty()) {
+    Message(std::string("SDC file found: ") + sdc_file_path.string());
+    command.appendFile("--sdc_file", sdc_file_path);
+  }
+  else {
+    Message(std::string("SDC file not found, no constraints passed to vpr."));
+  }
+  // ---------------------------------------------------------------- sdc_file --
+
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
+    command.appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
+  }
+
+  // parse vpr netlist options
+  if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "checked" ) {
+    command.append("--absorb_buffer_luts", "on");
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "unchecked" ) {
+    command.append("--absorb_buffer_luts", "off");
+  }
+
+  // parse vpr pack options: nothing here
+
+  // parse vpr place options: nothing here
+
+  // parse vpr route options
+  if( !QLSettingsManager::getStringValue("vpr", "route", "route_chan_width").empty() ) {
+    command.append("--route_chan_width", QLSettingsManager::getStringValue("vpr", "route", "route_chan_width"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
+    command.append("--max_router_iterations", QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations"));
+  }
+
+  if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+    command.append("--flat_routing", "on");
+    if( QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
+      // if flat_routing is enabled, and user has not specified the max_router_iterations
+      // then, increase maximum router iterations to a good default, to give flat router enough
+      // time to converage to a legal routing solution
+      command.append("--max_router_iterations",  "100");
+    }
+    // otherwise, user specified max_router_iterations is honored.
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
+    command.append("--flat_routing", "off");
+  }
+
+  // parse vpr analysis options
+  if( QLSettingsManager::getStringValue("vpr", "analysis", "gen_post_synthesis_netlist") == "checked" ) {
+    command.append("--gen_post_synthesis_netlist", "on");
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "analysis", "gen_post_synthesis_netlist") == "unchecked" ) {
+    command.append("--gen_post_synthesis_netlist", "off");
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs").empty() ) {
+    command.append("--post_synth_netlist_unconn_inputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs").empty() ) {
+    command.append("--post_synth_netlist_unconn_outputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths").empty() ) {
+    command.append("--timing_report_npaths", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail").empty() ) {
+    command.append("--timing_report_detail", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail"));
+  }
+
+  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
+      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
+      // until Synplify side is fixed to resolve the root cause of the error.
+      command.append("--skip_sync_clustering_and_routing_results", "on");
+    }
+  }
+
+  // custom vpr command-line options for *all* stages
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command.append(vpr_custom_options_string);
+  }
+
+  std::string netlistFile;
+  switch (GetNetlistType()) {
+    case NetlistType::Verilog:
+      netlistFile = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::VHDL:
+      // Until we have a VHDL netlist reader in VPR
+      netlistFile = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::Edif:
+      netlistFile = ProjManager()->projectName() + "_post_synth.edif";
+      break;
+    case NetlistType::Blif:
+      netlistFile = ProjManager()->projectName() + "_post_synth.blif";
+      break;
+  }
+
+  for (const auto& lang_file : ProjManager()->DesignFiles()) {
+    switch (lang_file.first.language) {
+      case Design::Language::VERILOG_NETLIST:
+      case Design::Language::BLIF:
+      case Design::Language::EBLIF: {
+        netlistFile = lang_file.second;
+        std::filesystem::path the_path = netlistFile;
+        if (!the_path.is_absolute()) {
+          netlistFile =
+              std::filesystem::path(std::filesystem::path("..") / netlistFile)
+                  .string();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+#if UPSTREAM_UNUSED
+  std::string pnrOptions;
+  if (!PnROpt().empty()) pnrOptions += " " + PnROpt();
+  if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
+#endif // #if UPSTREAM_UNUSED
+
+  // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+  // use rr_graph and router_lookahead files, if available in the device data:
+  std::filesystem::path rr_graph_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
+
+  std::filesystem::path router_lookahead_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
+
+  if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
+    command.appendFile("--read_rr_graph", rr_graph_file_path);
+    command.appendFile("--read_router_lookahead", router_lookahead_file_path);
+  }
+
+
+  m_architectureFile = 
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
+  if(m_architectureFile.empty()) {
+
+    ErrorMessage("Cannot proceed without VPR Architecture file.");
+    return CommandWrapper{};
+  }
+
+  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+    
+    std::filesystem::path vpr_xml_en_path = m_architectureFile;
+    m_architectureFile = GenerateTempFilePath();
+
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
+
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      Message("load cryptdb failed!");
+      // empty string returned on error.
+      return CommandWrapper{};
+    }
+
+    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+      ErrorMessage("decryption failed!");
+      // empty string returned on error.
+      return CommandWrapper{};
+    }
+  }
+
+  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
+
+  // add the *internal* option to allow dangling nodes in the logic.
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
+  // this is a workaround, to avoid putting timing arcs for static input ports.
+  command.append("--allow_dangling_combinational_nodes", "on");
+
+  // construct the base vpr command with all the options here.
+#if UPSTREAM_UNUSED
+  std::string command =
+      m_vprExecutablePath.string() + std::string(" ") +
+      m_architectureFile.string() + std::string(" ") +
+      std::string(netlistFile + std::string(" --sdc_file ") +
+                  std::string(ProjManager()->projectName() + "_openfpga.sdc") +
+                  std::string(" --clock_modeling ideal --route_chan_width ") +
+                  std::to_string(m_channel_width) + device_size + pnrOptions);
+
+  return command;
+#endif // #if UPSTREAM_UNUSED
+
+  if (GenerateIOFloorPlanConstraints()){
+    std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
+    std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    if (fs::exists(fp_constraint_filepath_absolute)) {
+      command.appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
+    }
+  }
+  else { //IO floorplanning generation failed, must stop the flow
+    return CommandWrapper{};
+  }
+
+  command.prependFile(std::filesystem::path{netlistFile});
+  command.prependFile(m_architectureFile);
+  command.prepend(m_vprExecutablePath.string());
+  
+  return command;
+}
+
 std::string CompilerOpenFPGA_ql::BaseStaCommand() {
   std::string command =
       m_staExecutablePath.string() +
