@@ -207,7 +207,7 @@ void TaskTableView::addTaskLogAction(QMenu *menu, FOEDAG::Task *task) {
   QAction *viewLog = new QAction(viewLogStr, this);
   logFilePath.replace(PROJECT_OSRCDIR, Project::Instance()->projectPath());
 
-  std::string logFileName = FileUtils::Basename(std::filesystem::path{logFilePath.toStdString()});
+  std::string logFileName = FileUtils::Basename(std::filesystem::path{logFilePath.toStdString()}).string();
   WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), logFileName);
 
   bool logExists = false;
