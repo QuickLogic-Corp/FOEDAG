@@ -94,6 +94,7 @@ set (SRC_H_INSTALL_LIST
   TaskModel.h
   Task.h
   TaskCompilationOptimizer.h
+  CommandWrapper.h
   TaskManager.h
   CompilerDefines.h
   Log.h
