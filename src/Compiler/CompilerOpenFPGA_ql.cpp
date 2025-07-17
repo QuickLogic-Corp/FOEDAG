@@ -3117,6 +3117,33 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   ofssta.close();
   return openStaFile;
 }
+
+std::string CompilerOpenFPGA_ql::getPackingCommand() {
+#if UPSTREAM_UNUSED
+  std::string command = BaseVprCommand() + " --pack";
+#endif // #if UPSTREAM_UNUSED
+  std::string command = BaseVprCommand();
+  if(command.empty()) {
+    ErrorMessage("Base VPR Command is empty!");
+    return "";
+  }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
+  command += std::string(" ") + 
+             std::string("--pack");
+
+  return command;
+}
+
 bool CompilerOpenFPGA_ql::Packing() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -3187,7 +3214,6 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   ofssdc.close();
 #endif // #if UPSTREAM_UNUSED
-
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
                 std::string(ProjManager()->projectName() + "_constraints.xml");
   if (fs::exists(io_floor_planningpath)) {
@@ -3196,27 +3222,10 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
-#if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand() + " --pack";
-#endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand();
+  std::string command = getPackingCommand();
   if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
     return false;
   }
-
-  // custom vpr command-line options for pack stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
-
-  command += std::string(" ") + 
-             std::string("--pack");
 
   std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
                      std::string(ProjManager()->projectName() + "_pack.cmd"))

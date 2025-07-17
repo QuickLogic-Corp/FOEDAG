@@ -229,6 +229,8 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
+
+  std::string getPackingCommand(); // todo make it const
 };
 
 }  // namespace FOEDAG
