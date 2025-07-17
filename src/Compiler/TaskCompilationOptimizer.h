@@ -117,8 +117,8 @@ public:
 
     // synth tool
     synthesis->addStringParameter(std::tuple("synplify", "general", "mode"));
-    synthesis->addFilePath(QLSettingsManager::getSDCFilePath());
-    synthesis->addFilePath(QLDeviceManager::getInstance()->deviceYosysScriptFile());
+    //synthesis->addFilePath(QLSettingsManager::getSDCFilePath());
+    //synthesis->addFilePath(QLDeviceManager::getInstance()->deviceYosysScriptFile());
 
     synthesis->addStringParameter(std::tuple("general", "options", "verific"));
 
