@@ -58,6 +58,7 @@ set (SRC_CPP_LIST
   #TaskModel.cpp
   TaskModel_ql.cpp
   Task.cpp
+  TaskCompilationOptimizer.cpp
   #TaskManager.cpp
   TaskManager_ql.cpp
   CompilerDefines.cpp
@@ -92,6 +93,7 @@ set (SRC_H_INSTALL_LIST
   TaskTableView.h
   TaskModel.h
   Task.h
+  TaskCompilationOptimizer.h
   TaskManager.h
   CompilerDefines.h
   Log.h
