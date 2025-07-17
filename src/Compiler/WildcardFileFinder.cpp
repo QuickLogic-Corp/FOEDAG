@@ -34,7 +34,7 @@ WildcardFileFinder::WildcardFileFinder(const std::filesystem::path& path, const 
 {
   std::string baseFileName = StringUtils::replaceAll(patternFileName, "*", ""); 
   
-  std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(path, patternFileName);
+  std::vector<std::string> fileNames = FileUtils::findFileNamesByWildcard(path.string(), patternFileName);
   for (const std::string& fileName: fileNames) {
     std::string profile;
     if (fileName != baseFileName) {
