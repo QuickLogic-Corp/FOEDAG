@@ -3465,57 +3465,6 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   return openStaFile;
 }
 
-std::string CompilerOpenFPGA_ql::getPackingCommandOLD() {
-#if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandOLD() + " --pack";
-#endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandOLD();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
-    return "";
-  }
-
-  // custom vpr command-line options for pack stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
-
-  command += std::string(" ") + 
-             std::string("--pack");
-
-  return command;
-}
-
-CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
-#if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand() + " --pack";
-#endif // #if UPSTREAM_UNUSED
-  CommandWrapper command = BaseVprCommand();
-  if(command.string().empty()) {
-    ErrorMessage("VPR Command is empty!");
-    return CommandWrapper{};
-  }
-
-  // custom vpr command-line options for pack stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command.append(vpr_custom_options_string);
-  }
-
-  command.append("--pack");
-
-  return command;
-}
-
 bool CompilerOpenFPGA_ql::Packing() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -3924,49 +3873,23 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  // generate pin contraints file or use pre-generated .place file, if required.
-  // this string should contain the path of the PinConstraints file, if generated correctly.
-  // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
-  // - there is no pre-generated .place file AND
-  // - there is no pcf file in the project.
-  std::string filepath_fpga_fix_pins_place_str;
-  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return false;
-
-  std::string command = BaseVprCommandOLD();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
+  std::string commandOld = getPlacementCommandOLD();
+  CommandWrapper command = getPlacementCommand();
+  if(command.string().empty()) {
     return false;
   }
+ 
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command.string());
 
-  // custom vpr command-line options for place stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
+  if (!command.compareIgnoringTempPath(commandOld)) {
+    qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
+    qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
+    qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+    return false;
+  }  
 
-  command += std::string(" ") + 
-             std::string("--place");
-
-  if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command += std::string(" --fix_clusters") + 
-               std::string(" ") + 
-               filepath_fpga_fix_pins_place_str;
-  }
-  else
-  {
-    Message("no pcf file found, skipping PinConstraints usage!");
-  }
-
-  std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                     std::string(ProjManager()->projectName() + "_place.cmd"))
-                        .string());
-  ofs << command << std::endl;
-  ofs.close();
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = ExecuteAndMonitorSystemCommand(command.string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -7751,6 +7674,136 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   power_analysis_debug_rpt.close();
 
   return power_leakage;
+}
+
+std::string CompilerOpenFPGA_ql::getPackingCommandOLD() {
+#if UPSTREAM_UNUSED
+  std::string command = BaseVprCommandOLD() + " --pack";
+#endif // #if UPSTREAM_UNUSED
+  std::string command = BaseVprCommandOLD();
+  if(command.empty()) {
+    ErrorMessage("Base VPR Command is empty!");
+    return "";
+  }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
+  command += std::string(" ") + 
+             std::string("--pack");
+
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
+#if UPSTREAM_UNUSED
+  std::string command = BaseVprCommand() + " --pack";
+#endif // #if UPSTREAM_UNUSED
+  CommandWrapper command = BaseVprCommand();
+  if(command.string().empty()) {
+    ErrorMessage("VPR Command is empty!");
+    return CommandWrapper{};
+  }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command.append(vpr_custom_options_string);
+  }
+
+  command.append("--pack");
+
+  return command;
+}
+
+std::string CompilerOpenFPGA_ql::getPlacementCommandOLD() {
+  // generate pin contraints file or use pre-generated .place file, if required.
+  // this string should contain the path of the PinConstraints file, if generated correctly.
+  // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
+  // - there is no pre-generated .place file AND
+  // - there is no pcf file in the project.
+  std::string filepath_fpga_fix_pins_place_str;
+  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return "";
+
+  std::string command = BaseVprCommandOLD();
+  if(command.empty()) {
+    ErrorMessage("Base VPR Command is empty!");
+    return "";
+  }
+
+  // custom vpr command-line options for place stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
+  command += std::string(" ") + 
+             std::string("--place");
+
+  if (!filepath_fpga_fix_pins_place_str.empty()) {
+    command += std::string(" --fix_clusters") + 
+               std::string(" ") + 
+               filepath_fpga_fix_pins_place_str;
+  }
+  else
+  {
+    Message("no pcf file found, skipping PinConstraints usage!");
+  }
+
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
+  // generate pin contraints file or use pre-generated .place file, if required.
+  // this string should contain the path of the PinConstraints file, if generated correctly.
+  // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
+  // - there is no pre-generated .place file AND
+  // - there is no pcf file in the project.
+  std::string filepath_fpga_fix_pins_place_str;
+  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return CommandWrapper{};
+
+  CommandWrapper command = BaseVprCommand();
+  if(command.string().empty()) {
+    ErrorMessage("Base VPR Command is empty!");
+    return CommandWrapper{};
+  }
+
+  // custom vpr command-line options for place stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command.append(vpr_custom_options_string);
+  }
+
+  command.append("--place");
+
+  if (!filepath_fpga_fix_pins_place_str.empty()) {
+    command.append("--fix_clusters", filepath_fpga_fix_pins_place_str);
+  }
+  else
+  {
+    Message("no pcf file found, skipping PinConstraints usage!");
+  }
+
+  return command;
 }
 
 // clang-format on

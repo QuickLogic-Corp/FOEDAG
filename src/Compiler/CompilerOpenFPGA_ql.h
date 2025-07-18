@@ -234,6 +234,9 @@ private:
 
   std::string getPackingCommandOLD(); // todo make it const
   CommandWrapper getPackingCommand(); // todo make it const
+
+  std::string getPlacementCommandOLD(); // todo make it const
+  CommandWrapper getPlacementCommand(); // todo make it const
 };
 
 }  // namespace FOEDAG
