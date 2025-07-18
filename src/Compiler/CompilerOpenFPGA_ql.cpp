@@ -2692,7 +2692,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
+std::string CompilerOpenFPGA_ql::BaseVprCommandOLD(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -3087,7 +3087,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
   return base_vpr_command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::BaseVprCommandNEW(QLDeviceTarget device_target) {
+CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
   CommandWrapper command;
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -3465,11 +3465,11 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   return openStaFile;
 }
 
-std::string CompilerOpenFPGA_ql::getPackingCommand() {
+std::string CompilerOpenFPGA_ql::getPackingCommandOLD() {
 #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand() + " --pack";
+  std::string command = BaseVprCommandOLD() + " --pack";
 #endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand();
+  std::string command = BaseVprCommandOLD();
   if(command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     return "";
@@ -3487,6 +3487,31 @@ std::string CompilerOpenFPGA_ql::getPackingCommand() {
 
   command += std::string(" ") + 
              std::string("--pack");
+
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
+#if UPSTREAM_UNUSED
+  std::string command = BaseVprCommand() + " --pack";
+#endif // #if UPSTREAM_UNUSED
+  CommandWrapper command = BaseVprCommand();
+  if(command.string().empty()) {
+    ErrorMessage("VPR Command is empty!");
+    return CommandWrapper{};
+  }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command.append(vpr_custom_options_string);
+  }
+
+  command.append("--pack");
 
   return command;
 }
@@ -3569,16 +3594,21 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
-  std::string command = getPackingCommand();
-  if(command.empty()) {
+  std::string commandOld = getPackingCommandOLD();
+  CommandWrapper command = getPackingCommand();
+  if(command.string().empty()) {
     return false;
   }
+ 
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command.string());
 
-  std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                     std::string(ProjManager()->projectName() + "_pack.cmd"))
-                        .string());
-  ofs << command << std::endl;
-  ofs.close();
+  if (!command.compareIgnoringTempPath(commandOld)) {
+    qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
+    qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
+    qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+    return false;
+  }  
 
 #if UPSTREAM_UNUSED
   if (FileUtils::IsUptoDate(
@@ -3592,7 +3622,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = ExecuteAndMonitorSystemCommand(command.string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
@@ -3902,7 +3932,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   std::string filepath_fpga_fix_pins_place_str;
   if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return false;
 
-  std::string command = BaseVprCommand();
+  std::string command = BaseVprCommandOLD();
   if(command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     return false;
@@ -4107,7 +4137,7 @@ bool CompilerOpenFPGA_ql::Route() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand();
+  std::string command = BaseVprCommandOLD();
   if(command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     return false;
@@ -4430,9 +4460,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    std::string taCommand = BaseVprCommand() + " --route --analysis --disp on";
+    std::string taCommand = BaseVprCommandOLD() + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::string taCommand = BaseVprCommand(current_device_sta) + " --analysis --disp on";
+    std::string taCommand = BaseVprCommandOLD(current_device_sta) + " --analysis --disp on";
     // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
     // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
     // due to mismatch in switch blocks, which needs to be fixed yet.
@@ -4474,7 +4504,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    std::string command = BaseVprCommand() + " --gen_post_synthesis_netlist on";
+    std::string command = BaseVprCommandOLD() + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
     int status = ExecuteAndMonitorSystemCommand(command);
@@ -4523,7 +4553,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     std::string vpr_options;
 
-    taCommand = BaseVprCommand(current_device_sta);
+    taCommand = BaseVprCommandOLD(current_device_sta);
     if(taCommand.empty()) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
@@ -5257,7 +5287,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // call vpr to execute analysis
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
 
-  std::string vpr_analysis_command = BaseVprCommand();
+  std::string vpr_analysis_command = BaseVprCommandOLD();
   if(vpr_analysis_command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     // empty string returned on error.

@@ -135,8 +135,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
-  CommandWrapper BaseVprCommandNEW(QLDeviceTarget device_target = QLDeviceTarget());
+  virtual std::string BaseVprCommandOLD(QLDeviceTarget device_target = QLDeviceTarget());
+  CommandWrapper BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget()); // todo, make it const
 
  protected:
   virtual bool IPGenerate();
@@ -232,7 +232,8 @@ private:
 
   BlifParser m_blifParser;
 
-  std::string getPackingCommand(); // todo make it const
+  std::string getPackingCommandOLD(); // todo make it const
+  CommandWrapper getPackingCommand(); // todo make it const
 };
 
 }  // namespace FOEDAG

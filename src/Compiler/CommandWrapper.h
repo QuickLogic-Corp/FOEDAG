@@ -24,13 +24,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 #include <filesystem>
+#include <regex>
 
 
 namespace FOEDAG {
 
 class CommandWrapper {
 public:
-  const std::string& command() const { return m_command; }
+  bool compareIgnoringTempPath(const std::string& rhs) {
+      static std::regex tmpRegex(R"(\/tmp\/\S+)");
+      std::string thisClean = std::regex_replace(string(), tmpRegex, "/tmp/PLACEHOLDER");
+      std::string rhsClean = std::regex_replace(rhs, tmpRegex, "/tmp/PLACEHOLDER");
+      return thisClean == rhsClean;
+  }
+
+  const std::string& string() const { return m_string; }
 
   void append(const std::string& parameter, const std::string& value) {
     appendArgument(parameter + " " + value);
@@ -49,7 +57,7 @@ public:
   void appendFile(const std::string& parameter, const std::string& file)=delete;
   void appendFile(const std::string& parameter, const std::filesystem::path& file) {
     m_files.push_back(file);
-    appendArgument(parameter + "_"  + file.string());
+    appendArgument(parameter + " "  + file.string());
   }
 
   void prepend(const std::string& parameter, const std::string& value) {
@@ -72,24 +80,24 @@ public:
     prependArgument(parameter + "_"  + file.string());
   }
 
-  bool isValid() const { return !m_command.empty(); }
+  bool isValid() const { return !m_string.empty(); }
 
 private:
   std::vector<std::filesystem::path> m_files;
-  std::string m_command;
+  std::string m_string;
 
   void appendArgument(const std::string& arg) {
-    if (!m_command.empty() && m_command.back() != ' ') {
-        m_command += ' ';
+    if (!m_string.empty() && m_string.back() != ' ') {
+        m_string += ' ';
     }
-    m_command += arg;
+    m_string += arg;
   }
 
   void prependArgument(const std::string& arg) {
-    if (!m_command.empty() && m_command.front() != ' ') {
-        m_command = arg + " " + m_command;
+    if (!m_string.empty() && m_string.front() != ' ') {
+        m_string = arg + " " + m_string;
     } else {
-        m_command = arg + m_command;
+        m_string = arg + m_string;
     }
   }
 };
