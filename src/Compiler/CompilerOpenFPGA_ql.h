@@ -37,6 +37,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
 
+#define ENABLE_LEGACY_CMD_GUARD
+
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };
@@ -232,11 +234,26 @@ private:
 
   BlifParser m_blifParser;
 
-  std::string getPackingCommandOLD(); // todo make it const
-  CommandWrapper getPackingCommand(); // todo make it const
+#ifdef ENABLE_LEGACY_CMD_GUARD
+  std::string getSynthesisCommandOLD();           // TODO
+  std::string getPackingCommandOLD();
+  std::string getPlacementCommandOLD();
+  std::string getRoutingCommandOLD();             // TODO
+  std::string getTimingAnalysisCommandOLD();      // TODO
+  std::string getPowerCommandOLD();               // TODO
+  std::string getBitstreamGenerationCommandOLD(); // TODO
 
-  std::string getPlacementCommandOLD(); // todo make it const
+#endif
+  CommandWrapper getSynthesisCommand();           // TODO
+  CommandWrapper getPackingCommand();   // todo make it const
   CommandWrapper getPlacementCommand(); // todo make it const
+  CommandWrapper getRoutingCommand();             // TODO
+  CommandWrapper getTimingAnalysisCommand();      // TODO
+  CommandWrapper getPowerCommand();               // TODO
+  CommandWrapper getBitstreamGenerationCommand(); // TODO
+
+    // BitstreamGeneration
+
 };
 
 }  // namespace FOEDAG

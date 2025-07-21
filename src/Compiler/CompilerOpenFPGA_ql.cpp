@@ -3549,15 +3549,17 @@ bool CompilerOpenFPGA_ql::Packing() {
     return false;
   }
  
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command.string());
 
+#ifdef ENABLE_LEGACY_CMD_GUARD
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
   if (!command.compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
     qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
     qInfo() << "~~~ new=" << QString::fromStdString(command.string());
     return false;
   }  
+#endif // ENABLE_LEGACY_CMD_GUARD
 
 #if UPSTREAM_UNUSED
   if (FileUtils::IsUptoDate(
@@ -3878,9 +3880,11 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(command.string().empty()) {
     return false;
   }
- 
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
+
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command.string());
+
+#ifdef ENABLE_LEGACY_CMD_GUARD
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
 
   if (!command.compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
@@ -3888,6 +3892,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     qInfo() << "~~~ new=" << QString::fromStdString(command.string());
     return false;
   }  
+#endif // ENABLE_LEGACY_CMD_GUARD
 
   int status = ExecuteAndMonitorSystemCommand(command.string());
   CleanTempFiles();
@@ -7676,6 +7681,15 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   return power_leakage;
 }
 
+#ifdef ENABLE_LEGACY_CMD_GUARD
+
+std::string CompilerOpenFPGA_ql::getSynthesisCommandOLD()
+{
+  std::string command;
+  assert(false);
+  return command;
+}
+
 std::string CompilerOpenFPGA_ql::getPackingCommandOLD() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommandOLD() + " --pack";
@@ -7698,31 +7712,6 @@ std::string CompilerOpenFPGA_ql::getPackingCommandOLD() {
 
   command += std::string(" ") + 
              std::string("--pack");
-
-  return command;
-}
-
-CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
-#if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand() + " --pack";
-#endif // #if UPSTREAM_UNUSED
-  CommandWrapper command = BaseVprCommand();
-  if(command.string().empty()) {
-    ErrorMessage("VPR Command is empty!");
-    return CommandWrapper{};
-  }
-
-  // custom vpr command-line options for pack stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command.append(vpr_custom_options_string);
-  }
-
-  command.append("--pack");
 
   return command;
 }
@@ -7768,6 +7757,68 @@ std::string CompilerOpenFPGA_ql::getPlacementCommandOLD() {
   return command;
 }
 
+std::string CompilerOpenFPGA_ql::getRoutingCommandOLD()
+{
+  std::string command;
+  assert(false);
+  return command;
+}
+
+std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandOLD() 
+{
+  std::string command;
+  assert(false);
+  return command;
+}
+
+std::string CompilerOpenFPGA_ql::getPowerCommandOLD()
+{
+  std::string command;
+  assert(false);
+  return command;
+}
+
+std::string CompilerOpenFPGA_ql::getBitstreamGenerationCommandOLD()
+{
+  std::string command;
+  assert(false);
+  return command;
+}
+
+#endif // ENABLE_LEGACY_CMD_GUARD
+
+CommandWrapper CompilerOpenFPGA_ql::getSynthesisCommand()
+{
+  CommandWrapper command;
+  assert(false);
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
+#if UPSTREAM_UNUSED
+  std::string command = BaseVprCommand() + " --pack";
+#endif // #if UPSTREAM_UNUSED
+  CommandWrapper command = BaseVprCommand();
+  if(command.string().empty()) {
+    ErrorMessage("VPR Command is empty!");
+    return CommandWrapper{};
+  }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command.append(vpr_custom_options_string);
+  }
+
+  command.append("--pack");
+
+  return command;
+}
+
 CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
   // generate pin contraints file or use pre-generated .place file, if required.
   // this string should contain the path of the PinConstraints file, if generated correctly.
@@ -7803,6 +7854,34 @@ CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
     Message("no pcf file found, skipping PinConstraints usage!");
   }
 
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getRoutingCommand()
+{
+  CommandWrapper command;
+  assert(false);
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand()
+{
+  CommandWrapper command;
+  assert(false);
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getPowerCommand()
+{
+  CommandWrapper command;
+  assert(false);
+  return command;
+}
+
+CommandWrapper CompilerOpenFPGA_ql::getBitstreamGenerationCommand()
+{
+  CommandWrapper command;
+  assert(false);
   return command;
 }
 
