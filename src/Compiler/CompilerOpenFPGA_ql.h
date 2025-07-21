@@ -242,7 +242,7 @@ private:
   std::string getPackingCommandOLD();
   std::string getPlacementCommandOLD();
   std::string getRoutingCommandOLD();             
-  std::string getTimingAnalysisCommandOLD(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);      // TODO
+  std::string getTimingAnalysisCommandOLD(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
   std::string getPowerCommandOLD();               // TODO
   std::string getBitstreamGenerationCommandOLD(); // TODO
 
@@ -251,7 +251,7 @@ private:
   CommandWrapper getPackingCommand();   // todo make it const
   CommandWrapper getPlacementCommand(); // todo make it const
   CommandWrapper getRoutingCommand();             
-  CommandWrapper getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);      // TODO
+  CommandWrapper getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
   CommandWrapper getPowerCommand();               // TODO
   CommandWrapper getBitstreamGenerationCommand(); // TODO
 
