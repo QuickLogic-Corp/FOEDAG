@@ -3543,15 +3543,16 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
-  std::string commandOld = getPackingCommandOLD();
   CommandWrapper command = getPackingCommand();
-  if(command.string().empty()) {
+  if(command.empty()) {
     return false;
   }
  
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command.string());
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
+  std::string commandOld = getPackingCommandOLD();
+
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
   if (!command.compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
@@ -3875,15 +3876,15 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  std::string commandOld = getPlacementCommandOLD();
   CommandWrapper command = getPlacementCommand();
-  if(command.string().empty()) {
+  if(command.empty()) {
     return false;
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command.string());
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
+  std::string commandOld = getPlacementCommandOLD();
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
 
   if (!command.compareIgnoringTempPath(commandOld)) {
@@ -4065,31 +4066,27 @@ bool CompilerOpenFPGA_ql::Route() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandOLD();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
+
+  CommandWrapper command = getRoutingCommand();
+  if (command.empty()) {
     return false;
   }
 
-  // custom vpr command-line options for route stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command.string());
 
-  command += std::string(" ") + 
-             std::string("--route");
+#ifdef ENABLE_LEGACY_CMD_GUARD
+  std::string commandOld = getRoutingCommandOLD();
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.OLD.cmd"), commandOld);
 
-  std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                     std::string(ProjManager()->projectName() + "_route.cmd"))
-                        .string());
-  ofs << command << std::endl;
-  ofs.close();
-  int status = ExecuteAndMonitorSystemCommand(command);
+  if (!command.compareIgnoringTempPath(commandOld)) {
+    qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
+    qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
+    qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+    return false;
+  }  
+#endif // ENABLE_LEGACY_CMD_GUARD
+
+  int status = ExecuteAndMonitorSystemCommand(command.string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
@@ -7759,8 +7756,25 @@ std::string CompilerOpenFPGA_ql::getPlacementCommandOLD() {
 
 std::string CompilerOpenFPGA_ql::getRoutingCommandOLD()
 {
-  std::string command;
-  assert(false);
+  std::string command = BaseVprCommandOLD();
+  if(command.empty()) {
+    ErrorMessage("Base VPR Command is empty!");
+    return "";
+  }
+
+  // custom vpr command-line options for route stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command += std::string(" ") + vpr_custom_options_string;
+  }
+
+  command += std::string(" ") + 
+             std::string("--route");
+
   return command;
 }
 
@@ -7859,8 +7873,24 @@ CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
 
 CommandWrapper CompilerOpenFPGA_ql::getRoutingCommand()
 {
-  CommandWrapper command;
-  assert(false);
+  CommandWrapper command = BaseVprCommand();
+  if(command.empty()) {
+    ErrorMessage("Base VPR Command is empty!");
+    return CommandWrapper{};
+  }
+
+  // custom vpr command-line options for route stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command.append(vpr_custom_options_string);
+  }
+
+  command.append("--route");
+
   return command;
 }
 

@@ -38,6 +38,8 @@ public:
       return thisClean == rhsClean;
   }
 
+  bool empty() const { return m_string.empty(); }
+
   const std::string& string() const { return m_string; }
 
   void append(const std::string& parameter, const std::string& value) {
