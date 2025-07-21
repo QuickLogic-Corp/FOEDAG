@@ -31,6 +31,12 @@ namespace FOEDAG {
 
 class CommandWrapper {
 public:
+  CommandWrapper()=default;
+  
+  CommandWrapper(const std::string& command) {
+    append(command);
+  }
+
   bool compareIgnoringTempPath(const std::string& rhs) {
       static std::regex tmpRegex(R"(\/tmp\/\S+)");
       std::string thisClean = std::regex_replace(string(), tmpRegex, "/tmp/PLACEHOLDER");
@@ -54,6 +60,17 @@ public:
   void appendFile(const std::filesystem::path& file) {
     m_files.push_back(file);
     appendArgument(file.string());
+  }
+  void watchFiles(const std::vector<std::filesystem::path>& files) {
+    for (const std::filesystem::path& file: files) {
+      watchFile(file);
+    }
+  }
+  void watchFile(const std::filesystem::path& file) {
+    m_watchFiles.push_back(file);
+    // Note: We do not add this file directly to the command-line arguments.
+    // It may be indirectly used within a script file, and the script file itself 
+    // is already included as a command-line argument.    
   }
 
   void appendFile(const std::string& parameter, const std::string& file)=delete;
@@ -86,6 +103,7 @@ public:
 
 private:
   std::vector<std::filesystem::path> m_files;
+  std::vector<std::filesystem::path> m_watchFiles;
   std::string m_string;
 
   void appendArgument(const std::string& arg) {

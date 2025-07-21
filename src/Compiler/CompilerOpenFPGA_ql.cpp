@@ -3434,15 +3434,23 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
   return command;
 }
 
-std::string CompilerOpenFPGA_ql::BaseStaCommand() {
+#ifdef ENABLE_LEGACY_CMD_GUARD
+std::string CompilerOpenFPGA_ql::BaseStaCommandOLD() {
   std::string command =
       m_staExecutablePath.string() +
       std::string(
           " -exit ");  // allow open sta exit its tcl shell even there is error
   return command;
 }
+#endif
 
-std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
+CommandWrapper CompilerOpenFPGA_ql::BaseStaCommand() {
+  CommandWrapper command{m_staExecutablePath.string()};
+  command.append("-exit");  // allow open sta exit its tcl shell even there is error
+  return command;
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
                                             std::string netlistFileName,
                                             std::string sdfFileName,
                                             std::string sdcFileName) {
@@ -3462,7 +3470,7 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   std::ofstream ofssta(openStaFile);
   ofssta << script << "\n";
   ofssta.close();
-  return openStaFile;
+  return std::filesystem::path{openStaFile};
 }
 
 bool CompilerOpenFPGA_ql::Packing() {
@@ -4461,8 +4469,8 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
         std::filesystem::is_regular_file(sdfFileName) &&
         std::filesystem::is_regular_file(sdcFileName)) {
       taCommand =
-          BaseStaCommand() + " " +
-          BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName);
+          BaseStaCommandOLD() + " " +
+          BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName).string();
       std::ofstream ofs(sta_cmd_filepath);
       ofs << taCommand << std::endl;
       ofs.close();
@@ -7778,11 +7786,122 @@ std::string CompilerOpenFPGA_ql::getRoutingCommandOLD()
   return command;
 }
 
-std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandOLD() 
+std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandOLD(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix) 
 {
-  std::string command;
-  assert(false);
-  return command;
+ if (sta_vpr_options.empty()) {
+    sta_suffix = "";
+  }
+  
+  if (TimingAnalysisOpt() == STAOpt::View) {
+  
+#ifdef _WIN32
+    // under WIN32, running the analysis stage alone causes issues, hence we call the
+    // route and analysis stages together
+    std::string taCommand = BaseVprCommandOLD() + " --route --analysis --disp on";
+#else // #ifdef _WIN32
+    std::string taCommand = BaseVprCommandOLD(current_device_sta) + " --analysis --disp on";
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
+    }
+#endif // #ifdef _WIN32
+
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
+    }
+  }
+
+  std::string taCommand;
+  // use OpenSTA to do the job
+  if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
+    // allows SDF to be generated for OpenSTA
+    std::string command = BaseVprCommandOLD() + " --gen_post_synthesis_netlist on";
+
+    // find files
+    std::string libFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".lib"))
+            .string();  // this is the standard sdc file
+    std::string netlistFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.v"))
+            .string();
+    std::string sdfFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.sdf"))
+            .string();
+    // std::string sdcFile = ProjManager()->getConstrFiles();
+    std::string sdcFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".sdc"))
+            .string();  // this is the standard sdc file
+    if (std::filesystem::is_regular_file(libFileName) &&
+        std::filesystem::is_regular_file(netlistFileName) &&
+        std::filesystem::is_regular_file(sdfFileName) &&
+        std::filesystem::is_regular_file(sdcFileName)) {
+      taCommand =
+          BaseStaCommandOLD() + " " +
+          BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName).string();
+    }
+  } 
+  else {
+    // use vpr/tatum engine
+
+    std::string vpr_options;
+
+    taCommand = BaseVprCommandOLD(current_device_sta);
+    if(taCommand.empty()) {
+        ErrorMessage("Base VPR Command is empty!");
+        return "";
+    }
+
+    // custom vpr command-line options for analysis stage
+    // it is upto the user to ensure that the options are passed in correctly.
+    if( !QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str").empty() ) {
+      // first, trim the entire string to eliminate any extra whitespace in the front and the back
+      std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
+      vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      // add the options string to the end of the vpr options with one whitespace separator
+      vpr_options += std::string(" ") + vpr_custom_options_string;
+    }
+
+    taCommand += vpr_options;
+
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
+    }
+    
+#ifdef _WIN32
+
+    // under WIN32, running the analysis stage along causes issues, hence we call the
+    // route and analysis stages together
+    taCommand += std::string(" --route");
+
+#else // #ifdef _WIN32
+
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
+    }
+
+#endif // #ifdef _WIN32
+
+    taCommand += std::string(" --analysis");
+  }
+
+  return taCommand;
 }
 
 std::string CompilerOpenFPGA_ql::getPowerCommandOLD()
@@ -7894,10 +8013,126 @@ CommandWrapper CompilerOpenFPGA_ql::getRoutingCommand()
   return command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand()
+CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix)
 {
   CommandWrapper command;
-  assert(false);
+
+  if (sta_vpr_options.empty()) {
+    sta_suffix = "";
+  }
+  
+  if (TimingAnalysisOpt() == STAOpt::View) {
+  
+#ifdef _WIN32
+    // under WIN32, running the analysis stage alone causes issues, hence we call the
+    // route and analysis stages together
+    command = BaseVprCommand();
+    command.append("--route");
+    command.append("--analysis");
+    command.append("--disp on");
+#else // #ifdef _WIN32
+    command = BaseVprCommand(current_device_sta);
+    command.append("--analysis");
+    command.append("--disp", "on");
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        command.append("--route");
+      }
+    }
+#endif // #ifdef _WIN32
+
+    if(!sta_vpr_options.empty()){
+      command.append(sta_vpr_options);
+    }
+  }
+
+  // use OpenSTA to do the job
+  if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
+    // allows SDF to be generated for OpenSTA
+
+    // find files
+    std::string libFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".lib"))
+            .string();  // this is the standard sdc file
+    std::string netlistFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.v"))
+            .string();
+    std::string sdfFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.sdf"))
+            .string();
+    // std::string sdcFile = ProjManager()->getConstrFiles();
+    std::string sdcFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".sdc"))
+            .string();  // this is the standard sdc file
+    if (std::filesystem::is_regular_file(libFileName) &&
+        std::filesystem::is_regular_file(netlistFileName) &&
+        std::filesystem::is_regular_file(sdfFileName) &&
+        std::filesystem::is_regular_file(sdcFileName)) {
+      command = BaseStaCommand();
+      command.watchFiles({libFileName, netlistFileName, sdfFileName, sdcFileName});
+      command.appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
+    }
+  } 
+  else {
+    // use vpr/tatum engine
+
+    std::string vpr_options;
+
+    command = BaseVprCommand(current_device_sta);
+    if(command.empty()) {
+        ErrorMessage("Base VPR Command is empty!");
+        return CommandWrapper{};
+    }
+
+    // custom vpr command-line options for analysis stage
+    // it is upto the user to ensure that the options are passed in correctly.
+    if( !QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str").empty() ) {
+      // first, trim the entire string to eliminate any extra whitespace in the front and the back
+      std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
+      vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      // add the options string to the end of the vpr options with one whitespace separator
+      vpr_options += std::string(" ") + vpr_custom_options_string;
+    }
+
+    command.append(vpr_options);
+
+    if(!sta_vpr_options.empty()){
+      command.append(sta_vpr_options);
+    }
+    
+#ifdef _WIN32
+
+    // under WIN32, running the analysis stage along causes issues, hence we call the
+    // route and analysis stages together
+    command.append("--route");
+
+#else // #ifdef _WIN32
+
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        command.append("--route");
+      }
+    }
+
+#endif // #ifdef _WIN32
+
+    command.append("--analysis");
+  }
+
   return command;
 }
 

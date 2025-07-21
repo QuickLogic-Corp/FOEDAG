@@ -221,8 +221,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
-  virtual std::string BaseStaCommand();
-  virtual std::string BaseStaScript(std::string libFileName,
+#ifdef ENABLE_LEGACY_CMD_GUARD
+  std::string BaseStaCommandOLD();
+#endif
+  CommandWrapper BaseStaCommand();
+  std::filesystem::path BaseStaScript(std::string libFileName,
                                     std::string netlistFileName,
                                     std::string sdfFileName,
                                     std::string sdcFileName);
@@ -238,8 +241,8 @@ private:
   std::string getSynthesisCommandOLD();           // TODO
   std::string getPackingCommandOLD();
   std::string getPlacementCommandOLD();
-  std::string getRoutingCommandOLD();             // TODO
-  std::string getTimingAnalysisCommandOLD();      // TODO
+  std::string getRoutingCommandOLD();             
+  std::string getTimingAnalysisCommandOLD(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);      // TODO
   std::string getPowerCommandOLD();               // TODO
   std::string getBitstreamGenerationCommandOLD(); // TODO
 
@@ -247,8 +250,8 @@ private:
   CommandWrapper getSynthesisCommand();           // TODO
   CommandWrapper getPackingCommand();   // todo make it const
   CommandWrapper getPlacementCommand(); // todo make it const
-  CommandWrapper getRoutingCommand();             // TODO
-  CommandWrapper getTimingAnalysisCommand();      // TODO
+  CommandWrapper getRoutingCommand();             
+  CommandWrapper getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);      // TODO
   CommandWrapper getPowerCommand();               // TODO
   CommandWrapper getBitstreamGenerationCommand(); // TODO
 
