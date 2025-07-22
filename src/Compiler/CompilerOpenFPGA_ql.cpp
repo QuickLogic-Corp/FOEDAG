@@ -5946,18 +5946,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
 
-  // Convert sets to comma-separated strings
-  auto setToString = [](const std::unordered_set<std::string>& set) {
-      std::string result;
-      for (const auto& sig : set) {
-          result += sig + ",";
-      }
-      if (!result.empty()) {
-        result.erase(result.size() - 1); // remove the last ","
-      }
-      return result;
-  };
-
   while (std::getline(infile, line)) {
     line = StringUtils::trim(line);
 
@@ -5977,7 +5965,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
    
     static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
     if (supportedCommands.find(token) == supportedCommands.end()){
-      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + setToString(supportedCommands)+ "].");
+      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
       return false;
     }
 
@@ -6020,14 +6008,14 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     }
   }
 
-  std::string leftStr   = setToString(leftSet);
-  std::string rightStr  = setToString(rightSet);
-  std::string topStr    = setToString(topSet);
-  std::string bottomStr = setToString(bottomSet);
+  std::string leftStr   = StringUtils::toString(leftSet);
+  std::string rightStr  = StringUtils::toString(rightSet);
+  std::string topStr    = StringUtils::toString(topSet);
+  std::string bottomStr = StringUtils::toString(bottomSet);
 
   std::string regionStr;
   for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += "region:" + region + "=" + setToString(patternsSet) + ";";
+    regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
   }
 
   // Output results
