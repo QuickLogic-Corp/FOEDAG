@@ -42,16 +42,37 @@ public:
       if (role.empty()) {
         m_modifiedDateTime = FileUtils::Mtime(filePath);
       } else {
-        m_md5sum = FileUtils::calcHashFileContent(filePath);
+        m_contentHash = FileUtils::calcHashFileContent(filePath);
       }
     }
+  }
+
+  const std::string& contentHash() const { return m_contentHash; }
+  const std::string& modifiedDateTime() const { return m_modifiedDateTime; }
+
+  bool matches(const FileIdentity& rhs, std::string& msg) const {
+    if (m_role.empty()) {
+      if (m_modifiedDateTime != rhs.modifiedDateTime()) {
+        msg += "\n filepath: " + m_filePath.string() + " datetime mismatches";
+        return false;
+      }
+    } else {
+      // if file role is not empty, than we cannot rely on filepath or modified datetime data, and must check content hash itself
+      // Note: this case is valid for decrypted vpr.xml in tmp folder, which generates each time. 
+      if (m_contentHash != rhs.contentHash()) {
+        msg += "\n role:" + m_role + " for file " + m_filePath.string() + " mismatches";
+        return false;
+      }
+    }
+
+    return true;
   }
 
 private:
   std::filesystem::path m_filePath;
   std::string m_role;
   std::string m_modifiedDateTime;
-  std::string m_md5sum;
+  std::string m_contentHash;
 };
 
 class CommandWrapper {
@@ -167,7 +188,16 @@ private:
       return false;
     }
 
-    // for ()
+    for (const auto& [key, fileIdentity]: filesMap1) {
+      const auto it = filesMap2.find(key);
+      if (it != filesMap2.end()) {
+        if (!fileIdentity.matches(it->second, msg)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
 std::unordered_set<std::string> getSymmetricKeyDifference(const std::map<std::string, FileIdentity>& a, const std::map<std::string, FileIdentity>& b) 
