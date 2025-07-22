@@ -868,7 +868,9 @@ void MainWindow::loadFile(const QString& file) {
 void MainWindow::createProgressBar() {
   m_progressWidget = new QWidget;
   m_progressBar = new QProgressBar(m_progressWidget);
-  m_progressBar->setFixedHeight(menuBar()->sizeHint().height() - 2);
+  // the height seems to be 0 and Qt crashes saying height cannot be negative
+  // so removed the -2, not sure what that's supposed to do!
+  m_progressBar->setFixedHeight(menuBar()->sizeHint().height());
   m_progressBar->setFormat("%v/%m");
   QHBoxLayout* layout = new QHBoxLayout;
   layout->setContentsMargins(0, 0, 0, 0);

@@ -534,20 +534,6 @@ std::string FileUtils::resolvePathStr(const std::string& pathStr) {
 #endif
 }
 
-std::filesystem::path FileUtils::getExecutablePath() {
-  std::filesystem::path result;
-#ifdef _WIN32
-    char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    result = std::string(path);
-#else
-    char path[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", path, PATH_MAX);
-    result = (count != -1) ? std::string(path, count) : "";
-#endif
-
-  return result.parent_path();
-}
 
 std::vector<std::filesystem::path> FileUtils::findFilePathesByWildcard(const std::string& wildCardFilePathPattern) 
 {
