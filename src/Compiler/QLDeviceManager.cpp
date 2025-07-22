@@ -865,7 +865,7 @@ void QLDeviceManager::collectDeviceVariantAvailableResources(const QLDeviceVaria
   }
 
   // create command to ask vpr to spit out resource information for the variant:
-  std::filesystem::path architectureFile = GetArchitectureFileForDeviceVariant(device_variant);
+  auto [architectureFile, isTemporary] = GetArchitectureFileForDeviceVariant(device_variant);
   if (architectureFile.empty()) {
     return;
   }
@@ -886,11 +886,11 @@ void QLDeviceManager::collectDeviceVariantAvailableResources(const QLDeviceVaria
   QProcess* process = compiler->ExecuteCommand(vpr_command);
 
   // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
-  QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, device_variant, architectureFile](int exitCode) {
+  QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, device_variant, architectureFile, isTemporary](int exitCode) {
     std::vector<std::shared_ptr<LayoutInfoHelper>> layoutsInfo =
         ExtractDeviceAvailableResourcesFromVprLogContent(process->readAllStandardOutput().toStdString());
     process->deleteLater();
-    if (std::filesystem::exists(architectureFile)) {
+    if (isTemporary && std::filesystem::exists(architectureFile)) {
       std::filesystem::remove(architectureFile);
     }
 
@@ -1579,8 +1579,9 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
 }
 
 
-std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant)
+std::pair<std::filesystem::path, bool> QLDeviceManager::GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant)
 {
+  bool is_temporary = false;
   std::filesystem::path architectureFile;
   std::filesystem::path device_type_dir_path =
       std::filesystem::path(deviceDataRootDirPath() /
@@ -1609,6 +1610,7 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
     std::filesystem::path vpr_xml_en_path =
           std::filesystem::path(device_variant_dir_path / std::string("vpr.xml.en"));
     architectureFile = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath(true);
+    is_temporary = true;
 
     std::filesystem::path cryptdbPath =
         CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
@@ -1622,17 +1624,17 @@ std::filesystem::path QLDeviceManager::GetArchitectureFileForDeviceVariant(const
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
       std::cout << "load cryptdb failed!" << std::endl;
-      return std::string("");
+      return std::make_pair(std::filesystem::path(""), is_temporary);
     }
 
     if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
       std::cout << "decryption failed!" << std::endl;
-      return std::string("");
+      return std::make_pair(std::filesystem::path(""), is_temporary);
     }
   }
 
   //Message( std::string("Using vpr.xml for: ") + convertToDeviceString(device_variant) );
-  return architectureFile;
+  return std::make_pair(architectureFile, is_temporary);
 }
 
 std::string QLDeviceManager::getCurrentDeviceTargetString() {
@@ -1759,7 +1761,6 @@ std::string QLDeviceManager::convertToDeviceTypeString(QLDeviceTarget device_tar
 
 int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                                      std::string device_data_source, std::string device_data_target) {
-
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
     // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> <target_device_data_dir_path>
