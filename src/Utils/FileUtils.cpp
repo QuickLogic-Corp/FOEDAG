@@ -36,6 +36,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QDebug>
 #include <QProcess>
+#include <QFile>
+#include <QByteArray>
+#include <QCryptographicHash>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -588,6 +591,32 @@ std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& p
   }
 
   return result;
+}
+
+std::string FileUtils::calcHashFileContent(const std::filesystem::path& filePath) 
+{
+  QFile file(QString::fromStdString(filePath.string()));
+  if (!file.open(QIODevice::ReadOnly)) {
+      return "";
+  }
+
+  QCryptographicHash hash(QCryptographicHash::Sha256);
+
+  const qint64 bufferSize = 10 * 1024 * 1024; // 10 MB buffer
+  QByteArray buffer;
+  buffer.resize(bufferSize);
+
+  while (!file.atEnd()) {
+    qint64 bytesRead = file.read(buffer.data(), bufferSize);
+    if (bytesRead > 0) {
+      hash.addData(buffer.constData(), bytesRead);
+    } else {
+      break; // read error or EOF
+    }
+  }
+
+  QByteArray hexResult = hash.result().toHex();
+  return std::string(hexResult.constData(), hexResult.size());
 }
 
 }  // namespace FOEDAG

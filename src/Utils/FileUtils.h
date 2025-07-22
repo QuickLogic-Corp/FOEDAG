@@ -31,7 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <map>
 
 class QProcess;
-
 namespace FOEDAG {
 
 struct Return {
@@ -116,6 +115,8 @@ class FileUtils final {
   static std::filesystem::path getExecutablePath();
   static std::vector<std::filesystem::path> findFilePathesByWildcard(const std::string& wildCardFilePathPattern);
   static std::vector<std::string> findFileNamesByWildcard(const std::string& path, const std::string& wildCardFileNamePattern);
+
+  static std::string calcHashFileContent(const std::filesystem::path& filePath);
 
  private:
   FileUtils() = delete;
