@@ -4,8 +4,6 @@
 #include <QList>
 #include <QString>
 
-class QEvent;
-
 namespace FOEDAG {
 
 class MultiComboBox : public QWidget {

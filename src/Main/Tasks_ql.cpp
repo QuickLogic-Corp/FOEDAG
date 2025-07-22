@@ -369,7 +369,7 @@ void openReportView(Compiler* compiler, const Task* task,
 }
   
 #ifdef USE_IPA
-void openInteractivePathAnalysisView(Compiler* compiler) {
+void openInteractivePathAnalysisView(Compiler* compiler, const QString& profile) {
   bool newView{true};
   auto tabWidget = TextEditorForm::Instance()->GetTabWidget();
   for (int i = 0; i < tabWidget->count(); i++) {
@@ -383,7 +383,7 @@ void openInteractivePathAnalysisView(Compiler* compiler) {
 
   if (newView) {
     SimpleLogger::instance().setFilePath(compiler->ProjManager()->getProjectPath()+"/"+NCRITICALPATH_INNER_NAME+".log");
-    NCriticalPathWidget* viewWidget = new NCriticalPathWidget(compiler, FOEDAG::QLSettingsManager::getInstance()->settings_json_filepath);
+    NCriticalPathWidget* viewWidget = new NCriticalPathWidget(compiler, profile, FOEDAG::QLSettingsManager::getInstance()->settings_json_filepath);
     viewWidget->setProperty("deleteOnCloseTab", true);
 
     tabWidget->addTab(viewWidget, NCRITICALPATH_UI_NAME);
@@ -572,16 +572,17 @@ void FOEDAG::handleViewFileRequested(const QString& filePath) {
 
 void FOEDAG::handleViewReportRequested(Compiler* compiler, const Task* task,
                                        const QString& reportId,
+                                       const QString& profile,
                                        ITaskReportManager& reportManager) {
-  auto report = reportManager.createReport(reportId);
+  auto report = reportManager.createReport(reportId, profile);
   if (!report) return;
 
   openReportView(compiler, task, *report);
 }
 
 #ifdef USE_IPA
-void FOEDAG::handleViewInteractivePathAnalysisRequested(Compiler* compiler) {
-  openInteractivePathAnalysisView(compiler);
+void FOEDAG::handleViewInteractivePathAnalysisRequested(Compiler* compiler, const QString& profile) {
+  openInteractivePathAnalysisView(compiler, profile);
 }
 #endif  // USE_IPA
 

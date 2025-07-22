@@ -53,15 +53,18 @@
 namespace FOEDAG {
 
 NCriticalPathToolsWidget::NCriticalPathToolsWidget(
-    FOEDAG::Compiler* compiler, const std::filesystem::path& settingsFilePath,
+    FOEDAG::Compiler* compiler, const QString& profile, const std::filesystem::path& settingsFilePath,
     QWidget* parent)
     : QWidget(parent),
       m_compiler(compiler),
+      m_profile(profile),
       m_vprProcess("vpr"),
       m_parameters(
           std::make_shared<NCriticalPathParameters>(settingsFilePath)) {
   SimpleLogger::instance().setEnabled(m_parameters->getIsLogToFileEnabled());
 
+  m_vprProcess.addInnerErrorToBypass(
+      "warning: PWD environment variable doesn't match current directory");
   m_vprProcess.addInnerErrorToBypass(
       "gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed");
   m_vprProcess.addInnerErrorToBypass(
@@ -122,7 +125,14 @@ QString NCriticalPathToolsWidget::vprBaseCommand() {
     FOEDAG::CompilerOpenFPGA_ql* openFpgaCompiler =
         dynamic_cast<FOEDAG::CompilerOpenFPGA_ql*>(m_compiler);
     if (openFpgaCompiler) {
-      return openFpgaCompiler->BaseVprCommand().c_str();
+      if (m_profile.isEmpty()) {
+        return QString::fromStdString(openFpgaCompiler->BaseVprCommand());
+      } else {
+        auto sta_device = openFpgaCompiler->getDeviceByStaProfile(m_profile.toStdString());
+        std::string cmd = openFpgaCompiler->BaseVprCommand(sta_device);
+        cmd += openFpgaCompiler->uniqueStaVprOptions();
+        return QString::fromStdString(cmd);
+      }
     } else {
       qCritical() << "cannot get vpr cmd because of wrong compiler type "
                      "(CompilerOpenFPGA_ql type is expected)";

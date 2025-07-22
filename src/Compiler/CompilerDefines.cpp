@@ -24,8 +24,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QHeaderView>
 
 #include "Compiler.h"
+#include "Reports/TimingAnalysisReportManager.h"
 #include "Main/Tasks.h"
 #include "MainWindow/Session.h"
+#include "WildcardFileFinder.h"
 #include "NewProject/ProjectManager/project.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Simulation/Simulator.h"
@@ -34,6 +36,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "TaskTableView.h"
 #include "Utils/FileUtils.h"
 #include "Utils/QtUtils.h"
+#include "Compiler/DialogUtils.h"
+
+#include <QDebug>
 
 extern FOEDAG::Session *GlobalSession;
 
@@ -52,13 +57,24 @@ QTableView *FOEDAG::prepareCompilerView(Compiler *compiler,
         auto &reportManagerRegistry = tManager->getReportManagerRegistry();
         auto reportManager =
             reportManagerRegistry.getReportManager(tManager->taskId(task));
-        if (reportManager)
-          FOEDAG::handleViewReportRequested(compiler, task, reportId,
+        if (reportManager) {
+          WildcardFileFinder finder(Project::Instance()->projectPath().toStdString(), TIMING_ANALYSIS_LOG_PATTERN);
+          QString profile = QString::fromStdString(finder.defaultProfile());
+          if (finder.hasProfiles()) {
+            TimingAnalysisReportManager* taReportManager = dynamic_cast<TimingAnalysisReportManager*>(reportManager.get());
+            if (taReportManager) {
+              if (reportId == taReportManager->timingReportId()) {
+                profile = DialogUtils::execUserSelectionOfActiveProfile(finder.profiles());
+              }
+            }
+          }
+          FOEDAG::handleViewReportRequested(compiler, task, reportId, profile,
                                             *reportManager);
+        }
       });
 #ifdef USE_IPA
-  QObject::connect(view, &TaskTableView::ViewInteractivePathAnalysisRequested, [compiler](){
-      FOEDAG::handleViewInteractivePathAnalysisRequested(compiler);
+  QObject::connect(view, &TaskTableView::ViewInteractivePathAnalysisRequested, [compiler](const QString& profile){
+      FOEDAG::handleViewInteractivePathAnalysisRequested(compiler, profile);
   });
 #endif  // USE_IPA
   QObject::connect(view, &TaskTableView::ViewWaveform, [compiler](Task *task) {

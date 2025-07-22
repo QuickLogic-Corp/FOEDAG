@@ -46,7 +46,7 @@ class PowerAnalysisReportManager final : public AbstractReportManager {
 
  private:
   QStringList getAvailableReportIds() const override;
-  std::unique_ptr<ITaskReport> createReport(const QString &reportId) override;
+  std::unique_ptr<ITaskReport> createReport(const QString &reportId, const QString& profile) override;
   QString getTimingLogFileName() const override;
   void splitTimingData(const QString &timingStr) override;
   // Go through the log file and fills internal data collections (stats,

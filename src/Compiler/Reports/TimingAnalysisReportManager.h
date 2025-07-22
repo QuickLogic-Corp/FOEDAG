@@ -40,18 +40,21 @@ class TimingAnalysisReportManager final : public AbstractReportManager {
   TimingAnalysisReportManager(const TaskManager &taskManager,
                               Compiler *compiler);
 
+  static QString timingReportId();
+  
  protected:
   void clearDataProfiles() override final;
+  void setActiveProfile(const std::string& profile) override final;
 
  private:
   QStringList getAvailableReportIds() const override;
-  std::unique_ptr<ITaskReport> createReport(const QString &reportId) override;
+  std::unique_ptr<ITaskReport> createReport(const QString &reportId, const QString& profile) override;
   QString getTimingLogFileName() const override;
   bool isStatisticalTimingLine(const QString &line) override;
   bool isStatisticalTimingHistogram(const QString &line) override;
   void splitTimingData(const QString &timingStr) override;
   void parseLogFile() override;
-  void parseLogFileHelper(const QString& logFileName, const std::string& profile);
+  void parseLogFileHelper(const QString& logFileName, const std::string& profile = "");
   
   void parseOpenSTALog(const QString& logFileName);
   IDataReport::TableData parseOpenSTATimingTable(QTextStream &in,
