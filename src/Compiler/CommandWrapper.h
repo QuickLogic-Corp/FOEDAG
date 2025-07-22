@@ -22,9 +22,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
 
 #include <string>
-#include <set>
+#include <unordered_set>
 #include <filesystem>
 #include <optional>
 #include <regex>
@@ -160,18 +161,18 @@ private:
   }
 
   bool compareFiles(const std::map<std::string, FileIdentity>& filesMap1, const std::map<std::string, FileIdentity>& filesMap2, std::string& msg) {
-    std::set<std::string> keyDiff = getSymmetricKeyDifference(filesMap1, filesMap2);
+    std::unordered_set<std::string> keyDiff = getSymmetricKeyDifference(filesMap1, filesMap2);
     if (!keyDiff.empty()) {
-      //msg = "changes in following files: " + set2Str(diff);
+      msg = "changes in following files: " + StringUtils::toString(keyDiff);
       return false;
     }
 
     // for ()
   }
 
-std::set<std::string> getSymmetricKeyDifference(const std::map<std::string, FileIdentity>& a, const std::map<std::string, FileIdentity>& b) 
+std::unordered_set<std::string> getSymmetricKeyDifference(const std::map<std::string, FileIdentity>& a, const std::map<std::string, FileIdentity>& b) 
 {
-  std::set<std::string> diff;
+  std::unordered_set<std::string> diff;
 
   for (const auto& pair : a) {
     if (b.find(pair.first) == b.end()) {
