@@ -201,11 +201,25 @@ private:
     for (const auto& [keyNew, valNew]: argsNew) {
       auto itOld = argsOld.find(keyNew);
       if (itOld != argsOld.end()) {
+        // detect changed parameters
         const std::string& valOld = itOld->second;
         if (valNew != valOld) {
           messages.push_back("value for parameter [" + keyNew + "], changed from [" + valOld + "] to [" + valNew + "]");
           isDirty = true;
         }
+      } else {
+        // detect added parameters
+        messages.push_back("new parameter has been added [" + keyNew + "]=" + valNew);
+        isDirty = true;
+      }
+    }
+
+    // detect deleted parameters
+    for (const auto& [keyOld, valOld]: argsOld) {
+      auto itNew = argsNew.find(keyOld);
+      if (itNew == argsNew.end()) {
+        messages.push_back("parameter [" + keyOld + "]=" + valOld + " was deleted");
+        isDirty = true;
       }
     }
 
