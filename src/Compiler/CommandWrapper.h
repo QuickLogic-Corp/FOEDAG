@@ -50,22 +50,23 @@ public:
   const std::string& contentHash() const { return m_contentHash; }
   const std::string& modifiedDateTime() const { return m_modifiedDateTime; }
 
-  bool matches(const FileIdentity& rhs, std::string& msg) const {
+  bool compareWithOld(const FileIdentity& old, std::vector<std::string>& messages) const {
+    bool isDirty = false;
     if (m_role.empty()) {
-      if (m_modifiedDateTime != rhs.modifiedDateTime()) {
-        msg += "\n filepath: " + m_filePath.string() + " datetime mismatches";
-        return false;
+      if (m_modifiedDateTime != old.modifiedDateTime()) {
+        messages.push_back("filepath: " + m_filePath.string() + " datetime changed from " + old.modifiedDateTime() + " to " + m_modifiedDateTime);
+        isDirty = true;
       }
     } else {
-      // if file role is not empty, than we cannot rely on filepath or modified datetime data, and must check content hash itself
-      // Note: this case is valid for decrypted vpr.xml in tmp folder, which generates each time. 
-      if (m_contentHash != rhs.contentHash()) {
-        msg += "\n role:" + m_role + " for file " + m_filePath.string() + " mismatches";
-        return false;
+      // file role is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
+      // for such files we cannot check file modification time, and needs to rely on the content hash, which is slower but robust.
+      if (m_contentHash != old.contentHash()) {
+        messages.push_back("file role:" + m_role + "content hash changed from " + old.contentHash() + " to " + contentHash());
+        isDirty = true;
       }
     }
 
-    return true;
+    return !isDirty;
   }
 
 private:
@@ -90,31 +91,30 @@ public:
       return thisClean == rhsClean;
   }
 
-  bool matches(const CommandWrapper& rhs, std::string& msg) {
-    if (string() != rhs.string()) {
-      // todo: fill message of diff
+  bool compareWithOld(const CommandWrapper& old, std::vector<std::string>& messages) {
+    if (!areArgumentsMatches(old.arguments(), arguments(), messages)) {
       return false;
     }
-    return compareFiles(files(), rhs.files(), msg);
+    if (!areFileContentsMatches(old.files(), files(), messages)) {
+      return false;
+    }
+    return true;
   }
 
   bool empty() const { return m_string.empty(); }
 
   const std::string& string() const { return m_string; }
-  const std::map<std::string, FileIdentity> files() const { return m_files; }
+  const std::unordered_map<std::string, FileIdentity>& files() const { return m_files; }
+  const std::unordered_map<std::string, std::string>& arguments() const { return m_arguments; }
 
-  void append(const std::string& parameter, const std::string& value) {
-    appendArgument(parameter + " " + value);
-  }
-
-  void append(const std::string& parameter) {
-    appendArgument(parameter);
+  void append(const std::string& parameter, const std::string& value = "") {
+    appendArgument(parameter, value);
   }
 
   void appendFile(const std::string& filePath)=delete;
   void appendFile(const std::filesystem::path& file, const std::string& role = "") {
+    appendArgument(file.string(), "");
     handleFile(file, role);
-    appendArgument(file.string());
   }
   // void watchFiles(const std::vector<std::filesystem::path>& files) {
   //   for (const std::filesystem::path& file: files) {
@@ -130,50 +130,60 @@ public:
 
   void appendFile(const std::string& parameter, const std::string& file)=delete;
   void appendFile(const std::string& parameter, const std::filesystem::path& file, const std::string& role = "") {
+    appendArgument(parameter, file.string());
     handleFile(file, role);
-    appendArgument(parameter + " "  + file.string());
   }
 
-  void prepend(const std::string& parameter, const std::string& value) {
-    prependArgument(parameter + " " + value);
+  void prepend(const std::string& parameter, const std::string& value = "") {
+    prependArgument(parameter, value);
   }
   
-  void prepend(const std::string& parameter) {
-    prependArgument(parameter);
-  }
-
   void prependFile(const std::string& file)=delete;
   void prependFile(const std::filesystem::path& file, const std::string& role = "") {
+    prependArgument(file.string(), "");
     handleFile(file, role);
-    prependArgument(file.string());
   }
 
   void prependFile(const std::string& parameter, const std::string& file)=delete;
   void prependFile(const std::string& parameter, const std::filesystem::path& file, const std::string& role) {
+    prependArgument(parameter, file.string());
     handleFile(file, role);
-    prependArgument(parameter + "_"  + file.string());
   }
 
-  bool isValid() const { return !m_string.empty(); }
+  //bool isValid() const { return !m_string.empty(); }
 
 private:
-  std::map<std::string, FileIdentity> m_files;
+  std::unordered_map<std::string, std::string> m_arguments;
+  std::unordered_map<std::string, FileIdentity> m_files;
   //std::set<std::filesystem::path> m_watchFiles;
   std::string m_string;
 
-  void appendArgument(const std::string& arg) {
+  void appendArgument(const std::string& param, const std::string& val) {
+    handleArgument(param, val);
     if (!m_string.empty() && m_string.back() != ' ') {
         m_string += ' ';
     }
-    m_string += arg;
+    m_string += param;
+    if (!val.empty()) {
+      m_string += ' ' + val;
+    }
   }
 
-  void prependArgument(const std::string& arg) {
+  void prependArgument(const std::string& param, const std::string& val) {
+    handleArgument(param, val);
+    std::string arg{param};
+    if (!val.empty()) {
+      arg += ' ' + val;
+    }
     if (!m_string.empty() && m_string.front() != ' ') {
-        m_string = arg + " " + m_string;
+        m_string = arg + ' ' + m_string;
     } else {
         m_string = arg + m_string;
     }
+  }
+
+  void handleArgument(const std::string& arg, const std::string& val) {
+    m_arguments[arg] = val;
   }
 
   void handleFile(const std::filesystem::path& file, const std::string& role) {
@@ -181,43 +191,45 @@ private:
     m_files[key] = FileIdentity{file, role};
   }
 
-  bool compareFiles(const std::map<std::string, FileIdentity>& filesMap1, const std::map<std::string, FileIdentity>& filesMap2, std::string& msg) {
-    std::unordered_set<std::string> keyDiff = getSymmetricKeyDifference(filesMap1, filesMap2);
-    if (!keyDiff.empty()) {
-      msg = "changes in following files: " + StringUtils::toString(keyDiff);
-      return false;
-    }
+  bool areArgumentsMatches(
+    const std::unordered_map<std::string, std::string>& argsOld, 
+    const std::unordered_map<std::string, std::string>& argsNew, 
+    std::vector<std::string>& messages) const 
+  {
+    bool isDirty = false;
 
-    for (const auto& [key, fileIdentity]: filesMap1) {
-      const auto it = filesMap2.find(key);
-      if (it != filesMap2.end()) {
-        if (!fileIdentity.matches(it->second, msg)) {
-          return false;
+    for (const auto& [keyNew, valNew]: argsNew) {
+      auto itOld = argsOld.find(keyNew);
+      if (itOld != argsOld.end()) {
+        const std::string& valOld = itOld->second;
+        if (valNew != valOld) {
+          messages.push_back("value for parameter [" + keyNew + "], changed from [" + valOld + "] to [" + valNew + "]");
+          isDirty = true;
         }
       }
     }
 
-    return true;
+    return !isDirty;
   }
 
-std::unordered_set<std::string> getSymmetricKeyDifference(const std::map<std::string, FileIdentity>& a, const std::map<std::string, FileIdentity>& b) 
-{
-  std::unordered_set<std::string> diff;
+  bool areFileContentsMatches(
+    const std::unordered_map<std::string, FileIdentity>& filesOld, 
+    const std::unordered_map<std::string, FileIdentity>& filesNew, 
+    std::vector<std::string>& messages) 
+  {
+    bool isDirty = false;
 
-  for (const auto& pair : a) {
-    if (b.find(pair.first) == b.end()) {
-      diff.insert(pair.first);
+    for (const auto& [keyNew, fileIdentityNew]: filesNew) {
+      auto itOld = filesOld.find(keyNew);
+      if (itOld != filesOld.end()) {
+        const FileIdentity& fileIdentityOld = itOld->second;
+        if (!fileIdentityNew.compareWithOld(fileIdentityOld, messages)) {
+          isDirty = true;
+        }
+      }
     }
+    return !isDirty;
   }
-
-  for (const auto& pair : b) {
-    if (a.find(pair.first) == a.end()) {
-      diff.insert(pair.first);
-    }
-  }
-
-  return diff;
-}
 
 };
 using CommandWrapperPtr = std::shared_ptr<CommandWrapper>;
