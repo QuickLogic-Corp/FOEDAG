@@ -51,7 +51,7 @@ struct DiffParameter: public MParameter {
 struct DiffFile {
   std::string file;
   std::string criteria;
-  std::string oldValue;
+  std::string prevValue;
   std::string value;
 };
 
