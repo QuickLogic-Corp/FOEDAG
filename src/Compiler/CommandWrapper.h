@@ -107,7 +107,7 @@ public:
   const std::string& contentHash() const { return m_contentHash; }
   const std::string& modifiedDateTime() const { return m_modifiedDateTime; }
 
-  bool compareWithOld(const FileIdentity& old, const DiffCommandPtr& diff) const {
+  bool compare(const FileIdentity& old, const DiffCommandPtr& diff) const {
     bool isDirty = false;
     if (m_role.empty()) {
       if (m_modifiedDateTime != old.modifiedDateTime()) {
@@ -148,14 +148,11 @@ public:
       return thisClean == rhsClean;
   }
 
-  bool compareWithOld(const CommandWrapper& old, const DiffCommandPtr& diff) {
-    if (!areArgumentsMatches(old.arguments(), arguments(), diff)) {
-      return false;
-    }
-    if (!areFileContentsMatches(old.files(), files(), diff)) {
-      return false;
-    }
-    return true;
+  DiffCommandPtr compare(const CommandWrapper& old) {
+    DiffCommandPtr diff = std::make_shared<DiffCommand>();
+    compareArguments(old.arguments(), arguments(), diff);
+    compareFiles(old.files(), files(), diff);
+    return diff;
   }
 
   bool empty() const { return m_string.empty(); }
@@ -246,13 +243,11 @@ private:
     m_files[key] = FileIdentity{file, role};
   }
 
-  bool areArgumentsMatches(
+  void compareArguments(
     const std::unordered_map<std::string, std::string>& argsOld, 
     const std::unordered_map<std::string, std::string>& argsNew, 
     const DiffCommandPtr& diff) const 
   {
-    bool isDirty = false;
-
     for (const auto& [keyNew, valNew]: argsNew) {
       auto itOld = argsOld.find(keyNew);
       if (itOld != argsOld.end()) {
@@ -260,12 +255,10 @@ private:
         const std::string& valOld = itOld->second;
         if (valNew != valOld) {
           diff->addChanged(keyNew, valOld, valNew);
-          isDirty = true;
         }
       } else {
         // detect added parameters
         diff->addAdded(keyNew, valNew);
-        isDirty = true;
       }
     }
 
@@ -274,30 +267,22 @@ private:
       auto itNew = argsNew.find(keyOld);
       if (itNew == argsNew.end()) {
         diff->addRemoved(keyOld, valOld);
-        isDirty = true;
       }
     }
-
-    return !isDirty;
   }
 
-  bool areFileContentsMatches(
+  void compareFiles(
     const std::unordered_map<std::string, FileIdentity>& filesOld, 
     const std::unordered_map<std::string, FileIdentity>& filesNew, 
     const DiffCommandPtr& diff) 
   {
-    bool isDirty = false;
-
     for (const auto& [keyNew, fileIdentityNew]: filesNew) {
       auto itOld = filesOld.find(keyNew);
       if (itOld != filesOld.end()) {
         const FileIdentity& fileIdentityOld = itOld->second;
-        if (!fileIdentityNew.compareWithOld(fileIdentityOld, diff)) {
-          isDirty = true;
-        }
+        fileIdentityNew.compare(fileIdentityOld, diff);
       }
     }
-    return !isDirty;
   }
 
 };

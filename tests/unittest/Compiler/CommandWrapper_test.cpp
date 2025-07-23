@@ -53,7 +53,6 @@ TEST(CommandWrapper, two_matches)
     command2.appendFile("--file1", std::filesystem::path{"filepath1"});
     command2.appendFile(std::filesystem::path{"filepath2"});
 
-    DiffCommandPtr diff = std::make_shared<DiffCommand>();
-    EXPECT_TRUE(command1.compareWithOld(command2, diff));
+    DiffCommandPtr diff = command1.compare(command2);
     EXPECT_TRUE(diff->empty());
 }

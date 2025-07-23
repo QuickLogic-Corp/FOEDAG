@@ -28,14 +28,12 @@ namespace FOEDAG {
 
 class TaskCompilationStateManager {
   DiffCommandPtr matches(int taskId, const CommandWrapperPtr& command) const {
-    DiffCommandPtr diff = std::make_shared<DiffCommand>();
     auto it = m_taskCommandsMap.find(taskId);
     if (it == m_taskCommandsMap.end()) {
-      return diff;
+      return std::make_shared<DiffCommand>();
     }
     const CommandWrapper& commandOld = *it->second;
-    command->compareWithOld(commandOld, diff);
-    return diff;
+    return command->compare(commandOld);
   }
 
   void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
