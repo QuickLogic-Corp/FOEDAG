@@ -1,0 +1,59 @@
+/*
+Copyright 2022 The Foedag team
+
+GPL License
+
+Copyright (c) 2022 The Open-Source FPGA Foundation
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include "Compiler/CommandWrapper.h"
+
+#include "gtest/gtest.h"
+
+using namespace FOEDAG;
+
+TEST(CommandWrapper, to_string)
+{
+    CommandWrapper command{"cmd"};
+    command.append("--p1", "v1");
+    command.append("--p2");
+    command.append("--p3", "v3");
+    command.appendFile("--file1", std::filesystem::path{"filepath1"});
+    command.appendFile(std::filesystem::path{"filepath2"});
+
+    EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 --file1 filepath1 filepath2", command.string());
+}
+
+TEST(CommandWrapper, two_matches)
+{
+    CommandWrapper command1{"cmd"};
+    command1.append("--p1", "v1");
+    command1.append("--p2");
+    command1.append("--p3", "v3");
+    command1.appendFile("--file1", std::filesystem::path{"filepath1"});
+    command1.appendFile(std::filesystem::path{"filepath2"});
+
+    CommandWrapper command2{"cmd"};
+    command2.append("--p1", "v1");
+    command2.append("--p2");
+    command2.append("--p3", "v3");
+    command2.appendFile("--file1", std::filesystem::path{"filepath1"});
+    command2.appendFile(std::filesystem::path{"filepath2"});
+
+    DiffCommandPtr diff = std::make_shared<DiffCommand>();
+    EXPECT_TRUE(command1.compareWithOld(command2, diff));
+    EXPECT_TRUE(diff->empty());
+}

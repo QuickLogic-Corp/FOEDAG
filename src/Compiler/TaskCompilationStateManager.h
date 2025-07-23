@@ -27,13 +27,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 namespace FOEDAG {
 
 class TaskCompilationStateManager {
-  bool matches(int taskId, const CommandWrapperPtr& command, std::vector<std::string>& messages) const {
+  DiffCommandPtr matches(int taskId, const CommandWrapperPtr& command) const {
+    DiffCommandPtr diff = std::make_shared<DiffCommand>();
     auto it = m_taskCommandsMap.find(taskId);
     if (it == m_taskCommandsMap.end()) {
-      return false;
+      return diff;
     }
     const CommandWrapper& commandOld = *it->second;
-    return command->compareWithOld(commandOld, messages);
+    command->compareWithOld(commandOld, diff);
+    return diff;
   }
 
   void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
