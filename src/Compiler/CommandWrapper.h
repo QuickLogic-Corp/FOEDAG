@@ -93,11 +93,12 @@ using DiffCommandPtr = std::shared_ptr<DiffCommand>;
 class FileIdentity {
 public:
   FileIdentity()=default;
-  FileIdentity(const std::filesystem::path& filePath, const std::string& role): m_filePath(filePath), m_role(role) {
+  FileIdentity(const std::filesystem::path& filePath, const std::string& mask): m_filePath(filePath), m_mask(mask) {
     if (std::filesystem::exists(filePath)) {
-      if (role.empty()) {
+      if (mask.empty()) {
         m_modifiedDateTime = std::to_string(FileUtils::Mtime(filePath));
       } else {
+        // when filepath masked we rely on context hash
         m_contentHash = FileUtils::calcHashFileContent(filePath);
       }
     }
@@ -108,16 +109,16 @@ public:
 
   bool compare(const FileIdentity& old, const DiffCommandPtr& diff) const {
     bool isDirty = false;
-    if (m_role.empty()) {
+    if (m_mask.empty()) {
       if (m_modifiedDateTime != old.modifiedDateTime()) {
         diff->addFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
         isDirty = true;
       }
     } else {
-      // file role is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
+      // file mask is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
       // for such files we cannot check file modification time, and needs to rely on the content hash, which is slower but robust.
       if (m_contentHash != old.contentHash()) {
-        diff->addFile(m_role, "hash", old.contentHash(), contentHash());
+        diff->addFile(m_mask, "hash", old.contentHash(), contentHash());
         isDirty = true;
       }
     }
@@ -127,7 +128,7 @@ public:
 
 private:
   std::filesystem::path m_filePath;
-  std::string m_role;
+  std::string m_mask;
   std::string m_modifiedDateTime;
   std::string m_contentHash;
 };
@@ -140,12 +141,14 @@ public:
     append(command);
   }
 
+// tmp function fused while migration
   bool compareIgnoringTempPath(const std::string& rhs) {
       static std::regex tmpRegex(R"(\/tmp\/\S+)");
       std::string thisClean = std::regex_replace(string(), tmpRegex, "/tmp/PLACEHOLDER");
       std::string rhsClean = std::regex_replace(rhs, tmpRegex, "/tmp/PLACEHOLDER");
       return thisClean == rhsClean;
   }
+  //
 
   DiffCommandPtr compare(const CommandWrapper& old) {
     DiffCommandPtr diff = std::make_shared<DiffCommand>();
@@ -165,26 +168,14 @@ public:
   }
 
   void appendFile(const std::string& filePath)=delete;
-  void appendFile(const std::filesystem::path& file, const std::string& role = "") {
-    appendArgument(file.string(), "");
-    handleFile(file, role);
+  void appendFile(const std::filesystem::path& file, const std::string& mask = "") {
+    appendArgument(file.string(), "", mask);
+    handleFile(file, mask);
   }
-  // void watchFiles(const std::vector<std::filesystem::path>& files) {
-  //   for (const std::filesystem::path& file: files) {
-  //     watchFile(file);
-  //   }
-  // }
-  // void watchFile(const std::filesystem::path& file) {
-  //   m_watchFiles.push_back(file);
-  //   // Note: We do not add this file directly to the command-line arguments.
-  //   // It may be indirectly used within a script file, and the script file itself 
-  //   // is already included as a command-line argument.    
-  // }
-
   void appendFile(const std::string& parameter, const std::string& file)=delete;
-  void appendFile(const std::string& parameter, const std::filesystem::path& file, const std::string& role = "") {
-    appendArgument(parameter, file.string());
-    handleFile(file, role);
+  void appendFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
+    appendArgument(parameter, file.string(), mask);
+    handleFile(file, mask);
   }
 
   void prepend(const std::string& parameter, const std::string& value = "") {
@@ -192,27 +183,26 @@ public:
   }
   
   void prependFile(const std::string& file)=delete;
-  void prependFile(const std::filesystem::path& file, const std::string& role = "") {
-    prependArgument(file.string(), "");
-    handleFile(file, role);
+  void prependFile(const std::filesystem::path& file, const std::string& mask = "") {
+    prependArgument(file.string(), "", mask);
+    handleFile(file, mask);
   }
 
   void prependFile(const std::string& parameter, const std::string& file)=delete;
-  void prependFile(const std::string& parameter, const std::filesystem::path& file, const std::string& role) {
-    prependArgument(parameter, file.string());
-    handleFile(file, role);
+  void prependFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask) {
+    prependArgument(parameter, file.string(), mask);
+    handleFile(file, mask);
   }
 
 private:
   std::unordered_map<std::string, std::string> m_arguments;
   std::unordered_map<std::string, FileIdentity> m_files;
-  //std::set<std::filesystem::path> m_watchFiles;
   std::string m_string;
 
-  void appendArgument(const std::string& param, const std::string& val) {
-    handleArgument(param, val);
+  void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
+    handleArgument(param, val, mask);
     if (!m_string.empty() && m_string.back() != ' ') {
-        m_string += ' ';
+      m_string += ' ';
     }
     m_string += param;
     if (!val.empty()) {
@@ -220,8 +210,8 @@ private:
     }
   }
 
-  void prependArgument(const std::string& param, const std::string& val) {
-    handleArgument(param, val);
+  void prependArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
+    handleArgument(param, val, mask);
     std::string arg{param};
     if (!val.empty()) {
       arg += ' ' + val;
@@ -233,13 +223,23 @@ private:
     }
   }
 
-  void handleArgument(const std::string& arg, const std::string& val) {
-    m_arguments[arg] = val;
+  void handleArgument(const std::string& param, const std::string& val, const std::string& mask) {
+    if (mask.empty()) {
+      m_arguments[param] = val;
+    } else {
+      if (val.empty()) {
+        //then we mask param 
+        m_arguments[mask] = val;
+      } else {
+        // we mask value of param
+        m_arguments[param] = mask;
+      }
+    }
   }
 
-  void handleFile(const std::filesystem::path& file, const std::string& role) {
-    std::string key = role.empty()? file.string(): role;
-    m_files[key] = FileIdentity{file, role};
+  void handleFile(const std::filesystem::path& file, const std::string& mask) {
+    std::string key = mask.empty()? file.string(): mask;
+    m_files[key] = FileIdentity{file, mask};
   }
 
   void compareArguments(

@@ -56,6 +56,8 @@ TEST(CommandWrapper, to_string)
 {
     ScopedFile filePath1{std::filesystem::path{"filepath1"}, "content for filepath1..."};
     ScopedFile filePath2{std::filesystem::path{"filepath2"}, "content for filepath2..."};
+    ScopedFile filePath3{std::filesystem::path{"filepath3"}, "content for filepath3..."};
+    ScopedFile filePath4{std::filesystem::path{"filepath4"}, "content for filepath4..."};
 
     CommandWrapper command{"cmd"};
     command.append("--p1", "v1");
@@ -63,8 +65,10 @@ TEST(CommandWrapper, to_string)
     command.append("--p3", "v3");
     command.appendFile("--file1", filePath1.filePath());
     command.appendFile(filePath2.filePath());
+    command.appendFile(filePath3.filePath(), "arch");
+    command.appendFile("--file4", filePath4.filePath(), "arch");
 
-    EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 --file1 filepath1 filepath2", command.string());
+    EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 --file1 filepath1 filepath2 filepath3 --file4 filepath4", command.string());
 }
 
 TEST(CommandWrapper, compare_matches)
@@ -314,5 +318,31 @@ TEST(CommandWrapper, file_content_changed)
     EXPECT_TRUE(diff->changed().empty());
     EXPECT_TRUE(diff->added().empty());
     EXPECT_TRUE(diff->removed().empty());
+}
 
+TEST(CommandWrapper, role_based_file) 
+{
+    // in this particular case we rely that file has specific role, filepath could be different, but content expected to be the same
+    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content..."};
+    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content..."};
+
+    CommandWrapper command1{"cmd"};
+    command1.append("--p1", "v1");
+    command1.append("--p2");
+    command1.append("--p3", "v3");
+    command1.appendFile(filePath1.filePath(), "arch");
+
+    CommandWrapper command2{"cmd"};
+    command2.append("--p1", "v1");
+    command2.append("--p2");
+    command2.append("--p3", "v3");
+    command2.appendFile(filePath2.filePath(), "arch");
+
+    DiffCommandPtr diff = command2.compare(command1);
+    EXPECT_TRUE(diff->empty());
+
+    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->changed().empty());
+    EXPECT_TRUE(diff->added().empty());
+    EXPECT_TRUE(diff->removed().empty());
 }
