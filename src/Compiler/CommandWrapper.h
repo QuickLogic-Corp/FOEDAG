@@ -31,7 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
-
 namespace FOEDAG {
 
 struct MParameter {
@@ -97,7 +96,7 @@ public:
   FileIdentity(const std::filesystem::path& filePath, const std::string& role): m_filePath(filePath), m_role(role) {
     if (std::filesystem::exists(filePath)) {
       if (role.empty()) {
-        m_modifiedDateTime = FileUtils::Mtime(filePath);
+        m_modifiedDateTime = std::to_string(FileUtils::Mtime(filePath));
       } else {
         m_contentHash = FileUtils::calcHashFileContent(filePath);
       }
