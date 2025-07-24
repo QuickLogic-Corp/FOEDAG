@@ -57,24 +57,30 @@ struct DiffFile {
 
 struct DiffCommand {
 public:
-  const std::vector<MParameter>& added() const { return m_added; }
-  const std::vector<MParameter>& removed() const { return m_removed; }
-  const std::vector<DiffParameter>& changed() const { return m_changed; }
-  const std::vector<DiffFile>& files() const { return m_files; }
+  const std::vector<MParameter>& addedParameters() const { return m_addedParameters; }
+  const std::vector<MParameter>& removedParameters() const { return m_removedParameters; }
+  const std::vector<DiffParameter>& changedParameters() const { return m_changedParameters; }
+  const std::vector<DiffFile>& diffFiles() const { return m_diffFiles; }
 
-  bool empty() const { return m_added.empty() && m_removed.empty() && m_changed.empty() && m_files.empty(); }
+  bool empty() const { 
+    return \
+    m_addedParameters.empty() 
+  && m_removedParameters.empty() 
+  && m_changedParameters.empty() 
+  && m_diffFiles.empty(); 
+  }
 
-  void addAdded(const std::string& param, const std::string& value) {
-    m_added.emplace_back(MParameter{param, value});
+  void addAddedParameter(const std::string& param, const std::string& value) {
+    m_addedParameters.emplace_back(MParameter{param, value});
   }
-  void addRemoved(const std::string& param, const std::string& value) {
-    m_removed.emplace_back(MParameter{param, value});
+  void addRemovedParameter(const std::string& param, const std::string& value) {
+    m_removedParameters.emplace_back(MParameter{param, value});
   }
-  void addChanged(const std::string& param, const std::string& fromValue, const std::string& toValue) {
-    m_changed.emplace_back(DiffParameter{param, fromValue, toValue});
+  void addChangedParameter(const std::string& param, const std::string& fromValue, const std::string& toValue) {
+    m_changedParameters.emplace_back(DiffParameter{param, fromValue, toValue});
   }
-  void addFile(const std::string& file, const std::string& criteria, const std::string& oldValue, const std::string& newValue) {
-    m_files.emplace_back(DiffFile{file, criteria, oldValue, newValue});
+  void addDiffFile(const std::string& file, const std::string& criteria, const std::string& oldValue, const std::string& newValue) {
+    m_diffFiles.emplace_back(DiffFile{file, criteria, oldValue, newValue});
   }
 
   //messages.push_back("file role:" + m_role + "content hash changed from " + old.contentHash() + " to " + contentHash());
@@ -84,10 +90,10 @@ public:
   //messages.push_back("parameter [" + keyOld + "]=" + valOld + " was deleted");
 
 private:
-  std::vector<MParameter> m_added;
-  std::vector<MParameter> m_removed;
-  std::vector<DiffParameter> m_changed;
-  std::vector<DiffFile> m_files;
+  std::vector<MParameter> m_addedParameters;
+  std::vector<MParameter> m_removedParameters;
+  std::vector<DiffParameter> m_changedParameters;
+  std::vector<DiffFile> m_diffFiles;
 };
 using DiffCommandPtr = std::shared_ptr<DiffCommand>;
 
@@ -112,14 +118,14 @@ public:
     bool isDirty = false;
     if (m_mask.empty()) {
       if (m_modifiedDateTime != old.modifiedDateTime()) {
-        diff->addFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
+        diff->addDiffFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
         isDirty = true;
       }
     } else {
       // file mask is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
       // for such files we cannot check file modification time, and needs to rely on the content hash, which is slower but robust.
       if (m_contentHash != old.contentHash()) {
-        diff->addFile(m_mask, "hash", old.contentHash(), contentHash());
+        diff->addDiffFile(m_mask, "hash", old.contentHash(), contentHash());
         isDirty = true;
       }
     }
@@ -287,11 +293,11 @@ private:
         // detect changed parameters
         const std::string& valOld = itOld->second;
         if (valNew != valOld) {
-          diff->addChanged(keyNew, valOld, valNew);
+          diff->addChangedParameter(keyNew, valOld, valNew);
         }
       } else {
         // detect added parameters
-        diff->addAdded(keyNew, valNew);
+        diff->addAddedParameter(keyNew, valNew);
       }
     }
 
@@ -299,7 +305,7 @@ private:
     for (const auto& [keyOld, valOld]: argsOld) {
       auto itNew = argsNew.find(keyOld);
       if (itNew == argsNew.end()) {
-        diff->addRemoved(keyOld, valOld);
+        diff->addRemovedParameter(keyOld, valOld);
       }
     }
   }

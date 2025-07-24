@@ -115,14 +115,14 @@ TEST(CommandWrapper, remove_argument)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->removed().size(), 1);
+    EXPECT_EQ(diff->removedParameters().size(), 1);
 
-    EXPECT_EQ(diff->removed()[0].parameter, "--p1");
-    EXPECT_EQ(diff->removed()[0].value, "v1");
+    EXPECT_EQ(diff->removedParameters()[0].parameter, "--p1");
+    EXPECT_EQ(diff->removedParameters()[0].value, "v1");
 
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
 }
 
 TEST(CommandWrapper, remove_argument_file)
@@ -146,13 +146,13 @@ TEST(CommandWrapper, remove_argument_file)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->removed().size(), 1);
-    EXPECT_EQ(diff->removed()[0].parameter, "--file1");
-    EXPECT_EQ(diff->removed()[0].value, "filepath1");
+    EXPECT_EQ(diff->removedParameters().size(), 1);
+    EXPECT_EQ(diff->removedParameters()[0].parameter, "--file1");
+    EXPECT_EQ(diff->removedParameters()[0].value, "filepath1");
 
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
 }
 
 TEST(CommandWrapper, add_argument)
@@ -178,13 +178,13 @@ TEST(CommandWrapper, add_argument)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->added().size(), 1);
-    EXPECT_EQ(diff->added()[0].parameter, "--p4");
-    EXPECT_EQ(diff->added()[0].value, "v4");
+    EXPECT_EQ(diff->addedParameters().size(), 1);
+    EXPECT_EQ(diff->addedParameters()[0].parameter, "--p4");
+    EXPECT_EQ(diff->addedParameters()[0].value, "v4");
 
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->removed().empty());
-    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
 }
 
 TEST(CommandWrapper, add_argument_file)
@@ -208,13 +208,13 @@ TEST(CommandWrapper, add_argument_file)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->added().size(), 1);
-    EXPECT_EQ(diff->added()[0].parameter, "filepath2");
-    EXPECT_EQ(diff->added()[0].value, "");
+    EXPECT_EQ(diff->addedParameters().size(), 1);
+    EXPECT_EQ(diff->addedParameters()[0].parameter, "filepath2");
+    EXPECT_EQ(diff->addedParameters()[0].value, "");
 
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->removed().empty());
-    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
 }
 
 TEST(CommandWrapper, change_argument)
@@ -239,14 +239,14 @@ TEST(CommandWrapper, change_argument)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->changed().size(), 1);
-    EXPECT_EQ(diff->changed()[0].parameter, "--p3");
-    EXPECT_EQ(diff->changed()[0].prevValue, "v3");
-    EXPECT_EQ(diff->changed()[0].value, "v3_NEW");
+    EXPECT_EQ(diff->changedParameters().size(), 1);
+    EXPECT_EQ(diff->changedParameters()[0].parameter, "--p3");
+    EXPECT_EQ(diff->changedParameters()[0].prevValue, "v3");
+    EXPECT_EQ(diff->changedParameters()[0].value, "v3_NEW");
 
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->removed().empty());
-    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
 }
 
 TEST(CommandWrapper, change_argument_file)
@@ -271,14 +271,14 @@ TEST(CommandWrapper, change_argument_file)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->changed().size(), 1);
-    EXPECT_EQ(diff->changed()[0].parameter, "--file1");
-    EXPECT_EQ(diff->changed()[0].prevValue, "filepath1");
-    EXPECT_EQ(diff->changed()[0].value, "filepath1_NEW");
+    EXPECT_EQ(diff->changedParameters().size(), 1);
+    EXPECT_EQ(diff->changedParameters()[0].parameter, "--file1");
+    EXPECT_EQ(diff->changedParameters()[0].prevValue, "filepath1");
+    EXPECT_EQ(diff->changedParameters()[0].value, "filepath1_NEW");
 
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->removed().empty());
-    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
 }
 
 TEST(CommandWrapper, file_content_changed)
@@ -308,16 +308,16 @@ TEST(CommandWrapper, file_content_changed)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(!diff->empty());
 
-    EXPECT_EQ(diff->files().size(), 1);
+    EXPECT_EQ(diff->diffFiles().size(), 1);
 
-    EXPECT_EQ(diff->files().begin()->file, filePath1.filePath().string());
-    EXPECT_EQ(diff->files().begin()->criteria, "datetime");
-    EXPECT_EQ(diff->files().begin()->prevValue, filePath1CreationTimeStr);
-    EXPECT_EQ(diff->files().begin()->value, filePath1ModificationTimeStr);
+    EXPECT_EQ(diff->diffFiles().begin()->file, filePath1.filePath().string());
+    EXPECT_EQ(diff->diffFiles().begin()->criteria, "datetime");
+    EXPECT_EQ(diff->diffFiles().begin()->prevValue, filePath1CreationTimeStr);
+    EXPECT_EQ(diff->diffFiles().begin()->value, filePath1ModificationTimeStr);
 
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->removed().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
 }
 
 TEST(CommandWrapper, role_based_file) 
@@ -341,10 +341,10 @@ TEST(CommandWrapper, role_based_file)
     DiffCommandPtr diff = command2.compare(command1);
     EXPECT_TRUE(diff->empty());
 
-    EXPECT_TRUE(diff->files().empty());
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->removed().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
 }
 
 TEST(CommandWrapper, serialization) 
@@ -369,8 +369,8 @@ TEST(CommandWrapper, serialization)
     DiffCommandPtr diff = commandRestored.compare(commandOrig);
     EXPECT_TRUE(diff->empty());
 
-    EXPECT_TRUE(diff->files().empty());
-    EXPECT_TRUE(diff->changed().empty());
-    EXPECT_TRUE(diff->added().empty());
-    EXPECT_TRUE(diff->removed().empty());
+    EXPECT_TRUE(diff->diffFiles().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
 }
