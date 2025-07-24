@@ -346,3 +346,31 @@ TEST(CommandWrapper, role_based_file)
     EXPECT_TRUE(diff->added().empty());
     EXPECT_TRUE(diff->removed().empty());
 }
+
+TEST(CommandWrapper, serialization) 
+{
+    // in this particular case we rely that file has specific role, filepath could be different, but content expected to be the same
+    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content..."};
+    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content..."};
+
+    CommandWrapper commandOrig{"cmd"};
+    commandOrig.append("--p1", "v1");
+    commandOrig.append("--p2");
+    commandOrig.append("--p3", "v3");
+    commandOrig.appendFile(filePath1.filePath(), "arch");
+    commandOrig.appendFile("--file2", filePath2.filePath());
+
+    // Serialize
+    nlohmann::json json = commandOrig;
+
+    // Deserialize
+    CommandWrapper commandRestored = json.get<CommandWrapper>();
+
+    DiffCommandPtr diff = commandRestored.compare(commandOrig);
+    EXPECT_TRUE(diff->empty());
+
+    EXPECT_TRUE(diff->files().empty());
+    EXPECT_TRUE(diff->changed().empty());
+    EXPECT_TRUE(diff->added().empty());
+    EXPECT_TRUE(diff->removed().empty());
+}
