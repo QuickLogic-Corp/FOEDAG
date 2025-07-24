@@ -24,6 +24,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
+#include <nlohmann_json/json.hpp>
+
 #include <string>
 #include <unordered_set>
 #include <filesystem>
@@ -40,8 +42,7 @@ struct MParameter {
 struct DiffParameter: public MParameter {
   DiffParameter(const std::string& param, const std::string& fromValue, const std::string& toValue):
   MParameter{param, toValue}, 
-  prevValue(fromValue)
-  {
+  prevValue(fromValue) {
 
   }
   std::string prevValue;
@@ -126,6 +127,25 @@ public:
     return !isDirty;
   }
 
+  friend void to_json(nlohmann::json& json, const FileIdentity& obj) {
+    json = nlohmann::json{
+      {"file_path", obj.m_filePath.string()},
+      {"mask", obj.m_mask},
+      {"modified_datetime", obj.m_modifiedDateTime},
+      {"content_hash", obj.m_contentHash}
+    };
+  }
+
+  friend void from_json(const nlohmann::json& json, FileIdentity& obj) {
+    std::string pathStr;
+    json.at("file_path").get_to(pathStr);
+    obj.m_filePath = std::filesystem::path{pathStr};
+
+    json.at("mask").get_to(obj.m_mask);
+    json.at("modified_datetime").get_to(obj.m_modifiedDateTime);
+    json.at("content_hash").get_to(obj.m_contentHash);
+  }
+
 private:
   std::filesystem::path m_filePath;
   std::string m_mask;
@@ -192,6 +212,20 @@ public:
   void prependFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask) {
     prependArgument(parameter, file.string(), mask);
     handleFile(file, mask);
+  }
+
+  friend void to_json(nlohmann::json& json, const CommandWrapper& obj) {
+    json = nlohmann::json{
+      {"arguments", obj.m_arguments},
+      {"files", obj.m_files},
+      {"string", obj.m_string}
+    };
+  }
+
+  friend void from_json(const nlohmann::json& json, CommandWrapper& obj) {
+    json.at("arguments").get_to(obj.m_arguments);
+    json.at("files").get_to(obj.m_files);
+    json.at("string").get_to(obj.m_string);
   }
 
 private:
