@@ -43,6 +43,10 @@ public:
         FileUtils::WriteToFile(m_filePath, content);
     }
 
+    std::string hash() const {
+        return FileUtils::calcHashFileContent(m_filePath);
+    }
+
     ~ScopedFile() {
         FileUtils::removeFile(m_filePath);
     }
@@ -117,7 +121,7 @@ TEST(CommandWrapper, remove_argument)
 
     EXPECT_EQ(diff->removedParameters().size(), 1);
 
-    EXPECT_EQ(diff->removedParameters()[0].parameter, "--p1");
+    EXPECT_EQ(diff->removedParameters()[0].name, "--p1");
     EXPECT_EQ(diff->removedParameters()[0].value, "v1");
 
     EXPECT_TRUE(diff->changedParameters().empty());
@@ -147,7 +151,7 @@ TEST(CommandWrapper, remove_argument_file)
     EXPECT_TRUE(!diff->empty());
 
     EXPECT_EQ(diff->removedParameters().size(), 1);
-    EXPECT_EQ(diff->removedParameters()[0].parameter, "--file1");
+    EXPECT_EQ(diff->removedParameters()[0].name, "--file1");
     EXPECT_EQ(diff->removedParameters()[0].value, "filepath1");
 
     EXPECT_TRUE(diff->changedParameters().empty());
@@ -179,7 +183,7 @@ TEST(CommandWrapper, add_argument)
     EXPECT_TRUE(!diff->empty());
 
     EXPECT_EQ(diff->addedParameters().size(), 1);
-    EXPECT_EQ(diff->addedParameters()[0].parameter, "--p4");
+    EXPECT_EQ(diff->addedParameters()[0].name, "--p4");
     EXPECT_EQ(diff->addedParameters()[0].value, "v4");
 
     EXPECT_TRUE(diff->changedParameters().empty());
@@ -209,7 +213,7 @@ TEST(CommandWrapper, add_argument_file)
     EXPECT_TRUE(!diff->empty());
 
     EXPECT_EQ(diff->addedParameters().size(), 1);
-    EXPECT_EQ(diff->addedParameters()[0].parameter, "filepath2");
+    EXPECT_EQ(diff->addedParameters()[0].name, "filepath2");
     EXPECT_EQ(diff->addedParameters()[0].value, "");
 
     EXPECT_TRUE(diff->changedParameters().empty());
@@ -240,7 +244,7 @@ TEST(CommandWrapper, change_argument)
     EXPECT_TRUE(!diff->empty());
 
     EXPECT_EQ(diff->changedParameters().size(), 1);
-    EXPECT_EQ(diff->changedParameters()[0].parameter, "--p3");
+    EXPECT_EQ(diff->changedParameters()[0].name, "--p3");
     EXPECT_EQ(diff->changedParameters()[0].prevValue, "v3");
     EXPECT_EQ(diff->changedParameters()[0].value, "v3_NEW");
 
@@ -272,7 +276,7 @@ TEST(CommandWrapper, change_argument_file)
     EXPECT_TRUE(!diff->empty());
 
     EXPECT_EQ(diff->changedParameters().size(), 1);
-    EXPECT_EQ(diff->changedParameters()[0].parameter, "--file1");
+    EXPECT_EQ(diff->changedParameters()[0].name, "--file1");
     EXPECT_EQ(diff->changedParameters()[0].prevValue, "filepath1");
     EXPECT_EQ(diff->changedParameters()[0].value, "filepath1_NEW");
 
@@ -320,7 +324,7 @@ TEST(CommandWrapper, file_content_changed)
     EXPECT_TRUE(diff->removedParameters().empty());
 }
 
-TEST(CommandWrapper, role_based_file) 
+TEST(CommandWrapper, masked_files_matches) 
 {
     // in this particular case we rely that file has specific role, filepath could be different, but content expected to be the same
     ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content..."};
@@ -342,6 +346,38 @@ TEST(CommandWrapper, role_based_file)
     EXPECT_TRUE(diff->empty());
 
     EXPECT_TRUE(diff->diffFiles().empty());
+    EXPECT_TRUE(diff->changedParameters().empty());
+    EXPECT_TRUE(diff->addedParameters().empty());
+    EXPECT_TRUE(diff->removedParameters().empty());
+}
+
+TEST(CommandWrapper, masked_files_differ) 
+{
+    // in this particular case we rely that file has specific role, filepath could be different, but content expected to be the same
+    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "content 1..."};
+    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "content 2..."};
+
+    CommandWrapper command1{"cmd"};
+    command1.append("--p1", "v1");
+    command1.append("--p2");
+    command1.append("--p3", "v3");
+    command1.appendFile(filePath1.filePath(), "arch");
+
+    CommandWrapper command2{"cmd"};
+    command2.append("--p1", "v1");
+    command2.append("--p2");
+    command2.append("--p3", "v3");
+    command2.appendFile(filePath2.filePath(), "arch");
+
+    DiffCommandPtr diff = command2.compare(command1);
+    EXPECT_TRUE(!diff->empty());
+
+    EXPECT_EQ(diff->diffFiles().size(), 1);
+    EXPECT_EQ(diff->diffFiles().begin()->file, "arch");
+    EXPECT_EQ(diff->diffFiles().begin()->criteria, "hash");
+    EXPECT_EQ(diff->diffFiles().begin()->prevValue, filePath1.hash());
+    EXPECT_EQ(diff->diffFiles().begin()->value, filePath2.hash());
+
     EXPECT_TRUE(diff->changedParameters().empty());
     EXPECT_TRUE(diff->addedParameters().empty());
     EXPECT_TRUE(diff->removedParameters().empty());

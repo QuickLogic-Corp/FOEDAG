@@ -36,12 +36,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 namespace FOEDAG {
 
 struct MParameter {
-  std::string parameter;
+  std::string name;
   std::string value;
 };
 struct DiffParameter: public MParameter {
-  DiffParameter(const std::string& param, const std::string& fromValue, const std::string& toValue):
-  MParameter{param, toValue}, 
+  DiffParameter(const std::string& name, const std::string& fromValue, const std::string& toValue):
+  MParameter{name, toValue}, 
   prevValue(fromValue) {
 
   }
@@ -79,15 +79,35 @@ public:
   void addChangedParameter(const std::string& param, const std::string& fromValue, const std::string& toValue) {
     m_changedParameters.emplace_back(DiffParameter{param, fromValue, toValue});
   }
-  void addDiffFile(const std::string& file, const std::string& criteria, const std::string& oldValue, const std::string& newValue) {
-    m_diffFiles.emplace_back(DiffFile{file, criteria, oldValue, newValue});
+  void addDiffFile(const std::string& file, const std::string& criteria, const std::string& prevValue, const std::string& newValue) {
+    m_diffFiles.emplace_back(DiffFile{file, criteria, prevValue, newValue});
   }
 
-  //messages.push_back("file role:" + m_role + "content hash changed from " + old.contentHash() + " to " + contentHash());
-  //messages.push_back("filepath: " + m_filePath.string() + " datetime changed from " + old.modifiedDateTime() + " to " + m_modifiedDateTime);
-  //messages.push_back("value for parameter [" + keyNew + "], changed from [" + valOld + "] to [" + valNew + "]");
-  //messages.push_back("new parameter has been added [" + keyNew + "]=" + valNew);
-  //messages.push_back("parameter [" + keyOld + "]=" + valOld + " was deleted");
+  std::vector<std::string> log() const {
+    std::vector<std::string> messages;
+    for (const MParameter& param: m_addedParameters) {
+      if (param.value.empty()) {
+        messages.push_back("new parameter has been added [" + param.name + "]");
+      } else {
+        messages.push_back("new parameter has been added [" + param.name + "]=" + param.value);
+      }
+    }
+    for (const MParameter& param: m_removedParameters) {
+      if (param.value.empty()) {
+        messages.push_back("parameter [" + param.name + "]");
+      } else {
+        messages.push_back("parameter [" + param.name + "]=" + param.value + " was deleted");
+      }
+    }
+    for (const DiffParameter& param: m_changedParameters) {
+      messages.push_back("value for parameter [" + param.name + "], changed from [" + param.prevValue + "] to [" + param.value + "]");
+    }
+    for (const DiffFile& file: m_diffFiles) {
+      messages.push_back("filepath: " + file.file + " " + file.criteria + " changed from " + file.prevValue + " to " + file.value);
+    }
+
+    return messages;
+  }
 
 private:
   std::vector<MParameter> m_addedParameters;
