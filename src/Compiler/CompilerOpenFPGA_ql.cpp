@@ -4417,6 +4417,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     TimingAnalysisOpt(STAOpt::None);
     
     CommandWrapperPtr taCommand = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
+    if (!taCommand) {
+      return false;
+    }
+
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
     if (!taCommand->compareIgnoringTempPath(commandOld)) {
@@ -4427,11 +4431,19 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
+    if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
+      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
+      return true;
+    } else {
+      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "processed";
+    }
     const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
       return false;
+    } else {
+      m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
     }
     return true;
   }
@@ -4448,13 +4460,19 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     return true;
   }
 #endif // #if UPSTREAM_UNUSED
-  CommandWrapperPtr taCommand = std::make_shared<CommandWrapper>();
+  CommandWrapperPtr taCommand = nullptr; // ??
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
     CommandWrapperPtr command = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
     if (!command) {
       return false;
+    }
+    if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, command)) {
+      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
+      return true;
+    } else {
+      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "processed";
     }
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
@@ -4468,11 +4486,14 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
+
     int status = ExecuteAndMonitorSystemCommand(command->string());
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " timing analysis failed");
       return false;
+    } else {
+      m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, command);
     }
     // find files
     std::string libFileName =
@@ -4522,8 +4543,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     taCommand = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
     if(!taCommand) {
-        ErrorMessage("Base VPR Command is empty!");
-        return false;
+      return false;
     }
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
@@ -4539,12 +4559,21 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
   }
 
+  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
+    qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
+    return true;
+  } else {
+    qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "processed";
+  }
+
   int status = ExecuteAndMonitorSystemCommand(taCommand->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " timing analysis failed");
     return false;
+  } else {
+    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
   }
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
