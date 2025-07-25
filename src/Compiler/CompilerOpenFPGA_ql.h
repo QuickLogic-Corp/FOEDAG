@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Compiler.h"
 #include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
+#include "Compiler/TaskCompilationStateManager.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -138,7 +139,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Leakage();
 
   virtual std::string BaseVprCommandOLD(QLDeviceTarget device_target = QLDeviceTarget());
-  CommandWrapper BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget()); // todo, make it const
+  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget()); // todo, make it const
 
  protected:
   virtual bool IPGenerate();
@@ -224,7 +225,7 @@ class CompilerOpenFPGA_ql : public Compiler {
 #ifdef ENABLE_LEGACY_CMD_GUARD
   std::string BaseStaCommandOLD();
 #endif
-  CommandWrapper BaseStaCommand();
+  CommandWrapperPtr BaseStaCommand();
   std::filesystem::path BaseStaScript(std::string libFileName,
                                     std::string netlistFileName,
                                     std::string sdfFileName,
@@ -236,6 +237,7 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
+  TaskCompilationStateManager m_taskCompilationManager;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
   std::string getSynthesisCommandOLD();           // TODO
@@ -247,13 +249,13 @@ private:
   std::string getBitstreamGenerationCommandOLD(); // TODO
 
 #endif
-  CommandWrapper getSynthesisCommand();           // TODO
-  CommandWrapper getPackingCommand();   // todo make it const
-  CommandWrapper getPlacementCommand(); // todo make it const
-  CommandWrapper getRoutingCommand();             
-  CommandWrapper getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
-  CommandWrapper getPowerCommand();               // TODO
-  CommandWrapper getBitstreamGenerationCommand(); // TODO
+  CommandWrapperPtr getSynthesisCommand();           // TODO
+  CommandWrapperPtr getPackingCommand();   // todo make it const
+  CommandWrapperPtr getPlacementCommand(); // todo make it const
+  CommandWrapperPtr getRoutingCommand();             
+  CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
+  CommandWrapperPtr getPowerCommand();               // TODO
+  CommandWrapperPtr getBitstreamGenerationCommand(); // TODO
 
     // BitstreamGeneration
 

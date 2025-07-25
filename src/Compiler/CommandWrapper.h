@@ -83,7 +83,7 @@ public:
     m_diffFiles.emplace_back(DiffFile{file, criteria, prevValue, newValue});
   }
 
-  std::vector<std::string> log() const {
+  std::vector<std::string> messages() const {
     std::vector<std::string> messages;
     for (const MParameter& param: m_addedParameters) {
       if (param.value.empty()) {
@@ -94,7 +94,7 @@ public:
     }
     for (const MParameter& param: m_removedParameters) {
       if (param.value.empty()) {
-        messages.push_back("parameter [" + param.name + "]");
+        messages.push_back("parameter [" + param.name + "] was deleted");
       } else {
         messages.push_back("parameter [" + param.name + "]=" + param.value + " was deleted");
       }

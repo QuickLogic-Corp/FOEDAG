@@ -23,17 +23,27 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CommandWrapper.h"
 
 #include <map>
+#include <iostream>
 
 namespace FOEDAG {
 
 class TaskCompilationStateManager {
-  DiffCommandPtr matches(int taskId, const CommandWrapperPtr& command) const {
+public:
+  bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
     auto it = m_taskCommandsMap.find(taskId);
     if (it == m_taskCommandsMap.end()) {
-      return std::make_shared<DiffCommand>();
+      return true;
     }
     const CommandWrapper& commandOld = *it->second;
-    return command->compare(commandOld);
+    DiffCommandPtr diff = command->compare(commandOld);
+    if (!diff->empty()) {
+      for (const std::string& msg: diff->messages()) {
+        std::cout << "~~~ diff msg=" << msg << std::endl;
+      }
+      return true;
+    }
+
+    return false;
   }
 
   void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {

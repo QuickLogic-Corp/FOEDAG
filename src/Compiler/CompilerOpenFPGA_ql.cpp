@@ -3087,8 +3087,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandOLD(QLDeviceTarget device_target)
   return base_vpr_command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
-  CommandWrapper command;
+CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   // note: at this point, the current_path() is the project 'source' directory.
 
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
@@ -3097,7 +3097,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return CommandWrapper{};
+    return nullptr;
   }
 
   // if device_target is explicitly specified (STA does this):
@@ -3122,7 +3122,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
-    return CommandWrapper{};
+    return nullptr;
   }
 
   // parse vpr general options
@@ -3133,39 +3133,39 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
   }
 #endif // #if UPSTREAM_UNUSED
   if (!m_deviceSize.empty()) {
-    command.append("--device", m_deviceSize);
+    command->append("--device", m_deviceSize);
   } else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
-    command.append("--device", QLSettingsManager::getStringValue("general", "device", "layout"));
+    command->append("--device", QLSettingsManager::getStringValue("general", "device", "layout"));
   } else {
     std::cout << "Should never be here, we should have a layout specified!" << std::endl;
-    return CommandWrapper{};
+    return nullptr;
   }
 
   if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "checked" ) {
-    command.append("--timing_analysis", "on");
+    command->append("--timing_analysis", "on");
   } else if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "unchecked" ) {
-    command.append("--timing_analysis", "off");
+    command->append("--timing_analysis", "off");
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "general", "constant_net_method").empty() ) {
-    command.append("--constant_net_method", QLSettingsManager::getStringValue("vpr", "general", "constant_net_method"));
+    command->append("--constant_net_method", QLSettingsManager::getStringValue("vpr", "general", "constant_net_method"));
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "general", "clock_modeling").empty() ) {
-    command.append("--clock_modeling", QLSettingsManager::getStringValue("vpr", "general", "clock_modeling"));
+    command->append("--clock_modeling", QLSettingsManager::getStringValue("vpr", "general", "clock_modeling"));
   }
 
 
   if( QLSettingsManager::getStringValue("vpr", "general", "exit_before_pack") == "checked" ) {
-    command.append("--exit_before_pack", "on");
+    command->append("--exit_before_pack", "on");
   }
   else if( QLSettingsManager::getStringValue("vpr", "general", "exit_before_pack") == "unchecked" ) {
-    command.append("--exit_before_pack", "off");
+    command->append("--exit_before_pack", "off");
   }
 
   // parse vpr filename options
   if( !QLSettingsManager::getStringValue("vpr", "filename", "circuit_format").empty() ) {
-    command.append("--circuit_format", QLSettingsManager::getStringValue("vpr", "filename", "circuit_format"));
+    command->append("--circuit_format", QLSettingsManager::getStringValue("vpr", "filename", "circuit_format"));
   }
 
   std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
@@ -3174,11 +3174,11 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
         ErrorMessage("Could not find the net file file in: " + 
           QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
-        return CommandWrapper{};
+        return nullptr;
     }
-    command.appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
+    command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
   } else {
-    command.appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
+    command->appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
   }
 
 
@@ -3186,25 +3186,25 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
         ErrorMessage("Could not find the place file file in: " + 
           QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
-        return CommandWrapper{};
+        return nullptr;
     }
-    command.appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+    command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
   }
 
   else {
-    command.appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+    command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
         ErrorMessage("Could not find the route file file in: " + 
           QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
-        return CommandWrapper{};
+        return nullptr;
       }
-    command.appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+    command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
   }
   else {
-    command.appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+    command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
   }
 
 
@@ -3220,7 +3220,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!sdc_file_path.empty()) {
     Message(std::string("SDC file found: ") + sdc_file_path.string());
-    command.appendFile("--sdc_file", sdc_file_path);
+    command->appendFile("--sdc_file", sdc_file_path);
   }
   else {
     Message(std::string("SDC file not found, no constraints passed to vpr."));
@@ -3229,15 +3229,15 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
 
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
-    command.appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
+    command->appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
   }
 
   // parse vpr netlist options
   if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "checked" ) {
-    command.append("--absorb_buffer_luts", "on");
+    command->append("--absorb_buffer_luts", "on");
   }
   else if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "unchecked" ) {
-    command.append("--absorb_buffer_luts", "off");
+    command->append("--absorb_buffer_luts", "off");
   }
 
   // parse vpr pack options: nothing here
@@ -3246,49 +3246,49 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
 
   // parse vpr route options
   if( !QLSettingsManager::getStringValue("vpr", "route", "route_chan_width").empty() ) {
-    command.append("--route_chan_width", QLSettingsManager::getStringValue("vpr", "route", "route_chan_width"));
+    command->append("--route_chan_width", QLSettingsManager::getStringValue("vpr", "route", "route_chan_width"));
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
-    command.append("--max_router_iterations", QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations"));
+    command->append("--max_router_iterations", QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations"));
   }
 
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-    command.append("--flat_routing", "on");
+    command->append("--flat_routing", "on");
     if( QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      command.append("--max_router_iterations",  "100");
+      command->append("--max_router_iterations",  "100");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
   else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
-    command.append("--flat_routing", "off");
+    command->append("--flat_routing", "off");
   }
 
   // parse vpr analysis options
   if( QLSettingsManager::getStringValue("vpr", "analysis", "gen_post_synthesis_netlist") == "checked" ) {
-    command.append("--gen_post_synthesis_netlist", "on");
+    command->append("--gen_post_synthesis_netlist", "on");
   }
   else if( QLSettingsManager::getStringValue("vpr", "analysis", "gen_post_synthesis_netlist") == "unchecked" ) {
-    command.append("--gen_post_synthesis_netlist", "off");
+    command->append("--gen_post_synthesis_netlist", "off");
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs").empty() ) {
-    command.append("--post_synth_netlist_unconn_inputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs"));
+    command->append("--post_synth_netlist_unconn_inputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs"));
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs").empty() ) {
-    command.append("--post_synth_netlist_unconn_outputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs"));
+    command->append("--post_synth_netlist_unconn_outputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs"));
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths").empty() ) {
-    command.append("--timing_report_npaths", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths"));
+    command->append("--timing_report_npaths", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths"));
   }
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail").empty() ) {
-    command.append("--timing_report_detail", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail"));
+    command->append("--timing_report_detail", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail"));
   }
 
   if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
@@ -3296,7 +3296,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
       // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
       // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
       // until Synplify side is fixed to resolve the root cause of the error.
-      command.append("--skip_sync_clustering_and_routing_results", "on");
+      command->append("--skip_sync_clustering_and_routing_results", "on");
     }
   }
 
@@ -3307,7 +3307,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
     // add the options string to the end of the vpr options with one whitespace separator
-    command.append(vpr_custom_options_string);
+    command->append(vpr_custom_options_string);
   }
 
   std::string netlistFile;
@@ -3361,8 +3361,8 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
       QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
-    command.appendFile("--read_rr_graph", rr_graph_file_path);
-    command.appendFile("--read_router_lookahead", router_lookahead_file_path);
+    command->appendFile("--read_rr_graph", rr_graph_file_path);
+    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
   }
 
 
@@ -3371,7 +3371,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
   if(m_architectureFile.empty()) {
 
     ErrorMessage("Cannot proceed without VPR Architecture file.");
-    return CommandWrapper{};
+    return nullptr;
   }
 
   if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
@@ -3386,13 +3386,13 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
       // empty string returned on error.
-      return CommandWrapper{};
+      return nullptr;
     }
 
     if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
       ErrorMessage("decryption failed!");
       // empty string returned on error.
-      return CommandWrapper{};
+      return nullptr;
     }
   }
 
@@ -3401,7 +3401,7 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
   // add the *internal* option to allow dangling nodes in the logic.
   // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
   // this is a workaround, to avoid putting timing arcs for static input ports.
-  command.append("--allow_dangling_combinational_nodes", "on");
+  command->append("--allow_dangling_combinational_nodes", "on");
 
   // construct the base vpr command with all the options here.
 #if UPSTREAM_UNUSED
@@ -3420,16 +3420,16 @@ CommandWrapper CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target)
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     if (fs::exists(fp_constraint_filepath_absolute)) {
-      command.appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
+      command->appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
   else { //IO floorplanning generation failed, must stop the flow
-    return CommandWrapper{};
+    return nullptr;
   }
 
-  command.prependFile(std::filesystem::path{netlistFile});
-  command.prependFile(m_architectureFile);
-  command.prepend(m_vprExecutablePath.string());
+  command->prependFile(std::filesystem::path{netlistFile});
+  command->prependFile(m_architectureFile, "architecture_file");
+  command->prepend(m_vprExecutablePath.string());
   
   return command;
 }
@@ -3444,9 +3444,9 @@ std::string CompilerOpenFPGA_ql::BaseStaCommandOLD() {
 }
 #endif
 
-CommandWrapper CompilerOpenFPGA_ql::BaseStaCommand() {
-  CommandWrapper command{m_staExecutablePath.string()};
-  command.append("-exit");  // allow open sta exit its tcl shell even there is error
+CommandWrapperPtr CompilerOpenFPGA_ql::BaseStaCommand() {
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>(m_staExecutablePath.string());
+  command->append("-exit");  // allow open sta exit its tcl shell even there is error
   return command;
 }
 
@@ -3489,6 +3489,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     CleanFiles(Action::Pack);
     return true;
   }
+
 #if UPSTREAM_UNUSED
   if (!HasTargetDevice()) return false;
 #endif // #if UPSTREAM_UNUSED
@@ -3551,21 +3552,27 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
-  CommandWrapper command = getPackingCommand();
-  if(command.empty()) {
+  CommandWrapperPtr command = getPackingCommand();
+  if(!command) {
     return false;
   }
+  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+    qInfo() << "~~~ packing skipped, not required";
+    return true;
+  } else {
+    qInfo() << "~~~ packing processed";
+  }
  
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command.string());
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getPackingCommandOLD();
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
-  if (!command.compareIgnoringTempPath(commandOld)) {
+  if (!command->compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
     qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-    qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+    qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
 #endif // ENABLE_LEGACY_CMD_GUARD
@@ -3582,13 +3589,15 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  int status = ExecuteAndMonitorSystemCommand(command.string());
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   }
   m_state = State::Packed;
+
+  m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
 }
@@ -3884,26 +3893,26 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  CommandWrapper command = getPlacementCommand();
-  if(command.empty()) {
+  CommandWrapperPtr command = getPlacementCommand();
+  if(!command) {
     return false;
   }
 
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command.string());
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getPlacementCommandOLD();
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
 
-  if (!command.compareIgnoringTempPath(commandOld)) {
+  if (!command->compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
     qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-    qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+    qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-  int status = ExecuteAndMonitorSystemCommand(command.string());
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -4075,26 +4084,26 @@ bool CompilerOpenFPGA_ql::Route() {
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
 
-  CommandWrapper command = getRoutingCommand();
-  if (command.empty()) {
+  CommandWrapperPtr command = getRoutingCommand();
+  if (!command) {
     return false;
   }
 
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command.string());
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getRoutingCommandOLD();
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.OLD.cmd"), commandOld);
 
-  if (!command.compareIgnoringTempPath(commandOld)) {
+  if (!command->compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
     qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-    qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+    qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-  int status = ExecuteAndMonitorSystemCommand(command.string());
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
@@ -4390,18 +4399,18 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     TimingAnalysisOpt(STAOpt::None);
     
-    CommandWrapper taCommand = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
+    CommandWrapperPtr taCommand = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
-    if (!taCommand.compareIgnoringTempPath(commandOld)) {
+    if (!taCommand->compareIgnoringTempPath(commandOld)) {
       qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
       qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(taCommand.string());
+      qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
       return false;
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-    const int status = ExecuteAndMonitorSystemCommand(taCommand.string());
+    const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -4422,25 +4431,27 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     return true;
   }
 #endif // #if UPSTREAM_UNUSED
-  CommandWrapper taCommand;
+  CommandWrapperPtr taCommand = std::make_shared<CommandWrapper>();
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    CommandWrapper command = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
-
+    CommandWrapperPtr command = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
+    if (!command) {
+      return false;
+    }
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
-    if (!command.compareIgnoringTempPath(commandOld)) {
+    if (!command->compareIgnoringTempPath(commandOld)) {
       qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
       qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(command.string());
+      qInfo() << "~~~ new=" << QString::fromStdString(command->string());
       return false;
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
-    int status = ExecuteAndMonitorSystemCommand(command.string());
+    int status = ExecuteAndMonitorSystemCommand(command->string());
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " timing analysis failed");
@@ -4469,19 +4480,19 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
         std::filesystem::is_regular_file(sdfFileName) &&
         std::filesystem::is_regular_file(sdcFileName)) {
       taCommand = BaseStaCommand();
-      taCommand.appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
+      taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
       
 #ifdef ENABLE_LEGACY_CMD_GUARD
       std::string commandOld = BaseStaCommandOLD() + " " + BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName).string();
-      if (!taCommand.compareIgnoringTempPath(commandOld)) {
+      if (!taCommand->compareIgnoringTempPath(commandOld)) {
         qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
         qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-        qInfo() << "~~~ new=" << QString::fromStdString(taCommand.string());
+        qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
         return false;
       }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-      FileUtils::WriteToFile(sta_cmd_filepath, taCommand.string());
+      FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
     } else {
       ErrorMessage(
           "No required design info generated for user design, required "
@@ -4493,25 +4504,25 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     // use vpr/tatum engine
 
     taCommand = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
-    if(taCommand.empty()) {
+    if(!taCommand) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
     }
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
-    if (!taCommand.compareIgnoringTempPath(commandOld)) {
+    if (!taCommand->compareIgnoringTempPath(commandOld)) {
       qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO OLD";
       qInfo() << "~~~ old=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(taCommand.string());
+      qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
       return false;
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-    FileUtils::WriteToFile(sta_cmd_filepath, taCommand.string());
+    FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
   }
 
-  int status = ExecuteAndMonitorSystemCommand(taCommand.string());
+  int status = ExecuteAndMonitorSystemCommand(taCommand->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -7859,21 +7870,21 @@ std::string CompilerOpenFPGA_ql::getBitstreamGenerationCommandOLD()
 
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-CommandWrapper CompilerOpenFPGA_ql::getSynthesisCommand()
+CommandWrapperPtr CompilerOpenFPGA_ql::getSynthesisCommand()
 {
-  CommandWrapper command;
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   assert(false);
   return command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
+CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand() + " --pack";
 #endif // #if UPSTREAM_UNUSED
-  CommandWrapper command = BaseVprCommand();
-  if(command.string().empty()) {
+  CommandWrapperPtr command = BaseVprCommand();
+  if(!command) {
     ErrorMessage("VPR Command is empty!");
-    return CommandWrapper{};
+    return nullptr;
   }
 
   // custom vpr command-line options for pack stage only
@@ -7883,27 +7894,27 @@ CommandWrapper CompilerOpenFPGA_ql::getPackingCommand() {
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
     // add the options string to the end of the vpr options with one whitespace separator
-    command.append(vpr_custom_options_string);
+    command->append(vpr_custom_options_string);
   }
 
-  command.append("--pack");
+  command->append("--pack");
 
   return command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
+CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // generate pin contraints file or use pre-generated .place file, if required.
   // this string should contain the path of the PinConstraints file, if generated correctly.
   // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
   // - there is no pre-generated .place file AND
   // - there is no pcf file in the project.
   std::string filepath_fpga_fix_pins_place_str;
-  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return CommandWrapper{};
+  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 
-  CommandWrapper command = BaseVprCommand();
-  if(command.string().empty()) {
+  CommandWrapperPtr command = BaseVprCommand();
+  if(!command) {
     ErrorMessage("Base VPR Command is empty!");
-    return CommandWrapper{};
+    return nullptr;
   }
 
   // custom vpr command-line options for place stage only
@@ -7913,13 +7924,13 @@ CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
     // add the options string to the end of the vpr options with one whitespace separator
-    command.append(vpr_custom_options_string);
+    command->append(vpr_custom_options_string);
   }
 
-  command.append("--place");
+  command->append("--place");
 
   if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command.append("--fix_clusters", filepath_fpga_fix_pins_place_str);
+    command->append("--fix_clusters", filepath_fpga_fix_pins_place_str);
   }
   else
   {
@@ -7929,12 +7940,12 @@ CommandWrapper CompilerOpenFPGA_ql::getPlacementCommand() {
   return command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getRoutingCommand()
+CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
 {
-  CommandWrapper command = BaseVprCommand();
-  if(command.empty()) {
+  CommandWrapperPtr command = BaseVprCommand();
+  if(!command) {
     ErrorMessage("Base VPR Command is empty!");
-    return CommandWrapper{};
+    return nullptr;
   }
 
   // custom vpr command-line options for route stage only
@@ -7944,15 +7955,15 @@ CommandWrapper CompilerOpenFPGA_ql::getRoutingCommand()
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
     // add the options string to the end of the vpr options with one whitespace separator
-    command.append(vpr_custom_options_string);
+    command->append(vpr_custom_options_string);
   }
 
-  command.append("--route");
+  command->append("--route");
 
   return command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix)
+CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix)
 {
   if (sta_vpr_options.empty()) {
     sta_suffix = "";
@@ -7962,14 +7973,14 @@ CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarge
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    CommandWrapper taCommand = BaseVprCommand();
-    command.append("--route");
-    command.append("--analysis");
-    command.append("--disp on");
+    CommandWrapperPtr taCommand = BaseVprCommand();
+    command->append("--route");
+    command->append("--analysis");
+    command->append("--disp on");
 #else // #ifdef _WIN32
-    CommandWrapper taCommand = BaseVprCommand(current_device_sta);
-    taCommand.append("--analysis");
-    taCommand.append("--disp", "on");
+    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
+    taCommand->append("--analysis");
+    taCommand->append("--disp", "on");
     // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
     // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
     // due to mismatch in switch blocks, which needs to be fixed yet.
@@ -7977,24 +7988,24 @@ CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarge
     // Until this is fixed, we need to run the route and analysis stages together.
     if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
       if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-        taCommand.append("--route");
+        taCommand->append("--route");
       }
     }
 #endif // #ifdef _WIN32
 
     if(!sta_vpr_options.empty()){
-      taCommand.append(sta_vpr_options);
+      taCommand->append(sta_vpr_options);
     }
 
     return taCommand;
   }
 
-  CommandWrapper taCommand;
+  CommandWrapperPtr taCommand = std::make_shared<CommandWrapper>();
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    CommandWrapper command = BaseVprCommand();
-    command.append("--gen_post_synthesis_netlist", "on");
+    CommandWrapperPtr command = BaseVprCommand();
+    command->append("--gen_post_synthesis_netlist", "on");
     return command;
   } 
   else {
@@ -8003,9 +8014,9 @@ CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarge
     std::string vpr_options;
 
     taCommand = BaseVprCommand(current_device_sta);
-    if(taCommand.empty()) {
+    if(!taCommand) {
         ErrorMessage("Base VPR Command is empty!");
-        return CommandWrapper{};
+        return nullptr;
     }
 
     // custom vpr command-line options for analysis stage
@@ -8018,17 +8029,17 @@ CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarge
       vpr_options += std::string(" ") + vpr_custom_options_string;
     }
 
-    taCommand.append(vpr_options);
+    taCommand->append(vpr_options);
 
     if(!sta_vpr_options.empty()){
-      taCommand.append(sta_vpr_options);
+      taCommand->append(sta_vpr_options);
     }
     
 #ifdef _WIN32
 
     // under WIN32, running the analysis stage along causes issues, hence we call the
     // route and analysis stages together
-    taCommand.append("--route");
+    taCommand->append("--route");
 
 #else // #ifdef _WIN32
 
@@ -8039,28 +8050,28 @@ CommandWrapper CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarge
     // Until this is fixed, we need to run the route and analysis stages together.
     if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
       if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-        taCommand.append("--route");
+        taCommand->append("--route");
       }
     }
 
 #endif // #ifdef _WIN32
 
-    taCommand.append("--analysis");
+    taCommand->append("--analysis");
   }
 
   return taCommand;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getPowerCommand()
+CommandWrapperPtr CompilerOpenFPGA_ql::getPowerCommand()
 {
-  CommandWrapper command;
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   assert(false);
   return command;
 }
 
-CommandWrapper CompilerOpenFPGA_ql::getBitstreamGenerationCommand()
+CommandWrapperPtr CompilerOpenFPGA_ql::getBitstreamGenerationCommand()
 {
-  CommandWrapper command;
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   assert(false);
   return command;
 }
