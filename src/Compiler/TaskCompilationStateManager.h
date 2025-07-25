@@ -22,7 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "CommandWrapper.h"
 
-#include <map>
+#include <unordered_map>
 #include <iostream>
 
 namespace FOEDAG {
@@ -30,7 +30,33 @@ namespace FOEDAG {
 class TaskCompilationStateManager {
 public:
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
-    auto it = m_taskCommandsMap.find(taskId);
+    return isCompilationRequired(key(taskId), command);
+  }
+
+  bool isCompilationRequired(int taskId, const std::string& profile, const CommandWrapperPtr& command) const {
+    return isCompilationRequired(key(taskId, profile), command);
+  }
+
+  void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
+    m_taskCommandsMap[key(taskId)] = command;
+  }
+
+  void storeTaskCommand(int taskId, const std::string& profile, const CommandWrapperPtr& command) {
+    m_taskCommandsMap[key(taskId, profile)] = command;
+  }
+
+private:
+  std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
+
+  std::string key(int taskId) const {
+    return std::to_string(taskId);
+  }
+  std::string key(int taskId, const std::string& profile) const {
+    return std::to_string(taskId) + "_" + profile;
+  }
+
+  bool isCompilationRequired(const std::string& id, const CommandWrapperPtr& command) const {
+    auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
       return true;
     }
@@ -45,13 +71,6 @@ public:
 
     return false;
   }
-
-  void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
-    m_taskCommandsMap[taskId] = command;
-  }
-
-private:
-  std::map<int, CommandWrapperPtr> m_taskCommandsMap;
 };
 
 }  // namespace FOEDAG

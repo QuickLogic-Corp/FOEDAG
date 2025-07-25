@@ -3594,10 +3594,10 @@ bool CompilerOpenFPGA_ql::Packing() {
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
+  } else {
+    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
-
-  m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
 }
@@ -3897,6 +3897,12 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(!command) {
     return false;
   }
+  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+    qInfo() << "~~~ placement skipped, not required";
+    return true;
+  } else {
+    qInfo() << "~~~ placement processed";
+  }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
@@ -3918,6 +3924,8 @@ bool CompilerOpenFPGA_ql::Placement() {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " placement failed");
     return false;
+  } else {
+    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Detailed), command);
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
@@ -4088,6 +4096,12 @@ bool CompilerOpenFPGA_ql::Route() {
   if (!command) {
     return false;
   }
+  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
+    qInfo() << "~~~ routing skipped, not required";
+    return true;
+  } else {
+    qInfo() << "~~~ routing processed";
+  }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
 
@@ -4108,6 +4122,8 @@ bool CompilerOpenFPGA_ql::Route() {
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
     return false;
+  } else {
+    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Routing), command);
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
