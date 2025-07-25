@@ -52,7 +52,11 @@ private:
     return std::to_string(taskId);
   }
   std::string key(int taskId, const std::string& profile) const {
-    return std::to_string(taskId) + "_" + profile;
+    if (profile.empty()) {
+      return std::to_string(taskId);
+    } else {
+      return std::to_string(taskId) + "_" + profile;
+    }
   }
 
   bool isCompilationRequired(const std::string& id, const CommandWrapperPtr& command) const {

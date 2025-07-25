@@ -4137,6 +4137,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
 
+  ErrorMessage("~~~ TODO: DON'T REMOVE STA LOGS, THIS BRINGS LOG LOST WHEN INCREMENtAL COMPILATION IS ENABLED");
   CleanFiles(Action::STA); // this is required to remove the not actual multi corner reports left from previous run
 
 #if UPSTREAM_UNUSED
