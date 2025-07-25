@@ -3117,6 +3117,7 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   ofssta.close();
   return openStaFile;
 }
+
 bool CompilerOpenFPGA_ql::Packing() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -3237,14 +3238,76 @@ bool CompilerOpenFPGA_ql::Packing() {
 #endif // #if UPSTREAM_UNUSED
 
   int status = ExecuteAndMonitorSystemCommand(command);
-  CleanTempFiles();
-  if (status) {
-    ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
-    return false;
+
+
+
+  // FPGA_AUTO device logic ++
+  bool is_fpga_auto_mode = false;
+  QLDeviceTarget current_device_target = 
+      QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
+    is_fpga_auto_mode = true;
   }
-  m_state = State::Packed;
-  Message("Design " + ProjManager()->projectName() + " is packed");
-  return true;
+
+  if(is_fpga_auto_mode) {
+    m_state = State::None; // TODO: check this if we should do this or leave it alone?
+    if (status) {
+      Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
+      Message("Try to generate a device that can accomodate current design...\n");
+
+      std::filesystem::path add_layout_script_path = 
+          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout.py";
+
+      std::filesystem::path vpr_stdout_log_filepath = 
+          std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
+
+      std::filesystem::path output_path = 
+          std::filesystem::path(ProjManager()->projectPath()) / "vpr_generated.xml";
+
+      std::string command_auto_device = 
+                            std::string("python3") + std::string(" ") +
+                            add_layout_script_path.string() + std::string(" ") +
+                            std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
+                            std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
+                            std::string("--output ") + output_path.string();
+
+      int status_auto_device = ExecuteAndMonitorSystemCommand(command_auto_device);
+
+      if (status_auto_device == 0) {
+        Message("Generating Device Succeeded.\n");
+        Message("New Device vpr xml is generated at: " + output_path.string() + "\n");
+        return true;
+      }
+      else {
+        ErrorMessage("Generating Device Failed, Error Code: " + std::to_string(status_auto_device) + "\n");
+        return false;
+      }
+      
+      return true;
+    }
+    else {
+      Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
+      Message("The current device layout can be used (change the layout name!!)\n");
+      return true;
+    }
+  }
+  // FPGA_AUTO device logic --
+
+
+
+  CleanTempFiles();
+
+  if(!is_fpga_auto_mode) {
+    if (status) {
+      ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
+      return false;
+    }
+    m_state = State::Packed;
+    Message("Design " + ProjManager()->projectName() + " is packed");
+    return true;
+  }
+
+  return false;
 }
 
 bool CompilerOpenFPGA_ql::GlobalPlacement() {

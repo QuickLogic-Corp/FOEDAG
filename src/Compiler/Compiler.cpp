@@ -2645,6 +2645,10 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                          // we skip reporting this specific error because it is not under our control,
                          // and it can be ignored! [VPR P&R Viewer]
                        }
+                       else if (errorstring.contains("Failed to find device which satisfies resource requirements required")) {
+                        // we skip reporting this specific error because it is not under our control,
+                        // and it can be ignored! [VPR P&R Viewer]
+                       }
                        else {
                         int bytes = data.size();
                         ofs.write(data, bytes);

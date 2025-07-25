@@ -1014,9 +1014,11 @@ void QLDeviceManager::parseDeviceData() {
                     device.devicename = devicename;
                     device.device_variants = device_variants;
 
-                    for (const auto& device_variant: device.device_variants) {
-                      collectDeviceVariantAvailableResources(device_variant);
-                    }
+                    // disable this step for faster testing.
+                    // replace by resources.json implementation later.
+                    // for (const auto& device_variant: device.device_variants) {
+                    //   collectDeviceVariantAvailableResources(device_variant);
+                    // }
                     device_list.push_back(device);
                   }
                 }
@@ -1791,7 +1793,8 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             std::filesystem::canonical(source_device_data_dir_path, ec);
     if(ec) {
       // error
-      compiler->ErrorMessage("Please check if the path specified exists!");
+      compiler->ErrorMessage("QLDeviceManager::encryptDevice() failed!\n");
+      compiler->ErrorMessage("Please check if the path specified exists!\n");
       compiler->ErrorMessage("path: " + source_device_data_dir_path.string());
       return -1;
     }
@@ -1902,6 +1905,11 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           }
           if (std::regex_match(dir_entry.path().filename().string(),
                                   std::regex(".*router_lookahead\\.bin",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".+\\.py",
                                   std::regex::icase))) {
               source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
@@ -2239,7 +2247,8 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
             std::filesystem::canonical(source_device_data_dir_path, ec);
     if(ec) {
       // error
-      compiler->ErrorMessage("Please check if the path specified exists!");
+      compiler->ErrorMessage("QLDeviceManager::addDevice() failed!\n");
+      compiler->ErrorMessage("Please check if the path specified exists!\n");
       compiler->ErrorMessage("path: " + source_device_data_dir_path.string());
       return -1;
     }
