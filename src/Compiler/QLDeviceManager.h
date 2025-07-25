@@ -80,15 +80,15 @@ class QLDeviceManager : public QObject {
 
  private:
   QLDeviceManager(QObject *parent = nullptr);
-  QLDeviceVariantLayout* findDeviceLayoutVariantPtr(const std::string& family, 
-                                                    const std::string& foundry,
-                                                    const std::string& node,
-                                                    const std::string& devicename,
-                                                    const std::string& voltage_threshold,
-                                                    const std::string& p_v_t_corner,
-                                                    const std::string& layoutName);
-  void collectDeviceVariantAvailableResources(const QLDeviceVariant& device_variant);
-  std::vector<std::shared_ptr<LayoutInfoHelper>> ExtractDeviceAvailableResourcesFromVprLogContent(const std::string&) const;
+  // QLDeviceVariantLayout* findDeviceLayoutVariantPtr(const std::string& family, 
+  //                                                   const std::string& foundry,
+  //                                                   const std::string& node,
+  //                                                   const std::string& devicename,
+  //                                                   const std::string& voltage_threshold,
+  //                                                   const std::string& p_v_t_corner,
+  //                                                   const std::string& layoutName);
+  // void collectDeviceVariantAvailableResources(const QLDeviceVariant& device_variant);
+  // std::vector<std::shared_ptr<LayoutInfoHelper>> ExtractDeviceAvailableResourcesFromVprLogContent(const std::string&) const;
 
  public:
   void initialize();
@@ -154,7 +154,7 @@ class QLDeviceManager : public QObject {
                               std::string layout_name);
   void setCurrentDeviceTarget(std::string device_string);
   void setCurrentDeviceTarget(QLDeviceTarget device_target);
-  std::pair<std::filesystem::path, bool> GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant);
+  // std::pair<std::filesystem::path, bool> GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant);
   std::string getCurrentDeviceTargetString();
   QLDeviceTarget getCurrentDeviceTarget();
   // only for GUI usage:
@@ -169,6 +169,7 @@ class QLDeviceManager : public QObject {
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
 
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
+  std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
