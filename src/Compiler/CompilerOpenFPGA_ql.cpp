@@ -3242,14 +3242,14 @@ bool CompilerOpenFPGA_ql::Packing() {
 
 
   // FPGA_AUTO device logic ++
-  bool is_fpga_auto_mode = false;
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
-    is_fpga_auto_mode = true;
+    Message("Packing is running in Auto Layout Generation Mode!\n");
+    m_autoLayoutGenerationMode = true;
   }
 
-  if(is_fpga_auto_mode) {
+  if(m_autoLayoutGenerationMode) {
     m_state = State::None; // TODO: check this if we should do this or leave it alone?
     if (status) {
       Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
@@ -3297,7 +3297,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   CleanTempFiles();
 
-  if(!is_fpga_auto_mode) {
+  if(!m_autoLayoutGenerationMode) {
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
       return false;
@@ -3363,6 +3363,11 @@ bool CompilerOpenFPGA_ql::Placement() {
     copyLog(ProjManager(), "vpr_stdout.log", PLACEMENT_LOG);
     QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
   });
+
+  if(m_autoLayoutGenerationMode) {
+    ErrorMessage("Placement cannot be run in Auto Layout Generation Mode!");
+    return false;
+  }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
@@ -3713,6 +3718,11 @@ bool CompilerOpenFPGA_ql::Route() {
     QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
   });
 
+  if(m_autoLayoutGenerationMode) {
+    ErrorMessage("Route cannot be run in Auto Layout Generation Mode!");
+    return false;
+  }
+
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3949,6 +3959,12 @@ QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staP
 }
 
 bool CompilerOpenFPGA_ql::TimingAnalysis() {
+
+  if(m_autoLayoutGenerationMode) {
+    ErrorMessage("Timing Analysis cannot be run in Auto Layout Generation Mode!");
+    return false;
+  }
+
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -4343,6 +4359,11 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     copyLog(ProjManager(), "vpr_stdout.log", POWER_ANALYSIS_LOG);
   });
 #endif // Disable VPR Power Analysis
+
+  if(m_autoLayoutGenerationMode) {
+    ErrorMessage("Power Analysis cannot be run in Auto Layout Generation Mode!");
+    return false;
+  }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
@@ -5207,6 +5228,11 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     // Rename log file
     copyLog(ProjManager(), "vpr_stdout.log", BITSTREAM_LOG);
   });
+
+  if(m_autoLayoutGenerationMode) {
+    ErrorMessage("Generate Bitstream cannot be run in Auto Layout Generation Mode!");
+    return false;
+  }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");

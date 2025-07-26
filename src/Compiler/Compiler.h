@@ -312,6 +312,7 @@ class Compiler {
   // call 'copy_files_on_add on' to enable this feature.
   // this will apply to all file types as of now.
   bool m_copyFilesWhileAdding = false;
+  bool m_autoLayoutGenerationMode = false;
 
   // Tasks generic options
   IPGenerateOpt m_ipGenerateOpt = IPGenerateOpt::None;
