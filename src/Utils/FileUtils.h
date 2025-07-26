@@ -113,8 +113,9 @@ class FileUtils final {
 
   static std::string resolvePathStr(const std::string& pathStr);
 
-  static std::vector<std::filesystem::path> findFilePathesByWildcard(const std::string& wildCardFilePathPattern);
+  static std::vector<std::filesystem::path> FileUtilsfindFilePathsByWildcard(const std::string& wildCardFilePathPattern);
   static std::vector<std::string> findFileNamesByWildcard(const std::string& path, const std::string& wildCardFileNamePattern);
+  static bool findAndReplaceInFile(const std::filesystem::path& filepath, const std::string& searchPattern, const std::string& replaceString);
 
  private:
   FileUtils() = delete;

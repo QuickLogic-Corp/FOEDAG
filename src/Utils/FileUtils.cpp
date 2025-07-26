@@ -473,7 +473,7 @@ void FileUtils::printArgs(int argc, const char* argv[]) {
 bool FileUtils::removeFile(const std::string& file) noexcept {
   bool result = true;
   if (file.find("*") != std::string::npos) {
-    std::vector<std::filesystem::path> foundFiles = findFilePathesByWildcard(file);
+    std::vector<std::filesystem::path> foundFiles = FileUtilsfindFilePathsByWildcard(file);
     for (const std::filesystem::path& found: foundFiles) {
       if (!removeFile(found)) {
         result = false;
@@ -535,7 +535,7 @@ std::string FileUtils::resolvePathStr(const std::string& pathStr) {
 }
 
 
-std::vector<std::filesystem::path> FileUtils::findFilePathesByWildcard(const std::string& wildCardFilePathPattern) 
+std::vector<std::filesystem::path> FileUtils::FileUtilsfindFilePathsByWildcard(const std::string& wildCardFilePathPattern) 
 {
   std::vector<std::filesystem::path> result;
 
@@ -574,6 +574,33 @@ std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& p
   }
 
   return result;
+}
+
+
+bool FileUtils::findAndReplaceInFile(const std::filesystem::path& filepath, const std::string& searchPattern, const std::string& replaceString) {
+
+  std::ifstream filepathIfstream(filepath);
+  if (!filepathIfstream.is_open()) {
+      std::cerr << "error opening file: " << filepath << std::endl;
+      return false;
+  }
+
+  std::string fileContent((std::istreambuf_iterator<char>(filepathIfstream)), std::istreambuf_iterator<char>());
+  filepathIfstream.close();
+
+  std::regex regexPattern(searchPattern);
+  std::string modifiedContent = std::regex_replace(fileContent, regexPattern, replaceString);
+
+  std::ofstream outputFile(filepath); // overwrites the original file
+  if (!outputFile.is_open()) {
+      std::cerr << "error opening file for writing: " << filepath << std::endl;
+      return false;
+  }
+  outputFile << modifiedContent;
+  outputFile.close();
+
+  // std::cout << "replaced in: " << filepath << std::endl;
+  return true;
 }
 
 }  // namespace FOEDAG

@@ -1908,8 +1908,17 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                   std::regex::icase))) {
               source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
+
+          // include any python scripts to copy
           if (std::regex_match(dir_entry.path().filename().string(),
                                   std::regex(".+\\.py",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
+          // include any already encrypted files to copy
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".+\\.en",
                                   std::regex::icase))) {
               source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
