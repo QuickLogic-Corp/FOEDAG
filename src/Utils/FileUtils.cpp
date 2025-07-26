@@ -71,6 +71,10 @@ bool FileUtils::FileIsRegular(const std::filesystem::path& name) {
   return std::filesystem::is_regular_file(name);
 }
 
+bool FileUtils::isExistedRegularFile(const std::filesystem::path& name) {
+  return FileExists(name) && FileIsRegular(name);
+}
+
 bool FileUtils::MkDirs(const std::filesystem::path& path) {
   // CAUTION: There is a known bug in VC compiler where a trailing
   // slash in the path will cause a false return from a call to

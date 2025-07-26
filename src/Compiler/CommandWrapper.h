@@ -187,7 +187,7 @@ public:
     append(command);
   }
 
-// tmp function fused while migration
+  // tmp function fused while migration
   bool compareIgnoringTempPath(const std::string& rhs) {
       static std::regex tmpRegex(R"(\/tmp\/\S+)");
       std::string thisClean = std::regex_replace(string(), tmpRegex, "/tmp/PLACEHOLDER");
@@ -346,5 +346,64 @@ private:
 
 };
 using CommandWrapperPtr = std::shared_ptr<CommandWrapper>;
+
+class CommandWrapperBuilder {
+  public:
+    static CommandWrapperPtr fromString(const std::string& content) {
+      CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+      std::vector<std::string> tokens = tokenize(content);
+      for (std::size_t i=0; i<tokens.size(); ++i) {
+        const std::string& token = tokens[i];
+
+        // special case when arch file is masked by permanent id
+        if (StringUtils::endsWith(token, "vpr")) {
+          command->append(token);
+          ++i;
+          if (i<tokens.size()) {
+            const std::string& arch_file = tokens[i];
+            command->appendFile(std::filesystem::path(arch_file), /*mask*/"arch_file");
+          } else {
+            command->append(token);
+          }
+          continue;
+        }
+        // end special case
+
+        if (StringUtils::startsWith(token, "-") || StringUtils::startsWith(token, "--")) {
+          const std::string& name = token;
+          ++i;
+          if (i<tokens.size()) {
+            const std::string& val = tokens[i];
+            if (FileUtils::isExistedRegularFile(std::filesystem::path(val))) {
+              command->appendFile(name, std::filesystem::path(val));
+            } else {
+              command->append(name, val);
+            }
+          } else {
+            command->append(name);
+          }
+        } else {
+          if (FileUtils::isExistedRegularFile(std::filesystem::path(token))) {
+            command->appendFile(std::filesystem::path(token));
+          } else {
+            command->append(token);
+          }
+        }
+      }
+
+      return command;
+    }
+
+  private:
+    static std::vector<std::string> tokenize(const std::string& line) {
+      std::istringstream iss(line);
+      std::vector<std::string> tokens;
+      std::string word;
+      while (iss >> word) {
+          tokens.push_back(word);
+      }
+      return tokens;
+    }
+};
 
 }  // namespace FOEDAG
