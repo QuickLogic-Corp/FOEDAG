@@ -3277,8 +3277,6 @@ bool CompilerOpenFPGA_ql::Packing() {
                                                               logfile_auto_device.string());
 
       if (status_auto_device == 0) {
-        Message("Generating Device Succeeded.\n");
-        Message("New Device vpr xml is generated at: " + output_path.string() + "\n");
 
         // get the layout name generated from the log file:
         std::string generated_layout_name = "";
@@ -3329,7 +3327,7 @@ bool CompilerOpenFPGA_ql::Packing() {
         // settings.json, replace FPGA_AUTO with generated layout name for all examples
 
 
-        // copy the FPGA_AUTO device directory recursively into another.
+        // copy the FPGA_AUTO device directory recursively to create new device.
         std::string target_device_copy_devicename = 
             StringUtils::replaceAll(current_device_target.device_variant.devicename,
                                     std::string("FPGA_AUTO"),
@@ -3344,6 +3342,16 @@ bool CompilerOpenFPGA_ql::Packing() {
             source_device_copy_dirpath / 
             std::string("..") / 
             target_device_copy_devicename;
+
+        // what if already generated previously, sameWH, but maybe different resources?
+        // maybe we should put some randomized name in addition to generated_layout_name ?
+        // DATE?
+        // Save in DEVICEDATA or somewhere else?
+        // TODO.
+        if(FileUtils::FileExists(target_device_copy_dirpath)) {
+          Message("Device Already Exists: " + target_device_copy_devicename +"\n");
+          return true;
+        }
 
         try {
           std::filesystem::copy(source_device_copy_dirpath,
@@ -3445,8 +3453,57 @@ bool CompilerOpenFPGA_ql::Packing() {
           FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", generated_layout_name);
         }
 
+
         // cleanup the currently run example files in the copied device (logs/working_directory etc.)
-        // TODO
+        // **if** it is part of the examples in the FPGA_AUTO device.
+        // <example_dir>/<project_dir>
+        // <example_dir>/*.log
+        // <example_dir>/aurora*.tcl
+
+        std::filesystem::path current_project_path = 
+            std::filesystem::path(ProjManager()->projectPath());
+
+        std::filesystem::path current_project_expected_device_dirpath = 
+            current_project_path.parent_path().parent_path().parent_path();
+
+        std::cout << current_project_path << std::endl;
+        std::cout << source_device_copy_dirpath << std::endl;
+
+        if(std::filesystem::equivalent(current_project_expected_device_dirpath, source_device_copy_dirpath)) {
+
+          std::string current_project_name = current_project_path.filename();
+          std::cout << current_project_name << std::endl;
+
+          std::filesystem::path current_example_path = 
+              current_project_path.parent_path();
+          std::cout << current_example_path << std::endl;
+
+          try {
+            current_example_path = std::filesystem::canonical(current_example_path);
+            source_device_copy_dirpath = std::filesystem::canonical(source_device_copy_dirpath);
+            std::cout << current_example_path << std::endl;
+            std::cout << source_device_copy_dirpath << std::endl;
+          }
+          catch (const std::filesystem::filesystem_error& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
+            return false;
+          }
+
+          std::filesystem::path current_example_path_relative = 
+              std::filesystem::relative(current_example_path, source_device_copy_dirpath);
+          std::cout << current_example_path_relative << std::endl;
+
+          std::filesystem::path current_example_path_target_device = 
+              target_device_copy_dirpath / current_example_path_relative;
+
+          FileUtils::RmDirRecursively(current_example_path_target_device / current_project_name );
+          FileUtils::removeFile(current_example_path_target_device / "aurora_perf.log");
+          FileUtils::removeFile(current_example_path_target_device / "aurora.log");
+          FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
+        }
+
+        Message("Generating Device ok: " + target_device_copy_devicename +"\n");
+        Message("Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
 
         return true;
       }

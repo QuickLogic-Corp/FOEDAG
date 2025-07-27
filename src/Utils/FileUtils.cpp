@@ -599,7 +599,6 @@ bool FileUtils::findAndReplaceInFile(const std::filesystem::path& filepath, cons
   outputFile << modifiedContent;
   outputFile.close();
 
-  // std::cout << "replaced in: " << filepath << std::endl;
   return true;
 }
 
