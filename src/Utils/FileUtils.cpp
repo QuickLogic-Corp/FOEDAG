@@ -71,7 +71,7 @@ bool FileUtils::FileIsRegular(const std::filesystem::path& name) {
   return std::filesystem::is_regular_file(name);
 }
 
-bool FileUtils::isExistedRegularFile(const std::filesystem::path& name) {
+bool FileUtils::IsExistedRegularFile(const std::filesystem::path& name) {
   return FileExists(name) && FileIsRegular(name);
 }
 

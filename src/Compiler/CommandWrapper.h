@@ -380,7 +380,7 @@ class CommandWrapperBuilder {
           ++i;
           if (i<tokens.size()) {
             const std::string& val = tokens[i];
-            if (FileUtils::isExistedRegularFile(std::filesystem::path(val))) {
+            if (FileUtils::IsExistedRegularFile(std::filesystem::path(val))) {
               std::string mask = tryExtractMask(std::filesystem::path(val), maskedFiles);
               if (mask.empty()) {
                 command->appendFile(name, std::filesystem::path(val));
@@ -394,7 +394,7 @@ class CommandWrapperBuilder {
             command->append(name);
           }
         } else {
-          if (FileUtils::isExistedRegularFile(std::filesystem::path(token))) {
+          if (FileUtils::IsExistedRegularFile(std::filesystem::path(token))) {
             std::string mask = tryExtractMask(std::filesystem::path(token), maskedFiles);
             if (mask.empty()) {
               command->appendFile(std::filesystem::path(token));

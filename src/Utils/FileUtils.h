@@ -43,7 +43,7 @@ class FileUtils final {
   static bool FileExists(const std::filesystem::path& name);
   static bool FileIsRegular(const std::filesystem::path& name);
   static bool FileIsDirectory(const std::filesystem::path& name);
-  static bool isExistedRegularFile(const std::filesystem::path& name);
+  static bool IsExistedRegularFile(const std::filesystem::path& name);
 
   static bool MkDirs(const std::filesystem::path& path);
   static bool RmDirRecursively(const std::filesystem::path& path);
