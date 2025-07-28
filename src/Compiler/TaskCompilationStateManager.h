@@ -74,12 +74,12 @@ public:
 
   void clear() {
     m_taskCommandsMap.clear();
-    FileUtils::removeFile(filePath());
+    FileUtils::removeFile(m_filePath);
   }
 
   void load() {
-    if (FileUtils::IsExistedRegularFile(filePath())) {
-      std::string content = FileUtils::GetFileContent(filePath());
+    if (FileUtils::IsExistedRegularFile(m_filePath)) {
+      std::string content = FileUtils::GetFileContent(m_filePath);
       nlohmann::json json = nlohmann::json::parse(content);
       if (!json.is_null()) {
         m_taskCommandsMap = json.get<decltype(m_taskCommandsMap)>();
@@ -87,13 +87,13 @@ public:
     }
   }
 
+  void setProjectPath(const std::filesystem::path& path) {
+    m_filePath = path / BUILD_STATE_FILENAME;
+  }
+
 private:
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
-
-  std::filesystem::path filePath() const {
-    std::filesystem::path path{BUILD_STATE_FILENAME};
-    return path;
-  }
+  std::filesystem::path m_filePath{BUILD_STATE_FILENAME};
 
   std::string key(int taskId) const {
     return std::to_string(taskId);
@@ -126,7 +126,7 @@ private:
   void save() {
     nlohmann::json json = m_taskCommandsMap;
     if (!json.is_null()) {
-      FileUtils::WriteToFile(filePath(), json.dump());
+      FileUtils::WriteToFile(m_filePath, json.dump());
     }
   }
 };

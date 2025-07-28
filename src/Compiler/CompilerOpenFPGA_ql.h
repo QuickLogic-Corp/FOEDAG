@@ -50,7 +50,7 @@ class CompilerOpenFPGA_ql : public Compiler {
     friend class QLMetricsManager;
     friend class QLDeviceManager;
  public:
-  CompilerOpenFPGA_ql() = default;
+  CompilerOpenFPGA_ql();
 #if UPSTREAM_UNUSED
   ~CompilerOpenFPGA_ql() = default;
 #endif // #if UPSTREAM_UNUSED

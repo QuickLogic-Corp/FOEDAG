@@ -84,6 +84,14 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
+CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler()
+{
+  QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
+    std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
+    m_taskCompilationStateManager.setProjectPath(projectPath);
+  });
+}
+
 void CompilerOpenFPGA_ql::Version(std::ostream* out) {
   (*out) << "QuickLogic Aurora"
          << "\n";
