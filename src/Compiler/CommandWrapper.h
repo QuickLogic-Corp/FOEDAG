@@ -28,12 +28,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <string>
 #include <unordered_set>
+#include <map>
 #include <filesystem>
 #include <optional>
 #include <regex>
 #include <memory>
 
 namespace FOEDAG {
+
+constexpr const char* VPR_ARCH_FILE_MASK = "vpr_arch_file_mask";
 
 struct MParameter {
   std::string name;
@@ -130,6 +133,9 @@ public:
       }
     }
   }
+
+  const std::filesystem::path& filePath() const { return m_filePath; }
+  const std::string& mask() const { return m_mask; }
 
   const std::string& contentHash() const { return m_contentHash; }
   const std::string& modifiedDateTime() const { return m_modifiedDateTime; }
@@ -349,19 +355,19 @@ using CommandWrapperPtr = std::shared_ptr<CommandWrapper>;
 
 class CommandWrapperBuilder {
   public:
-    static CommandWrapperPtr fromString(const std::string& content) {
+    static CommandWrapperPtr fromString(const std::string& content, const std::map<std::filesystem::path, std::string>& maskedFiles = {}) {
       CommandWrapperPtr command = std::make_shared<CommandWrapper>();
       std::vector<std::string> tokens = tokenize(content);
       for (std::size_t i=0; i<tokens.size(); ++i) {
         const std::string& token = tokens[i];
 
-        // special case when arch file is masked by permanent id
+        // special case when arch file is masked by permanent id VPR_ARCH_FILE_MASK
         if (StringUtils::endsWith(token, "vpr")) {
           command->append(token);
           ++i;
           if (i<tokens.size()) {
             const std::string& arch_file = tokens[i];
-            command->appendFile(std::filesystem::path(arch_file), /*mask*/"arch_file");
+            command->appendFile(std::filesystem::path(arch_file), VPR_ARCH_FILE_MASK);
           } else {
             command->append(token);
           }
@@ -375,7 +381,12 @@ class CommandWrapperBuilder {
           if (i<tokens.size()) {
             const std::string& val = tokens[i];
             if (FileUtils::isExistedRegularFile(std::filesystem::path(val))) {
-              command->appendFile(name, std::filesystem::path(val));
+              std::string mask = tryExtractMask(std::filesystem::path(val), maskedFiles);
+              if (mask.empty()) {
+                command->appendFile(name, std::filesystem::path(val));
+              } else {
+                command->appendFile(name, std::filesystem::path(val), mask);
+              }
             } else {
               command->append(name, val);
             }
@@ -384,7 +395,12 @@ class CommandWrapperBuilder {
           }
         } else {
           if (FileUtils::isExistedRegularFile(std::filesystem::path(token))) {
-            command->appendFile(std::filesystem::path(token));
+            std::string mask = tryExtractMask(std::filesystem::path(token), maskedFiles);
+            if (mask.empty()) {
+              command->appendFile(std::filesystem::path(token));
+            } else {
+              command->appendFile(std::filesystem::path(token), mask);
+            }
           } else {
             command->append(token);
           }
@@ -403,6 +419,14 @@ class CommandWrapperBuilder {
           tokens.push_back(word);
       }
       return tokens;
+    }
+
+    static std::string tryExtractMask(const std::filesystem::path& candidate, const std::map<std::filesystem::path, std::string>& maskedFiles) {
+      auto it = maskedFiles.find(candidate);
+      if (it != maskedFiles.end()) {
+        return it->second;
+      }
+      return "";
     }
 };
 

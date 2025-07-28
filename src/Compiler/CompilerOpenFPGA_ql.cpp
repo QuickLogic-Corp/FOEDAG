@@ -3428,7 +3428,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   command->prependFile(std::filesystem::path{netlistFile});
-  command->prependFile(m_architectureFile, "architecture_file");
+  command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
   command->prepend(m_vprExecutablePath.string());
   
   return command;
