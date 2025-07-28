@@ -3300,34 +3300,28 @@ bool CompilerOpenFPGA_ql::Packing() {
         file.open(QFile::ReadOnly);
         while (!file.atEnd()) {
           auto line = file.readLine();
-          std::cout << line.toStdString() << std::endl;
           auto match = auto_layout_regex.match(line);
           if (match.hasMatch()) {
             bool ok;
             generated_layout_name = QString(match.captured(1)).toStdString();
-            
             generated_layout_width = QString(match.captured(2)).toInt(&ok);
             if(!ok) {
-              // width is not a number ? error out.
+              ErrorMessage("Error parsing log from auto-layout script: width\n");
               return false;
             }
 
             generated_layout_height = QString(match.captured(3)).toInt(&ok);
             if(!ok) {
-              // height is not a number ? error out.
+              ErrorMessage("Error parsing log from auto-layout script: height\n");
               return false;
             }
             break;
           }
         }
         if(generated_layout_name.empty()) {
-          // we could not get the layout_name from the log, error out.
+          ErrorMessage("Error parsing log from auto-layout script: layoutname\n");
           return false;
         }
-
-        std::cout << generated_layout_name << std::endl;
-        std::cout << generated_layout_width << std::endl;
-        std::cout << generated_layout_height << std::endl;
       }
       else {
         ErrorMessage("Generating Device Failed, Error Code: " + std::to_string(status_auto_device) + "\n");
@@ -3337,6 +3331,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     else {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
       Message("Generating Device equivalent to the current device...\n");
+
       generated_layout_width = current_device_target.device_variant_layout.width;
       generated_layout_height = current_device_target.device_variant_layout.height;
       generated_layout_name = std::string("AUTOFPGA") + 
@@ -3348,14 +3343,10 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       // update the layout_name in the vpr.xml
       FileUtils::findAndReplaceInFile(output_vpr_xml_path, "FPGA_AUTO", generated_layout_name);
-
-      std::cout << generated_layout_name << std::endl;
-      std::cout << generated_layout_width << std::endl;
-      std::cout << generated_layout_height << std::endl;
     }
 
 
-    // create new device:
+    // create new device using generated vpr xml:
     // <device>: as a copy of the FPGA_AUTO device
     // devicename: replace FPGA_AUTO with the generated layout name
     // cryptdb: replace FPGA_AUTO with the generated layout name
@@ -3364,6 +3355,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // vpr.xml.en: encrypt the copied vpr.xml
     // vpr.xml: delete the vpr.xml after encryption
     // settings.json, replace FPGA_AUTO with generated layout name for all examples
+    // example logs: if currently running design within examples, clean up logs
 
 
     // copy the FPGA_AUTO device directory recursively to create new device.
@@ -3371,8 +3363,6 @@ bool CompilerOpenFPGA_ql::Packing() {
         StringUtils::replaceAll(current_device_target.device_variant.devicename,
                                 std::string("FPGA_AUTO"),
                                 generated_layout_name);
-    
-    std::cout << target_device_copy_devicename << std::endl;
     
     std::filesystem::path source_device_copy_dirpath = 
         QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
@@ -3393,6 +3383,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     if(FileUtils::FileExists(target_device_copy_dirpath)) {
       Message("[WARNING] Device Already Exists: " + target_device_copy_devicename +"\n");
       Message("[WARNING] Deleting the Existing Device, It will be regenerated.\n");
+
       FileUtils::RmDirRecursively(target_device_copy_dirpath);
     }
 
@@ -3402,16 +3393,17 @@ bool CompilerOpenFPGA_ql::Packing() {
                             std::filesystem::copy_options::recursive);
     }
     catch (const fs::filesystem_error& e) {
-      std::cerr << "Filesystem error: " << e.what() << std::endl;
-      std::cerr << "Path 1: " << e.path1() << std::endl;
-      std::cerr << "Path 2: " << e.path2() << std::endl;
+      ErrorMessage("Error Copying Device 1\n");
+      // std::cerr << "Filesystem error: " << e.what() << std::endl;
+      // std::cerr << "Path 1: " << e.path1() << std::endl;
+      // std::cerr << "Path 2: " << e.path2() << std::endl;
       return false;
     }
     catch (const std::exception& e) {
-        std::cerr << "General error: " << e.what() << std::endl;
+        ErrorMessage("Error Copying Device 2\n");
+        // std::cerr << "General error: " << e.what() << std::endl;
         return false;
     }
-    std::cout << "device copied" << std::endl;
 
 
     // replace the vpr.xml.en with generated vpr.xml:
@@ -3421,12 +3413,10 @@ bool CompilerOpenFPGA_ql::Packing() {
         current_device_target.device_variant.p_v_t_corner /
         "vpr.xml";
     FileUtils::overwriteFile(output_vpr_xml_path, target_device_vpr_xml_filepath);
-    std::cout << "copy device vpr.xml.en replaced with generated vpr.xml" << std::endl;
 
 
     // delete the generated vpr.xml:
     FileUtils::removeFile(output_vpr_xml_path);
-    std::cout << "delete generated vpr.xml" << std::endl;
 
 
     // rename the cryptdb file according to the new devicename
@@ -3452,15 +3442,15 @@ bool CompilerOpenFPGA_ql::Packing() {
                               target_device_copy_cryptdb_filepath_renamed);
     }
     catch (const std::filesystem::filesystem_error& e) {
-      std::cerr << "Error renaming file: " << e.what() << std::endl;
+      ErrorMessage("Error Renaming File 1\n");
+      //std::cerr << "Error renaming file: " << e.what() << std::endl;
       return false;
     }
-    std::cout << "rename cryptdb with new devicename" << std::endl;
 
 
     // encrypt the vpr.xml -> vpr.xml.en
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(target_device_copy_cryptdb_filepath_renamed.string())) {
-      Message("load cryptdb failed!");
+      ErrorMessage("load cryptdb failed\n");
       return false;
     }
 
@@ -3471,12 +3461,10 @@ bool CompilerOpenFPGA_ql::Packing() {
       ErrorMessage("encryption failed!");
       return false;
     }
-    std::cout << "copy device vpr.xml encrypted" << std::endl;
 
 
     // remove the vpr.xml:
     FileUtils::removeFile(target_device_vpr_xml_filepath);
-    std::cout << "copy device vpr.xml deleted" << std::endl;
 
 
     // find and update all settings/config json recursively
@@ -3493,7 +3481,6 @@ bool CompilerOpenFPGA_ql::Packing() {
 
     // replace "FPGA_AUTO" with generated layout name in all the files
     for(auto filepath: filepath_list) {
-      std::cout << filepath << std::endl;
       FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", generated_layout_name);
     }
 
@@ -3510,34 +3497,26 @@ bool CompilerOpenFPGA_ql::Packing() {
     std::filesystem::path current_project_expected_device_dirpath = 
         current_project_path.parent_path().parent_path().parent_path();
 
-    std::cout << current_project_path << std::endl;
-    std::cout << source_device_copy_dirpath << std::endl;
-
     if(std::filesystem::equivalent(current_project_expected_device_dirpath, source_device_copy_dirpath)) {
 
       std::string current_project_name = current_project_path.filename();
-      std::cout << current_project_name << std::endl;
 
       std::filesystem::path current_example_path = 
           current_project_path.parent_path();
-      std::cout << current_example_path << std::endl;
 
       try {
         current_example_path = std::filesystem::canonical(current_example_path);
         source_device_copy_dirpath = std::filesystem::canonical(source_device_copy_dirpath);
         target_device_copy_dirpath = std::filesystem::canonical(target_device_copy_dirpath);
-        std::cout << current_example_path << std::endl;
-        std::cout << source_device_copy_dirpath << std::endl;
-        std::cout << target_device_copy_dirpath << std::endl;
       }
       catch (const std::filesystem::filesystem_error& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        ErrorMessage("Error Canonicalizing Directory Paths\n");
+        //std::cerr << "Error: " << e.what() << std::endl;
         return false;
       }
 
       std::filesystem::path current_example_path_relative = 
           std::filesystem::relative(current_example_path, source_device_copy_dirpath);
-      std::cout << current_example_path_relative << std::endl;
 
       std::filesystem::path current_example_path_target_device = 
           target_device_copy_dirpath / current_example_path_relative;
