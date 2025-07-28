@@ -3568,7 +3568,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     qInfo() << "~~~ packing skipped, not required";
     return true;
   } else {
-    qInfo() << "~~~ packing processed";
+    qInfo() << "~~~ packing ...";
   }
  
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
@@ -3909,7 +3909,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     qInfo() << "~~~ placement skipped, not required";
     return true;
   } else {
-    qInfo() << "~~~ placement processed";
+    qInfo() << "~~~ placement ...";
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
@@ -4108,7 +4108,7 @@ bool CompilerOpenFPGA_ql::Route() {
     qInfo() << "~~~ routing skipped, not required";
     return true;
   } else {
-    qInfo() << "~~~ routing processed";
+    qInfo() << "~~~ routing...";
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
@@ -4443,7 +4443,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
       return true;
     } else {
-      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "processed";
+      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "...";
     }
     const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
     if (status) {
@@ -4480,7 +4480,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
       return true;
     } else {
-      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "processed";
+      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "...";
     }
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
@@ -4571,7 +4571,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
     return true;
   } else {
-    qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "processed";
+    qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "...";
   }
 
   int status = ExecuteAndMonitorSystemCommand(taCommand->string());

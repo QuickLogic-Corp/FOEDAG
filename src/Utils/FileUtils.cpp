@@ -302,6 +302,21 @@ time_t FileUtils::Mtime(const std::filesystem::path& path) {
   return statbuf.st_mtime;
 }
 
+std::string FileUtils::ModifiedTimeStr(const std::filesystem::path& path) {
+  std::time_t t = Mtime(path);
+  std::tm tmTime;
+
+#if defined(_WIN32) || defined(_WIN64)
+  localtime_s(&tmTime, &t);  // Windows
+#else
+  localtime_r(&t, &tmTime);  // POSIX
+#endif
+
+  std::ostringstream oss;
+  oss << std::put_time(&tmTime, "%Y-%m-%d %H:%M:%S");
+  return oss.str();
+}
+
 bool FileUtils::IsSystemCommandAvailable(const std::string& command) {
   QProcess process;
 #ifdef _WIN32

@@ -96,6 +96,7 @@ class FileUtils final {
                                      bool startDetached = false);
 
   static time_t Mtime(const std::filesystem::path& path);
+  static std::string ModifiedTimeStr(const std::filesystem::path& path);
 
   static bool IsUptoDate(const std::string& sourceFile,
                          const std::string& outputFile);

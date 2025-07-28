@@ -290,7 +290,7 @@ TEST(CommandWrapper, file_content_changed)
     ScopedFile filePath1{std::filesystem::path{"filepath1"}, "content for filepath1..."};
     ScopedFile filePath2{std::filesystem::path{"filepath2"}, "content for filepath2..."};
 
-    const std::string filePath1CreationTimeStr = std::to_string(FileUtils::Mtime(filePath1.filePath()));
+    const std::string filePath1CreationTimeStr = FileUtils::ModifiedTimeStr(filePath1.filePath());
 
     CommandWrapper command1{"cmd"};
     command1.append("--p1", "v1");
@@ -299,8 +299,8 @@ TEST(CommandWrapper, file_content_changed)
     command1.appendFile("--file1", filePath1.filePath());
     command1.appendFile(filePath2.filePath());
 
-    filePath1.writeContent("changed content for filepath1...", 1);
-    const std::string filePath1ModificationTimeStr = std::to_string(FileUtils::Mtime(filePath1.filePath()));
+    filePath1.writeContent("changed content for filepath1...", 2);
+    const std::string filePath1ModificationTimeStr = FileUtils::ModifiedTimeStr(filePath1.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
@@ -400,6 +400,17 @@ TEST(CommandWrapper, serialization)
 
     // Deserialize
     CommandWrapper commandRestored = json.get<CommandWrapper>();
+    for (const auto& [key, fileIdentity]: commandRestored.files()) {
+        if (fileIdentity.mask().empty()) {
+            std::cout << "~~~ fileIdentity.modifiedDateTime()" << fileIdentity.modifiedDateTime() << std::endl;
+            EXPECT_TRUE(!fileIdentity.modifiedDateTime().empty());
+            EXPECT_TRUE(fileIdentity.contentHash().empty());
+        } else {
+            std::cout << "~~~ fileIdentity.contentHash()" << fileIdentity.contentHash() << std::endl;
+            EXPECT_TRUE(!fileIdentity.contentHash().empty());
+            EXPECT_TRUE(fileIdentity.modifiedDateTime().empty());
+        }
+    }
 
     DiffCommandPtr diff = commandRestored.compare(commandOrig);
     EXPECT_TRUE(diff->empty());

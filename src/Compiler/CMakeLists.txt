@@ -60,6 +60,7 @@ set (SRC_CPP_LIST
   Task.cpp
   TaskCompilationOptimizer.cpp
   TaskCompilationStateManager.cpp
+  CommandWrapper.cpp
   #TaskManager.cpp
   TaskManager_ql.cpp
   CompilerDefines.cpp

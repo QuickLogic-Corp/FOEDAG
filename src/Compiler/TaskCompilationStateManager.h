@@ -51,7 +51,7 @@ struct adl_serializer<std::shared_ptr<FOEDAG::CommandWrapper>> {
 
 namespace FOEDAG {
 
-constexpr const char* BUILD_STATE_FILENAME = "build_state.json";
+constexpr const char* BUILD_STATE_FILENAME = "build_states.json";
 class TaskCompilationStateManager {
 public:
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
@@ -82,13 +82,14 @@ public:
       std::string content = FileUtils::GetFileContent(m_filePath);
       nlohmann::json json = nlohmann::json::parse(content);
       if (!json.is_null()) {
-        m_taskCommandsMap = json.get<decltype(m_taskCommandsMap)>();
+        m_taskCommandsMap = json.get<std::unordered_map<std::string, CommandWrapperPtr>>();
       }
     }
   }
 
   void setProjectPath(const std::filesystem::path& path) {
     m_filePath = path / BUILD_STATE_FILENAME;
+    CommandWrapper::setProjectPath(path);
   }
 
 private:

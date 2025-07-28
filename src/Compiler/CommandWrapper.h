@@ -34,6 +34,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
+#include <iostream>
+
 namespace FOEDAG {
 
 constexpr const char* VPR_ARCH_FILE_MASK = "vpr_arch_file_mask";
@@ -106,7 +108,7 @@ public:
       messages.push_back("value for parameter [" + param.name + "], changed from [" + param.prevValue + "] to [" + param.value + "]");
     }
     for (const DiffFile& file: m_diffFiles) {
-      messages.push_back("filepath: " + file.file + " " + file.criteria + " changed from " + file.prevValue + " to " + file.value);
+      messages.push_back("filepath [" + file.file + "], " + file.criteria + " changed from [" + file.prevValue + "] to [" + file.value + "]");
     }
 
     return messages;
@@ -126,7 +128,7 @@ public:
   FileIdentity(const std::filesystem::path& filePath, const std::string& mask): m_filePath(filePath), m_mask(mask) {
     if (std::filesystem::exists(filePath)) {
       if (mask.empty()) {
-        m_modifiedDateTime = std::to_string(FileUtils::Mtime(filePath));
+        m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
       } else {
         // when filepath masked we rely on context hash
         m_contentHash = FileUtils::calcHashFileContent(filePath);
@@ -143,16 +145,28 @@ public:
   bool compare(const FileIdentity& old, const DiffCommandPtr& diff) const {
     bool isDirty = false;
     if (m_mask.empty()) {
-      if (m_modifiedDateTime != old.modifiedDateTime()) {
+      // if in some reason we cannot get the dateTime for a file, we consider file is dirty (modified)
+      if (m_modifiedDateTime.empty() || old.modifiedDateTime().empty()) {
         diff->addDiffFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
         isDirty = true;
+      } else {
+        if (m_modifiedDateTime != old.modifiedDateTime()) {
+          diff->addDiffFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
+          isDirty = true;
+        }
       }
     } else {
-      // file mask is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
-      // for such files we cannot check file modification time, and needs to rely on the content hash, which is slower but robust.
-      if (m_contentHash != old.contentHash()) {
+      // if in some reason we cannot get the contentHash for a file, we consider file is dirty (modified)
+      if (m_contentHash.empty() || old.contentHash().empty()) {
         diff->addDiffFile(m_mask, "hash", old.contentHash(), contentHash());
         isDirty = true;
+      } else {
+        // file mask is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
+        // for such files we cannot check file modification time, and needs to rely on the content hash, which is slower but robust.
+        if (m_contentHash != old.contentHash()) {
+          diff->addDiffFile(m_mask, "hash", old.contentHash(), contentHash());
+          isDirty = true;
+        }
       }
     }
 
@@ -161,6 +175,7 @@ public:
 
 private:
   friend void to_json(nlohmann::json& json, const FileIdentity& obj) {
+    std::cout << obj.m_modifiedDateTime << " " << obj.m_filePath.string() << std::endl;
     json = nlohmann::json{
       {"file_path", obj.m_filePath.string()},
       {"mask", obj.m_mask},
@@ -186,12 +201,15 @@ private:
 };
 
 class CommandWrapper {
+  static std::string s_projectPath;
 public:
   CommandWrapper()=default;
   
   CommandWrapper(const std::string& command) {
     append(command);
   }
+
+  static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
 
   // tmp function fused while migration
   bool compareIgnoringTempPath(const std::string& rhs) {
@@ -304,8 +322,15 @@ private:
   }
 
   void handleFile(const std::filesystem::path& file, const std::string& mask) {
-    std::string key = mask.empty()? file.string(): mask;
-    m_files[key] = FileIdentity{file, mask};
+    std::filesystem::path resolvedFilePath(file);
+    if (!std::filesystem::exists(file)) {
+      if (file.is_relative() && !s_projectPath.empty()) {
+        resolvedFilePath = s_projectPath / file;
+      }  
+    }
+
+    std::string key = mask.empty()? resolvedFilePath.string(): mask;
+    m_files[key] = FileIdentity{resolvedFilePath, mask};
   }
 
   void compareArguments(
