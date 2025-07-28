@@ -437,7 +437,7 @@ TEST(CommandWrapperBuilder, restore_single_cmd_from_string)
     EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 filepath1 --file2 filepath2 --file3 filepath3", commandRestoredPtr->string());
 }
 
-TEST(CommandWrapperBuilder, restore_single_vpr_cmd_with_vpr_arch_file_masked_from_string)
+TEST(CommandWrapperBuilder, restore_single_cmd_from_string_automatic_mask_detection)
 {
     ScopedFile archFilePath{std::filesystem::path{"arch/filepath"}, "shared content 1..."};
     ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content 2..."};
@@ -460,5 +460,5 @@ TEST(CommandWrapperBuilder, restore_single_vpr_cmd_with_vpr_arch_file_masked_fro
 
 TEST(CommandWrapperBuilder, restore_multiple_cmds_from_string)
 {
-    // TODO
+    // TODO: https://github.com/QL-Proprietary/aurora2/issues/1306
 }
