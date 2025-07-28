@@ -34,8 +34,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
-#include <iostream>
-
 namespace FOEDAG {
 
 constexpr const char* VPR_ARCH_FILE_MASK = "vpr_arch_file_mask";
@@ -125,14 +123,13 @@ using DiffCommandPtr = std::shared_ptr<DiffCommand>;
 class FileIdentity {
 public:
   FileIdentity()=default;
-  FileIdentity(const std::filesystem::path& filePath, const std::string& mask): m_filePath(filePath), m_mask(mask) {
-    if (std::filesystem::exists(filePath)) {
-      if (mask.empty()) {
-        m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
-      } else {
-        // when filepath masked we rely on context hash
-        m_contentHash = FileUtils::calcHashFileContent(filePath);
-      }
+  FileIdentity(const std::filesystem::path& filePath, const std::string& mask, bool skipHashCheck)
+  : m_filePath(filePath), m_mask(mask) {
+    // 
+    if (skipHashCheck) {
+      m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
+    } else {
+      m_contentHash = FileUtils::calcHashFileContent(filePath);
     }
   }
 
@@ -144,30 +141,27 @@ public:
 
   bool compare(const FileIdentity& old, const DiffCommandPtr& diff) const {
     bool isDirty = false;
-    if (m_mask.empty()) {
-      // if in some reason we cannot get the dateTime for a file, we consider file is dirty (modified)
-      if (m_modifiedDateTime.empty() || old.modifiedDateTime().empty()) {
-        diff->addDiffFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
+    
+    bool hasHash = (!m_contentHash.empty() && !old.contentHash().empty());
+    bool hasModDateTime = (!m_modifiedDateTime.empty() && !old.modifiedDateTime().empty());
+
+    if (hasModDateTime) {
+      if (m_modifiedDateTime != old.modifiedDateTime()) {
+        diff->addDiffFile(m_mask.empty()? m_filePath.string(): m_mask, "datetime", old.modifiedDateTime(), m_modifiedDateTime);
         isDirty = true;
-      } else {
-        if (m_modifiedDateTime != old.modifiedDateTime()) {
-          diff->addDiffFile(m_filePath.string(), "datetime", old.modifiedDateTime(), m_modifiedDateTime);
-          isDirty = true;
-        }
       }
-    } else {
-      // if in some reason we cannot get the contentHash for a file, we consider file is dirty (modified)
-      if (m_contentHash.empty() || old.contentHash().empty()) {
-        diff->addDiffFile(m_mask, "hash", old.contentHash(), contentHash());
+    } 
+
+    if (hasHash) {
+      if (m_contentHash != old.contentHash()) {
+        diff->addDiffFile(m_mask.empty()? m_filePath.string(): m_mask, "hash", old.contentHash(), contentHash());
         isDirty = true;
-      } else {
-        // file mask is used as a stable file id, where the filepath could be changed (for instance for vpt.xml)
-        // for such files we cannot check file modification time, and needs to rely on the content hash, which is slower but robust.
-        if (m_contentHash != old.contentHash()) {
-          diff->addDiffFile(m_mask, "hash", old.contentHash(), contentHash());
-          isDirty = true;
-        }
       }
+    }
+
+    if (!hasModDateTime && !hasHash) {
+      diff->addDiffFile(m_mask.empty()? m_filePath.string(): m_mask, "no hash and no moddatetime", "", "");
+      isDirty = true;
     }
 
     return !isDirty;
@@ -175,7 +169,6 @@ public:
 
 private:
   friend void to_json(nlohmann::json& json, const FileIdentity& obj) {
-    std::cout << obj.m_modifiedDateTime << " " << obj.m_filePath.string() << std::endl;
     json = nlohmann::json{
       {"file_path", obj.m_filePath.string()},
       {"mask", obj.m_mask},
@@ -202,6 +195,8 @@ private:
 
 class CommandWrapper {
   static std::string s_projectPath;
+  static std::unordered_set<std::string> s_bigFilesSet;
+
 public:
   CommandWrapper()=default;
   
@@ -210,6 +205,7 @@ public:
   }
 
   static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
+  static void addBigFileName(const std::string& fileName) { s_bigFilesSet.insert(fileName); }
 
   // tmp function fused while migration
   bool compareIgnoringTempPath(const std::string& rhs) {
@@ -265,6 +261,10 @@ public:
   }
 
 private:
+  std::unordered_map<std::string, std::string> m_arguments;
+  std::unordered_map<std::string, FileIdentity> m_files;
+  std::string m_string;
+
   friend void to_json(nlohmann::json& json, const CommandWrapper& obj) {
     json = nlohmann::json{
       {"arguments", obj.m_arguments},
@@ -278,10 +278,6 @@ private:
     json.at("files").get_to(obj.m_files);
     json.at("string").get_to(obj.m_string);
   }
-
-  std::unordered_map<std::string, std::string> m_arguments;
-  std::unordered_map<std::string, FileIdentity> m_files;
-  std::string m_string;
 
   void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
     handleArgument(param, val, mask);
@@ -323,14 +319,31 @@ private:
 
   void handleFile(const std::filesystem::path& file, const std::string& mask) {
     std::filesystem::path resolvedFilePath(file);
-    if (!std::filesystem::exists(file)) {
+    bool exists = std::filesystem::exists(file);
+    if (!exists) {
       if (file.is_relative() && !s_projectPath.empty()) {
         resolvedFilePath = s_projectPath / file;
       }  
     }
 
+    if (!exists) {
+      exists = std::filesystem::exists(resolvedFilePath);
+    }
+    if (!exists) {
+      return;
+    }
+
+    bool skipHashCheck = false;
+    auto it = s_bigFilesSet.find(resolvedFilePath.filename());
+    if (it != s_bigFilesSet.end()) {
+      skipHashCheck = true;
+    }
+    if (resolvedFilePath.extension() == ".bin") {
+      skipHashCheck = true; // calc md5 sum for big bin files takes a lot of time
+    }
+
     std::string key = mask.empty()? resolvedFilePath.string(): mask;
-    m_files[key] = FileIdentity{resolvedFilePath, mask};
+    m_files[key] = FileIdentity{resolvedFilePath, mask, skipHashCheck};
   }
 
   void compareArguments(

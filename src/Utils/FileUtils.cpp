@@ -619,7 +619,7 @@ std::string FileUtils::calcHashFileContent(const std::filesystem::path& filePath
       return "";
   }
 
-  QCryptographicHash hash(QCryptographicHash::Sha256);
+  QCryptographicHash hash(QCryptographicHash::Md5);
 
   const qint64 bufferSize = 10 * 1024 * 1024; // 10 MB buffer
   QByteArray buffer;
