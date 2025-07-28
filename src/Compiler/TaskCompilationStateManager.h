@@ -21,9 +21,33 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "CommandWrapper.h"
+#include "Utils/FileUtils.h"
+
+#include "nlohmann_json/json.hpp"
 
 #include <unordered_map>
 #include <iostream>
+
+namespace nlohmann {
+template <>
+struct adl_serializer<std::shared_ptr<FOEDAG::CommandWrapper>> {
+    static void to_json(json& json, const std::shared_ptr<FOEDAG::CommandWrapper>& ptr) {
+      if (ptr) {
+        json = *ptr;
+      } else {
+        json = nullptr;
+      }
+    }
+
+    static void from_json(const json& json, std::shared_ptr<FOEDAG::CommandWrapper>& ptr) {
+      if (json.is_null()) {
+        ptr = nullptr;
+      } else {
+        ptr = std::make_shared<FOEDAG::CommandWrapper>(json.get<FOEDAG::CommandWrapper>());
+      }
+    }
+};
+} // namespace nlohmann
 
 namespace FOEDAG {
 
@@ -45,7 +69,20 @@ public:
     m_taskCommandsMap[key(taskId, profile)] = command;
   }
 
+  void clear() {
+    m_taskCommandsMap.clear();
+    FileUtils::removeFile(m_filePath);
+  }
+
+  void save() {
+    nlohmann::json json = m_taskCommandsMap;
+    if (!json.is_null()) {
+      FileUtils::WriteToFile(m_filePath, json.dump());
+    }
+  }
+
 private:
+  std::filesystem::path m_filePath{"build_state.json"};
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
 
   std::string key(int taskId) const {
@@ -74,6 +111,16 @@ private:
     }
 
     return false;
+  }
+
+  void load() {
+    if (FileUtils::IsExistedRegularFile(m_filePath)) {
+      std::string content = FileUtils::GetFileContent(m_filePath);
+      nlohmann::json json = nlohmann::json::parse(content);
+      if (!json.is_null()) {
+        m_taskCommandsMap = json.get<decltype(m_taskCommandsMap)>();
+      }
+    }
   }
 };
 
