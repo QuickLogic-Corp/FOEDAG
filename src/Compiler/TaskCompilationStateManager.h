@@ -63,10 +63,12 @@ public:
 
   void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
     m_taskCommandsMap[key(taskId)] = command;
+    save();
   }
 
   void storeTaskCommand(int taskId, const std::string& profile, const CommandWrapperPtr& command) {
     m_taskCommandsMap[key(taskId, profile)] = command;
+    save();
   }
 
   void clear() {
