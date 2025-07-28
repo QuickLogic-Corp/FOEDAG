@@ -3243,6 +3243,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   // FPGA_AUTO device logic ++
   // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
+  m_autoLayoutGenerationMode = false;
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
@@ -3547,6 +3548,8 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
     }
 
+    // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
+    QLDeviceManager::getInstance()->parseDeviceData();
 
     Message("Generating Device ok: " + target_device_copy_devicename +"\n");
     Message("Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
