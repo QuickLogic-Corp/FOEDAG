@@ -385,9 +385,8 @@ TEST(CommandWrapper, masked_files_differ)
 
 TEST(CommandWrapper, serialization) 
 {
-    // in this particular case we rely that file has specific role, filepath could be different, but content expected to be the same
-    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content..."};
-    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content..."};
+    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content 1..."};
+    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content 2..."};
 
     CommandWrapper commandOrig{"cmd"};
     commandOrig.append("--p1", "v1");
@@ -409,4 +408,25 @@ TEST(CommandWrapper, serialization)
     EXPECT_TRUE(diff->changedParameters().empty());
     EXPECT_TRUE(diff->addedParameters().empty());
     EXPECT_TRUE(diff->removedParameters().empty());
+}
+
+TEST(CommandWrapperBuilder, restore_single_cmd_from_string)
+{
+    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content 1..."};
+    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content 2..."};
+
+    CommandWrapper commandOrig{"cmd"};
+    commandOrig.append("--p1", "v1");
+    commandOrig.append("--p2");
+    commandOrig.append("--p3", "v3");
+    commandOrig.appendFile(filePath1.filePath(), "arch");
+    commandOrig.appendFile("--file2", filePath2.filePath());
+
+    CommandWrapperPtr commandRestoredPtr = CommandWrapperBuilder::fromString(commandOrig.string());
+    EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 filepath1 --file2 filepath2", commandRestoredPtr->string());
+}
+
+TEST(CommandWrapperBuilder, restore_multiple_cmds_from_string)
+{
+    
 }
