@@ -51,6 +51,7 @@ struct adl_serializer<std::shared_ptr<FOEDAG::CommandWrapper>> {
 
 namespace FOEDAG {
 
+constexpr const char* BUILD_STATE_FILENAME = "build_state.json";
 class TaskCompilationStateManager {
 public:
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
@@ -73,22 +74,26 @@ public:
 
   void clear() {
     m_taskCommandsMap.clear();
-    FileUtils::removeFile(m_filePath);
+    FileUtils::removeFile(filePath());
   }
 
   void load() {
-    if (FileUtils::IsExistedRegularFile(m_filePath)) {
-      std::string content = FileUtils::GetFileContent(m_filePath);
+    if (FileUtils::IsExistedRegularFile(filePath())) {
+      std::string content = FileUtils::GetFileContent(filePath());
       nlohmann::json json = nlohmann::json::parse(content);
       if (!json.is_null()) {
         m_taskCommandsMap = json.get<decltype(m_taskCommandsMap)>();
       }
     }
   }
-  
+
 private:
-  std::filesystem::path m_filePath{"build_state.json"};
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
+
+  std::filesystem::path filePath() const {
+    std::filesystem::path path{BUILD_STATE_FILENAME};
+    return path;
+  }
 
   std::string key(int taskId) const {
     return std::to_string(taskId);
@@ -121,7 +126,7 @@ private:
   void save() {
     nlohmann::json json = m_taskCommandsMap;
     if (!json.is_null()) {
-      FileUtils::WriteToFile(m_filePath, json.dump());
+      FileUtils::WriteToFile(filePath(), json.dump());
     }
   }
 };
