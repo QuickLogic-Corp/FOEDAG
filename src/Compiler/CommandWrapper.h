@@ -159,6 +159,7 @@ public:
     return !isDirty;
   }
 
+private:
   friend void to_json(nlohmann::json& json, const FileIdentity& obj) {
     json = nlohmann::json{
       {"file_path", obj.m_filePath.string()},
@@ -178,7 +179,6 @@ public:
     json.at("content_hash").get_to(obj.m_contentHash);
   }
 
-private:
   std::filesystem::path m_filePath;
   std::string m_mask;
   std::string m_modifiedDateTime;
@@ -246,6 +246,7 @@ public:
     handleFile(file, mask);
   }
 
+private:
   friend void to_json(nlohmann::json& json, const CommandWrapper& obj) {
     json = nlohmann::json{
       {"arguments", obj.m_arguments},
@@ -260,7 +261,6 @@ public:
     json.at("string").get_to(obj.m_string);
   }
 
-private:
   std::unordered_map<std::string, std::string> m_arguments;
   std::unordered_map<std::string, FileIdentity> m_files;
   std::string m_string;
