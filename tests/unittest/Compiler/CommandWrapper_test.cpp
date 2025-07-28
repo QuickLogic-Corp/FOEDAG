@@ -287,7 +287,7 @@ TEST(CommandWrapper, change_argument_file)
 
 TEST(CommandWrapper, file_content_changed)
 {
-    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "content for filepath1..."};
+    ScopedFile filePath1{std::filesystem::path{"filepath1.bin"}, "010101010010101..."}; // datetime mod check used for .bin files
     ScopedFile filePath2{std::filesystem::path{"filepath2"}, "content for filepath2..."};
 
     const std::string filePath1CreationTimeStr = FileUtils::ModifiedTimeStr(filePath1.filePath());
@@ -385,7 +385,7 @@ TEST(CommandWrapper, masked_files_differ)
 
 TEST(CommandWrapper, serialization) 
 {
-    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content 1..."};
+    ScopedFile filePath1{std::filesystem::path{"filepath1.bin"}, "0101010101..."}; // datetime mod check used for .bin files
     ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content 2..."};
 
     CommandWrapper commandOrig{"cmd"};
@@ -401,12 +401,10 @@ TEST(CommandWrapper, serialization)
     // Deserialize
     CommandWrapper commandRestored = json.get<CommandWrapper>();
     for (const auto& [key, fileIdentity]: commandRestored.files()) {
-        if (fileIdentity.mask().empty()) {
-            std::cout << "~~~ fileIdentity.modifiedDateTime()" << fileIdentity.modifiedDateTime() << std::endl;
+        if (fileIdentity.filePath().extension() == ".bin") {
             EXPECT_TRUE(!fileIdentity.modifiedDateTime().empty());
             EXPECT_TRUE(fileIdentity.contentHash().empty());
         } else {
-            std::cout << "~~~ fileIdentity.contentHash()" << fileIdentity.contentHash() << std::endl;
             EXPECT_TRUE(!fileIdentity.contentHash().empty());
             EXPECT_TRUE(fileIdentity.modifiedDateTime().empty());
         }
