@@ -3242,6 +3242,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
 
   // FPGA_AUTO device logic ++
+  // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
@@ -3251,6 +3252,23 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   if(m_autoLayoutGenerationMode) {
     m_state = State::None; // TODO: check this if we should do this or leave it alone?
+    
+    // Regardless of the status (whether the design fits into the base auto layout or now)
+    // we generated a device package.
+    // Even if the design fits, the layout being is called 'FPGA_AUTO' necessary to trigger the
+    // auto layout generation mode, prevents it from being used in the normal flow.
+    // So, we generate a device package (which will be identical to the FPGA_AUTO) with the
+    // devicename and layoutname changed according to the generated layout from the script.
+
+    // m_architectureFile -> decrypted vpr.xml of current device target.
+    std::filesystem::path output_vpr_xml_path = 
+          std::filesystem::path(ProjManager()->projectPath()) / "vpr_generated.xml";
+
+    // layout to be used in generated device
+    int generated_layout_width = 0;
+    int generated_layout_height = 0;
+    std::string generated_layout_name = "";
+
     if (status) {
       Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
       Message("Try to generate a device that can accomodate current design...\n");
@@ -3261,15 +3279,12 @@ bool CompilerOpenFPGA_ql::Packing() {
       std::filesystem::path vpr_stdout_log_filepath = 
           std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
 
-      std::filesystem::path output_path = 
-          std::filesystem::path(ProjManager()->projectPath()) / "vpr_generated.xml";
-
       std::string command_auto_device = 
                             std::string("python3") + std::string(" ") +
                             add_layout_script_path.string() + std::string(" ") +
                             std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
                             std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
-                            std::string("--output ") + output_path.string();
+                            std::string("--output ") + output_vpr_xml_path.string();
 
       std::filesystem::path logfile_auto_device = 
           std::filesystem::path(ProjManager()->projectPath()) / "auto_device.log";
@@ -3279,9 +3294,6 @@ bool CompilerOpenFPGA_ql::Packing() {
       if (status_auto_device == 0) {
 
         // get the layout name generated from the log file:
-        std::string generated_layout_name = "";
-        int generated_layout_width = 0;
-        int generated_layout_height = 0;
         const QRegularExpression auto_layout_regex("Layout: (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
         QFile file{QString::fromStdString(logfile_auto_device.string())};
         file.open(QFile::ReadOnly);
@@ -3315,216 +3327,235 @@ bool CompilerOpenFPGA_ql::Packing() {
         std::cout << generated_layout_name << std::endl;
         std::cout << generated_layout_width << std::endl;
         std::cout << generated_layout_height << std::endl;
-
-        // create new device:
-        // <device>: as a copy of the FPGA_AUTO device
-        // devicename: replace FPGA_AUTO with the generated layout name
-        // cryptdb: replace FPGA_AUTO with the generated layout name
-        // vpr.xml.en: delete existing
-        // vpr.xml: copy generated vpr xml
-        // vpr.xml.en: encrypt the copied vpr.xml
-        // vpr.xml: delete the vpr.xml after encryption
-        // settings.json, replace FPGA_AUTO with generated layout name for all examples
-
-
-        // copy the FPGA_AUTO device directory recursively to create new device.
-        std::string target_device_copy_devicename = 
-            StringUtils::replaceAll(current_device_target.device_variant.devicename,
-                                    std::string("FPGA_AUTO"),
-                                    generated_layout_name);
-        
-        std::cout << target_device_copy_devicename << std::endl;
-        
-        std::filesystem::path source_device_copy_dirpath = 
-            QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
-
-        std::filesystem::path target_device_copy_dirpath = 
-            source_device_copy_dirpath / 
-            std::string("..") / 
-            target_device_copy_devicename;
-
-        // what if already generated previously, sameWH, but maybe different resources?
-        // maybe we should put some randomized name in addition to generated_layout_name ?
-        // DATE?
-        // Save in DEVICEDATA or somewhere else?
-        // TODO.
-        if(FileUtils::FileExists(target_device_copy_dirpath)) {
-          Message("Device Already Exists: " + target_device_copy_devicename +"\n");
-          return true;
-        }
-
-        try {
-          std::filesystem::copy(source_device_copy_dirpath,
-                                target_device_copy_dirpath,
-                                std::filesystem::copy_options::recursive);
-        }
-        catch (const fs::filesystem_error& e) {
-          std::cerr << "Filesystem error: " << e.what() << std::endl;
-          std::cerr << "Path 1: " << e.path1() << std::endl;
-          std::cerr << "Path 2: " << e.path2() << std::endl;
-          return false;
-        }
-        catch (const std::exception& e) {
-            std::cerr << "General error: " << e.what() << std::endl;
-            return false;
-        }
-        std::cout << "device copied" << std::endl;
-
-        // replace the vpr.xml.en with generated vpr.xml:
-        std::filesystem::path target_device_vpr_xml_filepath =
-            target_device_copy_dirpath / 
-            current_device_target.device_variant.voltage_threshold /
-            current_device_target.device_variant.p_v_t_corner /
-            "vpr.xml";
-        FileUtils::overwriteFile(output_path, target_device_vpr_xml_filepath);
-        std::cout << "copy device vpr.xml.en replaced with generated vpr.xml" << std::endl;
-
-
-        // delete the generated vpr.xml:
-        FileUtils::removeFile(output_path);
-        std::cout << "delete generated vpr.xml" << std::endl;
-
-
-        // rename the cryptdb file according to the new devicename
-        std::filesystem::path source_device_cryptdb_filepath = 
-            CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                                QLDeviceManager::getInstance()->convertToDeviceTypeString());
-        std::string source_device_cryptdb_filename = 
-            source_device_cryptdb_filepath.filename();
-
-        std::string target_device_copy_cryptdb_filename = 
-            StringUtils::replaceAll(source_device_cryptdb_filename,
-                                    std::string("FPGA_AUTO"),
-                                    generated_layout_name);
-
-        std::filesystem::path target_device_copy_cryptdb_filepath_original = 
-            target_device_copy_dirpath / source_device_cryptdb_filename;
-
-        std::filesystem::path target_device_copy_cryptdb_filepath_renamed = 
-            target_device_copy_dirpath / target_device_copy_cryptdb_filename;
-
-        try {
-          std::filesystem::rename(target_device_copy_cryptdb_filepath_original,
-                                  target_device_copy_cryptdb_filepath_renamed);
-        }
-        catch (const std::filesystem::filesystem_error& e) {
-          std::cerr << "Error renaming file: " << e.what() << std::endl;
-          return false;
-        }
-        std::cout << "rename cryptdb with new devicename" << std::endl;
-
-
-        // encrypt the vpr.xml -> vpr.xml.en
-        if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(target_device_copy_cryptdb_filepath_renamed.string())) {
-          Message("load cryptdb failed!");
-          return false;
-        }
-
-        // existing API forces us to use a list of files to be encrypted...
-        std::vector<std::filesystem::path> file_list_to_encrypt;
-        file_list_to_encrypt.push_back(target_device_vpr_xml_filepath);
-        if (!CRFileCryptProc::getInstance()->encryptFiles(file_list_to_encrypt)) {
-          ErrorMessage("encryption failed!");
-          return false;
-        }
-        std::cout << "copy device vpr.xml encrypted" << std::endl;
-
-
-        // remove the vpr.xml:
-        FileUtils::removeFile(target_device_vpr_xml_filepath);
-        std::cout << "copy device vpr.xml deleted" << std::endl;
-
-
-        // find and update all settings/config json recursively
-        std::regex filename_pattern(".+\\.json");
-
-        std::vector<std::filesystem::path> filepath_list;
-
-        // this will include settings.json, settings_template.json, config.json
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath)) {
-          if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
-            filepath_list.push_back(entry.path());
-          }
-        }
-
-        // replace "FPGA_AUTO" with generated layout name in all the files
-        for(auto filepath: filepath_list) {
-          std::cout << filepath << std::endl;
-          FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", generated_layout_name);
-        }
-
-
-        // cleanup the currently run example files in the copied device (logs/working_directory etc.)
-        // **if** it is part of the examples in the FPGA_AUTO device.
-        // <example_dir>/<project_dir>
-        // <example_dir>/*.log
-        // <example_dir>/aurora*.tcl
-
-        std::filesystem::path current_project_path = 
-            std::filesystem::path(ProjManager()->projectPath());
-
-        std::filesystem::path current_project_expected_device_dirpath = 
-            current_project_path.parent_path().parent_path().parent_path();
-
-        std::cout << current_project_path << std::endl;
-        std::cout << source_device_copy_dirpath << std::endl;
-
-        if(std::filesystem::equivalent(current_project_expected_device_dirpath, source_device_copy_dirpath)) {
-
-          std::string current_project_name = current_project_path.filename();
-          std::cout << current_project_name << std::endl;
-
-          std::filesystem::path current_example_path = 
-              current_project_path.parent_path();
-          std::cout << current_example_path << std::endl;
-
-          try {
-            current_example_path = std::filesystem::canonical(current_example_path);
-            source_device_copy_dirpath = std::filesystem::canonical(source_device_copy_dirpath);
-            std::cout << current_example_path << std::endl;
-            std::cout << source_device_copy_dirpath << std::endl;
-          }
-          catch (const std::filesystem::filesystem_error& e) {
-            std::cerr << "Error: " << e.what() << std::endl;
-            return false;
-          }
-
-          std::filesystem::path current_example_path_relative = 
-              std::filesystem::relative(current_example_path, source_device_copy_dirpath);
-          std::cout << current_example_path_relative << std::endl;
-
-          std::filesystem::path current_example_path_target_device = 
-              target_device_copy_dirpath / current_example_path_relative;
-
-          FileUtils::RmDirRecursively(current_example_path_target_device / current_project_name );
-          FileUtils::removeFile(current_example_path_target_device / "aurora_perf.log");
-          FileUtils::removeFile(current_example_path_target_device / "aurora.log");
-          FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
-        }
-
-        Message("Generating Device ok: " + target_device_copy_devicename +"\n");
-        Message("Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
-
-        return true;
       }
       else {
         ErrorMessage("Generating Device Failed, Error Code: " + std::to_string(status_auto_device) + "\n");
         return false;
       }
-      
-      return true;
     }
     else {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
-      Message("The current device layout can be used (change the layout name!!)\n");
-      return true;
+      Message("Generating Device equivalent to the current device...\n");
+      generated_layout_width = current_device_target.device_variant_layout.width;
+      generated_layout_height = current_device_target.device_variant_layout.height;
+      generated_layout_name = std::string("AUTOFPGA") + 
+                              std::to_string(generated_layout_width) + 
+                              std::to_string(generated_layout_height);
+
+      // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
+      FileUtils::overwriteFile(m_architectureFile, output_vpr_xml_path);
+
+      // update the layout_name in the vpr.xml
+      FileUtils::findAndReplaceInFile(output_vpr_xml_path, "FPGA_AUTO", generated_layout_name);
+
+      std::cout << generated_layout_name << std::endl;
+      std::cout << generated_layout_width << std::endl;
+      std::cout << generated_layout_height << std::endl;
     }
+
+
+    // create new device:
+    // <device>: as a copy of the FPGA_AUTO device
+    // devicename: replace FPGA_AUTO with the generated layout name
+    // cryptdb: replace FPGA_AUTO with the generated layout name
+    // vpr.xml.en: delete existing
+    // vpr.xml: copy generated vpr xml
+    // vpr.xml.en: encrypt the copied vpr.xml
+    // vpr.xml: delete the vpr.xml after encryption
+    // settings.json, replace FPGA_AUTO with generated layout name for all examples
+
+
+    // copy the FPGA_AUTO device directory recursively to create new device.
+    std::string target_device_copy_devicename = 
+        StringUtils::replaceAll(current_device_target.device_variant.devicename,
+                                std::string("FPGA_AUTO"),
+                                generated_layout_name);
+    
+    std::cout << target_device_copy_devicename << std::endl;
+    
+    std::filesystem::path source_device_copy_dirpath = 
+        QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
+
+    std::filesystem::path target_device_copy_dirpath = 
+        source_device_copy_dirpath / 
+        std::string("..") / 
+        target_device_copy_devicename;
+
+
+    // if the same name device is already generated previously, then we replace that
+    // with the new device.
+    // 1. if this is not desirable, we would need to add additional data to the name, and
+    //    that means communicating this with the script, maybe as a parameter?
+    // 2. the other option is prompting user to enter a 'suffix' or 'prefix' for the devicename.
+    //    this is complicated, as we need to handle both batch mode and gui mode for the prompt.
+    // this is a decision for future releases.
+    if(FileUtils::FileExists(target_device_copy_dirpath)) {
+      Message("[WARNING] Device Already Exists: " + target_device_copy_devicename +"\n");
+      Message("[WARNING] Deleting the Existing Device, It will be regenerated.\n");
+      FileUtils::RmDirRecursively(target_device_copy_dirpath);
+    }
+
+    try {
+      std::filesystem::copy(source_device_copy_dirpath,
+                            target_device_copy_dirpath,
+                            std::filesystem::copy_options::recursive);
+    }
+    catch (const fs::filesystem_error& e) {
+      std::cerr << "Filesystem error: " << e.what() << std::endl;
+      std::cerr << "Path 1: " << e.path1() << std::endl;
+      std::cerr << "Path 2: " << e.path2() << std::endl;
+      return false;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "General error: " << e.what() << std::endl;
+        return false;
+    }
+    std::cout << "device copied" << std::endl;
+
+
+    // replace the vpr.xml.en with generated vpr.xml:
+    std::filesystem::path target_device_vpr_xml_filepath =
+        target_device_copy_dirpath / 
+        current_device_target.device_variant.voltage_threshold /
+        current_device_target.device_variant.p_v_t_corner /
+        "vpr.xml";
+    FileUtils::overwriteFile(output_vpr_xml_path, target_device_vpr_xml_filepath);
+    std::cout << "copy device vpr.xml.en replaced with generated vpr.xml" << std::endl;
+
+
+    // delete the generated vpr.xml:
+    FileUtils::removeFile(output_vpr_xml_path);
+    std::cout << "delete generated vpr.xml" << std::endl;
+
+
+    // rename the cryptdb file according to the new devicename
+    std::filesystem::path source_device_cryptdb_filepath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
+    std::string source_device_cryptdb_filename = 
+        source_device_cryptdb_filepath.filename();
+
+    std::string target_device_copy_cryptdb_filename = 
+        StringUtils::replaceAll(source_device_cryptdb_filename,
+                                std::string("FPGA_AUTO"),
+                                generated_layout_name);
+
+    std::filesystem::path target_device_copy_cryptdb_filepath_original = 
+        target_device_copy_dirpath / source_device_cryptdb_filename;
+
+    std::filesystem::path target_device_copy_cryptdb_filepath_renamed = 
+        target_device_copy_dirpath / target_device_copy_cryptdb_filename;
+
+    try {
+      std::filesystem::rename(target_device_copy_cryptdb_filepath_original,
+                              target_device_copy_cryptdb_filepath_renamed);
+    }
+    catch (const std::filesystem::filesystem_error& e) {
+      std::cerr << "Error renaming file: " << e.what() << std::endl;
+      return false;
+    }
+    std::cout << "rename cryptdb with new devicename" << std::endl;
+
+
+    // encrypt the vpr.xml -> vpr.xml.en
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(target_device_copy_cryptdb_filepath_renamed.string())) {
+      Message("load cryptdb failed!");
+      return false;
+    }
+
+    // existing API forces us to use a list of files to be encrypted...
+    std::vector<std::filesystem::path> file_list_to_encrypt;
+    file_list_to_encrypt.push_back(target_device_vpr_xml_filepath);
+    if (!CRFileCryptProc::getInstance()->encryptFiles(file_list_to_encrypt)) {
+      ErrorMessage("encryption failed!");
+      return false;
+    }
+    std::cout << "copy device vpr.xml encrypted" << std::endl;
+
+
+    // remove the vpr.xml:
+    FileUtils::removeFile(target_device_vpr_xml_filepath);
+    std::cout << "copy device vpr.xml deleted" << std::endl;
+
+
+    // find and update all settings/config json recursively
+    std::regex filename_pattern(".+\\.json");
+
+    std::vector<std::filesystem::path> filepath_list;
+
+    // this will include settings.json, settings_template.json, config.json
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath)) {
+      if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
+        filepath_list.push_back(entry.path());
+      }
+    }
+
+    // replace "FPGA_AUTO" with generated layout name in all the files
+    for(auto filepath: filepath_list) {
+      std::cout << filepath << std::endl;
+      FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", generated_layout_name);
+    }
+
+
+    // cleanup the currently run example files in the copied device (logs/working_directory etc.)
+    // **if** it is part of the examples in the FPGA_AUTO device.
+    // <example_dir>/<project_dir>
+    // <example_dir>/*.log
+    // <example_dir>/aurora*.tcl
+
+    std::filesystem::path current_project_path = 
+        std::filesystem::path(ProjManager()->projectPath());
+
+    std::filesystem::path current_project_expected_device_dirpath = 
+        current_project_path.parent_path().parent_path().parent_path();
+
+    std::cout << current_project_path << std::endl;
+    std::cout << source_device_copy_dirpath << std::endl;
+
+    if(std::filesystem::equivalent(current_project_expected_device_dirpath, source_device_copy_dirpath)) {
+
+      std::string current_project_name = current_project_path.filename();
+      std::cout << current_project_name << std::endl;
+
+      std::filesystem::path current_example_path = 
+          current_project_path.parent_path();
+      std::cout << current_example_path << std::endl;
+
+      try {
+        current_example_path = std::filesystem::canonical(current_example_path);
+        source_device_copy_dirpath = std::filesystem::canonical(source_device_copy_dirpath);
+        target_device_copy_dirpath = std::filesystem::canonical(target_device_copy_dirpath);
+        std::cout << current_example_path << std::endl;
+        std::cout << source_device_copy_dirpath << std::endl;
+        std::cout << target_device_copy_dirpath << std::endl;
+      }
+      catch (const std::filesystem::filesystem_error& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return false;
+      }
+
+      std::filesystem::path current_example_path_relative = 
+          std::filesystem::relative(current_example_path, source_device_copy_dirpath);
+      std::cout << current_example_path_relative << std::endl;
+
+      std::filesystem::path current_example_path_target_device = 
+          target_device_copy_dirpath / current_example_path_relative;
+
+      FileUtils::RmDirRecursively(current_example_path_target_device / current_project_name );
+      FileUtils::removeFile(current_example_path_target_device / "aurora_perf.log");
+      FileUtils::removeFile(current_example_path_target_device / "aurora.log");
+      FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
+    }
+
+
+    Message("Generating Device ok: " + target_device_copy_devicename +"\n");
+    Message("Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
   }
   // FPGA_AUTO device logic --
 
 
-
   CleanTempFiles();
+
 
   if(!m_autoLayoutGenerationMode) {
     if (status) {
@@ -3536,7 +3567,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     return true;
   }
 
-  return false;
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::GlobalPlacement() {
