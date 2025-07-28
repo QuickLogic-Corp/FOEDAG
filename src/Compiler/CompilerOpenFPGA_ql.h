@@ -141,6 +141,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::string BaseVprCommandOLD(QLDeviceTarget device_target = QLDeviceTarget());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget()); // todo, make it const
 
+  TaskCompilationStateManager& taskCompilationStateManager() { return m_taskCompilationStateManager; }
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -237,7 +239,7 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
-  TaskCompilationStateManager m_taskCompilationManager;
+  TaskCompilationStateManager m_taskCompilationStateManager;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
   std::string getSynthesisCommandOLD();           // TODO

@@ -76,13 +76,16 @@ public:
     FileUtils::removeFile(m_filePath);
   }
 
-  void save() {
-    nlohmann::json json = m_taskCommandsMap;
-    if (!json.is_null()) {
-      FileUtils::WriteToFile(m_filePath, json.dump());
+  void load() {
+    if (FileUtils::IsExistedRegularFile(m_filePath)) {
+      std::string content = FileUtils::GetFileContent(m_filePath);
+      nlohmann::json json = nlohmann::json::parse(content);
+      if (!json.is_null()) {
+        m_taskCommandsMap = json.get<decltype(m_taskCommandsMap)>();
+      }
     }
   }
-
+  
 private:
   std::filesystem::path m_filePath{"build_state.json"};
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
@@ -115,13 +118,10 @@ private:
     return false;
   }
 
-  void load() {
-    if (FileUtils::IsExistedRegularFile(m_filePath)) {
-      std::string content = FileUtils::GetFileContent(m_filePath);
-      nlohmann::json json = nlohmann::json::parse(content);
-      if (!json.is_null()) {
-        m_taskCommandsMap = json.get<decltype(m_taskCommandsMap)>();
-      }
+  void save() {
+    nlohmann::json json = m_taskCommandsMap;
+    if (!json.is_null()) {
+      FileUtils::WriteToFile(m_filePath, json.dump());
     }
   }
 };

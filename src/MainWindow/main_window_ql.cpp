@@ -862,6 +862,7 @@ void MainWindow::loadFile(const QString& file) {
   if (m_projectFileLoader) {
     m_projectFileLoader->Load(file);
     if (sourcesForm) sourcesForm->InitSourcesForm();
+    static_cast<CompilerOpenFPGA_ql*>(m_compiler)->taskCompilationStateManager().load();
     updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
     updateTaskTable();
   }

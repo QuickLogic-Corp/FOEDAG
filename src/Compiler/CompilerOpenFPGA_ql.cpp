@@ -3556,7 +3556,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   if(!command) {
     return false;
   }
-  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
     qInfo() << "~~~ packing skipped, not required";
     return true;
   } else {
@@ -3595,7 +3595,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {
-    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
   Message("Design " + ProjManager()->projectName() + " is packed");
@@ -3897,7 +3897,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(!command) {
     return false;
   }
-  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
     qInfo() << "~~~ placement skipped, not required";
     return true;
   } else {
@@ -3925,7 +3925,7 @@ bool CompilerOpenFPGA_ql::Placement() {
                  " placement failed");
     return false;
   } else {
-    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Detailed), command);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Detailed), command);
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
@@ -4096,7 +4096,7 @@ bool CompilerOpenFPGA_ql::Route() {
   if (!command) {
     return false;
   }
-  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
     qInfo() << "~~~ routing skipped, not required";
     return true;
   } else {
@@ -4123,7 +4123,7 @@ bool CompilerOpenFPGA_ql::Route() {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
     return false;
   } else {
-    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::Routing), command);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Routing), command);
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
@@ -4431,7 +4431,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-    if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
+    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
       qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
       return true;
     } else {
@@ -4443,7 +4443,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                    " place and route view failed");
       return false;
     } else {
-      m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
+      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
     }
     return true;
   }
@@ -4468,7 +4468,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!command) {
       return false;
     }
-    if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, command)) {
+    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, command)) {
       qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
       return true;
     } else {
@@ -4493,7 +4493,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                    " timing analysis failed");
       return false;
     } else {
-      m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, command);
+      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, command);
     }
     // find files
     std::string libFileName =
@@ -4559,7 +4559,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
   }
 
-  if (!m_taskCompilationManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
     qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
     return true;
   } else {
@@ -4573,7 +4573,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                  " timing analysis failed");
     return false;
   } else {
-    m_taskCompilationManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
   }
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
