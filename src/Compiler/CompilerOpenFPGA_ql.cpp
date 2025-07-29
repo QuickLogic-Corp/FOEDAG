@@ -84,6 +84,8 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
+#define USE_INCREMENTAL_COMPILATION
+
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler()
 {
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
@@ -1724,212 +1726,19 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
-  QLSettingsManager::reloadJSONSettings();
-
-  // check if settings were loaded correctly before proceeding:
-  if((QLSettingsManager::getInstance()->settings_json).empty()) {
-    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return false;
-  }
-
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
-    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
-    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
-    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
-    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
-    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
-    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
-    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
-    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
-    Message("family: " + family);
-    Message("foundry: " + foundry);
-    Message("node: " + node);
-    Message("devicename: " + devicename);
-    Message("voltage_threshold: " + voltage_threshold);
-    Message("p_v_t_corner: " + p_v_t_corner);
-    Message("layout: " + layout);
-    return false;
-  }
-
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
-    std::string synplifyScript; 
-    m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
-    if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
-      ErrorMessage("This Device is Not Supported by Synplify.");
-      return false;
-    }
-    synplifyScript = InitSynplifyScript();
+    std::vector<std::filesystem::path> internalScripts;
+    const std::string command = buildSynthesisCommandStr(internalScripts);
 
-    std::string includes;
-    for (auto path : ProjManager()->includePathList()) {
-      includes += "set_option -include_path " + FileUtils::AdjustPath(path) + "\n";
-    }
-    if(!includes.empty()) {
-      synplifyScript =
-        ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", includes);
-    }
-    else{
-      synplifyScript = ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
-    }
-
-    std::string designFiles;
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string filesScript =
-          "add_file ${LANGUAGE_STANDARD} ${FILES}";
-      std::string lang;
-
-      auto files = lang_file.second + " ";
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-        case Design::Language::VHDL_1993:
-        case Design::Language::VHDL_2000:
-        case Design::Language::VHDL_2008:
-        case Design::Language::VHDL_2019:
-          lang = "-vhdl";
-          break;
-        case Design::Language::VERILOG_1995:
-          lang = "-verilog -vlog_std v95";
-          break;
-        case Design::Language::VERILOG_2001:
-          lang = "-verilog -vlog_std v2001";
-          break;
-        case Design::Language::SYSTEMVERILOG_2005:
-        case Design::Language::SYSTEMVERILOG_2009:
-        case Design::Language::SYSTEMVERILOG_2012:
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-verilog -vlog_std sysv";
-          break;
-        case Design::Language::VERILOG_NETLIST:
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          ErrorMessage("Unsupported language (Synplify default parser)");
-          break;
-        case Design::Language::OTHER:
-          // don't include it in the compilation process
-          continue;
-      }
-      filesScript = ReplaceAll(filesScript, "${LANGUAGE_STANDARD}", lang);
-      filesScript = ReplaceAll(filesScript, "${FILES}", files);
-      designFiles += filesScript + "\n";
-    }
-#ifdef _WIN32
-    designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
-#endif
-    synplifyScript =
-        ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
-
-    if (!ProjManager()->DesignTopModule().empty()) {
-      synplifyScript = ReplaceAll(synplifyScript, "${TOP_MODULE}",
-                                ProjManager()->DesignTopModule());
+    CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
+    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
+      qInfo() << "~~~ sinplify synthesis skipped, not required";
+      return true;
     } else {
-      ErrorMessage("Cannot proceed without the top module specified.");
+      qInfo() << "~~~ sinplify synthesising ...";
     }
 
-    std::string synplify_family_name = 
-      QLDeviceManager::getInstance()->deviceSynplifyFamilyName();
-    if(!synplify_family_name.empty()) {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FAMILY}", synplify_family_name);
-    }
-    else {
-      ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
-      return false;
-    }
-
-    std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
-    if (synplify_mode == "speed")
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "1");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "auto");
-    }
-    else if (synplify_mode == "area")
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
-    }
-    else
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
-    }
-
-    std::filesystem::path synth_sdc_filepath;
-
-    if (synplify_mode == "speed"){
-      synth_sdc_filepath = QLSettingsManager::getSDCFilePath();
-
-      // if we have a valid sdc_file_path at this point, pass it on to vpr:
-      if(!synth_sdc_filepath.empty()) {
-        // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
-
-        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
-                                                                  std::string(" -constraint ") + 
-                                                                  synth_sdc_filepath.string());
-      }
-      else {
-        //std::cout << "synth sdc file not available." << std::endl;
-
-        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
-      }
-    }
-    else
-    {
-       synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
-    }
-
-    std::string synplify_script_path = ProjManager()->projectName() + ".prj";
-    synplify_script_path =
-      (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
-          .string();
-    std::ofstream ofs(synplify_script_path);
-    ofs << synplifyScript;
-#ifdef _WIN32
-    ofs << "\n";
-    ofs << "# Run all implementations of the active project.\n";
-    ofs << "run -all\n";
-    ofs << "\n";
-    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
-    ofs << "program_terminate\n";
-#endif
-    ofs.close();
-
-#ifdef _WIN32
-    // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
-    // let's use synplify_base_console instead to have proper logging into compiler console.
-    const std::string synplifyExecName{"synplify_base_console"};
-#else
-    const std::string synplifyExecName{"synplify_base"};
-#endif
-
-    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
-      ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
-      return false;
-    }
-
-    const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
-
-    std::string synplify_license_wait = "";
-
-    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
-      synplify_license_wait = "-license_wait ";
-
-#ifdef _WIN32
-    // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
-    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
-    synplify_script_path + " -log " + synplifyLogFilePath;
-#else
-    // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
-    synplify_script_path + " >> " + synplifyLogFilePath;
-#endif
     Message("Synthesis command: " + command);
     int status = ExecuteAndMonitorSystemCommand(command);
     CleanTempFiles();
@@ -1940,554 +1749,27 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     } else {
       m_state = State::Synthesized;
       Message("Design " + ProjManager()->projectName() + " is synthesized");
+      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), commandWrapper);
+      return true;
     }
   }
   
-  // use the device specific yosys script
-  m_aurora_template_script_yosys_path = QLDeviceManager::getInstance()->deviceYosysScriptFile();
-
-  if(m_aurora_template_script_yosys_path.empty()) {
-
-    ErrorMessage("Cannot proceed without Yosys Template Script.");
-    return false;
-  }
-
-
-  // init synthesis script from the right location according to the selected device.
-  std::string yosysScript = InitSynthesisScript();
-
-
-  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  }
-  else {
-    m_useVerific = false;
-  }
-
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF:
-        Message("Skipping synthesis, gate-level design.");
-        return true;
-        break;
-      default:
-        break;
-    }
-  }
-  
-  if(m_projManager->synthesisTool() != Synplify)
-  {
-    if (m_useVerific) {
-      // Verific parser
-      std::string fileList;
-      std::string includes;
-
-      for (auto msg_sev : MsgSeverityMap()) {
-        switch (msg_sev.second) {
-          case MsgSeverity::Ignore:
-            fileList += "verific -set-ignore " + msg_sev.first + "\n";
-            break;
-          case MsgSeverity::Info:
-            fileList += "verific -set-info " + msg_sev.first + "\n";
-            break;
-          case MsgSeverity::Warning:
-            fileList += "verific -set-warning " + msg_sev.first + "\n";
-            break;
-          case MsgSeverity::Error:
-            fileList += "verific -set-error " + msg_sev.first + "\n";
-            break;
-        }
-      }
-
-      // workaround for enabling usage of '-lib' option, suggested by yosyshq
-      // add the following line in the ys script:
-      fileList += std::string("verific -cfg veri_create_empty_box 1\n");
-
-      // ProjectManager::addIncludePath(const std::string& includePath)
-      for (auto path : ProjManager()->includePathList()) {
-        includes += FileUtils::AdjustPath(path) + " ";
-      }
-      if(!includes.empty()) {
-        fileList += "verific -vlog-incdir " + includes + "\n";
-      }
-
-      // incdir:always add the project's 'sources' directory 
-      //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
-      std::filesystem::path design_sources_dir_path =
-          ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
-                                          ProjManager()->projectName(),
-                                          ProjManager()->getDesignActiveFileSet().toStdString());
-      fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
-      
-      // incdir: if executed via TCL script, and copy_files_on_add is *not* set
-      //   add the TCL script directory 
-      std::filesystem::path tcl_script_dir_path = 
-          QLSettingsManager::getTCLScriptDirPath();
-      if(!tcl_script_dir_path.empty()) {
-        if(!copyFilesOnAdd()) {
-          fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
-        }
-      }
-
-      std::string libraries;
-      // ProjectManager::addLibraryPath(const std::string& libraryPath)
-      for (auto path : ProjManager()->libraryPathList()) {
-        libraries += FileUtils::AdjustPath(path) + " ";
-      }
-      if(!libraries.empty()) {
-        fileList += "verific -vlog-libdir " + libraries + "\n";
-      }
-
-      // -vlog-libdir : currently it does not solve anything, so it is commented out.
-      // std::filesystem::path device_yosys_modules_dir_path = 
-      //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
-      //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
-      // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
-      
-      // recommendation by: <nak@yosyshq.com>
-      // with the -vlog-libdir option, if verific can't find a module named "Foo",
-      // it will look in the given directory for a file named "Foo.v".
-      // if we want to use the -vlog-libdir option we would have to split
-      // the primitive library into one file per module.
-      // instead of using -vlog-libdir, we could use the existing files by
-      // reading them in with the -lib option like this:
-      //      verific -vlog2k -lib /path/to/dsp_sim.v
-      // we should do this with all files that contain primitives that
-      // the user might want to instantiate manually, such as the BRAM sim files.
-      std::vector<std::filesystem::path> yosys_modules_pathlist = 
-          QLDeviceManager::getInstance()->deviceYosysModulesPathList();
-
-      for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
-
-        std::string sim_verilog_pattern = ".*_sim\\.v";
-
-        if (std::regex_match(yosys_module_path.filename().string(),
-                            std::regex(sim_verilog_pattern, std::regex::icase))) {
-
-            fileList += std::string("verific -vlog2k -lib ") + 
-                        yosys_module_path.string() +
-                        "\n";
-        }
-      }
-
-      // ProjectManager::addLibraryExtension(const std::string& libraryExt)
-      for (auto ext : ProjManager()->libraryExtensionList()) {
-        fileList += "verific -vlog-libext " + ext + "\n";
-      }
-
-      // ProjectManager::addMacro(const std::string& macroName,
-      //                          const std::string& macroValue)
-      std::string macros;
-      for (auto& macro_value : ProjManager()->macroList()) {
-        macros += macro_value.first + "=" + macro_value.second + " ";
-      }
-      if(!macros.empty()) {
-        fileList += "verific -vlog-define " + macros + "\n";
-      }
-
-      std::string importLibs;
-      auto importDesignFilesLibs = false;
-
-      // this is available only if TCL command has specified a top module library
-      // with -work <libname>
-      // set_top_module <top> ?-work <libName>?
-      auto topModuleLib = ProjManager()->DesignTopModuleLib();
-
-      // this is available only if TCL command has specified a design library
-      // with -work <libname>
-      // add_design_file <file list> ?type? ?-work <libName>?
-      auto commandsLibs = ProjManager()->DesignLibraries();
-
-      size_t filesIndex{0};
-      for (const auto& lang_file : ProjManager()->DesignFiles()) {
-        std::string lang;
-        std::string designLibraries;
-        switch (lang_file.first.language) {
-          case Design::Language::VHDL_1987:
-            lang = "-vhdl87";
-            break;
-          case Design::Language::VHDL_1993:
-            lang = "-vhdl93";
-            break;
-          case Design::Language::VHDL_2000:
-            lang = "-vhdl2k";
-            break;
-          case Design::Language::VHDL_2008:
-            lang = "-vhdl2008";
-            break;
-          case Design::Language::VHDL_2019:
-            lang = "-vhdl2019";
-            break;
-          case Design::Language::VERILOG_1995:
-            lang = "-vlog95";
-            break;
-          case Design::Language::VERILOG_2001:
-            lang = "-vlog2k";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2005:
-            lang = "-sv2005";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2009:
-            lang = "-sv2009";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2012:
-            lang = "-sv2012";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2017:
-            lang = "-sv";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::VERILOG_NETLIST:
-            lang = "";
-            break;
-          case Design::Language::BLIF:
-          case Design::Language::EBLIF:
-            lang = "BLIF";
-            ErrorMessage("Unsupported file format:" + lang);
-            return false;
-          case Design::Language::OTHER:
-            // don't include it in the compilation process
-            continue;
-        }
-        if (filesIndex < commandsLibs.size()) {
-          const auto& filesCommandsLibs = commandsLibs[filesIndex];
-          for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
-            auto libName = filesCommandsLibs.second[i];
-            if (!libName.empty()) {
-              auto commandLib = "-work " + libName + " ";
-              designLibraries += commandLib;
-              if (importDesignFilesLibs && libName != topModuleLib) {
-                importLibs += "-L " + libName + " ";
-              }
-            }
-          }
-        }
-        ++filesIndex;
-
-        if (designLibraries.empty()) {
-          fileList += "verific " + lang + " " + lang_file.second + "\n";
-        }
-        else {
-          fileList +=
-              "verific " + designLibraries + lang + " " + lang_file.second + "\n";
-        }
-      }
-      auto topModuleLibImport = std::string{};
-      if (!topModuleLib.empty())
-        topModuleLibImport = "-work " + topModuleLib + " ";
-      if (ProjManager()->DesignTopModule().empty()) {
-        fileList += "verific -import -all\n";
-      } else {
-        fileList += "verific " + topModuleLibImport + importLibs + "-import " +
-                    ProjManager()->DesignTopModule() + "\n";
-      }
-      yosysScript = ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", fileList);
-    } else {
-    // Default Yosys parser
-
-    for (const auto& commandLib : ProjManager()->DesignLibraries()) {
-      if (!commandLib.first.empty()) {
-        ErrorMessage(
-            "Yosys default parser doesn't support '-work' design file "
-            "command");
-        break;
-      }
-    }
-
-    std::string macros = "";
-	  std::string includes = "";
-#if UPSTREAM_UNUSED
-    std::string macros = "verilog_defines ";
-    for (auto& macro_value : ProjManager()->macroList()) {
-      macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
-    }
-    macros += "\n";
-    std::string includes;
-    for (auto path : ProjManager()->includePathList()) {
-      includes += "-I" + FileUtils::AdjustPath(path) + " ";
-    }
-#endif // #if UPSTREAM_UNUSED
-
-    std::string designFiles;
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string filesScript =
-          "read_verilog ${READ_VERILOG_OPTIONS} ${INCLUDE_PATHS} "
-          "${VERILOG_FILES}";
-      std::string lang;
-
-      auto files = lang_file.second + " ";
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-        case Design::Language::VHDL_1993:
-        case Design::Language::VHDL_2000:
-        case Design::Language::VHDL_2008:
-        case Design::Language::VHDL_2019:
-          ErrorMessage("Unsupported language (Yosys default parser)");
-          break;
-        case Design::Language::VERILOG_1995:
-        case Design::Language::VERILOG_2001:
-        case Design::Language::SYSTEMVERILOG_2005:
-          break;
-        case Design::Language::SYSTEMVERILOG_2009:
-        case Design::Language::SYSTEMVERILOG_2012:
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-sv";
-          break;
-        case Design::Language::VERILOG_NETLIST:
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          ErrorMessage("Unsupported language (Yosys default parser)");
-          break;
-        case Design::Language::OTHER:
-          // don't include it in the compilation process
-          continue;
-      }
-      std::string options = lang;
-      filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
-      filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
-      filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
-
-      designFiles += filesScript + "\n";
-    }
-    yosysScript =
-        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
-    }
-  }
-  else
-  {
-    #if UPSTREAM_UNUSED
-        std::string macros = "verilog_defines ";
-        for (auto& macro_value : ProjManager()->macroList()) {
-          macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
-        }
-        macros += "\n";
-        std::string includes;
-        for (auto path : ProjManager()->includePathList()) {
-          includes += "-I" + FileUtils::AdjustPath(path) + " ";
-        }
-    #endif // #if UPSTREAM_UNUSED
-    std::string vm_file_path = ProjManager()->DesignTopModule() + "/" + ProjManager()->DesignTopModule() + ".vm";
-    std::string filesScript =
-            "read_verilog ${READ_VERILOG_OPTIONS} "
-            "${VERILOG_FILES}";
-    std::string options = "";
-    filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
-    filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
-    std::string designFiles = filesScript + "\n";
-    yosysScript =
-        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
-  }
-  
-  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
-
-#if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
-// https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
-#define STRINGIZE2(s) #s
-#define STRINGIZE(s) STRINGIZE2(s)
-  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
-#else
-  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
-#endif
-
-  if (!ProjManager()->DesignTopModule().empty()) {
-    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}",
-                             "-top " + ProjManager()->DesignTopModule());
-    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE}",
-                             ProjManager()->DesignTopModule());
-  } else {
-    yosysScript =
-        ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}", "-auto-top");
-  }
-
-  std::string yosys_family_name = 
-    QLDeviceManager::getInstance()->deviceYosysFamilyName();
-  if(!yosys_family_name.empty()) {
-    yosysScript = 
-          ReplaceAll(yosysScript, "${FAMILY}", yosys_family_name);
-  }
-  else {
-    ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
-    return false;
-  }
-
-
-  
-  std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
-  // if we have a valid sdc_file_path at this point, pass it on to vpr:
-  if(!synth_sdc_filepath.empty()) {
-    // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
-    
-    // we have a valid SDC file
-    std::filesystem::path aurora_yosys_import_script_path =
-        GetSession()->Context()->DataPath() /
-        std::filesystem::path("..") /
-        std::filesystem::path("scripts") /
-        std::filesystem::path("aurora_yosys_import.tcl");
-
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
-
-    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("tcl") + 
-                                                                       std::string(" ") + 
-                                                                       aurora_yosys_import_script_path.string());
-    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("read_sdc") +
-                                                              std::string(" ") + 
-                                                              synth_sdc_filepath.string());
-  }
-  else {
-    //std::cout << "synth sdc file not available." << std::endl;
-
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("# [skipped] sdc plugin load as there is no synth sdc file"));
-
-    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("# [skipped] call tcl import script as there is no synth sdc file"));
-
-    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
-  }
-  // ---------------------------------------------------------------- synth_sdc_file --
-
-  yosysScript = ReplaceAll(
-      yosysScript, "${OUTPUT_BLIF}",
-      std::string(ProjManager()->projectName() + "_post_synth.blif"));
-
-
-  // use settings to populate yosys_options
-  std::string yosys_options;
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "verilog") == "checked" ) {
-
-    yosys_options += " -verilog " + std::string(m_projManager->projectName() + "_post_synth.v");
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc_opt") == "checked" ) {
-
-    yosys_options += " -no_abc_opt";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc9") == "checked" ) {
-
-    yosys_options += " -no_abc9";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_opt") == "checked" ) {
-
-    yosys_options += " -no_opt";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_adder") == "checked" ) {
-
-    yosys_options += " -no_adder";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_ff_map") == "checked" ) {
-
-    yosys_options += " -no_ff_map";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_dsp") == "checked" ) {
-
-    yosys_options += " -no_dsp";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {
-
-    yosys_options += " -no_bram";
-  }
-
-  // moving towards multi-arch support (v2.6), this setting is arch specific and should be removed
-  // from user settings json, so we ignore it, even if set.
-  // if( QLSettingsManager::getStringValue("yosys", "general", "no_sdff") == "checked" ) {
-
-  //   yosys_options += " -nosdff";
-  // }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "edif") == "checked" ) {
-
-    yosys_options += " -edif " + std::string(m_projManager->projectName() + ".edif");
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "bram_types") == "checked" ) {
-
-    yosys_options += " -bram_types";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "use_dsp_cfg_params") == "checked" ) {
-
-    yosys_options += " -use_dsp_cfg_params";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
-
-    yosys_options += " -synplify";
-  }
-
-  // pass in the path to the device specific yosys libraries directly.
-  std::string yosys_modules_dir_path_string = 
-      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
-  if (yosys_modules_dir_path_string.back() != '/') {
-    // tack on a '/' separator if it is missing to be safe:
-    yosys_modules_dir_path_string += "/";
-  }
-  yosys_options += " -lib_path " + 
-                   yosys_modules_dir_path_string;
-
-  // TODO: trim yosys_options at the front
-  yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
-
-
-  yosysScript =
-      ReplaceAll(yosysScript, "${OUTPUT_VERILOG}",
-                 std::string(ProjManager()->projectName() + "_post_synth.v"));
-  yosysScript =
-      ReplaceAll(yosysScript, "${OUTPUT_VHDL}",
-                 std::string(ProjManager()->projectName() + "_post_synth.vhd"));
-
-  yosysScript = ReplaceAll(
-      yosysScript, "${OUTPUT_EDIF}",
-      std::string(ProjManager()->projectName() + "_post_synth.edif"));
-
-  yosysScript = FinishSynthesisScript(yosysScript);
-
-  std::string script_path = ProjManager()->projectName() + ".ys";
-  std::string output_path;
-  switch (GetNetlistType()) {
-    case NetlistType::Verilog:
-      output_path = ProjManager()->projectName() + "_post_synth.v";
-      break;
-    case NetlistType::VHDL:
-      // Until we have a VHDL netlist reader in VPR
-      output_path = ProjManager()->projectName() + "_post_synth.v";
-      break;
-    case NetlistType::Edif:
-      output_path = ProjManager()->projectName() + "_post_synth.edif";
-      break;
-    case NetlistType::Blif:
-      output_path = ProjManager()->projectName() + "_post_synth.blif";
-      break;
-  }
-
+  #ifndef USE_INCREMENTAL_COMPILATION
+  // this should be handled by inc compilation
   if (!DesignChanged(yosysScript, script_path, output_path)) {
     Message("Design didn't change: " + ProjManager()->projectName() +
             ", skipping synthesis.");
     return true;
   }
+  #endif
+
   std::filesystem::remove(
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.blif"));
   std::filesystem::remove(
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
-  // Create Yosys command and execute
-  script_path =
-      (std::filesystem::path(ProjManager()->projectPath()) / script_path)
-          .string();
-  std::ofstream ofs(script_path);
-  ofs << yosysScript;
-  ofs.close();
+  
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
     ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
@@ -2495,22 +1777,18 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-
-  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-#if(AURORA_USE_TABBYCAD == 1)
-  if(m_useVerific) {
-    yosys_executable_path = GetSession()->Context()->BinaryPath() /
-                            ".." /
-                            "tabby" /
-                            "bin" /
-                            "yosys_verific";
+  // incr compilation
+  std::vector<std::filesystem::path> internalScripts;
+  const std::string command = buildSynthesisCommandStr(internalScripts);
+  CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
+    qInfo() << "~~~ yosys synthesis skipped, not required";
+    return true;
+  } else {
+    qInfo() << "~~~ yosys synthesising ...";
   }
-#endif // #if(AURORA_USE_TABBYCAD == 1)
+  // incr compilation
 
-  std::string command =
-      yosys_executable_path.string() + " -s " +
-      std::string(ProjManager()->projectName() + ".ys -l " +
-                  ProjManager()->projectName() + "_synth.log");
   Message("Synthesis command: " + command);
   int status = ExecuteAndMonitorSystemCommand(command);
   CleanTempFiles();
@@ -2521,6 +1799,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), commandWrapper);
     return true;
   }
 }
@@ -7716,10 +6995,763 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
 
-std::string CompilerOpenFPGA_ql::getSynthesisCommandOLD()
+std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::filesystem::path>& internalScripts)
 {
-  std::string command;
-  assert(false);
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return "";
+  }
+
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return "";
+  }
+
+  if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
+  {
+    std::string synplifyScript; 
+    m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
+    if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
+      ErrorMessage("This Device is Not Supported by Synplify.");
+      return "";
+    }
+    synplifyScript = InitSynplifyScript();
+
+    std::string includes;
+    for (auto path : ProjManager()->includePathList()) {
+      includes += "set_option -include_path " + FileUtils::AdjustPath(path) + "\n";
+    }
+    if(!includes.empty()) {
+      synplifyScript =
+        ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", includes);
+    }
+    else{
+      synplifyScript = ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
+    }
+
+    std::string designFiles;
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string filesScript =
+          "add_file ${LANGUAGE_STANDARD} ${FILES}";
+      std::string lang;
+
+      auto files = lang_file.second + " ";
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+        case Design::Language::VHDL_1993:
+        case Design::Language::VHDL_2000:
+        case Design::Language::VHDL_2008:
+        case Design::Language::VHDL_2019:
+          lang = "-vhdl";
+          break;
+        case Design::Language::VERILOG_1995:
+          lang = "-verilog -vlog_std v95";
+          break;
+        case Design::Language::VERILOG_2001:
+          lang = "-verilog -vlog_std v2001";
+          break;
+        case Design::Language::SYSTEMVERILOG_2005:
+        case Design::Language::SYSTEMVERILOG_2009:
+        case Design::Language::SYSTEMVERILOG_2012:
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-verilog -vlog_std sysv";
+          break;
+        case Design::Language::VERILOG_NETLIST:
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Unsupported language (Synplify default parser)");
+          break;
+        case Design::Language::OTHER:
+          // don't include it in the compilation process
+          continue;
+      }
+      filesScript = ReplaceAll(filesScript, "${LANGUAGE_STANDARD}", lang);
+      filesScript = ReplaceAll(filesScript, "${FILES}", files);
+      designFiles += filesScript + "\n";
+    }
+#ifdef _WIN32
+    designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
+#endif
+    synplifyScript =
+        ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
+
+    if (!ProjManager()->DesignTopModule().empty()) {
+      synplifyScript = ReplaceAll(synplifyScript, "${TOP_MODULE}",
+                                ProjManager()->DesignTopModule());
+    } else {
+      ErrorMessage("Cannot proceed without the top module specified.");
+    }
+
+    std::string synplify_family_name = 
+      QLDeviceManager::getInstance()->deviceSynplifyFamilyName();
+    if(!synplify_family_name.empty()) {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FAMILY}", synplify_family_name);
+    }
+    else {
+      ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
+      return "";
+    }
+
+    std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
+    if (synplify_mode == "speed")
+    {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "1");
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "auto");
+    }
+    else if (synplify_mode == "area")
+    {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
+    }
+    else
+    {
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
+      synplifyScript = 
+            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
+    }
+
+    std::filesystem::path synth_sdc_filepath;
+
+    if (synplify_mode == "speed"){
+      synth_sdc_filepath = QLSettingsManager::getSDCFilePath();
+
+      // if we have a valid sdc_file_path at this point, pass it on to vpr:
+      if(!synth_sdc_filepath.empty()) {
+        // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
+
+        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
+                                                                  std::string(" -constraint ") + 
+                                                                  synth_sdc_filepath.string());
+      }
+      else {
+        //std::cout << "synth sdc file not available." << std::endl;
+
+        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+      }
+    }
+    else
+    {
+       synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
+    }
+
+    std::string synplify_script_path = ProjManager()->projectName() + ".prj";
+    synplify_script_path =
+      (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
+          .string();
+    std::ofstream ofs(synplify_script_path);
+    ofs << synplifyScript;
+    internalScripts.push_back(synplify_script_path);
+#ifdef _WIN32
+    ofs << "\n";
+    ofs << "# Run all implementations of the active project.\n";
+    ofs << "run -all\n";
+    ofs << "\n";
+    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
+    ofs << "program_terminate\n";
+#endif
+    ofs.close();
+
+#ifdef _WIN32
+    // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
+    // let's use synplify_base_console instead to have proper logging into compiler console.
+    const std::string synplifyExecName{"synplify_base_console"};
+#else
+    const std::string synplifyExecName{"synplify_base"};
+#endif
+
+    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
+      ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
+      return "";
+    }
+
+    const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
+
+    std::string synplify_license_wait = "";
+
+    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
+      synplify_license_wait = "-license_wait ";
+
+#ifdef _WIN32
+    // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
+    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
+    synplify_script_path + " -log " + synplifyLogFilePath;
+#else
+    // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
+    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
+    synplify_script_path + " >> " + synplifyLogFilePath;
+#endif
+    return command;
+  }
+  
+  // use the device specific yosys script
+  m_aurora_template_script_yosys_path = QLDeviceManager::getInstance()->deviceYosysScriptFile();
+
+  if(m_aurora_template_script_yosys_path.empty()) {
+
+    ErrorMessage("Cannot proceed without Yosys Template Script.");
+    return "";
+  }
+
+
+  // init synthesis script from the right location according to the selected device.
+  std::string yosysScript = InitSynthesisScript();
+
+
+  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+    m_useVerific = true;
+  }
+  else {
+    m_useVerific = false;
+  }
+ 
+  if(m_projManager->synthesisTool() != Synplify)
+  {
+    if (m_useVerific) {
+      // Verific parser
+      std::string fileList;
+      std::string includes;
+
+      for (auto msg_sev : MsgSeverityMap()) {
+        switch (msg_sev.second) {
+          case MsgSeverity::Ignore:
+            fileList += "verific -set-ignore " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Info:
+            fileList += "verific -set-info " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Warning:
+            fileList += "verific -set-warning " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Error:
+            fileList += "verific -set-error " + msg_sev.first + "\n";
+            break;
+        }
+      }
+
+      // workaround for enabling usage of '-lib' option, suggested by yosyshq
+      // add the following line in the ys script:
+      fileList += std::string("verific -cfg veri_create_empty_box 1\n");
+
+      // ProjectManager::addIncludePath(const std::string& includePath)
+      for (auto path : ProjManager()->includePathList()) {
+        includes += FileUtils::AdjustPath(path) + " ";
+      }
+      if(!includes.empty()) {
+        fileList += "verific -vlog-incdir " + includes + "\n";
+      }
+
+      // incdir:always add the project's 'sources' directory 
+      //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
+      std::filesystem::path design_sources_dir_path =
+          ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
+                                          ProjManager()->projectName(),
+                                          ProjManager()->getDesignActiveFileSet().toStdString());
+      fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
+      
+      // incdir: if executed via TCL script, and copy_files_on_add is *not* set
+      //   add the TCL script directory 
+      std::filesystem::path tcl_script_dir_path = 
+          QLSettingsManager::getTCLScriptDirPath();
+      if(!tcl_script_dir_path.empty()) {
+        if(!copyFilesOnAdd()) {
+          fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
+        }
+      }
+
+      std::string libraries;
+      // ProjectManager::addLibraryPath(const std::string& libraryPath)
+      for (auto path : ProjManager()->libraryPathList()) {
+        libraries += FileUtils::AdjustPath(path) + " ";
+      }
+      if(!libraries.empty()) {
+        fileList += "verific -vlog-libdir " + libraries + "\n";
+      }
+
+      // -vlog-libdir : currently it does not solve anything, so it is commented out.
+      // std::filesystem::path device_yosys_modules_dir_path = 
+      //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
+      //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
+      // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
+      
+      // recommendation by: <nak@yosyshq.com>
+      // with the -vlog-libdir option, if verific can't find a module named "Foo",
+      // it will look in the given directory for a file named "Foo.v".
+      // if we want to use the -vlog-libdir option we would have to split
+      // the primitive library into one file per module.
+      // instead of using -vlog-libdir, we could use the existing files by
+      // reading them in with the -lib option like this:
+      //      verific -vlog2k -lib /path/to/dsp_sim.v
+      // we should do this with all files that contain primitives that
+      // the user might want to instantiate manually, such as the BRAM sim files.
+      std::vector<std::filesystem::path> yosys_modules_pathlist = 
+          QLDeviceManager::getInstance()->deviceYosysModulesPathList();
+
+      for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
+
+        std::string sim_verilog_pattern = ".*_sim\\.v";
+
+        if (std::regex_match(yosys_module_path.filename().string(),
+                            std::regex(sim_verilog_pattern, std::regex::icase))) {
+
+            fileList += std::string("verific -vlog2k -lib ") + 
+                        yosys_module_path.string() +
+                        "\n";
+        }
+      }
+
+      // ProjectManager::addLibraryExtension(const std::string& libraryExt)
+      for (auto ext : ProjManager()->libraryExtensionList()) {
+        fileList += "verific -vlog-libext " + ext + "\n";
+      }
+
+      // ProjectManager::addMacro(const std::string& macroName,
+      //                          const std::string& macroValue)
+      std::string macros;
+      for (auto& macro_value : ProjManager()->macroList()) {
+        macros += macro_value.first + "=" + macro_value.second + " ";
+      }
+      if(!macros.empty()) {
+        fileList += "verific -vlog-define " + macros + "\n";
+      }
+
+      std::string importLibs;
+      auto importDesignFilesLibs = false;
+
+      // this is available only if TCL command has specified a top module library
+      // with -work <libname>
+      // set_top_module <top> ?-work <libName>?
+      auto topModuleLib = ProjManager()->DesignTopModuleLib();
+
+      // this is available only if TCL command has specified a design library
+      // with -work <libname>
+      // add_design_file <file list> ?type? ?-work <libName>?
+      auto commandsLibs = ProjManager()->DesignLibraries();
+
+      size_t filesIndex{0};
+      for (const auto& lang_file : ProjManager()->DesignFiles()) {
+        std::string lang;
+        std::string designLibraries;
+        switch (lang_file.first.language) {
+          case Design::Language::VHDL_1987:
+            lang = "-vhdl87";
+            break;
+          case Design::Language::VHDL_1993:
+            lang = "-vhdl93";
+            break;
+          case Design::Language::VHDL_2000:
+            lang = "-vhdl2k";
+            break;
+          case Design::Language::VHDL_2008:
+            lang = "-vhdl2008";
+            break;
+          case Design::Language::VHDL_2019:
+            lang = "-vhdl2019";
+            break;
+          case Design::Language::VERILOG_1995:
+            lang = "-vlog95";
+            break;
+          case Design::Language::VERILOG_2001:
+            lang = "-vlog2k";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2005:
+            lang = "-sv2005";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2009:
+            lang = "-sv2009";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2012:
+            lang = "-sv2012";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2017:
+            lang = "-sv";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::VERILOG_NETLIST:
+            lang = "";
+            break;
+          case Design::Language::BLIF:
+          case Design::Language::EBLIF:
+            lang = "BLIF";
+            ErrorMessage("Unsupported file format:" + lang);
+            return "";
+          case Design::Language::OTHER:
+            // don't include it in the compilation process
+            continue;
+        }
+        if (filesIndex < commandsLibs.size()) {
+          const auto& filesCommandsLibs = commandsLibs[filesIndex];
+          for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
+            auto libName = filesCommandsLibs.second[i];
+            if (!libName.empty()) {
+              auto commandLib = "-work " + libName + " ";
+              designLibraries += commandLib;
+              if (importDesignFilesLibs && libName != topModuleLib) {
+                importLibs += "-L " + libName + " ";
+              }
+            }
+          }
+        }
+        ++filesIndex;
+
+        if (designLibraries.empty()) {
+          fileList += "verific " + lang + " " + lang_file.second + "\n";
+        }
+        else {
+          fileList +=
+              "verific " + designLibraries + lang + " " + lang_file.second + "\n";
+        }
+      }
+      auto topModuleLibImport = std::string{};
+      if (!topModuleLib.empty())
+        topModuleLibImport = "-work " + topModuleLib + " ";
+      if (ProjManager()->DesignTopModule().empty()) {
+        fileList += "verific -import -all\n";
+      } else {
+        fileList += "verific " + topModuleLibImport + importLibs + "-import " +
+                    ProjManager()->DesignTopModule() + "\n";
+      }
+      yosysScript = ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", fileList);
+    } else {
+    // Default Yosys parser
+
+    for (const auto& commandLib : ProjManager()->DesignLibraries()) {
+      if (!commandLib.first.empty()) {
+        ErrorMessage(
+            "Yosys default parser doesn't support '-work' design file "
+            "command");
+        break;
+      }
+    }
+
+    std::string macros = "";
+	  std::string includes = "";
+#if UPSTREAM_UNUSED
+    std::string macros = "verilog_defines ";
+    for (auto& macro_value : ProjManager()->macroList()) {
+      macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
+    }
+    macros += "\n";
+    std::string includes;
+    for (auto path : ProjManager()->includePathList()) {
+      includes += "-I" + FileUtils::AdjustPath(path) + " ";
+    }
+#endif // #if UPSTREAM_UNUSED
+
+    std::string designFiles;
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string filesScript =
+          "read_verilog ${READ_VERILOG_OPTIONS} ${INCLUDE_PATHS} "
+          "${VERILOG_FILES}";
+      std::string lang;
+
+      auto files = lang_file.second + " ";
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+        case Design::Language::VHDL_1993:
+        case Design::Language::VHDL_2000:
+        case Design::Language::VHDL_2008:
+        case Design::Language::VHDL_2019:
+          ErrorMessage("Unsupported language (Yosys default parser)");
+          break;
+        case Design::Language::VERILOG_1995:
+        case Design::Language::VERILOG_2001:
+        case Design::Language::SYSTEMVERILOG_2005:
+          break;
+        case Design::Language::SYSTEMVERILOG_2009:
+        case Design::Language::SYSTEMVERILOG_2012:
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-sv";
+          break;
+        case Design::Language::VERILOG_NETLIST:
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Unsupported language (Yosys default parser)");
+          break;
+        case Design::Language::OTHER:
+          // don't include it in the compilation process
+          continue;
+      }
+      std::string options = lang;
+      filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
+      filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
+      filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
+
+      designFiles += filesScript + "\n";
+    }
+    yosysScript =
+        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
+    }
+  }
+  else
+  {
+    #if UPSTREAM_UNUSED
+        std::string macros = "verilog_defines ";
+        for (auto& macro_value : ProjManager()->macroList()) {
+          macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
+        }
+        macros += "\n";
+        std::string includes;
+        for (auto path : ProjManager()->includePathList()) {
+          includes += "-I" + FileUtils::AdjustPath(path) + " ";
+        }
+    #endif // #if UPSTREAM_UNUSED
+    std::string vm_file_path = ProjManager()->DesignTopModule() + "/" + ProjManager()->DesignTopModule() + ".vm";
+    std::string filesScript =
+            "read_verilog ${READ_VERILOG_OPTIONS} "
+            "${VERILOG_FILES}";
+    std::string options = "";
+    filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
+    filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
+    std::string designFiles = filesScript + "\n";
+    yosysScript =
+        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
+  }
+  
+  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+
+#if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
+// https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
+#define STRINGIZE2(s) #s
+#define STRINGIZE(s) STRINGIZE2(s)
+  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
+#else
+  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
+#endif
+
+  if (!ProjManager()->DesignTopModule().empty()) {
+    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}",
+                             "-top " + ProjManager()->DesignTopModule());
+    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE}",
+                             ProjManager()->DesignTopModule());
+  } else {
+    yosysScript =
+        ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}", "-auto-top");
+  }
+
+  std::string yosys_family_name = 
+    QLDeviceManager::getInstance()->deviceYosysFamilyName();
+  if(!yosys_family_name.empty()) {
+    yosysScript = 
+          ReplaceAll(yosysScript, "${FAMILY}", yosys_family_name);
+  }
+  else {
+    ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
+    return "";
+  }
+
+
+  
+  std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
+  // if we have a valid sdc_file_path at this point, pass it on to vpr:
+  if(!synth_sdc_filepath.empty()) {
+    // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
+    
+    // we have a valid SDC file
+    std::filesystem::path aurora_yosys_import_script_path =
+        GetSession()->Context()->DataPath() /
+        std::filesystem::path("..") /
+        std::filesystem::path("scripts") /
+        std::filesystem::path("aurora_yosys_import.tcl");
+
+    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
+
+    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("tcl") + 
+                                                                       std::string(" ") + 
+                                                                       aurora_yosys_import_script_path.string());
+    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("read_sdc") +
+                                                              std::string(" ") + 
+                                                              synth_sdc_filepath.string());
+  }
+  else {
+    //std::cout << "synth sdc file not available." << std::endl;
+
+    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("# [skipped] sdc plugin load as there is no synth sdc file"));
+
+    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("# [skipped] call tcl import script as there is no synth sdc file"));
+
+    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+  }
+  // ---------------------------------------------------------------- synth_sdc_file --
+
+  yosysScript = ReplaceAll(
+      yosysScript, "${OUTPUT_BLIF}",
+      std::string(ProjManager()->projectName() + "_post_synth.blif"));
+
+
+  // use settings to populate yosys_options
+  std::string yosys_options;
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "verilog") == "checked" ) {
+
+    yosys_options += " -verilog " + std::string(m_projManager->projectName() + "_post_synth.v");
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc_opt") == "checked" ) {
+
+    yosys_options += " -no_abc_opt";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc9") == "checked" ) {
+
+    yosys_options += " -no_abc9";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_opt") == "checked" ) {
+
+    yosys_options += " -no_opt";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_adder") == "checked" ) {
+
+    yosys_options += " -no_adder";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_ff_map") == "checked" ) {
+
+    yosys_options += " -no_ff_map";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_dsp") == "checked" ) {
+
+    yosys_options += " -no_dsp";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {
+
+    yosys_options += " -no_bram";
+  }
+
+  // moving towards multi-arch support (v2.6), this setting is arch specific and should be removed
+  // from user settings json, so we ignore it, even if set.
+  // if( QLSettingsManager::getStringValue("yosys", "general", "no_sdff") == "checked" ) {
+
+  //   yosys_options += " -nosdff";
+  // }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "edif") == "checked" ) {
+
+    yosys_options += " -edif " + std::string(m_projManager->projectName() + ".edif");
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "bram_types") == "checked" ) {
+
+    yosys_options += " -bram_types";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "use_dsp_cfg_params") == "checked" ) {
+
+    yosys_options += " -use_dsp_cfg_params";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
+
+    yosys_options += " -synplify";
+  }
+
+  // pass in the path to the device specific yosys libraries directly.
+  std::string yosys_modules_dir_path_string = 
+      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
+  if (yosys_modules_dir_path_string.back() != '/') {
+    // tack on a '/' separator if it is missing to be safe:
+    yosys_modules_dir_path_string += "/";
+  }
+  yosys_options += " -lib_path " + 
+                   yosys_modules_dir_path_string;
+
+  // TODO: trim yosys_options at the front
+  yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
+
+
+  yosysScript =
+      ReplaceAll(yosysScript, "${OUTPUT_VERILOG}",
+                 std::string(ProjManager()->projectName() + "_post_synth.v"));
+  yosysScript =
+      ReplaceAll(yosysScript, "${OUTPUT_VHDL}",
+                 std::string(ProjManager()->projectName() + "_post_synth.vhd"));
+
+  yosysScript = ReplaceAll(
+      yosysScript, "${OUTPUT_EDIF}",
+      std::string(ProjManager()->projectName() + "_post_synth.edif"));
+
+  yosysScript = FinishSynthesisScript(yosysScript);
+
+  std::string script_path = ProjManager()->projectName() + ".ys";
+  std::string output_path;
+  switch (GetNetlistType()) {
+    case NetlistType::Verilog:
+      output_path = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::VHDL:
+      // Until we have a VHDL netlist reader in VPR
+      output_path = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::Edif:
+      output_path = ProjManager()->projectName() + "_post_synth.edif";
+      break;
+    case NetlistType::Blif:
+      output_path = ProjManager()->projectName() + "_post_synth.blif";
+      break;
+  }
+
+  // Create Yosys command
+  script_path =
+      (std::filesystem::path(ProjManager()->projectPath()) / script_path)
+          .string();
+  std::ofstream ofs(script_path);
+  ofs << yosysScript;
+  ofs.close();
+  internalScripts.push_back(script_path);
+#if UPSTREAM_UNUSED
+  if (!FileUtils::FileExists(m_yosysExecutablePath)) {
+    ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
+    return false;
+  }
+#endif // #if UPSTREAM_UNUSED
+
+
+  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
+#if(AURORA_USE_TABBYCAD == 1)
+  if(m_useVerific) {
+    yosys_executable_path = GetSession()->Context()->BinaryPath() /
+                            ".." /
+                            "tabby" /
+                            "bin" /
+                            "yosys_verific";
+  }
+#endif // #if(AURORA_USE_TABBYCAD == 1)
+
+  std::string command =
+      yosys_executable_path.string() + " -s " +
+      std::string(ProjManager()->projectName() + ".ys -l " +
+                  ProjManager()->projectName() + "_synth.log");
   return command;
 }
 

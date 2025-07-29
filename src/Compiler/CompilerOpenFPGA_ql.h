@@ -242,7 +242,7 @@ private:
   TaskCompilationStateManager m_taskCompilationStateManager;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
-  std::string getSynthesisCommandOLD();           // TODO
+  std::string buildSynthesisCommandStr(std::vector<std::filesystem::path>& scripts);
   std::string getPackingCommandOLD();
   std::string getPlacementCommandOLD();
   std::string getRoutingCommandOLD();             
