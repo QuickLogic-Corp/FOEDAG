@@ -71,6 +71,8 @@ public:
     m_taskCommandsMap[key(taskId, profile)] = command;
     save();
   }
+  
+  bool isEmpty() const { return m_taskCommandsMap.empty(); }
 
   void clear() {
     m_taskCommandsMap.clear();
@@ -114,7 +116,7 @@ private:
     }
     const CommandWrapper& commandOld = *it->second;
     DiffCommandPtr diff = command->compare(commandOld);
-    if (!diff->empty()) {
+    if (!diff->isEmpty()) {
       for (const std::string& msg: diff->messages()) {
         std::cout << "~~~ diff msg=" << msg << std::endl;
       }

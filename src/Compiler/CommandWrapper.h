@@ -65,7 +65,7 @@ public:
   const std::vector<DiffParameter>& changedParameters() const { return m_changedParameters; }
   const std::vector<DiffFile>& diffFiles() const { return m_diffFiles; }
 
-  bool empty() const { 
+  bool isEmpty() const { 
     return \
     m_addedParameters.empty() 
   && m_removedParameters.empty() 
@@ -223,7 +223,7 @@ public:
     return diff;
   }
 
-  bool empty() const { return m_string.empty(); }
+  bool isEmpty() const { return m_string.empty(); }
 
   const std::string& string() const { return m_string; }
   const std::unordered_map<std::string, FileIdentity>& files() const { return m_files; }
