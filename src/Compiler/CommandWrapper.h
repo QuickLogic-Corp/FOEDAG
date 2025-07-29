@@ -73,6 +73,8 @@ public:
   && m_diffFiles.empty(); 
   }
 
+  void addGenericMsg(const std::string& msg) { m_genericMsg.push_back(msg); }
+
   void addAddedParameter(const std::string& param, const std::string& value) {
     m_addedParameters.emplace_back(MParameter{param, value});
   }
@@ -88,6 +90,9 @@ public:
 
   std::vector<std::string> messages() const {
     std::vector<std::string> messages;
+    for (const std::string& msg: m_genericMsg) {
+      messages.push_back(msg);
+    }
     for (const MParameter& param: m_addedParameters) {
       if (param.value.empty()) {
         messages.push_back("new parameter has been added [" + param.name + "]");
@@ -113,6 +118,7 @@ public:
   }
 
 private:
+  std::vector<std::string> m_genericMsg;
   std::vector<MParameter> m_addedParameters;
   std::vector<MParameter> m_removedParameters;
   std::vector<DiffParameter> m_changedParameters;
@@ -125,7 +131,6 @@ public:
   FileIdentity()=default;
   FileIdentity(const std::filesystem::path& filePath, const std::string& mask, bool skipHashCheck)
   : m_filePath(filePath), m_mask(mask) {
-    // 
     if (skipHashCheck) {
       m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
     } else {
@@ -390,6 +395,35 @@ private:
 
 };
 using CommandWrapperPtr = std::shared_ptr<CommandWrapper>;
+
+
+class CommandsWrapper {
+public:
+  std::vector<DiffCommandPtr> compare(const CommandsWrapper& old) {
+    std::vector<DiffCommandPtr> diffs;
+    if (size() == old.size()) {
+      for (std::size_t i=0; i<m_commands.size(); ++i) {
+        const CommandWrapperPtr& command = m_commands[i];
+        const CommandWrapperPtr& oldCommand = old.m_commands[i];
+        DiffCommandPtr diff = command->compare(*oldCommand);
+        if (!diff->isEmpty()) {
+          diffs.push_back(diff);
+        }
+      }
+    } else {
+      DiffCommandPtr diff = std::make_shared<DiffCommand>();
+      diff->addGenericMsg("number of commands has been changed");
+      diffs.push_back(diff);
+    }
+
+    return diffs;
+  }
+  std::size_t size() const { return m_commands.size(); }
+
+private:
+  std::vector<CommandWrapperPtr> m_commands;
+};
+using CommandsWrapperPtr = std::shared_ptr<CommandsWrapper>;
 
 class CommandWrapperBuilder {
   public:
