@@ -1726,31 +1726,34 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
+  const std::unordered_map<std::string, CommandHolder> commandsMap = buildSynthesisCommands();
+
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
-    std::vector<std::filesystem::path> internalScripts;
-    const std::string command = buildSynthesisCommandStr(internalScripts);
-
-    CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
-    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
-      qInfo() << "~~~ sinplify synthesis skipped, not required";
-      return true;
-    } else {
-      qInfo() << "~~~ sinplify synthesising ...";
-    }
-
-    Message("Synthesis command: " + command);
-    int status = ExecuteAndMonitorSystemCommand(command);
-    CleanTempFiles();
-    if (status) {
-      ErrorMessage("Design " + ProjManager()->projectName() +
-                  " synthesis failed");
+    auto it = commandsMap.find("sinplify");
+    if (it == commandsMap.end()) {
+      // error message reported inside the buildSynthesisCommands
       return false;
+    }
+    CommandHolder commandHolder = it->second;
+    std::string command = commandHolder.command;
+    CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
+      qInfo() << "~~~ sinplify synthesising ...";
+      Message("Synthesis command: " + command);
+      int status = ExecuteAndMonitorSystemCommand(command);
+      CleanTempFiles();
+      if (status) {
+        ErrorMessage("Design " + ProjManager()->projectName() +
+                    " synthesis failed");
+        return false;
+      } else {
+        m_state = State::Synthesized;
+        Message("Design " + ProjManager()->projectName() + " is synthesized");
+        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "sinplify", commandWrapper);
+      }
     } else {
-      m_state = State::Synthesized;
-      Message("Design " + ProjManager()->projectName() + " is synthesized");
-      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), commandWrapper);
-      return true;
+      qInfo() << "~~~ sinplify synthesis skipped, not required";
     }
   }
   
@@ -1778,8 +1781,13 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 #endif // #if UPSTREAM_UNUSED
 
   // incr compilation
-  std::vector<std::filesystem::path> internalScripts;
-  const std::string command = buildSynthesisCommandStr(internalScripts);
+  auto it = commandsMap.find("yosys");
+  if (it == commandsMap.end()) {
+    // error message reported inside the buildSynthesisCommands
+    return false;
+  }
+  CommandHolder commandHolder = it->second;
+  std::string command = commandHolder.command;
   CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
     qInfo() << "~~~ yosys synthesis skipped, not required";
@@ -6995,15 +7003,17 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
 
-std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::filesystem::path>& internalScripts)
+std::unordered_map<std::string, CommandHolder> CompilerOpenFPGA_ql::buildSynthesisCommands()
 {
+  std::unordered_map<std::string, CommandHolder> commands;
+
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
 
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return "";
+    return {};
   }
 
   if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
@@ -7022,7 +7032,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
-    return "";
+    return {};
   }
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
@@ -7031,7 +7041,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
     m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
     if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
       ErrorMessage("This Device is Not Supported by Synplify.");
-      return "";
+      return {};
     }
     synplifyScript = InitSynplifyScript();
 
@@ -7108,7 +7118,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
     }
     else {
       ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
-      return "";
+      return {};
     }
 
     std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
@@ -7164,7 +7174,6 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
           .string();
     std::ofstream ofs(synplify_script_path);
     ofs << synplifyScript;
-    internalScripts.push_back(synplify_script_path);
 #ifdef _WIN32
     ofs << "\n";
     ofs << "# Run all implementations of the active project.\n";
@@ -7185,7 +7194,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
 
     if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
       ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
-      return "";
+      return {};
     }
 
     const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
@@ -7204,7 +7213,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
     std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " >> " + synplifyLogFilePath;
 #endif
-    return command;
+    commands["synplify"] = CommandHolder{command, {synplify_script_path}};
   }
   
   // use the device specific yosys script
@@ -7213,7 +7222,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
   if(m_aurora_template_script_yosys_path.empty()) {
 
     ErrorMessage("Cannot proceed without Yosys Template Script.");
-    return "";
+    return {};
   }
 
 
@@ -7401,7 +7410,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
           case Design::Language::EBLIF:
             lang = "BLIF";
             ErrorMessage("Unsupported file format:" + lang);
-            return "";
+            return {};
           case Design::Language::OTHER:
             // don't include it in the compilation process
             continue;
@@ -7564,7 +7573,7 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
   }
   else {
     ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
-    return "";
+    return {};
   }
 
 
@@ -7728,7 +7737,6 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
   std::ofstream ofs(script_path);
   ofs << yosysScript;
   ofs.close();
-  internalScripts.push_back(script_path);
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
     ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
@@ -7752,7 +7760,8 @@ std::string CompilerOpenFPGA_ql::buildSynthesisCommandStr(std::vector<std::files
       yosys_executable_path.string() + " -s " +
       std::string(ProjManager()->projectName() + ".ys -l " +
                   ProjManager()->projectName() + "_synth.log");
-  return command;
+  commands["yosys"] = CommandHolder{command, {script_path}};
+  return commands;
 }
 
 std::string CompilerOpenFPGA_ql::getPackingCommandOLD() {

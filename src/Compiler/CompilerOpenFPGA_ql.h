@@ -45,6 +45,11 @@ namespace FOEDAG {
 //enum class SynthesisType { Yosys, QL, RS };
 #endif // #if UPSTREAM_UNUSED
 
+struct CommandHolder {
+  std::string command;
+  std::vector<std::string> internalScripts;
+};
+
 class CompilerOpenFPGA_ql : public Compiler {
     friend class QLSettingsManager;
     friend class QLMetricsManager;
@@ -242,7 +247,7 @@ private:
   TaskCompilationStateManager m_taskCompilationStateManager;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
-  std::string buildSynthesisCommandStr(std::vector<std::filesystem::path>& scripts);
+  std::unordered_map<std::string, CommandHolder> buildSynthesisCommands();
   std::string getPackingCommandOLD();
   std::string getPlacementCommandOLD();
   std::string getRoutingCommandOLD();             
