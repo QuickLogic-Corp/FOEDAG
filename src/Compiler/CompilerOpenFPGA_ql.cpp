@@ -3419,6 +3419,54 @@ bool CompilerOpenFPGA_ql::Packing() {
     FileUtils::removeFile(output_vpr_xml_path);
 
 
+    // before we remove the encrypt the new device, we also need to now run vpr with this file, 
+    // and a basic blif file for generating the rr_graph.bin and router_lookahead.bin
+    // this requires us to run pack and place (router_lookahead is only generated in place)
+    std::filesystem::path blif_filepath = 
+            std::filesystem::canonical(GlobalSession->Context()->DataPath() /
+            std::filesystem::path("..") /
+            std::filesystem::path("scripts") / 
+            "and2.blif");
+
+    std::filesystem::path rr_graph_bin_filepath = 
+            target_device_vpr_xml_filepath.parent_path() /
+            std::string("rr_graph.bin");
+
+    std::filesystem::path router_lookahead_bin_filepath = 
+            target_device_vpr_xml_filepath.parent_path() /
+            std::string("router_lookahead.bin");
+
+    std::string command_generate_rr_graph = 
+        std::string("vpr") + std::string(" ") +
+        target_device_vpr_xml_filepath.string() + std::string(" ") + // arch
+        blif_filepath.string() + std::string(" ") + // blif
+        std::string("--device ") + generated_layout_name + std::string(" ") + // layout
+        std::string("--write_rr_graph ") + rr_graph_bin_filepath.string() + std::string(" ") + 
+        std::string("--write_router_lookahead ") + router_lookahead_bin_filepath.string() + std::string(" ") +
+        std::string("--pack") + std::string(" ") + 
+        std::string("--place");
+
+    std::filesystem::path logfile_generate_rr_graph = 
+        std::filesystem::path(ProjManager()->projectPath()) / "generate_rr_graph.log";
+    int status_generate_rr_graph = ExecuteAndMonitorSystemCommand(command_generate_rr_graph,
+                                                                  logfile_generate_rr_graph.string());
+
+    if (status_generate_rr_graph == 0) {
+      // std::cout << "status_generate_rr_graph ok" << std::endl;
+    }
+    else {
+      ErrorMessage("Error Generating RRG!\n");
+      return false;
+    }
+
+    // delete extra logs from generate rrg step:
+    std::filesystem::path logfile_vpr_stdout = 
+        std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
+    FileUtils::removeFile(logfile_vpr_stdout);
+    FileUtils::removeFile(logfile_generate_rr_graph);
+
+
+
     // rename the cryptdb file according to the new devicename
     std::filesystem::path source_device_cryptdb_filepath = 
         CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
@@ -3468,20 +3516,22 @@ bool CompilerOpenFPGA_ql::Packing() {
 
 
     // find and update all settings/config json recursively
-    std::regex filename_pattern(".+\\.json");
+    {
+      std::regex filename_pattern(".+\\.json");
 
-    std::vector<std::filesystem::path> filepath_list;
+      std::vector<std::filesystem::path> filepath_list;
 
-    // this will include settings.json, settings_template.json, config.json
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath)) {
-      if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
-        filepath_list.push_back(entry.path());
+      // this will include settings.json, settings_template.json, config.json
+      for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath)) {
+        if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
+          filepath_list.push_back(entry.path());
+        }
       }
-    }
 
-    // replace "FPGA_AUTO" with generated layout name in all the files
-    for(auto filepath: filepath_list) {
-      FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", generated_layout_name);
+      // replace "FPGA_AUTO" with generated layout name in all the files
+      for(auto filepath: filepath_list) {
+        FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", generated_layout_name);
+      }
     }
 
 
@@ -3527,11 +3577,37 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
     }
 
+
+    // find and update all example tcl scripts recursively to enable all commented steps
+    {
+      std::regex filename_pattern(".+\\.tcl");
+
+      std::vector<std::filesystem::path> filepath_list;
+
+      // this will include settings.json, settings_template.json, config.json
+      for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath/"examples")) {
+        if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
+          filepath_list.push_back(entry.path());
+        }
+      }
+
+      // replace "#cmd" with "cmd" in all the files
+      for(auto filepath: filepath_list) {
+        FileUtils::findAndReplaceInFile(filepath, "#place", "place");
+        FileUtils::findAndReplaceInFile(filepath, "#route", "route");
+        FileUtils::findAndReplaceInFile(filepath, "#sta", "sta");
+        FileUtils::findAndReplaceInFile(filepath, "# place", "place");
+        FileUtils::findAndReplaceInFile(filepath, "# route", "route");
+        FileUtils::findAndReplaceInFile(filepath, "# sta", "sta");
+      }
+    }
+
+
     // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
     QLDeviceManager::getInstance()->parseDeviceData();
 
-    Message("Generating Device ok: " + target_device_copy_devicename +"\n");
-    Message("Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
+    Message("\n\n >> Generating Device ok: " + target_device_copy_devicename +"\n");
+    Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
   }
   // FPGA_AUTO device logic --
 
