@@ -21,10 +21,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #pragma once
 
+#include "nlohmann_json/json.hpp"
+#include "Utils/SerializationUtils.h"
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
-#include <nlohmann_json/json.hpp>
 
 #include <string>
 #include <unordered_set>
@@ -35,6 +36,112 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <memory>
 
 namespace FOEDAG {
+
+class ScriptRenderer {
+public:
+ScriptRenderer()=default;
+  ScriptRenderer(const std::string& scriptTemplate)
+  : m_scriptTemplate(scriptTemplate)
+  {}
+
+  void applyParameter(const std::string& placeholder, const std::string& name) {
+    m_parameters[placeholder] = name;
+  }
+
+  void applyFile(const std::string& placeholder, const std::filesystem::path& filePath, const std::string& mask = "") {
+    m_filePathes.push_back(filePath);
+    m_parameters[placeholder] = filePath.string();
+    if (!mask.empty()) {
+      m_maskedFiles[filePath.string()] = mask;
+    }
+  }
+
+  bool hasErrors() const { return !m_errors.empty(); }
+
+  std::string render() {
+    std::string script{m_scriptTemplate};
+
+    checkPlaceholder(script, "${FILES_INFO}");
+    script = StringUtils::replaceAll(script, "${FILES_INFO}", collectFileInfosStr(m_isMaskingEnabled));
+
+    for (const auto& [placeholder, value]: m_parameters) {
+      checkPlaceholder(script, placeholder);
+      std::string resolvedValue{value};
+      if (m_isMaskingEnabled) {
+        auto it = m_maskedFiles.find(value);
+        if (it != m_maskedFiles.end()) {
+          resolvedValue = it->second;
+        }
+      }
+
+      script = StringUtils::replaceAll(script, placeholder, resolvedValue);
+    }
+
+    if (script.find("${") != std::string::npos) {
+      m_errors.push_back("script is not fully parameterized, still contains pattern ${}");
+    }
+    return script;
+  }
+
+  std::string calcHash() {
+    m_isMaskingEnabled = true;
+    std::string script = render();
+    m_isMaskingEnabled = false;
+    return FileUtils::calcHash(script);
+  }
+
+private:
+  std::string m_scriptTemplate;
+  std::vector<std::filesystem::path> m_filePathes;
+  std::unordered_map<std::string, std::string> m_parameters;
+  std::unordered_map<std::string, std::string> m_maskedFiles; // special case to mask variation of file
+  std::string m_commentStr = "#";
+
+  bool m_isMaskingEnabled = false;
+
+  std::vector<std::string> m_errors;
+
+  std::string collectFileInfosStr(bool applyMask) const {
+    std::string result;
+    for (const std::filesystem::path filePath: m_filePathes) {
+      auto it = m_maskedFiles.find(filePath);
+      std::string name{filePath.string()};
+      if (applyMask) {
+        if (it != m_maskedFiles.end()) {
+          name = it->second; // use mask instead of path
+        }
+      }
+      result += m_commentStr + " " + name + " " + FileUtils::calcFileContentHash(filePath) + "\n";
+    }
+
+    return StringUtils::rtrim(result);
+  }
+
+  void checkPlaceholder(const std::string& script, const std::string& placeholder) {
+    if (script.find(placeholder) == std::string::npos) {
+      m_errors.push_back("script doesn't contain required placeholder:" + placeholder);
+    }
+  }
+
+  friend void to_json(nlohmann::json& j, const ScriptRenderer& obj) {
+    j = nlohmann::json{
+      { "scriptTemplate", obj.m_scriptTemplate },
+      { "filePathes",     obj.m_filePathes    },
+      { "parameters",     obj.m_parameters    },
+      { "maskedFiles",    obj.m_maskedFiles   },
+      { "commentStr",     obj.m_commentStr    }
+    };
+  }
+
+  friend void from_json(const nlohmann::json& j, ScriptRenderer& obj) {
+    j.at("scriptTemplate").get_to(obj.m_scriptTemplate);
+    j.at("filePathes").get_to(obj.m_filePathes);
+    j.at("parameters").get_to(obj.m_parameters);
+    j.at("maskedFiles").get_to(obj.m_maskedFiles);
+    j.at("commentStr").get_to(obj.m_commentStr);
+  }
+};
+using ScriptRendererPtr = std::shared_ptr<ScriptRenderer>;
 
 constexpr const char* VPR_ARCH_FILE_MASK = "vpr_arch_file_mask";
 
@@ -66,11 +173,11 @@ public:
   const std::vector<DiffFile>& diffFiles() const { return m_diffFiles; }
 
   bool isEmpty() const { 
-    return \
-    m_addedParameters.empty() 
-  && m_removedParameters.empty() 
-  && m_changedParameters.empty() 
-  && m_diffFiles.empty(); 
+    return m_genericMsg.empty() &&
+    m_addedParameters.empty() &&
+    m_removedParameters.empty() &&
+    m_changedParameters.empty() &&
+    m_diffFiles.empty(); 
   }
 
   void addGenericMsg(const std::string& msg) { m_genericMsg.push_back(msg); }
@@ -173,8 +280,8 @@ public:
   }
 
 private:
-  friend void to_json(nlohmann::json& json, const FileIdentity& obj) {
-    json = nlohmann::json{
+  friend void to_json(nlohmann::json& j, const FileIdentity& obj) {
+    j = nlohmann::json{
       {"file_path", obj.m_filePath.string()},
       {"mask", obj.m_mask},
       {"modified_datetime", obj.m_modifiedDateTime},
@@ -182,14 +289,14 @@ private:
     };
   }
 
-  friend void from_json(const nlohmann::json& json, FileIdentity& obj) {
+  friend void from_json(const nlohmann::json& j, FileIdentity& obj) {
     std::string pathStr;
-    json.at("file_path").get_to(pathStr);
+    j.at("file_path").get_to(pathStr);
     obj.m_filePath = std::filesystem::path{pathStr};
 
-    json.at("mask").get_to(obj.m_mask);
-    json.at("modified_datetime").get_to(obj.m_modifiedDateTime);
-    json.at("content_hash").get_to(obj.m_contentHash);
+    j.at("mask").get_to(obj.m_mask);
+    j.at("modified_datetime").get_to(obj.m_modifiedDateTime);
+    j.at("content_hash").get_to(obj.m_contentHash);
   }
 
   std::filesystem::path m_filePath;
@@ -225,6 +332,7 @@ public:
     DiffCommandPtr diff = std::make_shared<DiffCommand>();
     compareArguments(old.arguments(), arguments(), diff);
     compareFiles(old.files(), files(), diff);
+    compareScripts(old.scriptRenderer(), scriptRenderer(), diff);
     return diff;
   }
 
@@ -233,6 +341,12 @@ public:
   const std::string& string() const { return m_string; }
   const std::unordered_map<std::string, FileIdentity>& files() const { return m_files; }
   const std::unordered_map<std::string, std::string>& arguments() const { return m_arguments; }
+
+  void setScriptRenderer(const ScriptRendererPtr& scriptRenderer) {
+    m_scriptRenderer = scriptRenderer;
+  }
+
+  const ScriptRendererPtr& scriptRenderer() const { return m_scriptRenderer; }
 
   void append(const std::string& parameter, const std::string& value = "") {
     appendArgument(parameter, value);
@@ -268,20 +382,23 @@ public:
 private:
   std::unordered_map<std::string, std::string> m_arguments;
   std::unordered_map<std::string, FileIdentity> m_files;
+  ScriptRendererPtr m_scriptRenderer;
   std::string m_string;
 
-  friend void to_json(nlohmann::json& json, const CommandWrapper& obj) {
-    json = nlohmann::json{
+  friend void to_json(nlohmann::json& j, const CommandWrapper& obj) {
+    j = nlohmann::json{
       {"arguments", obj.m_arguments},
       {"files", obj.m_files},
-      {"string", obj.m_string}
+      {"string", obj.m_string},
+      {"script_renderer", obj.m_scriptRenderer}
     };
   }
 
-  friend void from_json(const nlohmann::json& json, CommandWrapper& obj) {
-    json.at("arguments").get_to(obj.m_arguments);
-    json.at("files").get_to(obj.m_files);
-    json.at("string").get_to(obj.m_string);
+  friend void from_json(const nlohmann::json& j, CommandWrapper& obj) {
+    j.at("arguments").get_to(obj.m_arguments);
+    j.at("files").get_to(obj.m_files);
+    j.at("string").get_to(obj.m_string);
+    j.at("script_renderer").get_to(obj.m_scriptRenderer);
   }
 
   void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
@@ -393,6 +510,17 @@ private:
     }
   }
 
+  void compareScripts(const ScriptRendererPtr& scriptRendererOld, const ScriptRendererPtr& scriptRendererNew, const DiffCommandPtr& diff) {
+    if ((scriptRendererOld && !scriptRendererNew) || (!scriptRendererOld && scriptRendererNew)) {
+      diff->addGenericMsg("one of script structure is not initialized");
+      return;
+    }
+    if (scriptRendererOld && scriptRendererNew) {
+      if (scriptRendererOld->calcHash() != scriptRendererNew->calcHash()) {
+        diff->addGenericMsg("hashes of scripts are different");
+      }
+    }
+  }
 };
 using CommandWrapperPtr = std::shared_ptr<CommandWrapper>;
 
@@ -472,105 +600,5 @@ class CommandWrapperBuilder {
       return "";
     }
 };
-
-class ScriptRenderer {
-public:
-  ScriptRenderer(const std::string& scriptTemplate)
-  : m_scriptTemplate(scriptTemplate)
-  {}
-
-  void applyParameter(const std::string& placeholder, const std::string& name) {
-    m_parameters[placeholder] = name;
-  }
-
-  void applyFile(const std::string& placeholder, const std::filesystem::path& filePath, const std::string& mask = "") {
-    m_filePathes.push_back(filePath);
-    m_parameters[placeholder] = filePath.string();
-    if (!mask.empty()) {
-      m_maskedFiles[filePath.string()] = mask;
-    }
-  }
-
-  bool hasErrors() const { return !m_errors.empty(); }
-
-  std::string render() {
-    std::string script{m_scriptTemplate};
-
-    checkPlaceholder(script, "${FILES_INFO}");
-    script = StringUtils::replaceAll(script, "${FILES_INFO}", collectFileInfosStr(m_isMaskingEnabled));
-
-    for (const auto& [placeholder, value]: m_parameters) {
-      checkPlaceholder(script, placeholder);
-      std::string resolvedValue{value};
-      if (m_isMaskingEnabled) {
-        auto it = m_maskedFiles.find(value);
-        if (it != m_maskedFiles.end()) {
-          resolvedValue = it->second;
-        }
-      }
-
-      script = StringUtils::replaceAll(script, placeholder, resolvedValue);
-    }
-
-    if (script.find("${") != std::string::npos) {
-      m_errors.push_back("script is not fully parameterized, still contains pattern ${}");
-    }
-    return script;
-  }
-
-  std::string calcHash() {
-    m_isMaskingEnabled = true;
-    std::string script = render();
-    m_isMaskingEnabled = false;
-    return FileUtils::calcHash(script);
-  }
-
-private:
-  std::string m_scriptTemplate;
-  std::vector<std::filesystem::path> m_filePathes;
-  std::unordered_map<std::string, std::string> m_parameters;
-  std::unordered_map<std::string, std::string> m_maskedFiles; // special case to mask variation of file
-  std::string m_commentStr = "#";
-
-  bool m_isMaskingEnabled = false;
-
-  std::vector<std::string> m_errors;
-
-  std::string collectFileInfosStr(bool applyMask) const {
-    std::string result;
-    for (const std::filesystem::path filePath: m_filePathes) {
-      auto it = m_maskedFiles.find(filePath);
-      std::string name{filePath.string()};
-      if (applyMask) {
-        if (it != m_maskedFiles.end()) {
-          name = it->second; // use mask instead of path
-        }
-      }
-      result += m_commentStr + " " + name + " " + FileUtils::calcFileContentHash(filePath) + "\n";
-    }
-
-    return StringUtils::rtrim(result);
-  }
-
-  void checkPlaceholder(const std::string& script, const std::string& placeholder) {
-    if (script.find(placeholder) == std::string::npos) {
-      m_errors.push_back("script doesn't contain required placeholder:" + placeholder);
-    }
-  }
-};
-
-// class CommandWrapperNew {
-// public:
-//   CommandWrapperNew(const std::filesystem::path& scriptFilePath) {
-//     m_files[scriptFilePath] = FileUtils::calcFileContentHash(scriptFilePath);
-//   }
-
-//   // bool compare(const CommandWrapper2& rhs) {
-
-//   // }
-
-// private:
-//   std::map<std::filesystem::path, std::string> m_files;
-// };
 
 }  // namespace FOEDAG

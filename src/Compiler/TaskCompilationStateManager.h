@@ -20,34 +20,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include "nlohmann_json/json.hpp"
+#include "Utils/SerializationUtils.h"
+
 #include "CommandWrapper.h"
 #include "Utils/FileUtils.h"
 
-#include "nlohmann_json/json.hpp"
-
 #include <unordered_map>
 #include <iostream>
-
-namespace nlohmann {
-template <>
-struct adl_serializer<std::shared_ptr<FOEDAG::CommandWrapper>> {
-    static void to_json(json& json, const std::shared_ptr<FOEDAG::CommandWrapper>& ptr) {
-      if (ptr) {
-        json = *ptr;
-      } else {
-        json = nullptr;
-      }
-    }
-
-    static void from_json(const json& json, std::shared_ptr<FOEDAG::CommandWrapper>& ptr) {
-      if (json.is_null()) {
-        ptr = nullptr;
-      } else {
-        ptr = std::make_shared<FOEDAG::CommandWrapper>(json.get<FOEDAG::CommandWrapper>());
-      }
-    }
-};
-} // namespace nlohmann
 
 namespace FOEDAG {
 
