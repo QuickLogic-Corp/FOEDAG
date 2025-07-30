@@ -396,35 +396,6 @@ private:
 };
 using CommandWrapperPtr = std::shared_ptr<CommandWrapper>;
 
-
-class CommandsWrapper {
-public:
-  std::vector<DiffCommandPtr> compare(const CommandsWrapper& old) {
-    std::vector<DiffCommandPtr> diffs;
-    if (size() == old.size()) {
-      for (std::size_t i=0; i<m_commands.size(); ++i) {
-        const CommandWrapperPtr& command = m_commands[i];
-        const CommandWrapperPtr& oldCommand = old.m_commands[i];
-        DiffCommandPtr diff = command->compare(*oldCommand);
-        if (!diff->isEmpty()) {
-          diffs.push_back(diff);
-        }
-      }
-    } else {
-      DiffCommandPtr diff = std::make_shared<DiffCommand>();
-      diff->addGenericMsg("number of commands has been changed");
-      diffs.push_back(diff);
-    }
-
-    return diffs;
-  }
-  std::size_t size() const { return m_commands.size(); }
-
-private:
-  std::vector<CommandWrapperPtr> m_commands;
-};
-using CommandsWrapperPtr = std::shared_ptr<CommandsWrapper>;
-
 class CommandWrapperBuilder {
   public:
     static CommandWrapperPtr fromString(const std::string& content, const std::map<std::filesystem::path, std::string>& maskedFiles = {}) {
@@ -500,6 +471,50 @@ class CommandWrapperBuilder {
       }
       return "";
     }
+};
+
+class ScriptRenderer {
+public:
+  ScriptRenderer(const std::filesystem::path& scriptTemplateFilePath)
+  : m_scriptTemplateFilePath(scriptTemplateFilePath)
+  {}
+
+  void addFile(const std::string& placeholder, const std::filesystem::path& filePath) {
+    m_filePathes.push_back(filePath);
+    m_parameters[placeholder] = filePath.string();
+  }
+
+  std::string render() {
+    std::string script{FileUtils::GetFileContent(m_scriptTemplateFilePath)};
+
+    std::string filesInfo;
+    for (std::size_t i=0; i<m_filePathes.size(); ++i) {
+      filesInfo += m_commentStr + " " + m_filePathes[i].string() + " " + FileUtils::calcHashFileContent(m_filePathes[i]);
+      if (i < m_filePathes.size() - 1) {
+        filesInfo += "\n";
+      }
+    }
+    script = StringUtils::replaceAll(script, "${FILES_INFO}", filesInfo);
+
+    for (const auto& [placeholder, value]: m_parameters) {
+      script = StringUtils::replaceAll(script, placeholder, value);
+    }
+
+    return script;
+  }
+
+  // bool validate() {
+  //   if (m_renderedScript.find("${") != std::string::npos) {
+  //     return false;
+  //   }
+  //   return true;
+  // }
+
+private:
+  std::filesystem::path m_scriptTemplateFilePath;
+  std::vector<std::filesystem::path> m_filePathes;
+  std::unordered_map<std::string, std::string> m_parameters;
+  std::string m_commentStr = "#";
 };
 
 }  // namespace FOEDAG

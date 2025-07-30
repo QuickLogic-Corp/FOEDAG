@@ -43,7 +43,7 @@ public:
         FileUtils::WriteToFile(m_filePath, content);
     }
 
-    std::string hash() const {
+    std::string calcHash() const {
         return FileUtils::calcHashFileContent(m_filePath);
     }
 
@@ -375,8 +375,8 @@ TEST(CommandWrapper, masked_files_differ)
     EXPECT_EQ(diff->diffFiles().size(), 1);
     EXPECT_EQ(diff->diffFiles().begin()->file, "arch");
     EXPECT_EQ(diff->diffFiles().begin()->criteria, "hash");
-    EXPECT_EQ(diff->diffFiles().begin()->prevValue, filePath1.hash());
-    EXPECT_EQ(diff->diffFiles().begin()->value, filePath2.hash());
+    EXPECT_EQ(diff->diffFiles().begin()->prevValue, filePath1.calcHash());
+    EXPECT_EQ(diff->diffFiles().begin()->value, filePath2.calcHash());
 
     EXPECT_TRUE(diff->changedParameters().empty());
     EXPECT_TRUE(diff->addedParameters().empty());
@@ -470,4 +470,59 @@ TEST(CommandWrapperBuilder, restore_single_cmd_from_string_automatic_mask_detect
 TEST(CommandWrapperBuilder, restore_multiple_cmds_from_string)
 {
     // TODO: https://github.com/QL-Proprietary/aurora2/issues/1306
+}
+
+TEST(ScriptRenderer, render)
+{
+    ScopedFile file1{std::filesystem::path{"file1"}, "file1 content..."};
+    ScopedFile file2{std::filesystem::path{"file2"}, "file2 content..."};
+    ScopedFile file3{std::filesystem::path{"file3"}, "file3 content..."};
+
+    std::string scriptTemplate = 
+R"(${FILES_INFO}
+cmd1 --p1 v1 ${FILE1}
+cmd2 ${FILE2} --p2 v2
+cmd3 -p3 v3 ${FILE3})";
+
+    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
+
+    ScriptRenderer renderer{scriptTemplateFile.filePath()};
+    renderer.addFile("${FILE1}", file1.filePath());
+    renderer.addFile("${FILE2}", file2.filePath());
+    renderer.addFile("${FILE3}", file3.filePath());
+
+    {
+    std::string script = renderer.render();
+
+    std::string expectedScript = 
+R"(# file1 ${file1_hash}
+# file2 ${file2_hash}
+# file3 ${file3_hash}
+cmd1 --p1 v1 file1
+cmd2 file2 --p2 v2
+cmd3 -p3 v3 file3)";
+    expectedScript = StringUtils::replaceAll(expectedScript, "${file1_hash}", file1.calcHash());
+    expectedScript = StringUtils::replaceAll(expectedScript, "${file2_hash}", file2.calcHash());
+    expectedScript = StringUtils::replaceAll(expectedScript, "${file3_hash}", file3.calcHash());
+
+    EXPECT_EQ(expectedScript, StringUtils::trim(script));
+    }
+
+    {
+    file1.writeContent("file1 content NEW...");
+    std::string script = renderer.render();
+
+std::string expectedScript = 
+R"(# file1 ${file1_hash}
+# file2 ${file2_hash}
+# file3 ${file3_hash}
+cmd1 --p1 v1 file1
+cmd2 file2 --p2 v2
+cmd3 -p3 v3 file3)";
+    expectedScript = StringUtils::replaceAll(expectedScript, "${file1_hash}", file1.calcHash());
+    expectedScript = StringUtils::replaceAll(expectedScript, "${file2_hash}", file2.calcHash());
+    expectedScript = StringUtils::replaceAll(expectedScript, "${file3_hash}", file3.calcHash());
+
+    EXPECT_EQ(expectedScript, StringUtils::trim(script));
+    }
 }
