@@ -612,7 +612,15 @@ std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& p
   return result;
 }
 
-std::string FileUtils::calcHashFileContent(const std::filesystem::path& filePath) 
+std::string FileUtils::calcHash(const std::string& content) 
+{
+  QCryptographicHash hash(QCryptographicHash::Md5);
+  hash.addData(content.data(), content.size());
+  QByteArray hexResult = hash.result().toHex();
+  return std::string(hexResult.constData(), hexResult.size());
+}
+
+std::string FileUtils::calcFileContentHash(const std::filesystem::path& filePath) 
 {
   QFile file(QString::fromStdString(filePath.string()));
   if (!file.open(QIODevice::ReadOnly)) {

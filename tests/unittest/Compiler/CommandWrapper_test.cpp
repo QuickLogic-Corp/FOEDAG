@@ -30,11 +30,13 @@ namespace {
 class ScopedFile {
 public:
     ScopedFile(const std::filesystem::path& filePath, const std::string& content):
-    m_filePath(filePath) {
+    m_filePath(filePath),
+    m_content(content) {
         FileUtils::WriteToFile(filePath, content);
     }
     
     const std::filesystem::path& filePath() const { return m_filePath; }
+    const std::string& content() const { return m_content; }
 
     void writeContent(const std::string& content, int delay = 0) {
         if (delay > 0) {
@@ -44,7 +46,7 @@ public:
     }
 
     std::string calcHash() const {
-        return FileUtils::calcHashFileContent(m_filePath);
+        return FileUtils::calcFileContentHash(m_filePath);
     }
 
     ~ScopedFile() {
@@ -53,6 +55,7 @@ public:
 
 private:
     std::filesystem::path m_filePath;
+    std::string m_content;
 };
 } // namespace
 
@@ -467,18 +470,13 @@ TEST(CommandWrapperBuilder, restore_single_cmd_from_string_automatic_mask_detect
     EXPECT_EQ("/some/path/to/vpr arch/filepath --p1 v1 --p2 --p3 v3 --file2 filepath2", commandRestoredPtr->string());
 }
 
-TEST(CommandWrapperBuilder, restore_multiple_cmds_from_string)
-{
-    // TODO: https://github.com/QL-Proprietary/aurora2/issues/1306
-}
-
 TEST(ScriptRenderer, render)
 {
-    ScopedFile file1{std::filesystem::path{"file1"}, "file1 content..."};
-    ScopedFile file2{std::filesystem::path{"file2"}, "file2 content..."};
-    ScopedFile file3{std::filesystem::path{"file3"}, "file3 content..."};
+    ScopedFile file1{std::filesystem::path{"file1"}, "file1 unique content..."};
+    ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
+    ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
 
-    std::string scriptTemplate = 
+    const std::string scriptTemplate = 
 R"(${FILES_INFO}
 cmd1 --p1 v1 ${FILE1}
 cmd2 ${FILE2} --p2 v2
@@ -487,12 +485,9 @@ cmd3 -p3 v3 ${FILE3})";
     ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
 
     ScriptRenderer renderer{scriptTemplateFile.filePath()};
-    renderer.addFile("${FILE1}", file1.filePath());
-    renderer.addFile("${FILE2}", file2.filePath());
-    renderer.addFile("${FILE3}", file3.filePath());
-
-    {
-    std::string script = renderer.render();
+    renderer.applyFile("${FILE1}", file1.filePath(), "file_mask");
+    renderer.applyFile("${FILE2}", file2.filePath());
+    renderer.applyFile("${FILE3}", file3.filePath());
 
     std::string expectedScript = 
 R"(# file1 ${file1_hash}
@@ -505,24 +500,97 @@ cmd3 -p3 v3 file3)";
     expectedScript = StringUtils::replaceAll(expectedScript, "${file2_hash}", file2.calcHash());
     expectedScript = StringUtils::replaceAll(expectedScript, "${file3_hash}", file3.calcHash());
 
-    EXPECT_EQ(expectedScript, StringUtils::trim(script));
-    }
-
-    {
-    file1.writeContent("file1 content NEW...");
     std::string script = renderer.render();
-
-std::string expectedScript = 
-R"(# file1 ${file1_hash}
-# file2 ${file2_hash}
-# file3 ${file3_hash}
-cmd1 --p1 v1 file1
-cmd2 file2 --p2 v2
-cmd3 -p3 v3 file3)";
-    expectedScript = StringUtils::replaceAll(expectedScript, "${file1_hash}", file1.calcHash());
-    expectedScript = StringUtils::replaceAll(expectedScript, "${file2_hash}", file2.calcHash());
-    expectedScript = StringUtils::replaceAll(expectedScript, "${file3_hash}", file3.calcHash());
+    EXPECT_TRUE(!renderer.hasErrors());
 
     EXPECT_EQ(expectedScript, StringUtils::trim(script));
-    }
+}
+
+TEST(ScriptRenderer, filepath_masked)
+{
+    ScopedFile file1{std::filesystem::path{"file1"}, "shared content..."};
+    ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
+    ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
+    ScopedFile file4{std::filesystem::path{"file4"}, file1.content()};
+
+    EXPECT_TRUE(file1.filePath() != file4.filePath());
+    EXPECT_TRUE(file1.calcHash() == file4.calcHash());
+
+    const std::string scriptTemplate = 
+R"(${FILES_INFO}
+cmd1 --p1 v1 ${FILE_MASK}
+cmd2 ${FILE2} --p2 v2
+cmd3 -p3 v3 ${FILE3})";
+
+    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
+
+    ScriptRenderer renderer1{scriptTemplateFile.filePath()};
+    renderer1.applyFile("${FILE_MASK}", file1.filePath(), "file_mask");
+    renderer1.applyFile("${FILE2}", file2.filePath());
+    renderer1.applyFile("${FILE3}", file3.filePath());
+    std::string hash1 = renderer1.calcHash();
+    EXPECT_TRUE(!renderer1.hasErrors());
+
+    ScriptRenderer renderer2{scriptTemplateFile.filePath()};
+    renderer2.applyFile("${FILE_MASK}", file4.filePath(), "file_mask");
+    renderer2.applyFile("${FILE2}", file2.filePath());
+    renderer2.applyFile("${FILE3}", file3.filePath());
+    std::string hash2 = renderer2.calcHash();
+    EXPECT_TRUE(!renderer2.hasErrors());
+
+    EXPECT_EQ(hash1, hash2);
+}
+
+TEST(ScriptRenderer, file_content_changed) 
+{
+    ScopedFile file1{std::filesystem::path{"file1"}, "file1 unique content..."};
+    ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
+    ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
+
+    const std::string scriptTemplate = 
+R"(${FILES_INFO}
+cmd1 --p1 v1 ${FILE1}
+cmd2 ${FILE2} --p2 v2
+cmd3 -p3 v3 ${FILE3})";
+
+    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
+
+    ScriptRenderer renderer{scriptTemplateFile.filePath()};
+    renderer.applyFile("${FILE1}", file1.filePath(), "file_mask");
+    renderer.applyFile("${FILE2}", file2.filePath());
+    renderer.applyFile("${FILE3}", file3.filePath());
+    std::string hashOrig = renderer.calcHash();
+    EXPECT_TRUE(!renderer.hasErrors());
+
+    file3.writeContent(file3.content() + "MODIFIED....");
+    std::string hashMod = renderer.calcHash();
+
+    EXPECT_TRUE(hashOrig != hashMod);
+}
+
+TEST(ScriptRenderer, masked_file_content_changed) 
+{
+    ScopedFile file1{std::filesystem::path{"file1"}, "file1 unique content..."};
+    ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
+    ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
+
+    const std::string scriptTemplate = 
+R"(${FILES_INFO}
+cmd1 --p1 v1 ${FILE1}
+cmd2 ${FILE2} --p2 v2
+cmd3 -p3 v3 ${FILE3})";
+
+    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
+
+    ScriptRenderer renderer{scriptTemplateFile.filePath()};
+    renderer.applyFile("${FILE1}", file1.filePath(), "file_mask");
+    renderer.applyFile("${FILE2}", file2.filePath());
+    renderer.applyFile("${FILE3}", file3.filePath());
+    std::string hashOrig = renderer.calcHash();
+    EXPECT_TRUE(!renderer.hasErrors());
+
+    file1.writeContent(file1.content() + "MODIFIED....");
+    std::string hashMod = renderer.calcHash();
+
+    EXPECT_TRUE(hashOrig != hashMod);
 }

@@ -134,7 +134,7 @@ public:
     if (skipHashCheck) {
       m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
     } else {
-      m_contentHash = FileUtils::calcHashFileContent(filePath);
+      m_contentHash = FileUtils::calcFileContentHash(filePath);
     }
   }
 
@@ -479,42 +479,102 @@ public:
   : m_scriptTemplateFilePath(scriptTemplateFilePath)
   {}
 
-  void addFile(const std::string& placeholder, const std::filesystem::path& filePath) {
-    m_filePathes.push_back(filePath);
-    m_parameters[placeholder] = filePath.string();
+  void applyParameter(const std::string& placeholder, const std::string& name) {
+    m_parameters[placeholder] = name;
   }
 
+  void applyFile(const std::string& placeholder, const std::filesystem::path& filePath, const std::string& mask = "") {
+    m_filePathes.push_back(filePath);
+    m_parameters[placeholder] = filePath.string();
+    if (!mask.empty()) {
+      m_maskedFiles[filePath.string()] = mask;
+    }
+  }
+
+  bool hasErrors() const { return !m_errors.empty(); }
+
   std::string render() {
+    if (!std::filesystem::exists(m_scriptTemplateFilePath)) {
+      m_errors.push_back(m_scriptTemplateFilePath.string() + " doesn't exists");
+      return "";
+    }
     std::string script{FileUtils::GetFileContent(m_scriptTemplateFilePath)};
 
-    std::string filesInfo;
-    for (std::size_t i=0; i<m_filePathes.size(); ++i) {
-      filesInfo += m_commentStr + " " + m_filePathes[i].string() + " " + FileUtils::calcHashFileContent(m_filePathes[i]);
-      if (i < m_filePathes.size() - 1) {
-        filesInfo += "\n";
-      }
-    }
-    script = StringUtils::replaceAll(script, "${FILES_INFO}", filesInfo);
+    checkPlaceholder(script, "${FILES_INFO}");
+    script = StringUtils::replaceAll(script, "${FILES_INFO}", collectFileInfosStr(m_isMaskingEnabled));
 
     for (const auto& [placeholder, value]: m_parameters) {
-      script = StringUtils::replaceAll(script, placeholder, value);
+      checkPlaceholder(script, placeholder);
+      std::string resolvedValue{value};
+      if (m_isMaskingEnabled) {
+        auto it = m_maskedFiles.find(value);
+        if (it != m_maskedFiles.end()) {
+          resolvedValue = it->second;
+        }
+      }
+
+      script = StringUtils::replaceAll(script, placeholder, resolvedValue);
     }
 
+    if (script.find("${") != std::string::npos) {
+      m_errors.push_back("script is not fully parameterized, still contains pattern ${}");
+    }
     return script;
   }
 
-  // bool validate() {
-  //   if (m_renderedScript.find("${") != std::string::npos) {
-  //     return false;
-  //   }
-  //   return true;
-  // }
+  std::string calcHash() {
+    m_isMaskingEnabled = true;
+    std::string script = render();
+    m_isMaskingEnabled = false;
+    return FileUtils::calcHash(script);
+  }
 
 private:
   std::filesystem::path m_scriptTemplateFilePath;
   std::vector<std::filesystem::path> m_filePathes;
   std::unordered_map<std::string, std::string> m_parameters;
+  std::unordered_map<std::string, std::string> m_maskedFiles; // special case to mask variation of file
   std::string m_commentStr = "#";
+
+  bool m_isMaskingEnabled = false;
+  
+  std::vector<std::string> m_errors;
+
+  std::string collectFileInfosStr(bool applyMask) const {
+    std::string result;
+    for (const std::filesystem::path filePath: m_filePathes) {
+      auto it = m_maskedFiles.find(filePath);
+      std::string name{filePath.string()};
+      if (applyMask) {
+        if (it != m_maskedFiles.end()) {
+          name = it->second; // use mask instead of path
+        }
+      }
+      result += m_commentStr + " " + name + " " + FileUtils::calcFileContentHash(filePath) + "\n";
+    }
+
+    return StringUtils::rtrim(result);
+  }
+
+  void checkPlaceholder(const std::string& script, const std::string& placeholder) {
+    if (script.find(placeholder) == std::string::npos) {
+      m_errors.push_back("script doesn't contain required placeholder:" + placeholder);
+    }
+  }
 };
+
+// class CommandWrapperNew {
+// public:
+//   CommandWrapperNew(const std::filesystem::path& scriptFilePath) {
+//     m_files[scriptFilePath] = FileUtils::calcFileContentHash(scriptFilePath);
+//   }
+
+//   // bool compare(const CommandWrapper2& rhs) {
+
+//   // }
+
+// private:
+//   std::map<std::filesystem::path, std::string> m_files;
+// };
 
 }  // namespace FOEDAG

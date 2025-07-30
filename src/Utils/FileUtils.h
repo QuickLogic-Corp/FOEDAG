@@ -116,7 +116,8 @@ class FileUtils final {
   static std::vector<std::filesystem::path> findFilePathesByWildcard(const std::string& wildCardFilePathPattern);
   static std::vector<std::string> findFileNamesByWildcard(const std::string& path, const std::string& wildCardFileNamePattern);
 
-  static std::string calcHashFileContent(const std::filesystem::path& filePath);
+  static std::string calcHash(const std::string& content);
+  static std::string calcFileContentHash(const std::filesystem::path& filePath);
 
  private:
   FileUtils() = delete;
