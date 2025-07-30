@@ -482,9 +482,7 @@ cmd1 --p1 v1 ${FILE1}
 cmd2 ${FILE2} --p2 v2
 cmd3 -p3 v3 ${FILE3})";
 
-    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
-
-    ScriptRenderer renderer{scriptTemplateFile.filePath()};
+    ScriptRenderer renderer{scriptTemplate};
     renderer.applyFile("${FILE1}", file1.filePath(), "file_mask");
     renderer.applyFile("${FILE2}", file2.filePath());
     renderer.applyFile("${FILE3}", file3.filePath());
@@ -522,16 +520,14 @@ cmd1 --p1 v1 ${FILE_MASK}
 cmd2 ${FILE2} --p2 v2
 cmd3 -p3 v3 ${FILE3})";
 
-    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
-
-    ScriptRenderer renderer1{scriptTemplateFile.filePath()};
+    ScriptRenderer renderer1{scriptTemplate};
     renderer1.applyFile("${FILE_MASK}", file1.filePath(), "file_mask");
     renderer1.applyFile("${FILE2}", file2.filePath());
     renderer1.applyFile("${FILE3}", file3.filePath());
     std::string hash1 = renderer1.calcHash();
     EXPECT_TRUE(!renderer1.hasErrors());
 
-    ScriptRenderer renderer2{scriptTemplateFile.filePath()};
+    ScriptRenderer renderer2{scriptTemplate};
     renderer2.applyFile("${FILE_MASK}", file4.filePath(), "file_mask");
     renderer2.applyFile("${FILE2}", file2.filePath());
     renderer2.applyFile("${FILE3}", file3.filePath());
@@ -553,9 +549,7 @@ cmd1 --p1 v1 ${FILE1}
 cmd2 ${FILE2} --p2 v2
 cmd3 -p3 v3 ${FILE3})";
 
-    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
-
-    ScriptRenderer renderer{scriptTemplateFile.filePath()};
+    ScriptRenderer renderer{scriptTemplate};
     renderer.applyFile("${FILE1}", file1.filePath(), "file_mask");
     renderer.applyFile("${FILE2}", file2.filePath());
     renderer.applyFile("${FILE3}", file3.filePath());
@@ -580,9 +574,7 @@ cmd1 --p1 v1 ${FILE1}
 cmd2 ${FILE2} --p2 v2
 cmd3 -p3 v3 ${FILE3})";
 
-    ScopedFile scriptTemplateFile{std::filesystem::path{"script"}, scriptTemplate};
-
-    ScriptRenderer renderer{scriptTemplateFile.filePath()};
+    ScriptRenderer renderer{scriptTemplate};
     renderer.applyFile("${FILE1}", file1.filePath(), "file_mask");
     renderer.applyFile("${FILE2}", file2.filePath());
     renderer.applyFile("${FILE3}", file3.filePath());

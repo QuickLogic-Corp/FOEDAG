@@ -475,8 +475,8 @@ class CommandWrapperBuilder {
 
 class ScriptRenderer {
 public:
-  ScriptRenderer(const std::filesystem::path& scriptTemplateFilePath)
-  : m_scriptTemplateFilePath(scriptTemplateFilePath)
+  ScriptRenderer(const std::string& scriptTemplate)
+  : m_scriptTemplate(scriptTemplate)
   {}
 
   void applyParameter(const std::string& placeholder, const std::string& name) {
@@ -494,11 +494,7 @@ public:
   bool hasErrors() const { return !m_errors.empty(); }
 
   std::string render() {
-    if (!std::filesystem::exists(m_scriptTemplateFilePath)) {
-      m_errors.push_back(m_scriptTemplateFilePath.string() + " doesn't exists");
-      return "";
-    }
-    std::string script{FileUtils::GetFileContent(m_scriptTemplateFilePath)};
+    std::string script{m_scriptTemplate};
 
     checkPlaceholder(script, "${FILES_INFO}");
     script = StringUtils::replaceAll(script, "${FILES_INFO}", collectFileInfosStr(m_isMaskingEnabled));
@@ -530,14 +526,14 @@ public:
   }
 
 private:
-  std::filesystem::path m_scriptTemplateFilePath;
+  std::string m_scriptTemplate;
   std::vector<std::filesystem::path> m_filePathes;
   std::unordered_map<std::string, std::string> m_parameters;
   std::unordered_map<std::string, std::string> m_maskedFiles; // special case to mask variation of file
   std::string m_commentStr = "#";
 
   bool m_isMaskingEnabled = false;
-  
+
   std::vector<std::string> m_errors;
 
   std::string collectFileInfosStr(bool applyMask) const {
