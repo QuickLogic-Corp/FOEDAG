@@ -251,6 +251,7 @@ class ProjectManager : public QObject {
   CompilationUnits DesignFiles() const;
   std::vector<std::pair<CompilationUnit, std::vector<std::string>>>
   DesignFileList() const;
+  std::vector<std::string> CollectDesignFiles() const;
   // simulation
   Libraries SimulationLibraries() const;
   CompilationUnits SimulationFiles() const;

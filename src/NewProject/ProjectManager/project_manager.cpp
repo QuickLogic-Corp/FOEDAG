@@ -1030,6 +1030,22 @@ ProjectManager::DesignFileList() const {
   return vec;
 }
 
+std::vector<std::string> ProjectManager::CollectDesignFiles() const {
+  ProjectFileSet* tmpFileSet =
+      Project::Instance()->getProjectFileset(getDesignActiveFileSet());
+
+  std::vector<std::string> files;
+  if (tmpFileSet && PROJECT_FILE_TYPE_DS == tmpFileSet->getSetType()) {
+    auto tmpMapFiles = tmpFileSet->Files();
+    for (auto iter = tmpMapFiles.begin(); iter != tmpMapFiles.end(); ++iter) {
+      for (const auto& f : iter->second) {
+        files.push_back(f.toStdString());
+      }
+    }
+  }
+  return files;
+}
+
 ProjectManager::Libraries ProjectManager::SimulationLibraries() const {
   ProjectFileSet* tmpFileSet =
       Project::Instance()->getProjectFileset(getSimulationActiveFileSet());

@@ -7084,15 +7084,9 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
 #endif
     synplifyScript->apply("${READ_DESIGN_FILES}", designFiles);
-
-    // collect design files list specially for script renderer to track they hashes
-    for (const auto& lang_file : ProjManager()->DesignFileList()) {
-      std::vector<std::string> files = lang_file.second;
-      for (const std::string& file: files) {
-        synplifyScript->addFile(std::filesystem::path{file});
-      }
+    for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+      synplifyScript->addFile(std::filesystem::path{file});
     }
-    // collect design files list specially for script renderer to track they hashes
 
     if (!ProjManager()->DesignTopModule().empty()) {
       synplifyScript->apply("${TOP_MODULE}", ProjManager()->DesignTopModule());
@@ -7460,14 +7454,9 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
                     ProjManager()->DesignTopModule() + "\n";
       }
       yosysScript->apply("${READ_DESIGN_FILES}", fileList);
-      // collect design files list specially for script renderer to track they hashes
-      // for (const auto& lang_file : ProjManager()->DesignFileList()) {
-      //   std::vector<std::string> files = lang_file.second;
-      //   for (const std::string& file: files) {
-      //     synplifyScript->addFile(std::filesystem::path{file});
-      //   }
-      // }
-      // collect design files list specially for script renderer to track they hashes
+      for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+        yosysScript->addFile(std::filesystem::path{file});
+      }
     } else {
     // Default Yosys parser
 
@@ -7536,6 +7525,9 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       designFiles += filesScript + "\n";
     }
     yosysScript->apply("${READ_DESIGN_FILES}", macros + designFiles);
+    for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+      yosysScript->addFile(std::filesystem::path{file});
+    }
     }
   }
   else
@@ -7560,6 +7552,9 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
     yosysScript->apply("${READ_DESIGN_FILES}", designFiles);
+    for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+      yosysScript->addFile(std::filesystem::path{file});
+    }
   }
   
   yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
