@@ -77,9 +77,6 @@ ScriptRenderer()=default;
   std::string render() {
     std::string script{m_scriptTemplate};
 
-    checkPlaceholder(script, FILES_INFO_PLACEHOLDER);
-    script = StringUtils::replaceAll(script, FILES_INFO_PLACEHOLDER, collectFileInfosStr(m_isMaskingEnabled));
-
     for (const auto& [placeholder, value]: m_parameters) {
       checkPlaceholder(script, placeholder);
       std::string resolvedValue{value};
@@ -92,6 +89,20 @@ ScriptRenderer()=default;
 
       script = StringUtils::replaceAll(script, placeholder, resolvedValue);
     }
+
+    // Insert the required FILES_INFO_PLACEHOLDER if it is missing from the template.
+    // Without it, incremental compilation may report an incorrect status.
+    if (script.find(FILES_INFO_PLACEHOLDER) == std::string::npos) {
+      script += "\n\n\n";
+      script += "###################################################################";
+      script += "# AUTO-GENERATED - DO NOT EDIT";
+      script += "# Contains <relative-path> <MD5> pairs used to detect stale files.";
+      script += "###################################################################";
+      script += FILES_INFO_PLACEHOLDER;
+      script += "###################################################################";
+    }
+    
+    script = StringUtils::replaceAll(script, FILES_INFO_PLACEHOLDER, collectFileInfosStr(m_isMaskingEnabled));
 
     if (script.find("${") != std::string::npos) {
       m_errors.push_back("script is not fully parameterized, still contains pattern ${}");
