@@ -1849,41 +1849,37 @@ std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
   return m_yosysScript;
 }
 
-std::string CompilerOpenFPGA_ql::InitSynplifyScript() {
+std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() {
   // Default or custom Synplify script
-  if (m_synplifyScript.empty()) {
-    bool use_external_template_synplify = false;
-    std::string aurora_template_script_synplify;
+  bool use_external_template_synplify = false;
+  std::string aurora_template_script_synplify;
 
-    // check if we have the device aurora template script available:
-    if(FileUtils::FileExists(m_aurora_template_script_synplify_path)) {
-      
-      // get it into a ifstream
-      std::ifstream stream(m_aurora_template_script_synplify_path.string());
-      
-      if (stream.good()) {
-        aurora_template_script_synplify = 
-          std::string((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
-          stream.close();
-          use_external_template_synplify = true;
-          
-        }
-    }
-
-    if(use_external_template_synplify) {
-      Message("Using External Synplify Template Script: " +
-                                std::string(m_aurora_template_script_synplify_path.string()));
-      m_synplifyScript = aurora_template_script_synplify;
-    }
-    else {
-      Message("Cannot load Synplify Template Script: " +
-                                std::string(m_aurora_template_script_synplify_path.string()));
-      Message("Using Internal Synplify Template Script.");
-      m_synplifyScript = qlSynplifyScript;
-    }
+  // check if we have the device aurora template script available:
+  if(FileUtils::FileExists(m_aurora_template_script_synplify_path)) {
+    
+    // get it into a ifstream
+    std::ifstream stream(m_aurora_template_script_synplify_path.string());
+    
+    if (stream.good()) {
+      aurora_template_script_synplify = 
+        std::string((std::istreambuf_iterator<char>(stream)),
+                      std::istreambuf_iterator<char>());
+        stream.close();
+        use_external_template_synplify = true;
+        
+      }
   }
-  return m_synplifyScript;
+
+  if(use_external_template_synplify) {
+    Message("Using External Synplify Template Script: " +
+                              std::string(m_aurora_template_script_synplify_path.string()));
+    return aurora_template_script_synplify;
+  } else {
+    Message("Cannot load Synplify Template Script: " +
+                              std::string(m_aurora_template_script_synplify_path.string()));
+    Message("Using Internal Synplify Template Script.");
+    return qlSynplifyScript;
+  }
 }
 
 
@@ -7033,24 +7029,21 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
-    std::string synplifyScript; 
     m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
     if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
       ErrorMessage("This Device is Not Supported by Synplify.");
       return {};
     }
-    synplifyScript = InitSynplifyScript();
+    ScriptRendererPtr synplifyScript = std::make_shared<ScriptRenderer>(GetSynplifyScriptTemplate());
 
     std::string includes;
     for (auto path : ProjManager()->includePathList()) {
       includes += "set_option -include_path " + FileUtils::AdjustPath(path) + "\n";
     }
     if(!includes.empty()) {
-      synplifyScript =
-        ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", includes);
-    }
-    else{
-      synplifyScript = ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
+      synplifyScript->apply("${INCLUDE_PATHS}", includes);
+    } else{
+      synplifyScript->apply("${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
     }
 
     std::string designFiles;
@@ -7096,12 +7089,19 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
 #ifdef _WIN32
     designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
 #endif
-    synplifyScript =
-        ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
+    synplifyScript->apply("${READ_DESIGN_FILES}", designFiles);
+
+    // collect design file list specially for script renderer
+    for (const auto& lang_file : ProjManager()->DesignFileList()) {
+      std::vector<std::string> files = lang_file.second;
+      for (const std::string& file: files) {
+        synplifyScript->addFile(std::filesystem::path{file});
+      }
+    }
+    // collect design file list specially for script renderer
 
     if (!ProjManager()->DesignTopModule().empty()) {
-      synplifyScript = ReplaceAll(synplifyScript, "${TOP_MODULE}",
-                                ProjManager()->DesignTopModule());
+      synplifyScript->apply("${TOP_MODULE}", ProjManager()->DesignTopModule());
     } else {
       ErrorMessage("Cannot proceed without the top module specified.");
     }
@@ -7109,35 +7109,22 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     std::string synplify_family_name = 
       QLDeviceManager::getInstance()->deviceSynplifyFamilyName();
     if(!synplify_family_name.empty()) {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FAMILY}", synplify_family_name);
-    }
-    else {
+      synplifyScript->apply("${FAMILY}", synplify_family_name);
+    } else {
       ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
       return {};
     }
 
     std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
-    if (synplify_mode == "speed")
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "1");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "auto");
-    }
-    else if (synplify_mode == "area")
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
-    }
-    else
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
+    if (synplify_mode == "speed") {
+      synplifyScript->apply("${RETIMING_VALUE}", "1");
+      synplifyScript->apply("${FREQUENCY_VALUE}", "auto");
+    } else if (synplify_mode == "area") {
+      synplifyScript->apply("${RETIMING_VALUE}", "0");
+      synplifyScript->apply("${FREQUENCY_VALUE}", "1");
+    } else {
+      synplifyScript->apply("${RETIMING_VALUE}", "0");
+      synplifyScript->apply("${FREQUENCY_VALUE}", "1");
     }
 
     std::filesystem::path synth_sdc_filepath;
@@ -7149,19 +7136,16 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       if(!synth_sdc_filepath.empty()) {
         // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
 
-        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
-                                                                  std::string(" -constraint ") + 
-                                                                  synth_sdc_filepath.string());
-      }
-      else {
+        synplifyScript->applyFile("${READ_SDC_FILE}", std::string("add_file") +
+                                                  std::string(" -constraint ") + 
+                                                  synth_sdc_filepath.string());
+      } else {
         //std::cout << "synth sdc file not available." << std::endl;
 
-        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+        synplifyScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
       }
-    }
-    else
-    {
-       synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
+    } else {
+       synplifyScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
     }
 
     std::string synplify_script_path = ProjManager()->projectName() + ".prj";
@@ -7169,7 +7153,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
           .string();
     std::ofstream ofs(synplify_script_path);
-    ofs << synplifyScript;
+    ofs << synplifyScript->render();
 #ifdef _WIN32
     ofs << "\n";
     ofs << "# Run all implementations of the active project.\n";
@@ -7201,6 +7185,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       synplify_license_wait = "-license_wait ";
 
     CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+    command->setScriptRenderer(synplifyScript);
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
     command->append(synplifyExecName);

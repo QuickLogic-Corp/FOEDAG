@@ -44,7 +44,7 @@ ScriptRenderer()=default;
   : m_scriptTemplate(scriptTemplate)
   {}
 
-  void applyParameter(const std::string& placeholder, const std::string& name) {
+  void apply(const std::string& placeholder, const std::string& name) {
     m_parameters[placeholder] = name;
   }
 
@@ -54,6 +54,10 @@ ScriptRenderer()=default;
     if (!mask.empty()) {
       m_maskedFiles[filePath.string()] = mask;
     }
+  }
+
+  void addFile(const std::filesystem::path& filePath) {
+    m_filePathes.push_back(filePath);
   }
 
   bool hasErrors() const { return !m_errors.empty(); }

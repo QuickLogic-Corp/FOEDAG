@@ -173,7 +173,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::string FinishAnalyzeScript(const std::string& script);
   virtual std::string InitOpenFPGAScript();
   virtual std::string FinishOpenFPGAScript(const std::string& script);
-  virtual std::string InitSynplifyScript();
+  std::string GetSynplifyScriptTemplate();
   virtual std::filesystem::path FindSynthSDCPaths();
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
@@ -221,7 +221,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
   std::string m_deviceSize;
   std::string m_yosysScript;
-  std::string m_synplifyScript;
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
