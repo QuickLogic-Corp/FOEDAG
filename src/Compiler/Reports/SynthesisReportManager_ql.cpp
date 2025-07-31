@@ -105,7 +105,7 @@ void SynthesisReportManager::fillLevels(const QString &line,
 }
 
 std::unique_ptr<ITaskReport> SynthesisReportManager::createReport(
-    const QString &reportId) {
+    const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
 
   emit reportCreated(QString(REPORT_NAME));

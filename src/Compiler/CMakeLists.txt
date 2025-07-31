@@ -35,8 +35,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if (MSVC)
 else()
   set(CMAKE_CXX_FLAGS_DEBUG
-  "${CMAKE_CXX_FLAGS_DEBUG} ${TCMALLOC_COMPILE_OPTIONS} -Werror -Wall -O0 -g ${MSYS_COMPILE_OPTIONS} ${MY_CXX_WARNING_FLAGS} ${MEM_SANITIZER_FLAGS} ${PRODUCTION_BUILD_FLAG}")
-  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${PRODUCTION_BUILD_FLAG} -Werror -Wall")
+  "${CMAKE_CXX_FLAGS_DEBUG} ${TCMALLOC_COMPILE_OPTIONS} -Werror -Wall -O0 -g ${MSYS_COMPILE_OPTIONS} ${MY_CXX_WARNING_FLAGS} ${MEM_SANITIZER_FLAGS} ${PRODUCTION_BUILD_FLAG} -Wno-deprecated-declarations")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${PRODUCTION_BUILD_FLAG} -Werror -Wall -Wno-deprecated-declarations")
 endif()
 
 include (../../cmake/cmake_qt.txt)
@@ -83,6 +83,8 @@ set (SRC_CPP_LIST
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   BlifParser.cpp
+  WildcardFileFinder.cpp
+  DialogUtils.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -118,6 +120,8 @@ set (SRC_H_INSTALL_LIST
   QLSettingsManager.h
   QLMetricsManager.h
   BlifParser.h
+  WildcardFileFinder.h
+  DialogUtils.h
 )
 
 set (SRC_H_LIST

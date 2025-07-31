@@ -6,7 +6,10 @@
 #include <set>
 
 #include "Compiler/TaskManager.h"
+#include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
+
 
 namespace {
 static constexpr const char *RESOURCES_SPLIT{"blocks of type:"};

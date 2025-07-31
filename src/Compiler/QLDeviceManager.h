@@ -154,7 +154,7 @@ class QLDeviceManager : public QObject {
                               std::string layout_name);
   void setCurrentDeviceTarget(std::string device_string);
   void setCurrentDeviceTarget(QLDeviceTarget device_target);
-  std::filesystem::path GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant);
+  std::pair<std::filesystem::path, bool> GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant);
   std::string getCurrentDeviceTargetString();
   QLDeviceTarget getCurrentDeviceTarget();
   // only for GUI usage:

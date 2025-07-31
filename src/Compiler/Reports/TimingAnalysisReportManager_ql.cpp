@@ -29,9 +29,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CompilerDefines.h"
 #include "DefaultTaskReport.h"
 #include "TableReport.h"
-#include "Utils/FileUtils.h"
-#include "Utils/StringUtils.h"
 #include "NewProject/ProjectManager/project.h"
+#include "WildcardFileFinder.h"
 
 namespace {
 static constexpr const char *RESOURCE_REPORT_NAME{
@@ -104,57 +103,35 @@ QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
           QString(TIMING_REPORT_NAME)};
 }
 
+QString TimingAnalysisReportManager::timingReportId() { return QString(TIMING_REPORT_NAME); }
+
 std::unique_ptr<ITaskReport> TimingAnalysisReportManager::createReport(
-    const QString &reportId) {
+    const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
+
+  setActiveProfile(profile.toStdString());
 
   ITaskReport::DataReports dataReports;
 
-  auto extendReportNameWithSuffix = [](QString reportName, const std::string& suffix)->QString {
-    if (suffix.empty()) {
-      return reportName;
-    }
-    QString prettySuffix{QString::fromStdString(suffix)};
-    if (prettySuffix.startsWith("_")) {
-      prettySuffix.remove(0, 1);
-    }
-    if (reportName.endsWith(":")) {
-      reportName += " " + prettySuffix;
-    } else {
-      reportName += " - " + prettySuffix;
-    }
-    return reportName;
-  };
-
   if (reportId == QString(RESOURCE_REPORT_NAME)) {
-    for (const std::string& profile: profiles()) {
-      dataReports.push_back(std::make_unique<TableReport>(
-        m_resourceColumns, resourceData(profile), extendReportNameWithSuffix("Resource Utilization", profile)));
-    }
+    dataReports.push_back(std::make_unique<TableReport>(
+      m_resourceColumns, resourceData(profile.toStdString()), "Resource Utilization"));
   } else if (reportId == QString(CIRCUIT_REPORT_NAME)) {
-    for (const std::string& profile: profiles()) {
-      dataReports.push_back(std::make_unique<TableReport>(
-        m_circuitColumns, circuitData(profile), extendReportNameWithSuffix("Circuit Statistics", profile)));
-    }
+    dataReports.push_back(std::make_unique<TableReport>(
+      m_circuitColumns, circuitData(profile.toStdString()), "Circuit Statistics"));
   } else {
-    for (const std::string& profile: profiles()) {
-      dataReports.push_back(std::make_unique<TableReport>(
-          m_timingColumns, timingData(profile), extendReportNameWithSuffix("Timing Data", profile)));
-    }
+    dataReports.push_back(std::make_unique<TableReport>(
+        m_timingColumns, timingData(profile.toStdString()), "Timing Data"));
     if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                           Compiler::STAEngineOpt::Opensta) {
-      for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms(profile)) {
-          dataReports.push_back(std::make_unique<TableReport>(
-              m_openSTATimingColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
-        }
+      for (auto &hgrm : histograms(profile.toStdString())) {
+        dataReports.push_back(std::make_unique<TableReport>(
+          m_openSTATimingColumns, hgrm.second, hgrm.first));
       }
     } else {
-      for (const std::string& profile: profiles()) {
-        for (auto &hgrm : histograms(profile)) {
-          dataReports.push_back(std::make_unique<TableReport>(
-              m_histogramColumns, hgrm.second, extendReportNameWithSuffix(hgrm.first, profile)));
-        }
+      for (auto &hgrm : histograms(profile.toStdString())) {
+        dataReports.push_back(std::make_unique<TableReport>(
+          m_histogramColumns, hgrm.second, hgrm.first));
       }
     }
   }
@@ -205,23 +182,22 @@ void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
 void TimingAnalysisReportManager::parseLogFile() {
   clearDataProfiles();
 
-  auto projectPath = Project::Instance()->projectPath().toStdString();
-  std::vector<std::string> logFileNames = FileUtils::findFileNamesByWildcard(projectPath, TIMING_ANALYSIS_LOG_PATTERN);
-  for (const std::string& logFileName: logFileNames) {
-    std::string profile;
-    if (logFileName != TIMING_ANALYSIS_LOG) {
-      profile = StringUtils::extractWildcardSegment(logFileName, TIMING_ANALYSIS_LOG_PATTERN);
+  WildcardFileFinder finder(std::filesystem::path{Project::Instance()->projectPath().toStdString()}, std::string{TIMING_ANALYSIS_LOG_PATTERN});
+
+  if (finder.isBaseFileNameOnlyAvailable()) {
+    parseLogFileHelper(QString::fromStdString(finder.baseFileName()));
+  } else {
+    for (const auto& [profile, logFileName]: finder.profileToFileNameMap()) {
+      parseLogFileHelper(QString::fromStdString(logFileName), profile);
     }
-    parseLogFileHelper(QString::fromStdString(logFileName), profile);
   }
 
   setFileParsed(true);
 }
 
 void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName, const std::string& profile) {
-  m_dataProfiles.setCurrentKey(profile);
   setActiveProfile(profile);
- 
+
   if (m_compiler && m_compiler->TimingAnalysisEngineOpt() ==
                         Compiler::STAEngineOpt::Opensta) {
     parseOpenSTALog(logFileName);
@@ -342,6 +318,12 @@ void TimingAnalysisReportManager::clearDataProfiles()
 {
   AbstractReportManager::clearDataProfiles();
   m_dataProfiles.clear();
+}
+
+void TimingAnalysisReportManager::setActiveProfile(const std::string& profile)
+{
+  AbstractReportManager::setActiveProfile(profile);
+  m_dataProfiles.setCurrentKey(profile);
 }
 
 }  // namespace FOEDAG

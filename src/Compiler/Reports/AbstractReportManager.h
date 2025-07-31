@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QObject>
 #include <QVector>
 #include <map>
+#include <set>
 
 #include "IDataReport.h"
 #include "ITaskReportManager.h"
@@ -112,7 +113,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
     m_dataProfiles.clear();
   }
 
-  void setActiveProfile(const std::string& profile) {
+  virtual void setActiveProfile(const std::string& profile) {
     m_dataProfiles.setCurrentKey(profile);
   }
 
@@ -141,7 +142,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   Messages& messages() {
     return m_dataProfiles.current()->messages;
   }
-  std::vector<std::string> profiles() const { return m_dataProfiles.keys(); }
+  std::string currentProfile() const { return m_dataProfiles.currentKey(); }
 
  private:
   bool m_fileParsed{false};

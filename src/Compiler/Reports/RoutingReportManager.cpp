@@ -60,7 +60,7 @@ QStringList RoutingReportManager::getAvailableReportIds() const {
 }
 
 std::unique_ptr<ITaskReport> RoutingReportManager::createReport(
-    const QString &reportId) {
+    const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
 
   ITaskReport::DataReports dataReports;

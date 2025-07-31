@@ -3689,28 +3689,25 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     TimingAnalysisOpt(STAOpt::None);
     
-    CommandWrapperPtr taCommand = getTimingAnalysisCommand(current_device_sta, sta_vpr_options, sta_suffix);
-    if (!taCommand) {
-      return false;
+#ifdef _WIN32
+    // under WIN32, running the analysis stage alone causes issues, hence we call the
+    // route and analysis stages together
+    std::string taCommand = BaseVprCommand() + " --route --analysis --disp on";
+#else // #ifdef _WIN32
+    std::string taCommand = BaseVprCommand(current_device_sta) + " --analysis --disp on";
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
     }
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
-    std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, sta_vpr_options, sta_suffix);
-    if (!taCommand->compareIgnoringTempPath(commandOld)) {
-      qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
-      qInfo() << "~~~ LEGACY=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
-      return false;
-    }  
-#endif // ENABLE_LEGACY_CMD_GUARD
-
-    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
-      if (!sta_suffix.empty()) {
-        Message("timing analysis skipped, not required");
-      } else {
-        Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
-      }
-      return true;
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
     }
     const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
     if (status) {
@@ -3836,13 +3833,36 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
   }
 
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
-    if (!sta_suffix.empty()) {
-      Message("timing analysis skipped, not required");
-    } else {
-      Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
+    if(!sta_vpr_options.empty()){
+      taCommand += sta_vpr_options;
     }
-    return true;
+    
+#ifdef _WIN32
+
+    // under WIN32, running the analysis stage along causes issues, hence we call the
+    // route and analysis stages together
+    taCommand += std::string(" --route");
+
+#else // #ifdef _WIN32
+
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand += std::string(" --route");
+      }
+    }
+
+#endif // #ifdef _WIN32
+
+    taCommand += std::string(" --analysis");
+
+    std::ofstream ofs(sta_cmd_filepath);
+    ofs << taCommand << std::endl;
+    ofs.close();
   }
 
   int status = ExecuteAndMonitorSystemCommand(taCommand->string());

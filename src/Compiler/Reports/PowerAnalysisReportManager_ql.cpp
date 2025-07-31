@@ -55,7 +55,7 @@ QStringList PowerAnalysisReportManager::getAvailableReportIds() const {
 
 
 std::unique_ptr<ITaskReport> PowerAnalysisReportManager::createReport(
-    const QString &reportId) {
+    const QString &reportId, const QString& profile) {
   if (!isFileParsed()) parseLogFile();
 
   ITaskReport::DataReports dataReports;
