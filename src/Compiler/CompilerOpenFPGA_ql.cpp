@@ -1737,7 +1737,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
     CommandWrapperPtr command = it->second;
     if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
-      qInfo() << "~~~ sinplify synthesising ...";
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -2717,7 +2716,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   return command;
 }
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
 std::string CompilerOpenFPGA_ql::BaseStaCommandLEGACY() {
   std::string command =
       m_staExecutablePath.string() +
@@ -2848,7 +2847,7 @@ bool CompilerOpenFPGA_ql::Packing() {
  
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getPackingCommandLEGACY();
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
@@ -2858,7 +2857,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
-#endif // ENABLE_LEGACY_CMD_GUARD
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 #if UPSTREAM_UNUSED
   if (FileUtils::IsUptoDate(
@@ -3189,7 +3188,7 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getPlacementCommandLEGACY();
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
 
@@ -3199,7 +3198,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
-#endif // ENABLE_LEGACY_CMD_GUARD
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -3388,7 +3387,7 @@ bool CompilerOpenFPGA_ql::Route() {
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getRoutingCommandLEGACY();
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.OLD.cmd"), commandOld);
 
@@ -3398,7 +3397,7 @@ bool CompilerOpenFPGA_ql::Route() {
     qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
-#endif // ENABLE_LEGACY_CMD_GUARD
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -3791,7 +3790,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!command) {
       return false;
     }
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
     if (!command->compareIgnoringTempPath(commandOld)) {
       qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
@@ -3799,7 +3798,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       qInfo() << "~~~ new=" << QString::fromStdString(command->string());
       return false;
     }  
-#endif // ENABLE_LEGACY_CMD_GUARD
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
     if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
       Message("##################################################");
@@ -3848,7 +3847,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       taCommand = BaseStaCommand();
       taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
       
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
       std::string commandOld = BaseStaCommandLEGACY() + " " + BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName).string();
       if (!taCommand->compareIgnoringTempPath(commandOld)) {
         qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
@@ -3856,7 +3855,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
         qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
         return false;
       }  
-#endif // ENABLE_LEGACY_CMD_GUARD
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
       FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
     } else {
@@ -3874,7 +3873,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       return false;
     }
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
     if (!taCommand->compareIgnoringTempPath(commandOld)) {
       qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
@@ -3882,7 +3881,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
       return false;
     }  
-#endif // ENABLE_LEGACY_CMD_GUARD
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   }
 
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
@@ -7036,7 +7035,7 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   return power_leakage;
 }
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 std::string CompilerOpenFPGA_ql::getPackingCommandLEGACY() {
 #if UPSTREAM_UNUSED
@@ -7402,14 +7401,14 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     command->append(synplify_script_path);
     command->append("-log");
     command->append(synplifyLogFilePath);
-  #ifdef DEBUG_COMMAND_MIGRATION 
+  #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD 
     std::string commandStr = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " -log " + synplifyLogFilePath;
     if (command->string() != commandStr) {
-      ErrorMessage("~~~ deverror: legacy command doesn't match to new");
+      ErrorMessage("deverror: legacy command doesn't match to new");
       return {};
     }
-  #endif // DEBUG_COMMAND_MIGRATION
+  #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
     command->append(synplifyExecName);
@@ -7422,14 +7421,14 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     command->append(">>");
     command->append(synplifyLogFilePath);
 
-  #ifdef DEBUG_COMMAND_MIGRATION
+  #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
     std::string commandStr = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " >> " + synplifyLogFilePath;
     if (command->string() != commandStr) {
-      ErrorMessage("~~~ deverror: legacy command doesn't match to new");
+      ErrorMessage("deverror: legacy command doesn't match to new");
       return {};
     }
-  #endif // DEBUG_COMMAND_MIGRATION
+  #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 #endif
     // TODO: handle synplify_script_path
@@ -7993,7 +7992,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
   command->append("-l");
   command->append(ProjManager()->projectName() + "_synth.log");
 
-#ifdef DEBUG_COMMAND_MIGRATION
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandStr =
       yosys_executable_path.string() + " -s " +
       std::string(ProjManager()->projectName() + ".ys -l " +
@@ -8002,7 +8001,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     ErrorMessage("~~~ deverror: legacy command doesn't match to new");
     return {};
   }
-#endif // DEBUG_COMMAND_MIGRATION
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   // TODO: handle script_path properly
   commands["yosys"] = command;
   return commands;

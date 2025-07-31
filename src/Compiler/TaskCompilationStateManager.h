@@ -76,6 +76,7 @@ public:
   }
 
 private:
+  bool m_isLogEnabled = true;
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{BUILD_STATE_FILENAME};
 
@@ -98,8 +99,10 @@ private:
     const CommandWrapper& commandOld = *it->second;
     DiffCommandPtr diff = command->collectDiff(commandOld);
     if (!diff->isEmpty()) {
-      for (const std::string& msg: diff->messages()) {
-        std::cout << "~~~ diff msg=" << msg << std::endl;
+      if (m_isLogEnabled) {
+        for (const std::string& msg: diff->messages()) {
+          std::cout << id << " detect " << msg << std::endl;
+        }
       }
       return true;
     }

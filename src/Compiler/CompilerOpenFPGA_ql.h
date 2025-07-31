@@ -38,8 +38,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
 
-#define ENABLE_LEGACY_CMD_GUARD
-#define DEBUG_COMMAND_MIGRATION
+#define DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
@@ -229,9 +228,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string BaseStaCommandLEGACY();
-#endif
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   CommandWrapperPtr BaseStaCommand();
   std::filesystem::path BaseStaScript(std::string libFileName,
                                     std::string netlistFileName,
@@ -246,12 +245,12 @@ private:
   BlifParser m_blifParser;
   TaskCompilationStateManager m_taskCompilationStateManager;
 
-#ifdef ENABLE_LEGACY_CMD_GUARD
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string getPackingCommandLEGACY();
   std::string getPlacementCommandLEGACY();
   std::string getRoutingCommandLEGACY();             
   std::string getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& profile);
-#endif
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::unordered_map<std::string, CommandWrapperPtr> buildSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
