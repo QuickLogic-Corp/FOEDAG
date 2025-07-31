@@ -1751,7 +1751,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       }
     } else {
       Message("##################################################");
-      Message("Synplify synthesis skipped, not required");
+      Message("Synthesis (Synplify) skipped, not required");
       Message("##################################################");
     }
   }
@@ -1781,7 +1781,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   CommandWrapperPtr command = it->second;
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
     Message("##################################################");
-    Message("yosys synthesis skipped, not required");
+    Message(" Synthesis(yosys) skipped, not required");
     Message("##################################################");
     return true;
   }
@@ -2840,7 +2840,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
     Message("##################################################");
-    Message("packing skipped, not required");
+    Message("Packing skipped, not required");
     Message("##################################################");
     return true;
   }
@@ -2850,7 +2850,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getPackingCommandLEGACY();
 
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.OLD.cmd"), commandOld);
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.LEGACY.cmd"), commandOld);
   if (!command->compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
     qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
@@ -3181,7 +3181,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
     Message("##################################################");
-    Message("placement skipped, not required");
+    Message("Placement skipped, not required");
     Message("##################################################");
     return true;
   }
@@ -3190,7 +3190,7 @@ bool CompilerOpenFPGA_ql::Placement() {
 
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getPlacementCommandLEGACY();
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.OLD.cmd"), commandOld);
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.LEGACY.cmd"), commandOld);
 
   if (!command->compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
@@ -3380,7 +3380,7 @@ bool CompilerOpenFPGA_ql::Route() {
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
     Message("##################################################");
-    Message("routing skipped, not required");
+    Message("Routing skipped, not required");
     Message("##################################################");
     return true;
   }
@@ -3389,7 +3389,7 @@ bool CompilerOpenFPGA_ql::Route() {
 
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::string commandOld = getRoutingCommandLEGACY();
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.OLD.cmd"), commandOld);
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.LEGACY.cmd"), commandOld);
 
   if (!command->compareIgnoringTempPath(commandOld)) {
     qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
