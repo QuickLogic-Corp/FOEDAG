@@ -78,7 +78,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   void ArchitectureFile(const std::filesystem::path& path) {
     m_architectureFile = path;
   }
-  void YosysScript(const std::string& script) { m_yosysScript = script; }
+  void setCustomYosysScript(const std::string& script) { m_customYosysScript = script; }
   void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }
   void OpenFpgaArchitectureFile(const std::filesystem::path& path) {
     m_OpenFpgaArchitectureFile = path;
@@ -167,13 +167,13 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::vector<std::string> GetCleanFiles(
       Action action, const std::string& projectName,
       const std::string& topModule) const;
-  virtual std::string InitSynthesisScript();
-  virtual std::string FinishSynthesisScript(const std::string& script);
+  std::string GetYosysScriptTemplate() const;
+  void FinishSynthesisScript(const ScriptRendererPtr& script);
   virtual std::string InitAnalyzeScript();
   virtual std::string FinishAnalyzeScript(const std::string& script);
   virtual std::string InitOpenFPGAScript();
   virtual std::string FinishOpenFPGAScript(const std::string& script);
-  std::string GetSynplifyScriptTemplate();
+  std::string GetSynplifyScriptTemplate() const;
   virtual std::filesystem::path FindSynthSDCPaths();
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
@@ -220,7 +220,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaPinMapXml = "";
   std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
   std::string m_deviceSize;
-  std::string m_yosysScript;
+  std::string m_customYosysScript;
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 

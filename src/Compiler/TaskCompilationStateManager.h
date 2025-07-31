@@ -71,6 +71,7 @@ public:
 
   void setProjectPath(const std::filesystem::path& path) {
     m_filePath = path / BUILD_STATE_FILENAME;
+    ScriptRenderer::setProjectPath(path);
     CommandWrapper::setProjectPath(path);
   }
 

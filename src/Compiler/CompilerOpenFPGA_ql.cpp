@@ -637,7 +637,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     std::string script((std::istreambuf_iterator<char>(stream)),
                        std::istreambuf_iterator<char>());
     stream.close();
-    compiler->YosysScript(script);
+    compiler->setCustomYosysScript(script);
     return TCL_OK;
   };
   interp->registerCmd("custom_synth_script", custom_synth_script, this, 0);
@@ -1764,13 +1764,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
   #endif
 
-  std::filesystem::remove(
-      std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.blif"));
-  std::filesystem::remove(
-      std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.v"));
-  
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
     ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
@@ -1793,6 +1786,13 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
   // incr compilation
 
+  std::filesystem::remove(
+      std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.blif"));
+  std::filesystem::remove(
+      std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.v"));
+      
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -1808,13 +1808,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 }
 
-std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
-  // Default or custom Yosys script
-  if (m_yosysScript.empty()) {
-#if UPSTREAM_UNUSED
-    m_yosysScript = basicYosysScript;
-#endif // #if UPSTREAM_UNUSED
-
+std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
+  if (m_customYosysScript.empty()) {
     bool use_external_template_yosys = false;
     std::string aurora_template_script_yosys;
 
@@ -1827,7 +1822,7 @@ std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
       if (stream.good()) {
         aurora_template_script_yosys = 
           std::string((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
+                        std::istreambuf_iterator<char>());
           stream.close();
           use_external_template_yosys = true;
           
@@ -1837,19 +1832,20 @@ std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
     if(use_external_template_yosys) {
       Message("Using External Yosys Template Script: " +
                                 std::string(m_aurora_template_script_yosys_path.string()));
-      m_yosysScript = aurora_template_script_yosys;
+      return aurora_template_script_yosys;
     }
     else {
       Message("Cannot load Yosys Template Script: " +
                                 std::string(m_aurora_template_script_yosys_path.string()));
       Message("Using Internal Yosys Template Script.");
-      m_yosysScript = qlYosysScript;
-    }
+      return qlYosysScript;
+    } 
+  } else {
+    return m_customYosysScript;
   }
-  return m_yosysScript;
 }
 
-std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() {
+std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() const {
   // Default or custom Synplify script
   bool use_external_template_synplify = false;
   std::string aurora_template_script_synplify;
@@ -1883,8 +1879,7 @@ std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() {
 }
 
 
-std::string CompilerOpenFPGA_ql::FinishSynthesisScript(const std::string& script) {
-  std::string result = script;
+void CompilerOpenFPGA_ql::FinishSynthesisScript(const ScriptRendererPtr& script) {
   // Keeps for Synthesis, preserve nodes used in constraints
   std::string keeps;
   if (m_keepAllSignals) {
@@ -1896,13 +1891,12 @@ std::string CompilerOpenFPGA_ql::FinishSynthesisScript(const std::string& script
     Message("Keep name: " + keep);
     keeps += "setattr -set keep 1 w:\\" + keep + "\n";
   }
-  result = ReplaceAll(result, "${KEEP_NAMES}", keeps);
-  result = ReplaceAll(result, "${OPTIMIZATION}", SynthMoreOpt());
-  result = ReplaceAll(result, "${PLUGIN_LIB}", YosysPluginLibName());
-  result = ReplaceAll(result, "${PLUGIN_NAME}", YosysPluginName());
-  result = ReplaceAll(result, "${MAP_TO_TECHNOLOGY}", YosysMapTechnology());
-  result = ReplaceAll(result, "${LUT_SIZE}", std::to_string(m_lut_size));
-  return result;
+  script->apply("${KEEP_NAMES}", keeps);
+  script->apply("${OPTIMIZATION}", SynthMoreOpt());
+  script->apply("${PLUGIN_LIB}", YosysPluginLibName());
+  script->apply("${PLUGIN_NAME}", YosysPluginName());
+  script->apply("${MAP_TO_TECHNOLOGY}", YosysMapTechnology());
+  script->apply("${LUT_SIZE}", std::to_string(m_lut_size));
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
@@ -5703,7 +5697,7 @@ int CompilerOpenFPGA_ql::CleanTempFiles() {
 }
 
 void CompilerOpenFPGA_ql::CleanScripts() {
-  m_yosysScript = "";
+  m_customYosysScript = "";
   m_openFPGAScript = "";
 }
 
@@ -7158,7 +7152,6 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       for (const std::string& error: errors) {
         ErrorMessage(error);
       }
-      return {};
     }
     std::ofstream ofs(synplify_script_path);
     ofs << synplify_script_rendered;
@@ -7247,15 +7240,12 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     return {};
   }
 
-
   // init synthesis script from the right location according to the selected device.
-  std::string yosysScript = InitSynthesisScript();
-
+  ScriptRendererPtr yosysScript = std::make_shared<ScriptRenderer>(GetYosysScriptTemplate());
 
   if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
     m_useVerific = true;
-  }
-  else {
+  } else {
     m_useVerific = false;
   }
  
@@ -7469,7 +7459,15 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
         fileList += "verific " + topModuleLibImport + importLibs + "-import " +
                     ProjManager()->DesignTopModule() + "\n";
       }
-      yosysScript = ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", fileList);
+      yosysScript->apply("${READ_DESIGN_FILES}", fileList);
+      // collect design files list specially for script renderer to track they hashes
+      // for (const auto& lang_file : ProjManager()->DesignFileList()) {
+      //   std::vector<std::string> files = lang_file.second;
+      //   for (const std::string& file: files) {
+      //     synplifyScript->addFile(std::filesystem::path{file});
+      //   }
+      // }
+      // collect design files list specially for script renderer to track they hashes
     } else {
     // Default Yosys parser
 
@@ -7537,8 +7535,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
 
       designFiles += filesScript + "\n";
     }
-    yosysScript =
-        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
+    yosysScript->apply("${READ_DESIGN_FILES}", macros + designFiles);
     }
   }
   else
@@ -7562,44 +7559,36 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
-    yosysScript =
-        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
+    yosysScript->apply("${READ_DESIGN_FILES}", designFiles);
   }
   
-  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+  yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
 #define STRINGIZE2(s) #s
 #define STRINGIZE(s) STRINGIZE2(s)
-  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
+  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
 #else
-  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
+  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
 #endif
 
   if (!ProjManager()->DesignTopModule().empty()) {
-    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}",
-                             "-top " + ProjManager()->DesignTopModule());
-    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE}",
-                             ProjManager()->DesignTopModule());
+    yosysScript->apply("${TOP_MODULE_DIRECTIVE}", "-top " + ProjManager()->DesignTopModule());
+    yosysScript->apply("${TOP_MODULE}", ProjManager()->DesignTopModule());
   } else {
-    yosysScript =
-        ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}", "-auto-top");
+    yosysScript->apply("${TOP_MODULE_DIRECTIVE}", "-auto-top");
   }
 
   std::string yosys_family_name = 
     QLDeviceManager::getInstance()->deviceYosysFamilyName();
   if(!yosys_family_name.empty()) {
-    yosysScript = 
-          ReplaceAll(yosysScript, "${FAMILY}", yosys_family_name);
-  }
-  else {
+    yosysScript->apply("${FAMILY}", yosys_family_name);
+  } else {
     ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
     return {};
   }
 
-
-  
   std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!synth_sdc_filepath.empty()) {
@@ -7612,30 +7601,32 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
         std::filesystem::path("scripts") /
         std::filesystem::path("aurora_yosys_import.tcl");
 
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
+    yosysScript->apply("${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
 
-    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("tcl") + 
-                                                                       std::string(" ") + 
-                                                                       aurora_yosys_import_script_path.string());
-    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("read_sdc") +
-                                                              std::string(" ") + 
-                                                              synth_sdc_filepath.string());
+    yosysScript->apply("${CALL_TCL_IMPORT_SCRIPT}", std::string("tcl") + 
+                                                    std::string(" ") + 
+                                                    aurora_yosys_import_script_path.string());
+    yosysScript->addFile(aurora_yosys_import_script_path);
+
+    yosysScript->apply("${READ_SDC_FILE}", std::string("read_sdc") +
+                                                        std::string(" ") + 
+                                                        synth_sdc_filepath.string());
+    yosysScript->addFile(synth_sdc_filepath);                                         
   }
   else {
     //std::cout << "synth sdc file not available." << std::endl;
 
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("# [skipped] sdc plugin load as there is no synth sdc file"));
+    yosysScript->apply("${PLUGIN_LOAD_SDC}", std::string("# [skipped] sdc plugin load as there is no synth sdc file"));
 
-    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("# [skipped] call tcl import script as there is no synth sdc file"));
+    yosysScript->apply("${CALL_TCL_IMPORT_SCRIPT}", std::string("# [skipped] call tcl import script as there is no synth sdc file"));
 
-    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+    yosysScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
   }
   // ---------------------------------------------------------------- synth_sdc_file --
 
-  yosysScript = ReplaceAll(
-      yosysScript, "${OUTPUT_BLIF}",
-      std::string(ProjManager()->projectName() + "_post_synth.blif"));
-
+  std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
+  yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
+  yosysScript->addFile(output_blif_filepath);
 
   // use settings to populate yosys_options
   std::string yosys_options;
@@ -7718,21 +7709,22 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
                    yosys_modules_dir_path_string;
 
   // TODO: trim yosys_options at the front
-  yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
+  yosysScript->apply("${YOSYS_OPTIONS}", yosys_options);
 
 
-  yosysScript =
-      ReplaceAll(yosysScript, "${OUTPUT_VERILOG}",
-                 std::string(ProjManager()->projectName() + "_post_synth.v"));
-  yosysScript =
-      ReplaceAll(yosysScript, "${OUTPUT_VHDL}",
-                 std::string(ProjManager()->projectName() + "_post_synth.vhd"));
+  std::filesystem::path output_verilog_filepath{ProjManager()->projectName() + "_post_synth.v"};
+  yosysScript->apply("${OUTPUT_VERILOG}", output_verilog_filepath.string());
+  yosysScript->addFile(output_verilog_filepath);
 
-  yosysScript = ReplaceAll(
-      yosysScript, "${OUTPUT_EDIF}",
-      std::string(ProjManager()->projectName() + "_post_synth.edif"));
+  std::filesystem::path output_vhdl_filepath{ProjManager()->projectName() + "_post_synth.vhd"};
+  yosysScript->apply("${OUTPUT_VHDL}", output_vhdl_filepath.string());
+  yosysScript->addFile(output_vhdl_filepath);
 
-  yosysScript = FinishSynthesisScript(yosysScript);
+  std::filesystem::path output_edif_filepath{ProjManager()->projectName() + "_post_synth.edif"};
+  yosysScript->apply("${OUTPUT_EDIF}", output_edif_filepath);
+  yosysScript->addFile(output_edif_filepath);
+
+  FinishSynthesisScript(yosysScript);
 
   std::string script_path = ProjManager()->projectName() + ".ys";
   std::string output_path;
@@ -7756,8 +7748,17 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
   script_path =
       (std::filesystem::path(ProjManager()->projectPath()) / script_path)
           .string();
+
+  std::string yosys_script_rendered = yosysScript->render();
+  if (yosysScript->hasErrors()) {
+    std::vector<std::string> errors = yosysScript->takeErrors();
+    for (const std::string& error: errors) {
+      ErrorMessage(error);
+    }
+  }
+
   std::ofstream ofs(script_path);
-  ofs << yosysScript;
+  ofs << yosys_script_rendered;
   ofs.close();
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
@@ -7779,6 +7780,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
 #endif // #if(AURORA_USE_TABBYCAD == 1)
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+  command->setScriptRenderer(yosysScript);
   command->append(yosys_executable_path.string());
   command->append("-s");
   command->append(ProjManager()->projectName() + ".ys");

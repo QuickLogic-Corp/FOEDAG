@@ -40,11 +40,15 @@ namespace FOEDAG {
 constexpr const char* FILES_INFO_PLACEHOLDER = "${FILES_INFO}";
 
 class ScriptRenderer {
+  static std::string s_projectPath;
+
 public:
 ScriptRenderer()=default;
   ScriptRenderer(const std::string& scriptTemplate)
   : m_scriptTemplate(scriptTemplate)
   {}
+
+  static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
 
   void apply(const std::string& placeholder, const std::string& name) {
     m_parameters[placeholder] = name;
@@ -113,7 +117,7 @@ private:
 
   std::vector<std::string> m_errors;
 
-  std::string collectFileInfosStr(bool applyMask) const {
+  std::string collectFileInfosStr(bool applyMask) {
     std::string result;
     for (const std::filesystem::path filePath: m_filePathes) {
       auto it = m_maskedFiles.find(filePath);
@@ -123,7 +127,19 @@ private:
           name = it->second; // use mask instead of path
         }
       }
-      result += m_commentStr + " " + name + " " + FileUtils::calcFileContentHash(filePath) + "\n";
+      std::filesystem::path resolvedFilePath(filePath);
+      bool exists = std::filesystem::exists(resolvedFilePath);
+      if (!exists) {
+        if (filePath.is_relative() && !s_projectPath.empty()) {
+          resolvedFilePath = s_projectPath / filePath;
+          exists = std::filesystem::exists(resolvedFilePath);
+        }  
+      }
+      if (exists) {
+        result += m_commentStr + " " + name + " " + FileUtils::calcFileContentHash(resolvedFilePath) + "\n";
+      } else {
+        m_errors.push_back(resolvedFilePath.string() + " doesn't exist, cannot calc hash for it");
+      }
     }
 
     return StringUtils::rtrim(result);
@@ -457,12 +473,10 @@ private:
     if (!exists) {
       if (file.is_relative() && !s_projectPath.empty()) {
         resolvedFilePath = s_projectPath / file;
+        exists = std::filesystem::exists(resolvedFilePath);
       }  
     }
 
-    if (!exists) {
-      exists = std::filesystem::exists(resolvedFilePath);
-    }
     if (!exists) {
       return;
     }
