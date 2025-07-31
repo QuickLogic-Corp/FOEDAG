@@ -1751,7 +1751,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
         m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "sinplify", command);
       }
     } else {
+      Message("##################################################");
       Message("Synplify synthesis skipped, not required");
+      Message("##################################################");
     }
   }
   
@@ -1779,7 +1781,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
   CommandWrapperPtr command = it->second;
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
+    Message("##################################################");
     Message("yosys synthesis skipped, not required");
+    Message("##################################################");
     return true;
   }
   // incr compilation
@@ -2836,7 +2840,9 @@ bool CompilerOpenFPGA_ql::Packing() {
     return false;
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+    Message("##################################################");
     Message("packing skipped, not required");
+    Message("##################################################");
     return true;
   }
  
@@ -3175,7 +3181,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     return false;
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+    Message("##################################################");
     Message("placement skipped, not required");
+    Message("##################################################");
     return true;
   }
 
@@ -3372,7 +3380,9 @@ bool CompilerOpenFPGA_ql::Route() {
     return false;
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
+    Message("##################################################");
     Message("routing skipped, not required");
+    Message("##################################################");
     return true;
   }
 
@@ -3784,11 +3794,13 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       return false;
     }
     if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, command)) {
+      Message("##################################################");
       if (!sta_suffix.empty()) {
         Message("timing analysis skipped, not required");
       } else {
         Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
       }
+      Message("##################################################");
       return true;
     }
 #ifdef ENABLE_LEGACY_CMD_GUARD
