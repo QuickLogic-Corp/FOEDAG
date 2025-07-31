@@ -37,6 +37,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
+constexpr const char* FILES_INFO_PLACEHOLDER = "${FILES_INFO}";
+
 class ScriptRenderer {
 public:
 ScriptRenderer()=default;
@@ -62,11 +64,17 @@ ScriptRenderer()=default;
 
   bool hasErrors() const { return !m_errors.empty(); }
 
+  std::vector<std::string> takeErrors() {
+    std::vector<std::string> result;
+    std::swap(m_errors, result);
+    return result;
+  }
+
   std::string render() {
     std::string script{m_scriptTemplate};
 
-    checkPlaceholder(script, "${FILES_INFO}");
-    script = StringUtils::replaceAll(script, "${FILES_INFO}", collectFileInfosStr(m_isMaskingEnabled));
+    checkPlaceholder(script, FILES_INFO_PLACEHOLDER);
+    script = StringUtils::replaceAll(script, FILES_INFO_PLACEHOLDER, collectFileInfosStr(m_isMaskingEnabled));
 
     for (const auto& [placeholder, value]: m_parameters) {
       checkPlaceholder(script, placeholder);

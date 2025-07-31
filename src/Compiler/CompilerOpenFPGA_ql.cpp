@@ -7091,14 +7091,14 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
 #endif
     synplifyScript->apply("${READ_DESIGN_FILES}", designFiles);
 
-    // collect design file list specially for script renderer
+    // collect design files list specially for script renderer to track they hashes
     for (const auto& lang_file : ProjManager()->DesignFileList()) {
       std::vector<std::string> files = lang_file.second;
       for (const std::string& file: files) {
         synplifyScript->addFile(std::filesystem::path{file});
       }
     }
-    // collect design file list specially for script renderer
+    // collect design files list specially for script renderer to track they hashes
 
     if (!ProjManager()->DesignTopModule().empty()) {
       synplifyScript->apply("${TOP_MODULE}", ProjManager()->DesignTopModule());
@@ -7152,8 +7152,16 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     synplify_script_path =
       (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
           .string();
+    std::string synplify_script_rendered = synplifyScript->render();
+    if (synplifyScript->hasErrors()) {
+      std::vector<std::string> errors = synplifyScript->takeErrors();
+      for (const std::string& error: errors) {
+        ErrorMessage(error);
+      }
+      return {};
+    }
     std::ofstream ofs(synplify_script_path);
-    ofs << synplifyScript->render();
+    ofs << synplify_script_rendered;
 #ifdef _WIN32
     ofs << "\n";
     ofs << "# Run all implementations of the active project.\n";
