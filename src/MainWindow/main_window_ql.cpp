@@ -32,7 +32,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Constraints.h"
 #include "Compiler/TaskManager.h"
 #include "Compiler/TaskModel.h"
-#include "Compiler/TaskCompilationOptimizer.h" // test
 #include "Console/DummyParser.h"
 #include "Console/StreamBuffer.h"
 #include "Console/TclConsole.h"
@@ -148,7 +147,6 @@ void centerWidget(QWidget& widget) {
 
 MainWindow::MainWindow(Session* session)
     : m_session(session), m_settings("settings", QSettings::IniFormat) {
-  graph_test();
   /* Window settings */
   m_compiler = session->GetCompiler();
   m_interpreter = session->TclInterp();
