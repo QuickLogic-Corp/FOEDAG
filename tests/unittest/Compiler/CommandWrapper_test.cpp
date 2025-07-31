@@ -38,11 +38,12 @@ public:
     const std::filesystem::path& filePath() const { return m_filePath; }
     const std::string& content() const { return m_content; }
 
-    void writeContent(const std::string& content, int delay = 0) {
+    void appendContent(const std::string& appendix, int delay = 0) {
         if (delay > 0) {
             std::this_thread::sleep_for(std::chrono::seconds(delay));
         }
-        FileUtils::WriteToFile(m_filePath, content);
+        m_content += appendix;
+        FileUtils::WriteToFile(m_filePath, m_content);
     }
 
     std::string calcHash() const {
@@ -302,7 +303,7 @@ TEST(CommandWrapper, file_content_changed)
     command1.appendFile("--file1", filePath1.filePath());
     command1.appendFile(filePath2.filePath());
 
-    filePath1.writeContent("changed content for filepath1...", 2);
+    filePath1.appendContent("0101...", 2);
     const std::string filePath1ModificationTimeStr = FileUtils::ModifiedTimeStr(filePath1.filePath());
 
     CommandWrapper command2{"cmd"};
@@ -556,7 +557,7 @@ cmd3 -p3 v3 ${FILE3})";
     std::string hashOrig = renderer.calcHash();
     EXPECT_TRUE(!renderer.hasErrors());
 
-    file3.writeContent(file3.content() + "MODIFIED....");
+    file3.appendContent("MODIFIED....");
     std::string hashMod = renderer.calcHash();
 
     EXPECT_TRUE(hashOrig != hashMod);
@@ -581,8 +582,45 @@ cmd3 -p3 v3 ${FILE3})";
     std::string hashOrig = renderer.calcHash();
     EXPECT_TRUE(!renderer.hasErrors());
 
-    file1.writeContent(file1.content() + "MODIFIED....");
+    file1.appendContent("MODIFIED....");
     std::string hashMod = renderer.calcHash();
 
     EXPECT_TRUE(hashOrig != hashMod);
+}
+
+TEST(CommandWrapperAndScriptRenderer, serialization_and_internal_file_modifiction_after)
+{
+    // create script renderer
+    ScopedFile file1{std::filesystem::path{"file1"}, "file1 unique content..."};
+    ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
+    ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
+
+    const std::string scriptTemplate = 
+R"(${FILES_INFO}
+cmd1 --p1 v1 ${FILE1}
+cmd2 ${FILE2} --p2 v2
+cmd3 -p3 v3 ${FILE3})";
+
+    ScriptRendererPtr rendererOrig = std::make_shared<ScriptRenderer>(scriptTemplate);
+    rendererOrig->applyFile("${FILE1}", file1.filePath(), "file_mask");
+    rendererOrig->applyFile("${FILE2}", file2.filePath());
+    rendererOrig->applyFile("${FILE3}", file3.filePath());
+
+    // create command wrapper
+    CommandWrapper commandOrig;
+    commandOrig.setScriptRenderer(rendererOrig);
+
+    nlohmann::json j = commandOrig;
+    CommandWrapper commandRestored = j;
+
+    EXPECT_TRUE(commandOrig.scriptRenderer());
+    EXPECT_TRUE(commandRestored.scriptRenderer());
+    EXPECT_TRUE(!commandOrig.scriptRenderer()->calcHash().empty());
+
+    EXPECT_EQ(commandOrig.scriptRenderer()->calcHash(), commandRestored.scriptRenderer()->calcHash());
+    EXPECT_TRUE(commandOrig.compare(commandRestored));
+    
+    file1.appendContent("MODIFIED...");
+
+    EXPECT_EQ(commandOrig.scriptRenderer()->calcHash(), commandRestored.scriptRenderer()->calcHash());
 }
