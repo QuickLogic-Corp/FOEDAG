@@ -98,7 +98,7 @@ TEST(CommandWrapper, compare_matches)
     command2.appendFile("--file1", filePath1.filePath());
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(diff->isEmpty());
 }
 
@@ -120,7 +120,7 @@ TEST(CommandWrapper, remove_argument)
     command2.appendFile("--file1", filePath1.filePath());
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->removedParameters().size(), 1);
@@ -151,7 +151,7 @@ TEST(CommandWrapper, remove_argument_file)
     command2.append("--p3", "v3");
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->removedParameters().size(), 1);
@@ -183,7 +183,7 @@ TEST(CommandWrapper, add_argument)
     command2.appendFile("--file1", filePath1.filePath());
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->addedParameters().size(), 1);
@@ -213,7 +213,7 @@ TEST(CommandWrapper, add_argument_file)
     command2.appendFile("--file1", filePath1.filePath());
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->addedParameters().size(), 1);
@@ -244,7 +244,7 @@ TEST(CommandWrapper, change_argument)
     command2.appendFile("--file1", filePath1.filePath());
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->changedParameters().size(), 1);
@@ -276,7 +276,7 @@ TEST(CommandWrapper, change_argument_file)
     command2.appendFile("--file1", std::filesystem::path{"filepath1_NEW"});
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->changedParameters().size(), 1);
@@ -313,7 +313,7 @@ TEST(CommandWrapper, file_content_changed)
     command2.appendFile("--file1", filePath1.filePath());
     command2.appendFile(filePath2.filePath());
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->diffFiles().size(), 1);
@@ -346,7 +346,7 @@ TEST(CommandWrapper, masked_files_matches)
     command2.append("--p3", "v3");
     command2.appendFile(filePath2.filePath(), "arch");
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(diff->isEmpty());
 
     EXPECT_TRUE(diff->diffFiles().empty());
@@ -373,7 +373,7 @@ TEST(CommandWrapper, masked_files_differ)
     command2.append("--p3", "v3");
     command2.appendFile(filePath2.filePath(), "arch");
 
-    DiffCommandPtr diff = command2.compare(command1);
+    DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
 
     EXPECT_EQ(diff->diffFiles().size(), 1);
@@ -414,7 +414,7 @@ TEST(CommandWrapper, serialization)
         }
     }
 
-    DiffCommandPtr diff = commandRestored.compare(commandOrig);
+    DiffCommandPtr diff = commandRestored.collectDiff(commandOrig);
     EXPECT_TRUE(diff->isEmpty());
 
     EXPECT_TRUE(diff->diffFiles().empty());
@@ -595,6 +595,7 @@ TEST(CommandWrapperAndScriptRenderer, serialization_and_internal_file_modifictio
     ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
     ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
 
+    // create script renderer
     const std::string scriptTemplate = 
 R"(${FILES_INFO}
 cmd1 --p1 v1 ${FILE1}
@@ -618,9 +619,15 @@ cmd3 -p3 v3 ${FILE3})";
     EXPECT_TRUE(!commandOrig.scriptRenderer()->calcHash().empty());
 
     EXPECT_EQ(commandOrig.scriptRenderer()->calcHash(), commandRestored.scriptRenderer()->calcHash());
-    EXPECT_TRUE(commandOrig.compare(commandRestored));
-    
+    DiffCommandPtr diff = commandOrig.collectDiff(commandRestored);
+    EXPECT_TRUE(diff->isEmpty());
+
     file1.appendContent("MODIFIED...");
 
     EXPECT_EQ(commandOrig.scriptRenderer()->calcHash(), commandRestored.scriptRenderer()->calcHash());
 }
+
+// TEST(CommandWrapperAndScriptRenderer, serialization_and_internal_file_modifiction_after)
+// {
+
+// }

@@ -95,7 +95,7 @@ private:
       return true;
     }
     const CommandWrapper& commandOld = *it->second;
-    DiffCommandPtr diff = command->compare(commandOld);
+    DiffCommandPtr diff = command->collectDiff(commandOld);
     if (!diff->isEmpty()) {
       for (const std::string& msg: diff->messages()) {
         std::cout << "~~~ diff msg=" << msg << std::endl;

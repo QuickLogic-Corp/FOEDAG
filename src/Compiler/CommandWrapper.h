@@ -328,7 +328,7 @@ public:
   }
   //
 
-  DiffCommandPtr compare(const CommandWrapper& old) {
+  DiffCommandPtr collectDiff(const CommandWrapper& old) {
     DiffCommandPtr diff = std::make_shared<DiffCommand>();
     compareArguments(old.arguments(), arguments(), diff);
     compareFiles(old.files(), files(), diff);
