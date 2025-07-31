@@ -1751,7 +1751,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
         m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "sinplify", command);
       }
     } else {
-      qInfo() << "~~~ sinplify synthesis skipped, not required";
+      Message("Synplify synthesis skipped, not required");
     }
   }
   
@@ -1779,10 +1779,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
   CommandWrapperPtr command = it->second;
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
-    qInfo() << "~~~ yosys synthesis skipped, not required";
+    Message("yosys synthesis skipped, not required");
     return true;
-  } else {
-    qInfo() << "~~~ yosys synthesising ...";
   }
   // incr compilation
 
@@ -2838,10 +2836,8 @@ bool CompilerOpenFPGA_ql::Packing() {
     return false;
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
-    qInfo() << "~~~ packing skipped, not required";
+    Message("packing skipped, not required");
     return true;
-  } else {
-    qInfo() << "~~~ packing ...";
   }
  
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
@@ -3179,10 +3175,8 @@ bool CompilerOpenFPGA_ql::Placement() {
     return false;
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
-    qInfo() << "~~~ placement skipped, not required";
+    Message("placement skipped, not required");
     return true;
-  } else {
-    qInfo() << "~~~ placement ...";
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
@@ -3378,10 +3372,8 @@ bool CompilerOpenFPGA_ql::Route() {
     return false;
   }
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
-    qInfo() << "~~~ routing skipped, not required";
+    Message("routing skipped, not required");
     return true;
-  } else {
-    qInfo() << "~~~ routing...";
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
@@ -3713,10 +3705,12 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #endif // ENABLE_LEGACY_CMD_GUARD
 
     if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
-      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
+      if (!sta_suffix.empty()) {
+        Message("timing analysis skipped, not required");
+      } else {
+        Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
+      }
       return true;
-    } else {
-      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "...";
     }
     const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
     if (status) {
@@ -3750,10 +3744,12 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       return false;
     }
     if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, command)) {
-      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
+      if (!sta_suffix.empty()) {
+        Message("timing analysis skipped, not required");
+      } else {
+        Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
+      }
       return true;
-    } else {
-      qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "...";
     }
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandOLD(current_device_sta, sta_vpr_options, sta_suffix);
@@ -3841,10 +3837,12 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   }
 
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, taCommand)) {
-    qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "skipped, not required";
+    if (!sta_suffix.empty()) {
+      Message("timing analysis skipped, not required");
+    } else {
+      Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
+    }
     return true;
-  } else {
-    qInfo() << "~~~ ta" << QString::fromStdString(sta_suffix) << "...";
   }
 
   int status = ExecuteAndMonitorSystemCommand(taCommand->string());
