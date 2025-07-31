@@ -250,13 +250,13 @@ private:
   std::string getPackingCommandLEGACY();
   std::string getPlacementCommandLEGACY();
   std::string getRoutingCommandLEGACY();             
-  std::string getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
+  std::string getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& profile);
 #endif
   std::unordered_map<std::string, CommandWrapperPtr> buildSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
   CommandWrapperPtr getRoutingCommand();             
-  CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
+  CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
 };
 
 }  // namespace FOEDAG
