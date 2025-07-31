@@ -29,7 +29,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // *before* the template, so ADL knows a to_json / from_json will exist.
 // ---------------------------------------------------------------------
 namespace FOEDAG { 
-    struct ScriptRenderer; 
     struct CommandWrapper; 
 } // namespace FOEDAG
 

@@ -1792,7 +1792,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::filesystem::remove(
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
-      
+
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -7146,7 +7146,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
     synplify_script_path =
       (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
           .string();
-    std::string synplify_script_rendered = synplifyScript->render();
+    std::string synplify_script_content = synplifyScript->render();
     if (synplifyScript->hasErrors()) {
       std::vector<std::string> errors = synplifyScript->takeErrors();
       for (const std::string& error: errors) {
@@ -7154,7 +7154,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       }
     }
     std::ofstream ofs(synplify_script_path);
-    ofs << synplify_script_rendered;
+    ofs << synplify_script_content;
 #ifdef _WIN32
     ofs << "\n";
     ofs << "# Run all implementations of the active project.\n";
@@ -7186,7 +7186,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       synplify_license_wait = "-license_wait ";
 
     CommandWrapperPtr command = std::make_shared<CommandWrapper>();
-    command->setScriptRenderer(synplifyScript);
+    command->setScriptHash(FileUtils::calcHash(synplify_script_content));
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
     command->append(synplifyExecName);
@@ -7749,7 +7749,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
       (std::filesystem::path(ProjManager()->projectPath()) / script_path)
           .string();
 
-  std::string yosys_script_rendered = yosysScript->render();
+  const std::string yosys_script_content = yosysScript->render();
   if (yosysScript->hasErrors()) {
     std::vector<std::string> errors = yosysScript->takeErrors();
     for (const std::string& error: errors) {
@@ -7758,7 +7758,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
   }
 
   std::ofstream ofs(script_path);
-  ofs << yosys_script_rendered;
+  ofs << yosys_script_content;
   ofs.close();
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
@@ -7780,7 +7780,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSyn
 #endif // #if(AURORA_USE_TABBYCAD == 1)
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
-  command->setScriptRenderer(yosysScript);
+  command->setScriptHash(FileUtils::calcHash(yosys_script_content));
   command->append(yosys_executable_path.string());
   command->append("-s");
   command->append(ProjManager()->projectName() + ".ys");

@@ -150,24 +150,6 @@ private:
       m_errors.push_back("script doesn't contain required placeholder:" + placeholder);
     }
   }
-
-  friend void to_json(nlohmann::json& j, const ScriptRenderer& obj) {
-    j = nlohmann::json{
-      { "scriptTemplate", obj.m_scriptTemplate },
-      { "filePathes",     obj.m_filePathes    },
-      { "parameters",     obj.m_parameters    },
-      { "maskedFiles",    obj.m_maskedFiles   },
-      { "commentStr",     obj.m_commentStr    }
-    };
-  }
-
-  friend void from_json(const nlohmann::json& j, ScriptRenderer& obj) {
-    j.at("scriptTemplate").get_to(obj.m_scriptTemplate);
-    j.at("filePathes").get_to(obj.m_filePathes);
-    j.at("parameters").get_to(obj.m_parameters);
-    j.at("maskedFiles").get_to(obj.m_maskedFiles);
-    j.at("commentStr").get_to(obj.m_commentStr);
-  }
 };
 using ScriptRendererPtr = std::shared_ptr<ScriptRenderer>;
 
@@ -360,7 +342,9 @@ public:
     DiffCommandPtr diff = std::make_shared<DiffCommand>();
     compareArguments(old.arguments(), arguments(), diff);
     compareFiles(old.files(), files(), diff);
-    compareScripts(old.scriptRenderer(), scriptRenderer(), diff);
+    if (old.scriptHash() != scriptHash()) {
+      diff->addGenericMsg("hashes of scripts are different");
+    }
     return diff;
   }
 
@@ -370,11 +354,9 @@ public:
   const std::unordered_map<std::string, FileIdentity>& files() const { return m_files; }
   const std::unordered_map<std::string, std::string>& arguments() const { return m_arguments; }
 
-  void setScriptRenderer(const ScriptRendererPtr& scriptRenderer) {
-    m_scriptRenderer = scriptRenderer;
-  }
+  void setScriptHash(const std::string& scriptHash) { m_scriptHash = scriptHash; }
 
-  const ScriptRendererPtr& scriptRenderer() const { return m_scriptRenderer; }
+  const std::string& scriptHash() const { return m_scriptHash; }
 
   void append(const std::string& parameter, const std::string& value = "") {
     appendArgument(parameter, value);
@@ -410,7 +392,7 @@ public:
 private:
   std::unordered_map<std::string, std::string> m_arguments;
   std::unordered_map<std::string, FileIdentity> m_files;
-  ScriptRendererPtr m_scriptRenderer;
+  std::string m_scriptHash;
   std::string m_string;
 
   friend void to_json(nlohmann::json& j, const CommandWrapper& obj) {
@@ -418,7 +400,7 @@ private:
       {"arguments", obj.m_arguments},
       {"files", obj.m_files},
       {"string", obj.m_string},
-      {"script_renderer", obj.m_scriptRenderer}
+      {"script_hash", obj.m_scriptHash}
     };
   }
 
@@ -426,7 +408,7 @@ private:
     j.at("arguments").get_to(obj.m_arguments);
     j.at("files").get_to(obj.m_files);
     j.at("string").get_to(obj.m_string);
-    j.at("script_renderer").get_to(obj.m_scriptRenderer);
+    j.at("script_hash").get_to(obj.m_scriptHash);
   }
 
   void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
@@ -532,18 +514,6 @@ private:
       if (itOld != filesOld.end()) {
         const FileIdentity& fileIdentityOld = itOld->second;
         fileIdentityNew.compare(fileIdentityOld, diff);
-      }
-    }
-  }
-
-  void compareScripts(const ScriptRendererPtr& scriptRendererOld, const ScriptRendererPtr& scriptRendererNew, const DiffCommandPtr& diff) {
-    if ((scriptRendererOld && !scriptRendererNew) || (!scriptRendererOld && scriptRendererNew)) {
-      diff->addGenericMsg("one of script structure is not initialized");
-      return;
-    }
-    if (scriptRendererOld && scriptRendererNew) {
-      if (scriptRendererOld->calcHash() != scriptRendererNew->calcHash()) {
-        diff->addGenericMsg("hashes of scripts are different");
       }
     }
   }

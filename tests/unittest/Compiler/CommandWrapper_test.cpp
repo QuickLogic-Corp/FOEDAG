@@ -398,6 +398,7 @@ TEST(CommandWrapper, serialization)
     commandOrig.append("--p3", "v3");
     commandOrig.appendFile(filePath1.filePath(), "arch");
     commandOrig.appendFile("--file2", filePath2.filePath());
+    commandOrig.setScriptHash("www");
 
     // Serialize
     nlohmann::json json = commandOrig;
@@ -415,6 +416,8 @@ TEST(CommandWrapper, serialization)
     }
 
     DiffCommandPtr diff = commandRestored.collectDiff(commandOrig);
+    EXPECT_TRUE(!commandOrig.scriptHash().empty());
+    EXPECT_EQ(commandOrig.scriptHash(), commandRestored.scriptHash());
     EXPECT_TRUE(diff->isEmpty());
 
     EXPECT_TRUE(diff->diffFiles().empty());
@@ -539,47 +542,3 @@ cmd3 -p3 v3 ${FILE3})";
 
     EXPECT_TRUE(hashOrig != hashMod);
 }
-
-TEST(CommandWrapperAndScriptRenderer, serialization_and_internal_file_modifiction_after)
-{
-    // create script renderer
-    ScopedFile file1{std::filesystem::path{"file1"}, "file1 unique content..."};
-    ScopedFile file2{std::filesystem::path{"file2"}, "file2 unique content..."};
-    ScopedFile file3{std::filesystem::path{"file3"}, "file3 unique content..."};
-
-    // create script renderer
-    const std::string scriptTemplate = 
-R"(${FILES_INFO}
-cmd1 --p1 v1 ${FILE1}
-cmd2 ${FILE2} --p2 v2
-cmd3 -p3 v3 ${FILE3})";
-
-    ScriptRendererPtr rendererOrig = std::make_shared<ScriptRenderer>(scriptTemplate);
-    rendererOrig->applyFile("${FILE1}", file1.filePath(), "file_mask");
-    rendererOrig->applyFile("${FILE2}", file2.filePath());
-    rendererOrig->applyFile("${FILE3}", file3.filePath());
-
-    // create command wrapper
-    CommandWrapper commandOrig;
-    commandOrig.setScriptRenderer(rendererOrig);
-
-    nlohmann::json j = commandOrig;
-    CommandWrapper commandRestored = j;
-
-    EXPECT_TRUE(commandOrig.scriptRenderer());
-    EXPECT_TRUE(commandRestored.scriptRenderer());
-    EXPECT_TRUE(!commandOrig.scriptRenderer()->calcHash().empty());
-
-    EXPECT_EQ(commandOrig.scriptRenderer()->calcHash(), commandRestored.scriptRenderer()->calcHash());
-    DiffCommandPtr diff = commandOrig.collectDiff(commandRestored);
-    EXPECT_TRUE(diff->isEmpty());
-
-    file1.appendContent("MODIFIED...");
-
-    EXPECT_EQ(commandOrig.scriptRenderer()->calcHash(), commandRestored.scriptRenderer()->calcHash());
-}
-
-// TEST(CommandWrapperAndScriptRenderer, serialization_and_internal_file_modifiction_after)
-// {
-
-// }
