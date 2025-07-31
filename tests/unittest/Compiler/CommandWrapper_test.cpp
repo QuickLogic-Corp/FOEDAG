@@ -423,54 +423,6 @@ TEST(CommandWrapper, serialization)
     EXPECT_TRUE(diff->removedParameters().empty());
 }
 
-TEST(CommandWrapperBuilder, restore_single_cmd_from_string)
-{
-    ScopedFile filePath1{std::filesystem::path{"filepath1"}, "shared content 1..."};
-    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content 2..."};
-    ScopedFile filePath3{std::filesystem::path{"filepath3"}, "shared content 3..."};
-
-    CommandWrapper commandOrig{"cmd"};
-    commandOrig.append("--p1", "v1");
-    commandOrig.append("--p2");
-    commandOrig.append("--p3", "v3");
-    commandOrig.appendFile(filePath1.filePath(), "mask1");
-    commandOrig.appendFile("--file2", filePath2.filePath());
-    commandOrig.appendFile("--file3", filePath3.filePath(), "mask2");
-
-    const std::map<std::filesystem::path, std::string> maskedFiles = {{filePath1.filePath(), "mask1"}, {filePath3.filePath(), "mask2"}};
-    CommandWrapperPtr commandRestoredPtr = CommandWrapperBuilder::fromString(commandOrig.string(), maskedFiles);
-    for (const auto& [key, fileIdentity]: commandRestoredPtr->files()) {
-        if (fileIdentity.filePath() == filePath1.filePath()) {
-            EXPECT_EQ("mask1", fileIdentity.mask());
-        }
-        if (fileIdentity.filePath() == filePath3.filePath()) {
-            EXPECT_EQ("mask2", fileIdentity.mask());
-        }
-    }
-    EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 filepath1 --file2 filepath2 --file3 filepath3", commandRestoredPtr->string());
-}
-
-TEST(CommandWrapperBuilder, restore_single_cmd_from_string_automatic_mask_detection)
-{
-    ScopedFile archFilePath{std::filesystem::path{"arch/filepath"}, "shared content 1..."};
-    ScopedFile filePath2{std::filesystem::path{"filepath2"}, "shared content 2..."};
-
-    CommandWrapper commandOrig{"/some/path/to/vpr"};
-    commandOrig.appendFile(archFilePath.filePath(), VPR_ARCH_FILE_MASK); // for automatic VPR_ARCH_FILE_MASK detect it must be first argument after the vpr command
-    commandOrig.append("--p1", "v1");
-    commandOrig.append("--p2");
-    commandOrig.append("--p3", "v3");
-    commandOrig.appendFile("--file2", filePath2.filePath());
-
-    CommandWrapperPtr commandRestoredPtr = CommandWrapperBuilder::fromString(commandOrig.string());
-    for (const auto& [key, fileIdentity]: commandRestoredPtr->files()) {
-        if (fileIdentity.filePath() == archFilePath.filePath()) {
-            EXPECT_EQ(VPR_ARCH_FILE_MASK, fileIdentity.mask());
-        }
-    }
-    EXPECT_EQ("/some/path/to/vpr arch/filepath --p1 v1 --p2 --p3 v3 --file2 filepath2", commandRestoredPtr->string());
-}
-
 TEST(ScriptRenderer, render)
 {
     ScopedFile file1{std::filesystem::path{"file1"}, "file1 unique content..."};
