@@ -3730,7 +3730,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   if (!profile.empty()) {
     sta_suffix = "_" + profile;
   } 
-  
+
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
   auto guard = sg::make_scope_guard([this, sta_suffix] {
@@ -3767,8 +3767,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
       return false;
-    } else {
-      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
     }
     return true;
   }
@@ -3793,16 +3791,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!command) {
       return false;
     }
-    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), sta_suffix, command)) {
-      Message("##################################################");
-      if (!sta_suffix.empty()) {
-        Message("timing analysis skipped, not required");
-      } else {
-        Message("timing analysis for corner[" + sta_suffix + "] skipped, not required");
-      }
-      Message("##################################################");
-      return true;
-    }
 #ifdef ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
     if (!command->compareIgnoringTempPath(commandOld)) {
@@ -3813,6 +3801,17 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
 
+    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+      Message("##################################################");
+      if (profile.empty()) {
+        Message("timing analysis skipped, not required");
+      } else {
+        Message("timing analysis for corner[" + profile + "] skipped, not required");
+      }
+      Message("##################################################");
+      return true;
+    }
+
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
 
@@ -3822,7 +3821,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                    " timing analysis failed");
       return false;
     } else {
-      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, command);
+      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, command);
     }
     // find files
     std::string libFileName =
@@ -3884,10 +3883,19 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       return false;
     }  
 #endif // ENABLE_LEGACY_CMD_GUARD
-
-    FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
   }
 
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
+    Message("##################################################");
+    if (profile.empty()) {
+      Message("timing analysis skipped, not required");
+    } else {
+      Message("timing analysis for corner[" + profile + "] skipped, not required");
+    }
+    Message("##################################################");
+    return true;
+  }
+  FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
   int status = ExecuteAndMonitorSystemCommand(taCommand->string());
   CleanTempFiles();
   if (status) {
@@ -3895,7 +3903,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                  " timing analysis failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), sta_suffix, taCommand);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, taCommand);
   }
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
