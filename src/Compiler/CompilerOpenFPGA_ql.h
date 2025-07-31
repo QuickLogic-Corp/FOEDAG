@@ -39,16 +39,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define COMPILER_OPENFPGA_QL_H
 
 #define ENABLE_LEGACY_CMD_GUARD
+#define DEBUG_COMMAND_MIGRATION
 
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };
 #endif // #if UPSTREAM_UNUSED
-
-struct CommandHolder {
-  std::string command;
-  std::vector<std::string> internalScripts;
-};
 
 class CompilerOpenFPGA_ql : public Compiler {
     friend class QLSettingsManager;
@@ -247,7 +243,7 @@ private:
   TaskCompilationStateManager m_taskCompilationStateManager;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
-  std::unordered_map<std::string, CommandHolder> buildSynthesisCommands();
+  std::unordered_map<std::string, CommandWrapperPtr> buildSynthesisCommands();
   std::string getPackingCommandOLD();
   std::string getPlacementCommandOLD();
   std::string getRoutingCommandOLD();             

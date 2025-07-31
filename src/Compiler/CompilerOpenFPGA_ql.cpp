@@ -1726,7 +1726,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  const std::unordered_map<std::string, CommandHolder> commandsMap = buildSynthesisCommands();
+  const std::unordered_map<std::string, CommandWrapperPtr> commandsMap = buildSynthesisCommands();
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
@@ -1735,13 +1735,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       // error message reported inside the buildSynthesisCommands
       return false;
     }
-    CommandHolder commandHolder = it->second;
-    std::string command = commandHolder.command;
-    CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
+    CommandWrapperPtr command = it->second;
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
       qInfo() << "~~~ sinplify synthesising ...";
-      Message("Synthesis command: " + command);
-      int status = ExecuteAndMonitorSystemCommand(command);
+      Message("Synthesis command: " + command->string());
+      int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
       if (status) {
         ErrorMessage("Design " + ProjManager()->projectName() +
@@ -1750,7 +1748,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       } else {
         m_state = State::Synthesized;
         Message("Design " + ProjManager()->projectName() + " is synthesized");
-        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "sinplify", commandWrapper);
+        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "sinplify", command);
       }
     } else {
       qInfo() << "~~~ sinplify synthesis skipped, not required";
@@ -1786,10 +1784,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     // error message reported inside the buildSynthesisCommands
     return false;
   }
-  CommandHolder commandHolder = it->second;
-  std::string command = commandHolder.command;
-  CommandWrapperPtr commandWrapper = CommandWrapperBuilder::fromString(command);
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), commandWrapper)) {
+  CommandWrapperPtr command = it->second;
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
     qInfo() << "~~~ yosys synthesis skipped, not required";
     return true;
   } else {
@@ -1797,8 +1793,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
   // incr compilation
 
-  Message("Synthesis command: " + command);
-  int status = ExecuteAndMonitorSystemCommand(command);
+  Message("Synthesis command: " + command->string());
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -1807,7 +1803,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), commandWrapper);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), command);
     return true;
   }
 }
@@ -7003,9 +6999,9 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
 
-std::unordered_map<std::string, CommandHolder> CompilerOpenFPGA_ql::buildSynthesisCommands()
+std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSynthesisCommands()
 {
-  std::unordered_map<std::string, CommandHolder> commands;
+  std::unordered_map<std::string, CommandWrapperPtr> commands;
 
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
@@ -7204,16 +7200,49 @@ std::unordered_map<std::string, CommandHolder> CompilerOpenFPGA_ql::buildSynthes
     if (GlobalSession->CmdLine()->SynplifyLicenseWait())
       synplify_license_wait = "-license_wait ";
 
+    CommandWrapperPtr command = std::make_shared<CommandWrapper>();
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
-    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
+    command->append(synplifyExecName);
+    command->append("-licensetype", "synplifybase_quicklogic");
+    if (!synplify_license_wait.empty()) {
+      command->append(synplify_license_wait);
+    }
+    command->append(synplify_script_path);
+    command->append("-log");
+    command->append(synplifyLogFilePath);
+  #ifdef DEBUG_COMMAND_MIGRATION 
+    std::string commandStr = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " -log " + synplifyLogFilePath;
+    if (command->string() != commandStr) {
+      ErrorMessage("~~~ deverror: legacy command doesn't match to new");
+      return {};
+    }
+  #endif // DEBUG_COMMAND_MIGRATION
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
+    command->append(synplifyExecName);
+    command->append("-batch");
+    command->append("-licensetype", "synplifybase_quicklogic");
+    if (!synplify_license_wait.empty()) {
+      command->append(synplify_license_wait);
+    }
+    command->append(synplify_script_path);
+    command->append(">>");
+    command->append(synplifyLogFilePath);
+
+  #ifdef DEBUG_COMMAND_MIGRATION
+    std::string commandStr = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
     synplify_script_path + " >> " + synplifyLogFilePath;
+    if (command->string() != commandStr) {
+      ErrorMessage("~~~ deverror: legacy command doesn't match to new");
+      return {};
+    }
+  #endif // DEBUG_COMMAND_MIGRATION
+
 #endif
-    commands["synplify"] = CommandHolder{command, {synplify_script_path}};
+    // TODO: handle synplify_script_path
+    commands["synplify"] = command;
   }
   
   // use the device specific yosys script
@@ -7756,11 +7785,25 @@ std::unordered_map<std::string, CommandHolder> CompilerOpenFPGA_ql::buildSynthes
   }
 #endif // #if(AURORA_USE_TABBYCAD == 1)
 
-  std::string command =
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+  command->append(yosys_executable_path.string());
+  command->append("-s");
+  command->append(ProjManager()->projectName() + ".ys");
+  command->append("-l");
+  command->append(ProjManager()->projectName() + "_synth.log");
+
+#ifdef DEBUG_COMMAND_MIGRATION
+  std::string commandStr =
       yosys_executable_path.string() + " -s " +
       std::string(ProjManager()->projectName() + ".ys -l " +
                   ProjManager()->projectName() + "_synth.log");
-  commands["yosys"] = CommandHolder{command, {script_path}};
+  if (command->string() != commandStr) {
+    ErrorMessage("~~~ deverror: legacy command doesn't match to new");
+    return {};
+  }
+#endif // DEBUG_COMMAND_MIGRATION
+  // TODO: handle script_path properly
+  commands["yosys"] = command;
   return commands;
 }
 
