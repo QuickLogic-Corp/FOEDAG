@@ -139,8 +139,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommandOLD(QLDeviceTarget device_target = QLDeviceTarget());
-  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget()); // todo, make it const
+  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
+  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
 
   TaskCompilationStateManager& taskCompilationStateManager() { return m_taskCompilationStateManager; }
 
@@ -225,7 +225,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_pb_pin_fixup;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
-  std::string BaseStaCommandOLD();
+  std::string BaseStaCommandLEGACY();
 #endif
   CommandWrapperPtr BaseStaCommand();
   std::filesystem::path BaseStaScript(std::string libFileName,
@@ -242,25 +242,16 @@ private:
   TaskCompilationStateManager m_taskCompilationStateManager;
 
 #ifdef ENABLE_LEGACY_CMD_GUARD
-  std::unordered_map<std::string, CommandWrapperPtr> buildSynthesisCommands();
-  std::string getPackingCommandOLD();
-  std::string getPlacementCommandOLD();
-  std::string getRoutingCommandOLD();             
-  std::string getTimingAnalysisCommandOLD(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
-  std::string getPowerCommandOLD();               // TODO
-  std::string getBitstreamGenerationCommandOLD(); // TODO
-
+  std::string getPackingCommandLEGACY();
+  std::string getPlacementCommandLEGACY();
+  std::string getRoutingCommandLEGACY();             
+  std::string getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
 #endif
-  CommandWrapperPtr getSynthesisCommand();           // TODO
-  CommandWrapperPtr getPackingCommand();   // todo make it const
-  CommandWrapperPtr getPlacementCommand(); // todo make it const
+  std::unordered_map<std::string, CommandWrapperPtr> buildSynthesisCommands();
+  CommandWrapperPtr getPackingCommand();
+  CommandWrapperPtr getPlacementCommand();
   CommandWrapperPtr getRoutingCommand();             
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& sta_vpr_options, std::string sta_suffix);
-  CommandWrapperPtr getPowerCommand();               // TODO
-  CommandWrapperPtr getBitstreamGenerationCommand(); // TODO
-
-    // BitstreamGeneration
-
 };
 
 }  // namespace FOEDAG
