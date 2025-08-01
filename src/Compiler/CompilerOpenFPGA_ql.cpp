@@ -2720,16 +2720,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   return command;
 }
 
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-std::string CompilerOpenFPGA_ql::BaseStaCommandLEGACY() {
-  std::string command =
-      m_staExecutablePath.string() +
-      std::string(
-          " -exit ");  // allow open sta exit its tcl shell even there is error
-  return command;
-}
-#endif
-
 CommandWrapperPtr CompilerOpenFPGA_ql::BaseStaCommand() {
   CommandWrapperPtr command = std::make_shared<CommandWrapper>(m_staExecutablePath.string());
   command->append("-exit");  // allow open sta exit its tcl shell even there is error
@@ -2850,18 +2840,6 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
  
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
-
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::string commandOld = getPackingCommandLEGACY();
-
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.LEGACY.cmd"), commandOld);
-  if (!command->compareIgnoringTempPath(commandOld)) {
-    ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
-    qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-    qInfo() << "~~~ new=" << QString::fromStdString(command->string());
-    return false;
-  }  
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 #if UPSTREAM_UNUSED
   if (FileUtils::IsUptoDate(
@@ -3192,18 +3170,6 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::string commandOld = getPlacementCommandLEGACY();
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.LEGACY.cmd"), commandOld);
-
-  if (!command->compareIgnoringTempPath(commandOld)) {
-    ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
-    qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-    qInfo() << "~~~ new=" << QString::fromStdString(command->string());
-    return false;
-  }  
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
-
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
@@ -3390,18 +3356,6 @@ bool CompilerOpenFPGA_ql::Route() {
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
-
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::string commandOld = getRoutingCommandLEGACY();
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.LEGACY.cmd"), commandOld);
-
-  if (!command->compareIgnoringTempPath(commandOld)) {
-    ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
-    qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-    qInfo() << "~~~ new=" << QString::fromStdString(command->string());
-    return false;
-  }  
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -3792,15 +3746,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!command) {
       return false;
     }
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-    std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
-    if (!command->compareIgnoringTempPath(commandOld)) {
-      ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
-      qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(command->string());
-      return false;
-    }  
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
     if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
       Message("##################################################");
@@ -3849,16 +3794,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       taCommand = BaseStaCommand();
       taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
       
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-      std::string commandOld = BaseStaCommandLEGACY() + " " + BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName).string();
-      if (!taCommand->compareIgnoringTempPath(commandOld)) {
-        ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
-        qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-        qInfo() << "~~~ new=" << QString::fromStdString(command->string());
-        return false;
-      }  
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
-
       FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
     } else {
       ErrorMessage(
@@ -3874,16 +3809,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if(!taCommand) {
       return false;
     }
-
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-    std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
-    if (!taCommand->compareIgnoringTempPath(commandOld)) {
-      ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
-      qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
-      return false;
-    }  
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   }
 
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
@@ -7037,178 +6962,6 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   return power_leakage;
 }
 
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-
-std::string CompilerOpenFPGA_ql::getPackingCommandLEGACY() {
-  VprStageCfg cfg;
-  cfg.use_place_file = false;
-  cfg.use_route_file = false;
-
-#if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandLEGACY(QLDeviceTarget(), cfg) + " --pack";
-#endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandLEGACY(QLDeviceTarget(), cfg);
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
-    return "";
-  }
-
-  // custom vpr command-line options for pack stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
-
-  command += std::string(" ") + 
-             std::string("--pack");
-
-  return command;
-}
-
-std::string CompilerOpenFPGA_ql::getPlacementCommandLEGACY() {
-  // generate pin contraints file or use pre-generated .place file, if required.
-  // this string should contain the path of the PinConstraints file, if generated correctly.
-  // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
-  // - there is no pre-generated .place file AND
-  // - there is no pcf file in the project.
-  std::string filepath_fpga_fix_pins_place_str;
-  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return "";
-
-  VprStageCfg cfg;
-  cfg.use_place_file = true;
-  cfg.use_route_file = false;
-
-  std::string command = BaseVprCommandLEGACY(QLDeviceTarget(), cfg);
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
-    return "";
-  }
-
-  // custom vpr command-line options for place stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
-
-  command += std::string(" ") + 
-             std::string("--place");
-
-  if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command += std::string(" --fix_clusters") + 
-               std::string(" ") + 
-               filepath_fpga_fix_pins_place_str;
-  }
-  else
-  {
-    Message("no pcf file found, skipping PinConstraints usage!");
-  }
-
-  return command;
-}
-
-std::string CompilerOpenFPGA_ql::getRoutingCommandLEGACY()
-{
-  std::string command = BaseVprCommandLEGACY();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
-    return "";
-  }
-
-  // custom vpr command-line options for route stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
-  }
-
-  command += std::string(" ") + 
-             std::string("--route");
-
-  return command;
-}
-
-std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& profile) 
-{
-  std::string sta_suffix{};
-  if (!profile.empty()) {
-    sta_suffix = "_" + profile;
-  }
-  
-  if (TimingAnalysisOpt() == STAOpt::View) {
-  
-#ifdef _WIN32
-    // under WIN32, running the analysis stage alone causes issues, hence we call the
-    // route and analysis stages together
-    std::string taCommand = BaseVprCommandLEGACY() + " --route --analysis --disp on";
-#else // #ifdef _WIN32
-    std::string taCommand = BaseVprCommandLEGACY(current_device_sta) + " --analysis --disp on";
-#endif // #ifdef _WIN32
-
-    if(!profile.empty()){
-      taCommand += " " + uniqueStaVprOptions();
-    }
-
-    return taCommand;
-  }
-
-  std::string taCommand;
-  // use OpenSTA to do the job
-  if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
-    // allows SDF to be generated for OpenSTA
-    std::string command = BaseVprCommandLEGACY() + " --gen_post_synthesis_netlist on";
-    return command;    
-  } 
-  else {
-    // use vpr/tatum engine
-
-    std::string vpr_options;
-
-    taCommand = BaseVprCommandLEGACY(current_device_sta);
-    if(taCommand.empty()) {
-        ErrorMessage("Base VPR Command is empty!");
-        return "";
-    }
-
-    // custom vpr command-line options for analysis stage
-    // it is upto the user to ensure that the options are passed in correctly.
-    if( !QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str").empty() ) {
-      // first, trim the entire string to eliminate any extra whitespace in the front and the back
-      std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
-      vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-      // add the options string to the end of the vpr options with one whitespace separator
-      vpr_options += std::string(" ") + vpr_custom_options_string;
-    }
-
-    taCommand += vpr_options;
-
-    if(!profile.empty()){
-      taCommand += " " + uniqueStaVprOptions();
-    }
-    
-#ifdef _WIN32
-    // under WIN32, running the analysis stage along causes issues, hence we call the
-    // route and analysis stages together
-    taCommand += std::string(" --route");
-#endif // #ifdef _WIN32
-
-    taCommand += std::string(" --analysis");
-  }
-
-  return taCommand;
-}
-#endif // ENABLE_LEGACY_CMD_GUARD
-
 std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
 {
   std::unordered_map<std::string, CommandWrapperPtr> commands;
@@ -7411,14 +7164,6 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
     command->append(synplify_script_path);
     command->append("-log");
     command->append(synplifyLogFilePath);
-  #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD 
-    std::string commandStr = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
-    synplify_script_path + " -log " + synplifyLogFilePath;
-    if (command->string() != commandStr) {
-      ErrorMessage("deverror: legacy command doesn't match to new");
-      return {};
-    }
-  #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 #else
     // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
     command->append(synplifyExecName);
@@ -7430,15 +7175,6 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
     command->append(synplify_script_path);
     command->append(">>");
     command->append(synplifyLogFilePath);
-
-  #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-    std::string commandStr = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
-    synplify_script_path + " >> " + synplifyLogFilePath;
-    if (command->string() != commandStr) {
-      ErrorMessage("deverror: legacy command doesn't match to new");
-      return {};
-    }
-  #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 #endif
     // TODO: handle synplify_script_path
@@ -8002,17 +7738,6 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
   command->append("-l");
   command->append(ProjManager()->projectName() + "_synth.log");
 
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::string commandStr =
-      yosys_executable_path.string() + " -s " +
-      std::string(ProjManager()->projectName() + ".ys -l " +
-                  ProjManager()->projectName() + "_synth.log");
-  if (command->string() != commandStr) {
-    ErrorMessage("~~~ deverror: legacy command doesn't match to new");
-    return {};
-  }
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
-  // TODO: handle script_path properly
   commands["yosys"] = command;
   return commands;
 }

@@ -229,9 +229,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::string BaseStaCommandLEGACY();
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   CommandWrapperPtr BaseStaCommand();
   std::filesystem::path BaseStaScript(std::string libFileName,
                                     std::string netlistFileName,
@@ -246,12 +243,6 @@ private:
   BlifParser m_blifParser;
   TaskCompilationStateManager m_taskCompilationStateManager;
 
-#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::string getPackingCommandLEGACY();
-  std::string getPlacementCommandLEGACY();
-  std::string getRoutingCommandLEGACY();             
-  std::string getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& profile);
-#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
   std::unordered_map<std::string, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
