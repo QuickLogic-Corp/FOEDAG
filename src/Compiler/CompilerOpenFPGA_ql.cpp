@@ -1782,7 +1782,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   CommandWrapperPtr command = it->second;
   if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), "yosys", command)) {
     Message("##################################################");
-    Message(" Synthesis(yosys) skipped, not required");
+    Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
     return true;
   }
