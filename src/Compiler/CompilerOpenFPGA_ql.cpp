@@ -3287,12 +3287,35 @@ bool CompilerOpenFPGA_ql::Packing() {
       std::filesystem::path vpr_stdout_log_filepath = 
           std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
 
+
+      // overhead settings and other settings, read from file 'add_layout_params.json' if it exists:
+      std::filesystem::path add_layout_params_json_filepath = 
+          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout_params.json";
+
+      json add_layout_params_json = json::object();
+      int overhead_percentage = 0;
+      if(FileUtils::FileExists(add_layout_params_json_filepath)) {
+        std::ifstream add_layout_params_json_ifstream(add_layout_params_json_filepath.string());
+        add_layout_params_json = json::parse(add_layout_params_json_ifstream);
+        if(!add_layout_params_json.empty()) {
+          if(add_layout_params_json.contains("overhead_percentage")){
+            overhead_percentage = add_layout_params_json["overhead_percentage"].get<int>();
+            // std::cout << "overhead_percentage: " << overhead_percentage << std::endl;
+          }
+        }
+      }
+
       std::string command_auto_device = 
-                            std::string("python3") + std::string(" ") +
-                            add_layout_script_path.string() + std::string(" ") +
-                            std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
-                            std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
-                            std::string("--output ") + generated_vpr_xml_path.string();
+          std::string("python3") + std::string(" ") +
+          add_layout_script_path.string() + std::string(" ") +
+          std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
+          std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
+          std::string("--output ") + generated_vpr_xml_path.string();
+
+      if(overhead_percentage > 0) {
+        command_auto_device += 
+            std::string(" --overhead_percentage ") + std::to_string(overhead_percentage);
+      }
 
       std::filesystem::path logfile_auto_device = 
           std::filesystem::path(ProjManager()->projectPath()) / "auto_device.log";
