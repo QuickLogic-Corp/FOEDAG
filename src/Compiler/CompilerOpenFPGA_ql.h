@@ -144,8 +144,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
 
-  TaskCompilationStateManager& taskCompilationStateManager() { return m_taskCompilationStateManager; }
-
   std::string staProfile(const QLDeviceTarget& device) const;  
   bool collectStaDevices(std::map<std::string, QLDeviceTarget>& devices) const;
   QLDeviceTarget getDeviceByStaProfile(const std::string staProfile) const;
@@ -259,6 +257,10 @@ private:
   CommandWrapperPtr getPlacementCommand();
   CommandWrapperPtr getRoutingCommand();             
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
+
+  void loadCompilationCache() override final;
+  void clearCompilationCache() override final;
+  bool hasCompilationCache() const override final;
 };
 
 }  // namespace FOEDAG

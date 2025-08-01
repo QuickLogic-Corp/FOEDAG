@@ -31,7 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
-constexpr const char* BUILD_STATE_FILENAME = "build_states.json";
+constexpr const char* COMPILATION_CACHE_FILENAME = "compilation_cache.json";
 class TaskCompilationStateManager {
 public:
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
@@ -70,7 +70,7 @@ public:
   }
 
   void setProjectPath(const std::filesystem::path& path) {
-    m_filePath = path / BUILD_STATE_FILENAME;
+    m_filePath = path / COMPILATION_CACHE_FILENAME;
     ScriptRenderer::setProjectPath(path);
     CommandWrapper::setProjectPath(path);
   }
@@ -78,7 +78,7 @@ public:
 private:
   bool m_isLogEnabled = true;
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
-  std::filesystem::path m_filePath{BUILD_STATE_FILENAME};
+  std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
 
   std::string key(int taskId) const {
     return std::to_string(taskId);

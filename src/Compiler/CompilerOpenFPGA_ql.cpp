@@ -8195,4 +8195,20 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
   return taCommand;
 }
 
+void CompilerOpenFPGA_ql::loadCompilationCache()
+{
+  m_taskCompilationStateManager.load();
+}
+
+
+void CompilerOpenFPGA_ql::clearCompilationCache()
+{
+  m_taskCompilationStateManager.clear();
+}
+
+bool CompilerOpenFPGA_ql::hasCompilationCache() const
+{
+  return !m_taskCompilationStateManager.isEmpty();
+}
+
 // clang-format on

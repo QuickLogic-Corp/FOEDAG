@@ -1782,6 +1782,16 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   };
   interp->registerCmd("ip_add_to_design", ip_add_to_design, this, nullptr);
 
+  auto clear_compilation_cache = [](void* clientData, Tcl_Interp* interp, int argc,
+                             const char* argv[]) -> int {
+    Compiler* compiler = (Compiler*)clientData;
+    if (compiler) {
+      compiler->clearCompilationCache();
+    }
+    return TCL_OK;
+  };
+  interp->registerCmd("clear_compilation_cache", clear_compilation_cache, this, nullptr);
+
   return true;
 }
 

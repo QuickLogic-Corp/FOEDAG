@@ -607,7 +607,7 @@ void MainWindow::forceStopCompilation() {
 
 void MainWindow::clearCompilationStates() {
   if (m_compiler) {
-    static_cast<CompilerOpenFPGA_ql*>(m_compiler)->taskCompilationStateManager().clear();
+    m_compiler->clearCompilationCache();
   }
   clearCompilationStatesAction->setEnabled(false);
 }
@@ -867,8 +867,10 @@ void MainWindow::loadFile(const QString& file) {
   if (m_projectFileLoader) {
     m_projectFileLoader->Load(file);
     if (sourcesForm) sourcesForm->InitSourcesForm();
-    static_cast<CompilerOpenFPGA_ql*>(m_compiler)->taskCompilationStateManager().load();
-    updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
+    if (m_compiler) {
+      m_compiler->loadCompilationCache();
+      updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
+    }
     updateTaskTable();
   }
 }
@@ -1886,8 +1888,10 @@ void MainWindow::ReShowWindow(QString strProject) {
   connect(m_taskManager, &TaskManager::taskDone, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
   connect(m_taskManager, &TaskManager::taskDone, this, [this](){
     if (!clearCompilationStatesAction->isEnabled()) {
-      if (!static_cast<CompilerOpenFPGA_ql*>(m_compiler)->taskCompilationStateManager().isEmpty()) {
-        clearCompilationStatesAction->setEnabled(true);
+      if (m_compiler) {
+        if (m_compiler->hasCompilationCache()) {
+          clearCompilationStatesAction->setEnabled(true);
+        }
       }
     }
   });

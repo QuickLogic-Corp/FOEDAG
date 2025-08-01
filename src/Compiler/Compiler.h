@@ -241,6 +241,10 @@ class Compiler {
   bool copyFilesOnAdd() { return m_copyFilesWhileAdding; }
   void setCopyFilesOnAdd(bool copyFilesWhileAdding) { m_copyFilesWhileAdding = copyFilesWhileAdding; }
 
+  virtual void loadCompilationCache() {};
+  virtual bool hasCompilationCache() const { return false; };
+  virtual void clearCompilationCache() {};
+
  protected:
   /* Methods that can be customized for each new compiler flow */
   virtual bool IPGenerate();
