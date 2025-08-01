@@ -247,7 +247,10 @@ MainWindow::MainWindow(Session* session)
   });
 #endif
 
-  QObject::connect(QLSettingsManager::getInstance(), &QLSettingsManager::settingsChanged, [this](){
+  QObject::connect(QLSettingsManager::getInstance(), &QLSettingsManager::settingsChanged, this, [this](){
+    m_compiler->invalidateTaskStatuses();
+  });
+  QObject::connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designFilesChanged, this, [this](){
     m_compiler->invalidateTaskStatuses();
   });
 }
