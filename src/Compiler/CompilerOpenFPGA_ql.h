@@ -38,8 +38,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
 
-#define DEBUG_ENABLE_LEGACY_CMD_GUARD
-
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };

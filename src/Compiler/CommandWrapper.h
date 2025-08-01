@@ -35,6 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
+#define DEBUG_ENABLE_LEGACY_CMD_GUARD
+
 namespace FOEDAG {
 
 constexpr const char* FILES_INFO_PLACEHOLDER = "${FILES_INFO}";
@@ -340,14 +342,14 @@ public:
   static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
   static void addBigFileName(const std::string& fileName) { s_bigFilesSet.insert(fileName); }
 
-  // tmp function fused while migration
+#ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
   bool compareIgnoringTempPath(const std::string& rhs) {
       static std::regex tmpRegex(R"(\/tmp\/\S+)");
       std::string thisClean = std::regex_replace(string(), tmpRegex, "/tmp/PLACEHOLDER");
       std::string rhsClean = std::regex_replace(rhs, tmpRegex, "/tmp/PLACEHOLDER");
       return thisClean == rhsClean;
   }
-  //
+#endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
 
   DiffCommandPtr collectDiff(const CommandWrapper& old) {
     DiffCommandPtr diff = std::make_shared<DiffCommand>();
