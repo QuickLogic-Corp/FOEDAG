@@ -94,6 +94,9 @@ private:
   bool isCompilationRequired(const std::string& id, const CommandWrapperPtr& command) const {
     auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
+      if (m_isLogEnabled) {
+        std::cout << "task [" << id << "] wasn't previously compiled" << std::endl;
+      }
       return true;
     }
     const CommandWrapper& commandOld = *it->second;

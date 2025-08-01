@@ -91,6 +91,7 @@ CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler()
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
     std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
     m_taskCompilationStateManager.setProjectPath(projectPath);
+    m_taskCompilationStateManager.load();
   });
 }
 

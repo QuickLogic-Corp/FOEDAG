@@ -868,7 +868,6 @@ void MainWindow::loadFile(const QString& file) {
     m_projectFileLoader->Load(file);
     if (sourcesForm) sourcesForm->InitSourcesForm();
     if (m_compiler) {
-      m_compiler->loadCompilationCache();
       updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
     }
     updateTaskTable();
