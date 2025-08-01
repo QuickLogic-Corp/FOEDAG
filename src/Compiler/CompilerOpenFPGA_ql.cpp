@@ -1736,7 +1736,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
     CommandWrapperPtr command = it->second;
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), "synplify", command)) {
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -1747,7 +1747,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       } else {
         m_state = State::Synthesized;
         Message("Design " + ProjManager()->projectName() + " is synthesized");
-        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "sinplify", command);
+        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "synplify", command);
       }
     } else {
       Message("##################################################");
@@ -1779,7 +1779,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
   CommandWrapperPtr command = it->second;
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), command)) {
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), "yosys", command)) {
     Message("##################################################");
     Message(" Synthesis(yosys) skipped, not required");
     Message("##################################################");
@@ -1804,7 +1804,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), command);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "yosys", command);
     return true;
   }
 }
