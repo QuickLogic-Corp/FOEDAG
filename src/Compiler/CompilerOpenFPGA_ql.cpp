@@ -1726,13 +1726,13 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  const std::unordered_map<std::string, CommandWrapperPtr> commandsMap = buildSynthesisCommands();
+  const std::unordered_map<std::string, CommandWrapperPtr> commandsMap = getSynthesisCommands();
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
     auto it = commandsMap.find("sinplify");
     if (it == commandsMap.end()) {
-      // error message reported inside the buildSynthesisCommands
+      // error message reported inside the getSynthesisCommands
       return false;
     }
     CommandWrapperPtr command = it->second;
@@ -1775,7 +1775,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   // incr compilation
   auto it = commandsMap.find("yosys");
   if (it == commandsMap.end()) {
-    // error message reported inside the buildSynthesisCommands
+    // error message reported inside the getSynthesisCommands
     return false;
   }
   CommandWrapperPtr command = it->second;
@@ -7199,7 +7199,7 @@ std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandLEGACY(const QLDeviceTa
 }
 #endif // ENABLE_LEGACY_CMD_GUARD
 
-std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::buildSynthesisCommands()
+std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
 {
   std::unordered_map<std::string, CommandWrapperPtr> commands;
 

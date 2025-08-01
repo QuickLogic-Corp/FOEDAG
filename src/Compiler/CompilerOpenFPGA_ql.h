@@ -251,7 +251,7 @@ private:
   std::string getRoutingCommandLEGACY();             
   std::string getTimingAnalysisCommandLEGACY(const QLDeviceTarget& current_device_sta, const std::string& profile);
 #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
-  std::unordered_map<std::string, CommandWrapperPtr> buildSynthesisCommands();
+  std::unordered_map<std::string, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
   CommandWrapperPtr getRoutingCommand();             
