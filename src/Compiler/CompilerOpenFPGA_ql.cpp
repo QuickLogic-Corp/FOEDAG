@@ -1974,7 +1974,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
+std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target, const VprStageCfg& cfg) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2088,38 +2088,41 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
                     netlistFilePrefix + std::string(".net");
   }
 
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        ErrorMessage("Could not find the place file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
-        return "";
-      }
-    vpr_options += std::string(" --place_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-  }
-
-  else {
-        vpr_options += std::string(" --place_file") + 
+  if (cfg.use_place_file) {
+    if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+          ErrorMessage("Could not find the place file file in: " + 
+            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+          return "";
+        }
+      vpr_options += std::string(" --place_file") + 
                     std::string(" ") + 
-                    netlistFilePrefix + std::string(".place");
+                    QLSettingsManager::getStringValue("vpr", "filename", "place_file");
+    }
+
+    else {
+          vpr_options += std::string(" --place_file") + 
+                      std::string(" ") + 
+                      netlistFilePrefix + std::string(".place");
+    }
   }
 
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        ErrorMessage("Could not find the route file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
-        return "";
-      }
-    vpr_options += std::string(" --route_file") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-  }
-  else {
-        vpr_options += std::string(" --route_file") + 
+  if (cfg.use_route_file) {
+    if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+          ErrorMessage("Could not find the route file file in: " + 
+            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+          return "";
+        }
+      vpr_options += std::string(" --route_file") + 
                     std::string(" ") + 
-                    netlistFilePrefix + std::string(".route");
+                    QLSettingsManager::getStringValue("vpr", "filename", "route_file");
+    }
+    else {
+          vpr_options += std::string(" --route_file") + 
+                      std::string(" ") + 
+                      netlistFilePrefix + std::string(".route");
+    }
   }
 
 
@@ -2369,7 +2372,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
   return base_vpr_command;
 }
 
-CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
+CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target, const VprStageCfg& cfg) {
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2463,30 +2466,30 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     command->appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
   }
 
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        ErrorMessage("Could not find the place file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
-        return nullptr;
-    }
-    command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
-  }
-
-  else {
-    command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
-  }
-
-  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        ErrorMessage("Could not find the route file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
-        return nullptr;
+  if (cfg.use_place_file) {
+    if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+          ErrorMessage("Could not find the place file file in: " + 
+            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+          return nullptr;
       }
-    command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+      command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+    } else {
+      command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+    }
   }
-  else {
-    command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+
+  if (cfg.use_route_file) {
+    if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+          ErrorMessage("Could not find the route file file in: " + 
+            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+          return nullptr;
+        }
+      command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+    } else {
+      command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+    }
   }
 
 
@@ -7036,10 +7039,14 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
 
 std::string CompilerOpenFPGA_ql::getPackingCommandLEGACY() {
+  VprStageCfg cfg;
+  cfg.use_place_file = false;
+  cfg.use_route_file = false;
+
 #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandLEGACY() + " --pack";
+  std::string command = BaseVprCommandLEGACY(QLDeviceTarget(), cfg) + " --pack";
 #endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommandLEGACY();
+  std::string command = BaseVprCommandLEGACY(QLDeviceTarget(), cfg);
   if(command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     return "";
@@ -7070,7 +7077,11 @@ std::string CompilerOpenFPGA_ql::getPlacementCommandLEGACY() {
   std::string filepath_fpga_fix_pins_place_str;
   if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return "";
 
-  std::string command = BaseVprCommandLEGACY();
+  VprStageCfg cfg;
+  cfg.use_place_file = true;
+  cfg.use_route_file = false;
+
+  std::string command = BaseVprCommandLEGACY(QLDeviceTarget(), cfg);
   if(command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     return "";
@@ -8006,10 +8017,14 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
 }
 
 CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
+  VprStageCfg cfg;
+  cfg.use_place_file = false;
+  cfg.use_route_file = false;
+
 #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand() + " --pack";
+  std::string command = BaseVprCommand(QLDeviceTarget(), cfg) + " --pack";
 #endif // #if UPSTREAM_UNUSED
-  CommandWrapperPtr command = BaseVprCommand();
+  CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
   if(!command) {
     ErrorMessage("VPR Command is empty!");
     return nullptr;
@@ -8039,7 +8054,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   std::string filepath_fpga_fix_pins_place_str;
   if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 
-  CommandWrapperPtr command = BaseVprCommand();
+  VprStageCfg cfg;
+  cfg.use_place_file = true;
+  cfg.use_route_file = false;
+
+  CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
   if(!command) {
     ErrorMessage("Base VPR Command is empty!");
     return nullptr;

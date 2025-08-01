@@ -38,6 +38,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
 
+struct VprStageCfg {
+  bool use_place_file = true;
+  bool use_route_file = true;
+};
+
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
 //enum class SynthesisType { Yosys, QL, RS };
@@ -136,8 +141,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
-  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
+  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
+  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
 
   TaskCompilationStateManager& taskCompilationStateManager() { return m_taskCompilationStateManager; }
 
