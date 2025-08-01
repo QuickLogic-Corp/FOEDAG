@@ -36,6 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <memory>
 
 #define DEBUG_ENABLE_LEGACY_CMD_GUARD
+// #define DEBUG_ENABLE_PARANOIC_CHECK
 
 namespace FOEDAG {
 
@@ -151,7 +152,9 @@ private:
       if (exists) {
         result += m_commentStr + " " + name + " " + FileUtils::calcFileContentHash(resolvedFilePath) + "\n";
       } else {
+#ifdef DEBUG_ENABLE_PARANOIC_CHECK
         m_errors.push_back(resolvedFilePath.string() + " doesn't exist, cannot calc hash for it");
+#endif // DEBUG_ENABLE_PARANOIC_CHECK
       }
     }
 
@@ -159,9 +162,11 @@ private:
   }
 
   void checkPlaceholder(const std::string& script, const std::string& placeholder) {
+#ifdef DEBUG_ENABLE_PARANOIC_CHECK
     if (script.find(placeholder) == std::string::npos) {
       m_errors.push_back("script doesn't contain required placeholder:" + placeholder);
     }
+#endif // DEBUG_ENABLE_PARANOIC_CHECK
   }
 };
 using ScriptRendererPtr = std::shared_ptr<ScriptRenderer>;
