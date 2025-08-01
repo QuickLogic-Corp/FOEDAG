@@ -3482,6 +3482,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // 4 cryptdb: replace FPGA_AUTO with the generated layout name
     // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
     // 6 example logs: if currently running design within examples, clean up logs
+    // 7 remove other files: add_layout.py, add_layout_params.json if existing
     if(status == 0) {
       // packing succeeded with the generated vpr xml, package the device
 
@@ -3647,6 +3648,10 @@ bool CompilerOpenFPGA_ql::Packing() {
         FileUtils::removeFile(current_example_path_target_device / "aurora.log");
         FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
       }
+
+      // 7 remove other files: add_layout.py, add_layout_params.json if existing
+      FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout.py");
+      FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout_params.json");
 
 
       // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
