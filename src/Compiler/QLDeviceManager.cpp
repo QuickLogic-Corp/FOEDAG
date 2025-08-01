@@ -375,30 +375,31 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
   return dlg;
 }
 
-QLDeviceVariantLayout* QLDeviceManager::findDeviceLayoutVariantPtr(const std::string& family, 
-                                                                   const std::string& foundry,
-                                                                   const std::string& node,
-                                                                   const std::string& devicename,
-                                                                   const std::string& voltage_threshold,
-                                                                   const std::string& p_v_t_corner,
-                                                                   const std::string& layoutName)
-{
-  for (QLDeviceType& device: this->device_list) {
-    if ((device.family == family) && (device.foundry == foundry) && (device.node == node) && (device.devicename == devicename)) {
-      for (QLDeviceVariant& device_variant: device.device_variants) {
-        if ((device_variant.voltage_threshold == voltage_threshold) && (device_variant.p_v_t_corner == p_v_t_corner)) {
-          for (QLDeviceVariantLayout& layout: device_variant.device_variant_layouts) {
-            if (layout.name == layoutName) {
-              return &layout;
-            }
-          }
-        }
-      }
-    }
-  }
-  std::cout << "cannot find layout " << layoutName << " for family " << family << std::endl;
-  return nullptr;
-};
+// QLDeviceVariantLayout* QLDeviceManager::findDeviceLayoutVariantPtr(const std::string& family, 
+//                                                                    const std::string& foundry,
+//                                                                    const std::string& node,
+//                                                                    const std::string& devicename,
+//                                                                    const std::string& voltage_threshold,
+//                                                                    const std::string& p_v_t_corner,
+//                                                                    const std::string& layoutName)
+// {
+//   for (QLDeviceType& device: this->device_list) {
+//     if ((device.family == family) && (device.foundry == foundry) && (device.node == node) && (device.devicename == devicename)) {
+//       for (QLDeviceVariant& device_variant: device.device_variants) {
+//         if ((device_variant.voltage_threshold == voltage_threshold) && (device_variant.p_v_t_corner == p_v_t_corner)) {
+//           for (QLDeviceVariantLayout& layout: device_variant.device_variant_layouts) {
+//             if (layout.name == layoutName) {
+//               return &layout;
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
+//   std::cout << "cannot find layout " << layoutName << " for family " << family << std::endl;
+//   return nullptr;
+// };
+
 
 void QLDeviceManager::giveupDeviceSelectionWidget() {
 
@@ -779,139 +780,140 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
 }
 
 
-std::vector<std::shared_ptr<LayoutInfoHelper>>
-QLDeviceManager::ExtractDeviceAvailableResourcesFromVprLogContent(const std::string& content) const
-{
-  static QRegularExpression layoutPattern(R"(^Resource usage for device layout (\w+)...$)");
-  static QRegularExpression clbLogPattern(R"(^(\d+)\s+blocks of type: clb$)");
-  static QRegularExpression dspLogPattern(R"(^(\d+)\s+blocks of type: dsp$)");
-  static QRegularExpression bramLogPattern(R"(^(\d+)\s+blocks of type: bram$)");
-  static QRegularExpression ioLogPattern(R"(^(\d+)\s+blocks of type: io.+$)");
+// std::vector<std::shared_ptr<LayoutInfoHelper>>
+// QLDeviceManager::ExtractDeviceAvailableResourcesFromVprLogContent(const std::string& content) const
+// {
+//   static QRegularExpression layoutPattern(R"(^Resource usage for device layout (\w+)...$)");
+//   static QRegularExpression clbLogPattern(R"(^(\d+)\s+blocks of type: clb$)");
+//   static QRegularExpression dspLogPattern(R"(^(\d+)\s+blocks of type: dsp$)");
+//   static QRegularExpression bramLogPattern(R"(^(\d+)\s+blocks of type: bram$)");
+//   static QRegularExpression ioLogPattern(R"(^(\d+)\s+blocks of type: io.+$)");
 
-  auto tryExtractSubInt = [](const QRegularExpression& pattern, const std::string& content) -> int {
-    int result = 0;
-    auto match = pattern.match(content.c_str());
-    if (match.hasMatch() && (match.lastCapturedIndex() == 1)) {
-      bool ok;
-      int candidate = match.captured(1).toInt(&ok);
-      if (ok) {
-        result = candidate;
-      }
-    }
-    return result;
-  };
-  auto tryExtractSubStr = [](const QRegularExpression& pattern, const std::string& content) -> std::string {
-    std::string result;
-    auto match = pattern.match(content.c_str());
-    if (match.hasMatch() && (match.lastCapturedIndex() == 1)) {
-      result = match.captured(1).toStdString();
-    }
-    return result;
-  };
+//   auto tryExtractSubInt = [](const QRegularExpression& pattern, const std::string& content) -> int {
+//     int result = 0;
+//     auto match = pattern.match(content.c_str());
+//     if (match.hasMatch() && (match.lastCapturedIndex() == 1)) {
+//       bool ok;
+//       int candidate = match.captured(1).toInt(&ok);
+//       if (ok) {
+//         result = candidate;
+//       }
+//     }
+//     return result;
+//   };
+//   auto tryExtractSubStr = [](const QRegularExpression& pattern, const std::string& content) -> std::string {
+//     std::string result;
+//     auto match = pattern.match(content.c_str());
+//     if (match.hasMatch() && (match.lastCapturedIndex() == 1)) {
+//       result = match.captured(1).toStdString();
+//     }
+//     return result;
+//   };
 
-  QString buff(content.c_str());
-  QList<QString> lines = buff.split("\n");
+//   QString buff(content.c_str());
+//   QList<QString> lines = buff.split("\n");
 
-  std::vector<std::shared_ptr<LayoutInfoHelper>> result;
-  std::shared_ptr<LayoutInfoHelper> layoutInfo;
-  for (const QString& line: lines) {
-    std::string trimmedLine = line.trimmed().toStdString();
-    std::string layoutName = tryExtractSubStr(layoutPattern, trimmedLine);
-    if (!layoutName.empty() && (layoutName != "auto")) {
-      if (layoutInfo) {
-        result.push_back(layoutInfo);
-      }
-      layoutInfo = std::make_shared<LayoutInfoHelper>(layoutName);
-      layoutInfo->clb = 0;
-      layoutInfo->dsp = 0;
-      layoutInfo->bram = 0;
-      layoutInfo->io = 0;
-      continue;
-    }
-    int clb = tryExtractSubInt(clbLogPattern, trimmedLine);
-    if (layoutInfo && clb) {
-      layoutInfo->clb += clb;
-      continue;
-    }
-    int dsp = tryExtractSubInt(dspLogPattern, trimmedLine);
-    if (layoutInfo && dsp) {
-      layoutInfo->dsp += dsp;
-      continue;
-    }
-    int bram = tryExtractSubInt(bramLogPattern, trimmedLine);
-    if (layoutInfo && bram) {
-      layoutInfo->bram += bram;
-      continue;
-    }
-    int io = tryExtractSubInt(ioLogPattern, trimmedLine);
-    if (layoutInfo && io) {
-      layoutInfo->io += io;
-      continue;
-    }
-  }
+//   std::vector<std::shared_ptr<LayoutInfoHelper>> result;
+//   std::shared_ptr<LayoutInfoHelper> layoutInfo;
+//   for (const QString& line: lines) {
+//     std::string trimmedLine = line.trimmed().toStdString();
+//     std::string layoutName = tryExtractSubStr(layoutPattern, trimmedLine);
+//     if (!layoutName.empty() && (layoutName != "auto")) {
+//       if (layoutInfo) {
+//         result.push_back(layoutInfo);
+//       }
+//       layoutInfo = std::make_shared<LayoutInfoHelper>(layoutName);
+//       layoutInfo->clb = 0;
+//       layoutInfo->dsp = 0;
+//       layoutInfo->bram = 0;
+//       layoutInfo->io = 0;
+//       continue;
+//     }
+//     int clb = tryExtractSubInt(clbLogPattern, trimmedLine);
+//     if (layoutInfo && clb) {
+//       layoutInfo->clb += clb;
+//       continue;
+//     }
+//     int dsp = tryExtractSubInt(dspLogPattern, trimmedLine);
+//     if (layoutInfo && dsp) {
+//       layoutInfo->dsp += dsp;
+//       continue;
+//     }
+//     int bram = tryExtractSubInt(bramLogPattern, trimmedLine);
+//     if (layoutInfo && bram) {
+//       layoutInfo->bram += bram;
+//       continue;
+//     }
+//     int io = tryExtractSubInt(ioLogPattern, trimmedLine);
+//     if (layoutInfo && io) {
+//       layoutInfo->io += io;
+//       continue;
+//     }
+//   }
 
-  if (layoutInfo) { // add last item
-    result.push_back(layoutInfo);
-  }
+//   if (layoutInfo) { // add last item
+//     result.push_back(layoutInfo);
+//   }
 
-  return result;
-}
+//   return result;
+// }
 
 
-void QLDeviceManager::collectDeviceVariantAvailableResources(const QLDeviceVariant& device_variant) {
-  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
-  if (!compiler) {
-      return;
-  }
+// void QLDeviceManager::collectDeviceVariantAvailableResources(const QLDeviceVariant& device_variant) {
+//   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+//   if (!compiler) {
+//       return;
+//   }
 
-  // create command to ask vpr to spit out resource information for the variant:
-  auto [architectureFile, isTemporary] = GetArchitectureFileForDeviceVariant(device_variant);
-  if (architectureFile.empty()) {
-    return;
-  }
+//   // create command to ask vpr to spit out resource information for the variant:
+//   auto [architectureFile, isTemporary] = GetArchitectureFileForDeviceVariant(device_variant);
+//   if (architectureFile.empty()) {
+//     return;
+//   }
 
-  // use a 'placeholder' blif as vpr requires a blif to run, though we don't use it in 'resource_usage' mode
-  std::filesystem::path blif_filepath = std::filesystem::canonical(GlobalSession->Context()->DataPath() /
-                                                                   std::filesystem::path("..") /
-                                                                   std::filesystem::path("scripts") / 
-                                                                   "and2.blif");
+//   // use a 'placeholder' blif as vpr requires a blif to run, though we don't use it in 'resource_usage' mode
+//   std::filesystem::path blif_filepath = std::filesystem::canonical(GlobalSession->Context()->DataPath() /
+//                                                                    std::filesystem::path("..") /
+//                                                                    std::filesystem::path("scripts") / 
+//                                                                    "and2.blif");
 
-  std::string vpr_command =
-      ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->m_vprExecutablePath.string() + std::string(" ") +
-      architectureFile.string() + std::string(" ") +
-      blif_filepath.string() + std::string(" ") +
-      std::string("--show_resource_usage on");
+//   std::string vpr_command =
+//       ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->m_vprExecutablePath.string() + std::string(" ") +
+//       architectureFile.string() + std::string(" ") +
+//       blif_filepath.string() + std::string(" ") +
+//       std::string("--show_resource_usage on");
 
-  // execute vpr command
-  QProcess* process = compiler->ExecuteCommand(vpr_command);
+//   // execute vpr command
+//   QProcess* process = compiler->ExecuteCommand(vpr_command);
 
-  // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
-  QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, device_variant, architectureFile, isTemporary](int exitCode) {
-    std::vector<std::shared_ptr<LayoutInfoHelper>> layoutsInfo =
-        ExtractDeviceAvailableResourcesFromVprLogContent(process->readAllStandardOutput().toStdString());
-    process->deleteLater();
-    if (isTemporary && std::filesystem::exists(architectureFile)) {
-      std::filesystem::remove(architectureFile);
-    }
+//   // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
+//   QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, device_variant, architectureFile, isTemporary](int exitCode) {
+//     std::vector<std::shared_ptr<LayoutInfoHelper>> layoutsInfo =
+//         ExtractDeviceAvailableResourcesFromVprLogContent(process->readAllStandardOutput().toStdString());
+//     process->deleteLater();
+//     if (isTemporary && std::filesystem::exists(architectureFile)) {
+//       std::filesystem::remove(architectureFile);
+//     }
 
-    if (exitCode == 0) {
-      for (const std::shared_ptr<LayoutInfoHelper>& layoutInfo: layoutsInfo) {
-        QLDeviceVariantLayout* device_layout = findDeviceLayoutVariantPtr(device_variant.family, device_variant.foundry, device_variant.node, device_variant.devicename, device_variant.voltage_threshold, device_variant.p_v_t_corner, layoutInfo->name);
-        if (device_layout) {
-          device_layout->bram = layoutInfo->bram;
-          device_layout->dsp = layoutInfo->dsp;
-          device_layout->clb = layoutInfo->clb;
-          device_layout->io = layoutInfo->io;
-        }
-      }
-      // update GUI with the acquired resource information.
-      triggerUIUpdate();
-    } else {
-      std::cout << "Cannot fetch layout available resources. Process finished with err code " << exitCode << std::endl;
-    }
-  });
+//     if (exitCode == 0) {
+//       for (const std::shared_ptr<LayoutInfoHelper>& layoutInfo: layoutsInfo) {
+//         QLDeviceVariantLayout* device_layout = findDeviceLayoutVariantPtr(device_variant.family, device_variant.foundry, device_variant.node, device_variant.devicename, device_variant.voltage_threshold, device_variant.p_v_t_corner, layoutInfo->name);
+//         if (device_layout) {
+//           device_layout->bram = layoutInfo->bram;
+//           device_layout->dsp = layoutInfo->dsp;
+//           device_layout->clb = layoutInfo->clb;
+//           device_layout->io = layoutInfo->io;
+//         }
+//       }
+//       // update GUI with the acquired resource information.
+//       triggerUIUpdate();
+//     } else {
+//       std::cout << "Cannot fetch layout available resources. Process finished with err code " << exitCode << std::endl;
+//     }
+//   });
 
-}
+// }
+
 
 void QLDeviceManager::resetButtonClicked() {
 
@@ -948,16 +950,16 @@ void QLDeviceManager::parseDeviceData() {
   std::error_code ec;
 
   // get to the device_data dir path of the installation
-  std::filesystem::path root_device_data_dir_path = 
-     deviceDataRootDirPath();
+  std::filesystem::path root_device_data_dir_path = deviceDataRootDirPath();
 
   // clear the list before parsing
   device_list.clear();
 
   // each dir in the device_data is a family
   //    for each family, check for foundry dirs
-  //        for each foundry, check for node 
-  //            for each family-foundry-node dir, check the device_variants
+  //      for each foundry, check for node 
+  //        for each node, check for devicename 
+  //          for each family-foundry-node-devicename dir, check the device_variants
   
   // look at the directories inside the device_data_dir_path for 'family' entries
   for (const std::filesystem::directory_entry& dir_entry_family : 
@@ -1014,11 +1016,6 @@ void QLDeviceManager::parseDeviceData() {
                     device.devicename = devicename;
                     device.device_variants = device_variants;
 
-                    // disable this step for faster testing.
-                    // replace by resources.json implementation later.
-                    // for (const auto& device_variant: device.device_variants) {
-                    //   collectDeviceVariantAvailableResources(device_variant);
-                    // }
                     device_list.push_back(device);
                   }
                 }
@@ -1030,26 +1027,70 @@ void QLDeviceManager::parseDeviceData() {
     }
   }
 
+
+  // parse resources information for each device variant in the device_list:
+  for (QLDeviceType &device: device_list) {
+
+    for (QLDeviceVariant &device_variant: device.device_variants) {
+
+      for (QLDeviceVariantLayout &device_variant_layout: device_variant.device_variant_layouts) {
+
+        QLDeviceTarget _device_target = convertToDeviceTarget(device.family,
+                                                              device.foundry,
+                                                              device.node,
+                                                              device.devicename,
+                                                              device_variant.voltage_threshold,
+                                                              device_variant.p_v_t_corner,
+                                                              device_variant_layout.name);
+
+        std::vector<std::tuple<std::string, int>> resources_vector = deviceResourceInformation(_device_target);
+
+        for (const auto& resource_tuple : resources_vector) {
+          
+          std::string resourcename = std::get<0>(resource_tuple);
+          int resourcecount = std::get<1>(resource_tuple);
+
+          // this part is a carry-over, we should make the layout resource structure
+          // in c++ code generic, so we don't need to have these ifs ? TODO future
+          if(resourcename == "clb") {
+            device_variant_layout.clb = resourcecount;
+          }
+          if(resourcename == "io") {
+            device_variant_layout.io = resourcecount;
+          }
+          if(resourcename == "dsp") {
+            device_variant_layout.dsp = resourcecount;
+          }
+          if(resourcename == "bram") {
+            device_variant_layout.bram = resourcecount;
+          }
+        }
+      }
+      // collectDeviceVariantAvailableResources(device_variant);
+    }
+  }
+
+
   // DEBUG
-  // std::cout << "============ DEBUG++ ============" << std::endl;
-  // for (QLDeviceType device: device_list) {
-  //     std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
-  //     for (QLDeviceVariant variant: device.device_variants) {
-  //       std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
-  //       for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
-  //         std::cout <<  "    layout_name:" + layout.name + "\n" +
-  //                       "              w:" + std::to_string(layout.width) + "\n" +
-  //                       "              h:" + std::to_string(layout.height) //+ "\n" +
-  //                       // "            clb:" + std::to_string(layout.clb) + "\n" +
-  //                       // "             io:" + std::to_string(layout.io) + "\n" +
-  //                       // "           bram:" + std::to_string(layout.bram) + "\n" +
-  //                       // "            dsp:" + std::to_string(layout.dsp)
-  //                       << std::endl;
-  //       }
-  //     }
-  //     std::cout << "\n" << std::endl;
-  // }
-  // std::cout << "============ DEBUG-- ============" << std::endl;
+  std::cout << "============ DEBUG++ ============" << std::endl;
+  for (QLDeviceType device: device_list) {
+      std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
+      for (QLDeviceVariant variant: device.device_variants) {
+        std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
+        for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
+          std::cout <<  "    layout_name:" + layout.name + "\n" +
+                        "              w:" + std::to_string(layout.width) + "\n" +
+                        "              h:" + std::to_string(layout.height) + "\n" +
+                        "            clb:" + std::to_string(layout.clb) + "\n" +
+                        "             io:" + std::to_string(layout.io) + "\n" +
+                        "           bram:" + std::to_string(layout.bram) + "\n" +
+                        "            dsp:" + std::to_string(layout.dsp)
+                        << std::endl;
+        }
+      }
+      std::cout << "\n" << std::endl;
+  }
+  std::cout << "============ DEBUG-- ============" << std::endl;
   //DEBUG
 }
 
@@ -1581,63 +1622,64 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
 }
 
 
-std::pair<std::filesystem::path, bool> QLDeviceManager::GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant)
-{
-  bool is_temporary = false;
-  std::filesystem::path architectureFile;
-  std::filesystem::path device_type_dir_path =
-      std::filesystem::path(deviceDataRootDirPath() /
-                            device_variant.family /
-                            device_variant.foundry /
-                            device_variant.node /
-                            device_variant.devicename);
+// std::pair<std::filesystem::path, bool> QLDeviceManager::GetArchitectureFileForDeviceVariant(const QLDeviceVariant& device_variant)
+// {
+//   bool is_temporary = false;
+//   std::filesystem::path architectureFile;
+//   std::filesystem::path device_type_dir_path =
+//       std::filesystem::path(deviceDataRootDirPath() /
+//                             device_variant.family /
+//                             device_variant.foundry /
+//                             device_variant.node /
+//                             device_variant.devicename);
 
-  std::filesystem::path device_variant_dir_path =
-      std::filesystem::path(deviceDataRootDirPath() /
-                            device_variant.family /
-                            device_variant.foundry /
-                            device_variant.node /
-                            device_variant.devicename /
-                            device_variant.voltage_threshold /
-                            device_variant.p_v_t_corner);
+//   std::filesystem::path device_variant_dir_path =
+//       std::filesystem::path(deviceDataRootDirPath() /
+//                             device_variant.family /
+//                             device_variant.foundry /
+//                             device_variant.node /
+//                             device_variant.devicename /
+//                             device_variant.voltage_threshold /
+//                             device_variant.p_v_t_corner);
 
-  // prefer to use the unencrypted file, if available.
-  architectureFile =
-      std::filesystem::path(device_variant_dir_path / std::string("vpr.xml"));
+//   // prefer to use the unencrypted file, if available.
+//   architectureFile =
+//       std::filesystem::path(device_variant_dir_path / std::string("vpr.xml"));
 
-  // if not, use the encrypted file after decryption.
-  std::error_code ec;
-  if (!std::filesystem::exists(architectureFile, ec)) {
+//   // if not, use the encrypted file after decryption.
+//   std::error_code ec;
+//   if (!std::filesystem::exists(architectureFile, ec)) {
 
-    std::filesystem::path vpr_xml_en_path =
-          std::filesystem::path(device_variant_dir_path / std::string("vpr.xml.en"));
-    architectureFile = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath(true);
-    is_temporary = true;
+//     std::filesystem::path vpr_xml_en_path =
+//           std::filesystem::path(device_variant_dir_path / std::string("vpr.xml.en"));
+//     architectureFile = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath(true);
+//     is_temporary = true;
 
-    std::filesystem::path cryptdbPath =
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
-                                                           device_variant.family +
-                                                           "_" +
-                                                           device_variant.foundry +
-                                                           "_" +
-                                                           device_variant.node +
-                                                           "_" +
-                                                           device_variant.devicename);
+//     std::filesystem::path cryptdbPath =
+//         CRFileCryptProc::getInstance()->getCryptDBFileName(device_type_dir_path.string(),
+//                                                            device_variant.family +
+//                                                            "_" +
+//                                                            device_variant.foundry +
+//                                                            "_" +
+//                                                            device_variant.node +
+//                                                            "_" +
+//                                                            device_variant.devicename);
 
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
-      std::cout << "load cryptdb failed!" << std::endl;
-      return std::make_pair(std::filesystem::path(""), is_temporary);
-    }
+//     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
+//       std::cout << "load cryptdb failed!" << std::endl;
+//       return std::make_pair(std::filesystem::path(""), is_temporary);
+//     }
 
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
-      std::cout << "decryption failed!" << std::endl;
-      return std::make_pair(std::filesystem::path(""), is_temporary);
-    }
-  }
+//     if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
+//       std::cout << "decryption failed!" << std::endl;
+//       return std::make_pair(std::filesystem::path(""), is_temporary);
+//     }
+//   }
 
-  //Message( std::string("Using vpr.xml for: ") + convertToDeviceString(device_variant) );
-  return std::make_pair(architectureFile, is_temporary);
-}
+//   //Message( std::string("Using vpr.xml for: ") + convertToDeviceString(device_variant) );
+//   return std::make_pair(architectureFile, is_temporary);
+// }
+
 
 std::string QLDeviceManager::getCurrentDeviceTargetString() {
 
@@ -2393,6 +2435,54 @@ std::filesystem::path QLDeviceManager::deviceConfigJSONPath(QLDeviceTarget devic
   }
 
   return device_config_json_path;
+}
+
+
+std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInformation(QLDeviceTarget device_target){
+
+  // the resource information for the target device is stored in a "resources.json" in the device_type_dir_path
+  // as the resouces are (must be) the same for all the variants of a device-type.
+  // {
+  //   "layout_1": {
+  //     "resourcename1": resourcecount1,
+  //     "resourcename2": resourcecount2,
+  //     ...
+  //   },
+  //   "layout_2": {
+  //     "resourcename1": resourcecount1,
+  //     "resourcename2": resourcecount2,
+  //     ...
+  //   },
+  //   ...
+  // }
+
+  // we extract the information for specific layout from the json file, and structure it into a vector of tuples.
+  // each tuple has information about a specific resource type and its count, such as clb, dsp, bram etc.
+  // vector for the device target will have tuples like below:
+  // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
+
+  std::vector<std::tuple<std::string, int>> resources_vector;
+
+  std::filesystem::path device_resources_json_filepath = deviceTypeDirPath(device_target) / std::string("resources.json");
+
+  if(FileUtils::FileExists(device_resources_json_filepath)) {
+
+    std::ifstream device_resources_json_path_ifstream(device_resources_json_filepath.string());
+    json device_resources_json = json::parse(device_resources_json_path_ifstream);
+
+    // std::cout << device_resources_json.dump() << std::endl;
+    
+    if( device_resources_json.contains(device_target.device_variant_layout.name) ) {
+      auto layout_resources_json = device_resources_json[device_target.device_variant_layout.name];
+      for (auto [resource_name, resource_count] : layout_resources_json.items()) {
+        // std::cout << "resource_name: " << resource_name << std::endl;
+        // std::cout << "resource_count: " << resource_count << std::endl;
+        resources_vector.push_back(std::make_tuple(resource_name, resource_count));
+      }
+    }
+  }
+
+  return resources_vector;
 }
 
 
