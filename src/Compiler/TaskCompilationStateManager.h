@@ -20,6 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <Compiler/Compiler.h>
+
 #include "nlohmann_json/json.hpp"
 #include "Utils/SerializationUtils.h"
 
@@ -34,6 +36,10 @@ namespace FOEDAG {
 constexpr const char* COMPILATION_CACHE_FILENAME = "compilation_cache.json";
 class TaskCompilationStateManager {
 public:
+  TaskCompilationStateManager(Compiler* compiler): m_compiler(compiler) {
+
+  }
+
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
     return isCompilationRequired(key(taskId), command);
   }
@@ -56,7 +62,13 @@ public:
 
   void clear() {
     m_taskCommandsMap.clear();
-    FileUtils::removeFile(m_filePath);
+    if (!FileUtils::removeFile(m_filePath)) {
+      if (CommandWrapper::projectPath().empty()) {
+        m_compiler->ErrorMessage(logPrefix() + "Cannot remove " + m_filePath.string() + " because the project path is not yet known. "
+"If you are attempting to run clear_compilation_cache from Tcl, make sure you run it "
+"immediately before the compilation task, after the project folder has been instantiated.");
+      }
+    }
   }
 
   void load() {
@@ -77,8 +89,10 @@ public:
 
 private:
   bool m_isLogEnabled = true;
+  Compiler* m_compiler = nullptr; // used for log messages
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
+  std::string m_logPrefix = "task_comp_manager: ";
 
   std::string key(int taskId) const {
     return std::to_string(taskId);
@@ -95,7 +109,7 @@ private:
     auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
       if (m_isLogEnabled) {
-        std::cout << "task [" << id << "] wasn't previously compiled" << std::endl;
+        m_compiler->Message(logPrefix() + "task [" + id + "] wasn't previously compiled");
       }
       return true;
     }
@@ -104,7 +118,7 @@ private:
     if (!diff->isEmpty()) {
       if (m_isLogEnabled) {
         for (const std::string& msg: diff->messages()) {
-          std::cout << "task(" << id << "), detects " << msg << std::endl;
+          m_compiler->Message(logPrefix() + "task(" + id + "), detects " + msg);
         }
       }
       return true;
@@ -119,6 +133,8 @@ private:
       FileUtils::WriteToFile(m_filePath, json.dump());
     }
   }
+
+  const std::string& logPrefix() const { return m_logPrefix; }
 };
 
 }  // namespace FOEDAG

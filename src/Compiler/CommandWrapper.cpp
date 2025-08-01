@@ -23,9 +23,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 namespace FOEDAG {
 
-std::string ScriptRenderer::s_projectPath = "";
+std::filesystem::path ScriptRenderer::s_projectPath;
 
-std::string CommandWrapper::s_projectPath = "";
+std::filesystem::path CommandWrapper::s_projectPath;
 std::unordered_set<std::string> CommandWrapper::s_bigFilesSet = {};
 
 }  // namespace FOEDAG

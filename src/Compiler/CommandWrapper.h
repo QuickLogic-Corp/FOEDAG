@@ -42,7 +42,7 @@ namespace FOEDAG {
 constexpr const char* FILES_INFO_PLACEHOLDER = "${FILES_INFO}";
 
 class ScriptRenderer {
-  static std::string s_projectPath;
+  static std::filesystem::path s_projectPath;
 
 public:
 ScriptRenderer()=default;
@@ -329,7 +329,7 @@ private:
 };
 
 class CommandWrapper {
-  static std::string s_projectPath;
+  static std::filesystem::path s_projectPath;
   static std::unordered_set<std::string> s_bigFilesSet;
 
 public:
@@ -340,6 +340,7 @@ public:
   }
 
   static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
+  static const std::filesystem::path& projectPath() { return s_projectPath; }
   static void addBigFileName(const std::string& fileName) { s_bigFilesSet.insert(fileName); }
 
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD

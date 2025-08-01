@@ -86,7 +86,7 @@ using namespace FOEDAG;
 
 #define USE_INCREMENTAL_COMPILATION
 
-CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler()
+CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
 {
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
     std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
@@ -8195,12 +8195,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
 
   return taCommand;
 }
-
-void CompilerOpenFPGA_ql::loadCompilationCache()
-{
-  m_taskCompilationStateManager.load();
-}
-
 
 void CompilerOpenFPGA_ql::clearCompilationCache()
 {
