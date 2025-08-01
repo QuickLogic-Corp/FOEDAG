@@ -2852,7 +2852,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.LEGACY.cmd"), commandOld);
   if (!command->compareIgnoringTempPath(commandOld)) {
-    qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
+    ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
     qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
     qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
@@ -3193,8 +3193,8 @@ bool CompilerOpenFPGA_ql::Placement() {
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.LEGACY.cmd"), commandOld);
 
   if (!command->compareIgnoringTempPath(commandOld)) {
-    qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
-    qInfo() << "~~~ LEGACY=" << QString::fromStdString(commandOld);
+    ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
+    qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
     qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
@@ -3392,8 +3392,8 @@ bool CompilerOpenFPGA_ql::Route() {
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.LEGACY.cmd"), commandOld);
 
   if (!command->compareIgnoringTempPath(commandOld)) {
-    qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
-    qInfo() << "~~~ LEGACY=" << QString::fromStdString(commandOld);
+    ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
+    qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
     qInfo() << "~~~ new=" << QString::fromStdString(command->string());
     return false;
   }  
@@ -3793,8 +3793,8 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
     if (!command->compareIgnoringTempPath(commandOld)) {
-      qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
-      qInfo() << "~~~ LEGACY=" << QString::fromStdString(commandOld);
+      ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
+      qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
       qInfo() << "~~~ new=" << QString::fromStdString(command->string());
       return false;
     }  
@@ -3850,9 +3850,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
       std::string commandOld = BaseStaCommandLEGACY() + " " + BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName).string();
       if (!taCommand->compareIgnoringTempPath(commandOld)) {
-        qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
-        qInfo() << "~~~ LEGACY=" << QString::fromStdString(commandOld);
-        qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
+        ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
+        qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
+        qInfo() << "~~~ new=" << QString::fromStdString(command->string());
         return false;
       }  
 #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
@@ -3876,9 +3876,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef DEBUG_ENABLE_LEGACY_CMD_GUARD
     std::string commandOld = getTimingAnalysisCommandLEGACY(current_device_sta, profile);
     if (!taCommand->compareIgnoringTempPath(commandOld)) {
-      qInfo() << "~~~ NEW COMMAND DOESN'T MATCH TO LEGACY";
-      qInfo() << "~~~ LEGACY=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
+      ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
+      qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
+      qInfo() << "~~~ new=" << QString::fromStdString(command->string());
       return false;
     }  
 #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD

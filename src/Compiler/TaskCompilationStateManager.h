@@ -101,7 +101,7 @@ private:
     if (!diff->isEmpty()) {
       if (m_isLogEnabled) {
         for (const std::string& msg: diff->messages()) {
-          std::cout << id << " detect " << msg << std::endl;
+          std::cout << "task(" << id << "), detects " << msg << std::endl;
         }
       }
       return true;
