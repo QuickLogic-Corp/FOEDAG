@@ -1975,7 +1975,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target, const VprStageCfg& cfg) {
+std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2089,41 +2089,38 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
                     netlistFilePrefix + std::string(".net");
   }
 
-  if (cfg.use_place_file) {
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-          ErrorMessage("Could not find the place file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
-          return "";
-        }
-      vpr_options += std::string(" --place_file") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "place_file");
-    }
 
-    else {
-          vpr_options += std::string(" --place_file") + 
-                      std::string(" ") + 
-                      netlistFilePrefix + std::string(".place");
-    }
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        ErrorMessage("Could not find the place file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        return "";
+      }
+    vpr_options += std::string(" --place_file") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("vpr", "filename", "place_file");
   }
 
-  if (cfg.use_route_file) {
-    if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-          ErrorMessage("Could not find the route file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
-          return "";
-        }
-      vpr_options += std::string(" --route_file") + 
+  else {
+        vpr_options += std::string(" --place_file") + 
                     std::string(" ") + 
-                    QLSettingsManager::getStringValue("vpr", "filename", "route_file");
-    }
-    else {
-          vpr_options += std::string(" --route_file") + 
-                      std::string(" ") + 
-                      netlistFilePrefix + std::string(".route");
-    }
+                    netlistFilePrefix + std::string(".place");
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        ErrorMessage("Could not find the route file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        return "";
+      }
+    vpr_options += std::string(" --route_file") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("vpr", "filename", "route_file");
+  }
+  else {
+        vpr_options += std::string(" --route_file") + 
+                    std::string(" ") + 
+                    netlistFilePrefix + std::string(".route");
   }
 
 
@@ -2720,13 +2717,23 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   return command;
 }
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 CommandWrapperPtr CompilerOpenFPGA_ql::BaseStaCommand() {
   CommandWrapperPtr command = std::make_shared<CommandWrapper>(m_staExecutablePath.string());
   command->append("-exit");  // allow open sta exit its tcl shell even there is error
   return command;
 }
+#else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+std::string CompilerOpenFPGA_ql::BaseStaCommand() {
+  std::string command =
+      m_staExecutablePath.string() +
+      std::string(
+          " -exit ");  // allow open sta exit its tcl shell even there is error
+  return command;
+}
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
-std::filesystem::path CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
+std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
                                             std::string netlistFileName,
                                             std::string sdfFileName,
                                             std::string sdcFileName) {
@@ -2746,7 +2753,7 @@ std::filesystem::path CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName
   std::ofstream ofssta(openStaFile);
   ofssta << script << "\n";
   ofssta.close();
-  return std::filesystem::path{openStaFile};
+  return openStaFile;
 }
 
 bool CompilerOpenFPGA_ql::Packing() {
@@ -3469,6 +3476,7 @@ QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staP
   return QLDeviceTarget();
 }
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 bool CompilerOpenFPGA_ql::TimingAnalysis() {
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
@@ -3843,6 +3851,396 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
   return true;
 }
+
+#else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
+bool CompilerOpenFPGA_ql::TimingAnalysis() {
+  if (!ProjManager()->HasDesign()) {
+    ErrorMessage("No design specified");
+    return false;
+  }
+
+  CleanFiles(Action::STA); // this is required to remove the not actual multi corner reports left from previous run
+
+#if UPSTREAM_UNUSED
+  if (!HasTargetDevice()) return false;
+#endif // #if UPSTREAM_UNUSED
+  if (TimingAnalysisOpt() == STAOpt::Clean) {
+    Message("Cleaning TimingAnalysis results for " +
+            ProjManager()->projectName());
+    TimingAnalysisOpt(STAOpt::None);
+    m_state = State::Routed;
+    CleanFiles(Action::STA);
+    return true;
+  }
+
+  PERF_LOG("TimingAnalysis has started");
+  Message("##################################################");
+  Message("Timing Analysis for design: " + ProjManager()->projectName());
+  Message("##################################################");
+
+#ifdef _WIN32
+
+// under WIN32, running the analysis stage alone causes issues, hence we call the
+// route and analysis stages together
+// hence, we can also be at Placed state here.
+  // state check: requires "Placed"/"Routed" to be completed.
+  // we should be *atleast* at "Placed"/"Routed" or later state.
+  if( (m_state == State::Placed) ||
+      (m_state == State::Routed) ||
+      (m_state == State::TimingAnalyzed) ||
+      (m_state == State::PowerAnalyzed) ||
+      (m_state == State::BistreamGenerated) ) {
+  }
+  else {
+    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in placed/routed state"));
+    return false;
+  }
+
+#else // #ifdef _WIN32
+
+  // state check: requires "Routed" to be completed.
+  // we should be *atleast* at "Routed" or later state.
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + std::string(net_file_path));
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + std::string(net_file_path));
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + std::string(place_file_path));
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + std::string(place_file_path));
+      m_state = State::Placed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      Message("Attempting to read the route file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        Message("Found the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+        m_state = State::Routed;
+      } else {
+        ErrorMessage("Could not find the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      }
+  } else { 
+    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.route");
+    Message("Attempting to read the route file from: " + route_file_path.string());
+    if (fs::exists(route_file_path)) {
+      Message("Found the route file in: " + route_file_path.string());
+      m_state = State::Routed;
+    }
+  }
+  if( (m_state == State::Routed) ||
+      (m_state == State::TimingAnalyzed) ||
+      (m_state == State::PowerAnalyzed) ||
+      (m_state == State::BistreamGenerated) ) {
+  }
+  else {
+    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in routed state"));
+    return false;
+  }
+
+#endif // #ifdef _WIN32
+
+#if UPSTREAM_UNUSED
+  if (!FileUtils::FileExists(m_vprExecutablePath)) {
+    ErrorMessage("Cannot find executable: " + m_vprExecutablePath.string());
+    return false;
+  }
+#endif // #if UPSTREAM_UNUSED
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return false;
+  }
+
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return false;
+  }
+
+  // Check the STA specified device, and if it is different from the current target device
+  // explicitly ask to form the base vpr command using the specific variant instead of the
+  // current target device:
+  // currently we only expect the p_v_t_corner to be specified in JSON, but the code
+  // supports voltage_threshold also, if it is added to the JSON.
+  std::map<std::string, QLDeviceTarget> devices;
+  if (!collectStaDevices(devices)) {
+    return false;
+  }
+
+  if (devices.empty()) {
+    // run sta with current device
+    devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  }
+
+  for (const auto& [profile, device]: devices) {
+    if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {
+      if (!TimingAnalysisHelper(device, profile)) {
+        return false;
+      }
+    } else {
+      ErrorMessage("Attempt to run STA on invalid device");
+      return false;
+    }
+  }
+  return true;
+}
+
+
+std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
+{
+  std::string sta_vpr_options;
+#ifndef _WIN32
+  // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+  // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+  // due to mismatch in switch blocks, which needs to be fixed yet.
+  // https://github.com/QL-Proprietary/aurora2/issues/1267
+  // Until this is fixed, we need to run the route and analysis stages together.
+  if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+    sta_vpr_options += std::string(" --route");
+  }
+#endif // #ifdef _WIN32
+    
+  // As the architecture file for PnR will not match the architecture file for STA in this case,
+  // vpr will fail on verifying the file hashes, so explicitly ask vpr to ignore the 
+  // file hash checks.
+  // example error message:
+  // >> Netlist was generated from a different architecture file (loaded architecture ID: SHA256:f73c6dffee1739f500e80ed13797d3bb78fb14ef9904f06368c8c0a407205617, netlist file architecture ID: SHA256:af8742ca39cc2f748b691015adaef1561ea258f433904565b2f84e00954c9e87)
+  sta_vpr_options += std::string(" --verify_file_digests off");
+
+  return sta_vpr_options;
+}
+
+bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& profile)
+{
+  std::string sta_suffix{};
+  if (!profile.empty()) {
+    sta_suffix = "_" + profile;
+  } 
+
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this, sta_suffix] {
+    if (sta_suffix.empty()) {
+      // Rename log file
+      copyLog(ProjManager(), "vpr_stdout.log", TIMING_ANALYSIS_LOG);
+    } else {
+      std::string corner_timing_analysis_log = StringUtils::replaceAll(TIMING_ANALYSIS_LOG_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), "vpr_stdout.log", corner_timing_analysis_log);
+      removeLog(ProjManager(), "vpr_stdout.log");
+
+      std::string corner_report_timing_hold = StringUtils::replaceAll(TA_REPORT_TIMING_HOLD_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), TA_REPORT_TIMING_HOLD, corner_report_timing_hold);
+      removeLog(ProjManager(), TA_REPORT_TIMING_HOLD);
+      
+      std::string corner_report_timing_setup = StringUtils::replaceAll(TA_REPORT_TIMING_SETUP_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), TA_REPORT_TIMING_SETUP, corner_report_timing_setup);
+      removeLog(ProjManager(), TA_REPORT_TIMING_SETUP);
+    }
+  });
+
+  std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
+
+  if (TimingAnalysisOpt() == STAOpt::View) {
+
+    TimingAnalysisOpt(STAOpt::None);
+    
+#ifdef _WIN32
+    // under WIN32, running the analysis stage alone causes issues, hence we call the
+    // route and analysis stages together
+    std::string taCommand = BaseVprCommandLEGACY() + " --route --analysis --disp on";
+#else // #ifdef _WIN32
+    std::string taCommand = BaseVprCommandLEGACY(current_device_sta) + " --analysis --disp on";
+#endif // #ifdef _WIN32
+
+    if(!profile.empty()){
+      taCommand += uniqueStaVprOptions();
+    }
+
+    const int status = ExecuteAndMonitorSystemCommand(taCommand);
+    if (status) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                   " place and route view failed");
+      return false;
+    }
+    return true;
+  }
+
+#if UPSTREAM_UNUSED
+  if (FileUtils::IsUptoDate(
+          (std::filesystem::path(ProjManager()->projectPath()) /
+           std::string(ProjManager()->projectName() + "_post_synth.route"))
+              .string(),
+          (std::filesystem::path(ProjManager()->projectPath()) /
+           std::string(ProjManager()->projectName() + "_sta.cmd"))
+              .string())) {
+    Message("Design " + ProjManager()->projectName() + " timing didn't change");
+    return true;
+  }
+#endif // #if UPSTREAM_UNUSED
+  std::string taCommand;
+  // use OpenSTA to do the job
+  if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
+    // allows SDF to be generated for OpenSTA
+    std::string command = BaseVprCommandLEGACY() + " --gen_post_synthesis_netlist on";
+    std::ofstream ofs(sta_cmd_filepath);
+    ofs.close();
+    int status = ExecuteAndMonitorSystemCommand(command);
+    if (status) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                   " timing analysis failed");
+      return false;
+    }
+    // find files
+    std::string libFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".lib"))
+            .string();  // this is the standard sdc file
+    std::string netlistFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.v"))
+            .string();
+    std::string sdfFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.sdf"))
+            .string();
+    // std::string sdcFile = ProjManager()->getConstrFiles();
+    std::string sdcFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".sdc"))
+            .string();  // this is the standard sdc file
+    if (std::filesystem::is_regular_file(libFileName) &&
+        std::filesystem::is_regular_file(netlistFileName) &&
+        std::filesystem::is_regular_file(sdfFileName) &&
+        std::filesystem::is_regular_file(sdcFileName)) {
+      taCommand =
+          BaseStaCommand() + " " +
+          BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName);
+      std::ofstream ofs(sta_cmd_filepath);
+      ofs << taCommand << std::endl;
+      ofs.close();
+    } else {
+      ErrorMessage(
+          "No required design info generated for user design, required "
+          "for timing analysis");
+      return false;
+    }
+  } 
+  else {
+    // use vpr/tatum engine
+
+    std::string vpr_options;
+
+    taCommand = BaseVprCommandLEGACY(current_device_sta);
+    if(taCommand.empty()) {
+        ErrorMessage("Base VPR Command is empty!");
+        return false;
+    }
+
+    // custom vpr command-line options for analysis stage
+    // it is upto the user to ensure that the options are passed in correctly.
+    if( !QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str").empty() ) {
+      // first, trim the entire string to eliminate any extra whitespace in the front and the back
+      std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
+      vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      // add the options string to the end of the vpr options with one whitespace separator
+      vpr_options += std::string(" ") + vpr_custom_options_string;
+    }
+
+    taCommand += vpr_options;
+
+    if(!profile.empty()){
+      taCommand += uniqueStaVprOptions();
+    }
+    
+#ifdef _WIN32
+
+    // under WIN32, running the analysis stage along causes issues, hence we call the
+    // route and analysis stages together
+    taCommand += std::string(" --route");
+
+#endif // #ifdef _WIN32
+
+    taCommand += std::string(" --analysis");
+
+    std::ofstream ofs(sta_cmd_filepath);
+    ofs << taCommand << std::endl;
+    ofs.close();
+  }
+
+  int status = ExecuteAndMonitorSystemCommand(taCommand);
+  CleanTempFiles();
+  if (status) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " timing analysis failed");
+    return false;
+  }
+
+  Message("Design " + ProjManager()->projectName() + " is timing analysed");
+
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+// hence, we set the state here, so that just sta can be called instead of route and sta as well.
+  m_state = State::Routed;
+#endif // #ifdef _WIN32
+
+  return true;
+}
+
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 bool CompilerOpenFPGA_ql::PowerAnalysis() {
   // Using a Scope Guard so this will fire even if we exit mid function
@@ -7836,6 +8234,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
   return command;
 }
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile)
 {
   std::string sta_suffix{};
@@ -7921,6 +8320,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
   return taCommand;
 }
 
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
 void CompilerOpenFPGA_ql::clearCompilationCache()
 {
   m_taskCompilationStateManager.clear();
@@ -7973,6 +8374,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   if (!isTimingAnalysysStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(TIMING_SIGN_OFF);
     m_state = State::Routed;
@@ -7982,7 +8384,12 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
       m_state = State::TimingAnalyzed;
     }
   }
-    
+#else
+  if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
+    m_state = State::TimingAnalyzed;
+  }
+#endif
+
   if (GetTaskManager()->tryRestoreSuccessFor(POWER)) {
     m_state = State::PowerAnalyzed;
   }
@@ -8020,6 +8427,7 @@ bool CompilerOpenFPGA_ql::isRoutingStatusActual()
   return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command);
 }
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
 {
   std::map<std::string, QLDeviceTarget> devices;
@@ -8039,5 +8447,6 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
     return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), command);
   }
 }
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 // clang-format on

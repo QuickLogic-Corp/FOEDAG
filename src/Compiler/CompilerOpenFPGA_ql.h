@@ -141,7 +141,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
+  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
 
   std::string staProfile(const QLDeviceTarget& device) const;  
@@ -229,8 +229,12 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   CommandWrapperPtr BaseStaCommand();
-  std::filesystem::path BaseStaScript(std::string libFileName,
+#else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+  std::string BaseStaCommand();
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+  virtual std::string BaseStaScript(std::string libFileName,
                                     std::string netlistFileName,
                                     std::string sdfFileName,
                                     std::string sdcFileName);
@@ -246,15 +250,19 @@ private:
   std::unordered_map<std::string, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
-  CommandWrapperPtr getRoutingCommand();             
+  CommandWrapperPtr getRoutingCommand();      
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA       
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
+#endif
 
   void invalidateTaskStatuses() override final;
   bool isSynthesisStatusActual();
   bool isPackingStatusActual();
   bool isPlacementStatusActual();
   bool isRoutingStatusActual();
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   bool isTimingAnalysysStatusActual();
+#endif
 
   void clearCompilationCache() override final;
   bool hasCompilationCache() const override final;
