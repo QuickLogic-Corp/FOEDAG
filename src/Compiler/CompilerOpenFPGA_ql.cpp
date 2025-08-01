@@ -3754,10 +3754,8 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
 
   if (TimingAnalysisOpt() == STAOpt::View) {
-
-    TimingAnalysisOpt(STAOpt::None);
-    
     CommandWrapperPtr taCommand = getTimingAnalysisCommand(current_device_sta, profile);
+    TimingAnalysisOpt(STAOpt::None); // this must be set after command constructing
     if (!taCommand) {
       return false;
     }
@@ -8104,10 +8102,10 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    CommandWrapperPtr taCommand = BaseVprCommand();
-    command->append("--route");
-    command->append("--analysis");
-    command->append("--disp on");
+    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
+    taCommand->append("--route");
+    taCommand->append("--analysis");
+    taCommand->append("--disp", "on");
 #else // #ifdef _WIN32
     CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
     taCommand->append("--analysis");
