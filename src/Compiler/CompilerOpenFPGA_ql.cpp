@@ -3560,7 +3560,7 @@ bool CompilerOpenFPGA_ql::Packing() {
           CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
                                                               QLDeviceManager::getInstance()->convertToDeviceTypeString());
       std::string source_device_cryptdb_filename = 
-          source_device_cryptdb_filepath.filename();
+          source_device_cryptdb_filepath.filename().string();
 
       std::string target_device_copy_cryptdb_filename = 
           StringUtils::replaceAll(source_device_cryptdb_filename,
@@ -3621,7 +3621,7 @@ bool CompilerOpenFPGA_ql::Packing() {
         // then we are running an example within the FPGA_AUTO device itself, the logs need to be cleaned up
         // where it has been copied into the newly created device
 
-        std::string current_project_name = current_project_path.filename();
+        std::string current_project_name = current_project_path.filename().string();
 
         std::filesystem::path current_example_path = 
             current_project_path.parent_path();
