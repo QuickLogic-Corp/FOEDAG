@@ -8,5 +8,6 @@
         <file>cross.png</file>
         <file>search.png</file>
         <file>loading.gif</file>
+        <file>warning.png</file>
     </qresource>
 </RCC>

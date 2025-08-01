@@ -258,6 +258,13 @@ private:
   CommandWrapperPtr getRoutingCommand();             
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
 
+  void invalidateTaskStatuses() override final;
+  bool isSynthesisStatusActual();
+  bool isPackingStatusActual();
+  bool isPlacementStatusActual();
+  bool isRoutingStatusActual();
+  bool isTimingAnalysysStatusActual();
+
   void clearCompilationCache() override final;
   bool hasCompilationCache() const override final;
 };

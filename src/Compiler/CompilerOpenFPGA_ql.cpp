@@ -8206,4 +8206,113 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
   return !m_taskCompilationStateManager.isEmpty();
 }
 
+void CompilerOpenFPGA_ql::invalidateTaskStatuses()
+{
+  if (!isSynthesisStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
+    m_state = State::IPGenerated;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(SYNTHESIS)) {
+      m_state = State::Synthesized;
+    }
+  }
+
+  if (!isPackingStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(PACKING);
+    m_state = State::Synthesized;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(PACKING)) {
+      m_state = State::Packed;
+    }
+  }
+
+  if (!isPlacementStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(PLACEMENT);
+    m_state = State::Packed;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(PLACEMENT)) {
+      m_state = State::Placed;
+    }
+  }
+
+  if (!isRoutingStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(ROUTING);
+    m_state = State::Placed;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(ROUTING)) {
+      m_state = State::Routed;
+    }
+  }
+
+  if (!isTimingAnalysysStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(TIMING_SIGN_OFF);
+    m_state = State::Routed;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
+      m_state = State::TimingAnalyzed;
+    }
+  }
+    
+  if (GetTaskManager()->tryRestoreSuccessFor(POWER)) {
+    m_state = State::PowerAnalyzed;
+  }
+  if (GetTaskManager()->tryRestoreSuccessFor(BITSTREAM)) {
+    m_state = State::BistreamGenerated;
+  }
+}
+
+bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
+{
+  std::unordered_map<std::string, CommandWrapperPtr> commands = getSynthesisCommands();
+  for (const auto& [profile, command]: commands) {
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), profile, command)) {
+      return false;
+    }
+  }
+  return !commands.empty();  
+}
+
+bool CompilerOpenFPGA_ql::isPackingStatusActual()
+{
+  CommandWrapperPtr command = getPackingCommand();
+  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command);
+}
+
+bool CompilerOpenFPGA_ql::isPlacementStatusActual()
+{
+  CommandWrapperPtr command = getPlacementCommand();
+  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command);
+}
+
+bool CompilerOpenFPGA_ql::isRoutingStatusActual()
+{
+  CommandWrapperPtr command = getRoutingCommand();
+  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command);
+}
+
+bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
+{
+  std::map<std::string, QLDeviceTarget> devices;
+  if (collectStaDevices(devices)) {
+    // handle sta multicorner case
+    for (const auto& [profile, device]: devices) {
+      CommandWrapperPtr command = getTimingAnalysisCommand(device, "");
+      if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+        return false;
+      }
+    }
+    return true;
+  } else {
+    // regular sta case
+    QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    CommandWrapperPtr command = getTimingAnalysisCommand(current_device, "");
+    return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), command);
+  }
+}
+
 // clang-format on

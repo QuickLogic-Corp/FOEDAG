@@ -246,6 +246,10 @@ MainWindow::MainWindow(Session* session)
     refreshPinPlanner();
   });
 #endif
+
+  QObject::connect(QLSettingsManager::getInstance(), &QLSettingsManager::settingsChanged, [this](){
+    m_compiler->invalidateTaskStatuses();
+  });
 }
 
 void MainWindow::Tcl_NewProject(int argc, const char* argv[]) {
