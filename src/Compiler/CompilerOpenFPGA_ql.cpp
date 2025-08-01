@@ -3709,7 +3709,7 @@ std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
   // https://github.com/QL-Proprietary/aurora2/issues/1267
   // Until this is fixed, we need to run the route and analysis stages together.
   if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-    sta_vpr_options += std::string(" --route");
+    sta_vpr_options += std::string("--route");
   }
 #endif // #ifdef _WIN32
 
@@ -3878,7 +3878,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!taCommand->compareIgnoringTempPath(commandOld)) {
       ErrorMessage("NEW COMMAND DOESN'T MATCH TO LEGACY");
       qInfo() << "~~~ legacy=" << QString::fromStdString(commandOld);
-      qInfo() << "~~~ new=" << QString::fromStdString(command->string());
+      qInfo() << "~~~ new=" << QString::fromStdString(taCommand->string());
       return false;
     }  
 #endif // DEBUG_ENABLE_LEGACY_CMD_GUARD
@@ -7146,7 +7146,7 @@ std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandLEGACY(const QLDeviceTa
 #endif // #ifdef _WIN32
 
     if(!profile.empty()){
-      taCommand += uniqueStaVprOptions();
+      taCommand += " " + uniqueStaVprOptions();
     }
 
     return taCommand;
@@ -7183,7 +7183,7 @@ std::string CompilerOpenFPGA_ql::getTimingAnalysisCommandLEGACY(const QLDeviceTa
     taCommand += vpr_options;
 
     if(!profile.empty()){
-      taCommand += uniqueStaVprOptions();
+      taCommand += " " + uniqueStaVprOptions();
     }
     
 #ifdef _WIN32
