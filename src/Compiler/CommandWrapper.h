@@ -133,8 +133,8 @@ private:
   std::string collectFileInfosStr(bool applyMask) {
     std::string result;
     for (const std::filesystem::path filePath: m_filePathes) {
-      auto it = m_maskedFiles.find(filePath);
       std::string name{filePath.string()};
+      auto it = m_maskedFiles.find(name);
       if (applyMask) {
         if (it != m_maskedFiles.end()) {
           name = it->second; // use mask instead of path
