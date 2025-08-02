@@ -473,7 +473,7 @@ private:
     }
 
     bool skipHashCheck = false;
-    auto it = s_bigFilesSet.find(resolvedFilePath.filename());
+    auto it = s_bigFilesSet.find(resolvedFilePath.filename().string());
     if (it != s_bigFilesSet.end()) {
       skipHashCheck = true;
     }
