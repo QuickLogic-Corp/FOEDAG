@@ -128,12 +128,35 @@ std::string FileUtils::GetFileContent(const std::filesystem::path& filename) {
   return result;
 }
 
+std::vector<std::string> FileUtils::GetFileContentLines(const std::filesystem::path& filepath) {
+  std::vector<std::string> lines;
+  std::ifstream in(filepath);
+  if (!in) {
+    return {};
+  }
+
+  for (std::string line; std::getline(in, line); ) {
+    lines.push_back(std::move(line));
+  }
+  return lines;
+}
+
 void FileUtils::WriteToFile(const std::filesystem::path& path,
                             const std::string& content, bool newLine) {
   std::ofstream ofs{path};
   ofs << content;
   if (newLine) ofs << std::endl;
   ofs.close();
+}
+
+void FileUtils::MoveFile(const std::filesystem::path& src, const std::filesystem::path& dst)
+{
+  if (IsExistedRegularFile(src)) {
+    copy(src, dst);
+    if (IsExistedRegularFile(dst)) {
+      removeFile(src);
+    }
+  }
 }
 
 std::filesystem::path FileUtils::GetPathName(

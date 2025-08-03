@@ -53,8 +53,11 @@ class FileUtils final {
   static uint64_t FileSize(const std::filesystem::path& name);
 
   static std::string GetFileContent(const std::filesystem::path& name);
+  static std::vector<std::string> GetFileContentLines(const std::filesystem::path& filepath);
   static void WriteToFile(const std::filesystem::path& path,
                           const std::string& content, bool newLine = true);
+
+  static void MoveFile(const std::filesystem::path& src, const std::filesystem::path& dst);
 
   static std::filesystem::path GetPreferredPath(
       const std::filesystem::path& path);

@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "BlifParser.h"
+#include "Utils/FileUtils.h"
 
 #include <sstream>
 #include <fstream>
@@ -252,16 +253,9 @@ std::shared_ptr<BlifNode> BlifParser::load(const std::filesystem::path& filepath
         return nullptr;
     }
 
-    std::ifstream in(filepath);
-    if (!in) {
-        return nullptr;
-    }
-
     if (!m_rootNodePtr || isFileChanged(filepath)) {
-        std::vector<std::string> lines;
-        for (std::string line; std::getline(in, line); ) {
-            lines.push_back(std::move(line));
-        }
+        std::vector<std::string> lines = FileUtils::GetFileContentLines(filepath);
+
         m_rootNodePtr = parseLines(lines);
         m_lastWriteTime = std::filesystem::last_write_time(filepath);
     }    

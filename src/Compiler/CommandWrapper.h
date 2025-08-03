@@ -26,7 +26,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
-
 #include <string>
 #include <unordered_set>
 #include <map>
@@ -34,12 +33,65 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <optional>
 #include <regex>
 #include <memory>
+#include <iostream>
 
 // #define DEBUG_ENABLE_PARANOIC_CHECK
 
 namespace FOEDAG {
 
 constexpr const char* FILES_INFO_PLACEHOLDER = "${FILES_INFO}";
+
+class PostTaskFileRemover {
+public:
+  PostTaskFileRemover(const std::filesystem::path& path): m_path(path) {
+    // if file was created by other task we do a backup
+    if (std::filesystem::exists(path)) {
+      std::cout << "~~~ doing backup of" << m_path << std::endl;
+      m_backup = path;
+      m_backup += ".backup";
+      FileUtils::MoveFile(m_path, m_backup);
+    }
+  }
+
+  ~PostTaskFileRemover() {
+    apply();
+  }
+
+  void apply() {
+    if (m_isApplied) {
+      return;
+    }
+
+    // remove newaly generated file during the current task
+    if (std::filesystem::exists(m_path)) {
+      bool hasNotCommentedLined = false;
+      for (std::string line: FileUtils::GetFileContentLines(m_path)) {
+        line = StringUtils::trim(line);
+        if (!StringUtils::startsWith(line, "#")) {
+          hasNotCommentedLined = false;
+        }
+      }
+      if (!hasNotCommentedLined) {
+        std::cout << "~~~ all lines are comments, remove" << m_path << std::endl;
+        FileUtils::removeFile(m_path);
+      } else {
+        std::cout << "~~~ despite not commented line detected, remove" << m_path << std::endl;
+        FileUtils::removeFile(m_path);
+      }
+    }
+    // restore backup
+    if (std::filesystem::exists(m_backup)) {
+      std::cout << "~~~ restore backup" << m_backup << std::endl;
+      FileUtils::MoveFile(m_backup, m_path);
+    }
+    m_isApplied = true;
+  }
+
+private:
+  bool m_isApplied = false;
+  std::filesystem::path m_path;
+  std::filesystem::path m_backup;
+};
 
 class ScriptRenderer {
   static std::filesystem::path s_projectPath;
