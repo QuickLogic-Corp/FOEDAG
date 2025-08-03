@@ -1695,7 +1695,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
             SYNTHESIS_LOG);
     QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
   });
-
+  
   if (SynthOpt() == SynthesisOpt::Clean) {
     Message("Cleaning synthesis results for " + ProjManager()->projectName());
     m_state = State::IPGenerated;
@@ -2757,14 +2757,6 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 }
 
 bool CompilerOpenFPGA_ql::Packing() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", PACKING_LOG);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
-  });
-
   if (PackOpt() == PackingOpt::Clean) {
     Message("Cleaning packing results for " + ProjManager()->projectName());
     m_state = State::Synthesized;
@@ -2860,6 +2852,14 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
 #endif // #if UPSTREAM_UNUSED
 
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this] {
+    // Rename log file
+    copyLog(ProjManager(), "vpr_stdout.log", PACKING_LOG);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
+  });
+
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
@@ -2919,14 +2919,6 @@ bool CompilerOpenFPGA_ql::GlobalPlacement() {
 }
 
 bool CompilerOpenFPGA_ql::Placement() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", PLACEMENT_LOG);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
-  });
-
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3177,6 +3169,14 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this] {
+    // Rename log file
+    copyLog(ProjManager(), "vpr_stdout.log", PLACEMENT_LOG);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
+  });
+
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
@@ -3240,15 +3240,6 @@ bool CompilerOpenFPGA_ql::ConvertSdcPinConstrainToPcf(
 }
 
 bool CompilerOpenFPGA_ql::Route() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", ROUTING_LOG);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
-    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
-  });
-
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3363,6 +3354,15 @@ bool CompilerOpenFPGA_ql::Route() {
   }
 
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
+
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this] {
+    // Rename log file
+    copyLog(ProjManager(), "vpr_stdout.log", ROUTING_LOG);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
+    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
+  });
 
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
