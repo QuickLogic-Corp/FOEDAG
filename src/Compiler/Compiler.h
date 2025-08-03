@@ -317,6 +317,7 @@ class Compiler {
   std::filesystem::path m_autoLayoutGeneratedVPRXMLPath{};
   std::filesystem::path m_autoLayoutGeneratedRRGraphBinPath{};
   std::filesystem::path m_autoLayoutGeneratedRouterLookaheadBinPath{};
+  bool m_useAnalyticalPlace = false;
 
   // Tasks generic options
   IPGenerateOpt m_ipGenerateOpt = IPGenerateOpt::None;

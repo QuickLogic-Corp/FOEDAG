@@ -3127,6 +3127,7 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 }
 
 bool CompilerOpenFPGA_ql::Packing() {
+
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
   auto guard = sg::make_scope_guard([this] {
@@ -3196,6 +3197,29 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   ofssdc.close();
 #endif // #if UPSTREAM_UNUSED
+
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return false;
+  }
+
+  if( QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+    m_useAnalyticalPlace = true;
+  }
+  else {
+    m_useAnalyticalPlace = false;
+  }
+
+  if(m_useAnalyticalPlace) {
+    m_state = State::Packed;
+    Message("Design " + ProjManager()->projectName() + " packing is skipped as we are in Analytical Place flow!");
+    return true;
+  }
 
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
                 std::string(ProjManager()->projectName() + "_constraints.xml");
@@ -3973,6 +3997,22 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return false;
+  }
+
+  if( QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+    m_useAnalyticalPlace = true;
+  }
+  else {
+    m_useAnalyticalPlace = false;
+  }
+
   // generate pin contraints file or use pre-generated .place file, if required.
   // this string should contain the path of the PinConstraints file, if generated correctly.
   // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
@@ -3997,8 +4037,14 @@ bool CompilerOpenFPGA_ql::Placement() {
     command += std::string(" ") + vpr_custom_options_string;
   }
 
-  command += std::string(" ") + 
-             std::string("--place");
+  if(m_useAnalyticalPlace) {
+    command += std::string(" ") + 
+              std::string("--analytical_place");
+  }
+  else {
+    command += std::string(" ") + 
+              std::string("--place");
+  }
 
   if (!filepath_fpga_fix_pins_place_str.empty()) {
     command += std::string(" --fix_clusters") + 

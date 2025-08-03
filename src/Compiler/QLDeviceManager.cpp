@@ -1072,25 +1072,25 @@ void QLDeviceManager::parseDeviceData() {
 
 
   // DEBUG
-  std::cout << "============ DEBUG++ ============" << std::endl;
-  for (QLDeviceType device: device_list) {
-      std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
-      for (QLDeviceVariant variant: device.device_variants) {
-        std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
-        for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
-          std::cout <<  "    layout_name:" + layout.name + "\n" +
-                        "              w:" + std::to_string(layout.width) + "\n" +
-                        "              h:" + std::to_string(layout.height) + "\n" +
-                        "            clb:" + std::to_string(layout.clb) + "\n" +
-                        "             io:" + std::to_string(layout.io) + "\n" +
-                        "           bram:" + std::to_string(layout.bram) + "\n" +
-                        "            dsp:" + std::to_string(layout.dsp)
-                        << std::endl;
-        }
-      }
-      std::cout << "\n" << std::endl;
-  }
-  std::cout << "============ DEBUG-- ============" << std::endl;
+  // std::cout << "============ DEBUG++ ============" << std::endl;
+  // for (QLDeviceType device: device_list) {
+  //     std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
+  //     for (QLDeviceVariant variant: device.device_variants) {
+  //       std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
+  //       for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
+  //         std::cout <<  "    layout_name:" + layout.name + "\n" +
+  //                       "              w:" + std::to_string(layout.width) + "\n" +
+  //                       "              h:" + std::to_string(layout.height) + "\n" +
+  //                       "            clb:" + std::to_string(layout.clb) + "\n" +
+  //                       "             io:" + std::to_string(layout.io) + "\n" +
+  //                       "           bram:" + std::to_string(layout.bram) + "\n" +
+  //                       "            dsp:" + std::to_string(layout.dsp)
+  //                       << std::endl;
+  //       }
+  //     }
+  //     std::cout << "\n" << std::endl;
+  // }
+  // std::cout << "============ DEBUG-- ============" << std::endl;
   //DEBUG
 }
 
