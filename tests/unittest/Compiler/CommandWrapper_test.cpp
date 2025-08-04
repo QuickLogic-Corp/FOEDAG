@@ -398,7 +398,8 @@ TEST(CommandWrapper, serialization)
     commandOrig.append("--p3", "v3");
     commandOrig.appendFile(filePath1.filePath(), "arch");
     commandOrig.appendFile("--file2", filePath2.filePath());
-    commandOrig.setScriptHash("www");
+    ScriptRendererPtr script = std::make_shared<ScriptRenderer>("www");
+    commandOrig.setScriptRenderer(script);
 
     // Serialize
     nlohmann::json json = commandOrig;

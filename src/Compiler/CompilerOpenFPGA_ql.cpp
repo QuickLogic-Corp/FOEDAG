@@ -7556,7 +7556,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
       synplify_license_wait = "-license_wait ";
 
     CommandWrapperPtr command = std::make_shared<CommandWrapper>();
-    command->setScriptHash(FileUtils::calcHash(synplify_script_content));
+    command->setScriptRenderer(synplifyScript);
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
     command->append(synplifyExecName);
@@ -8134,7 +8134,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
 #endif // #if(AURORA_USE_TABBYCAD == 1)
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
-  command->setScriptHash(FileUtils::calcHash(yosys_script_content));
+  command->setScriptRenderer(yosysScript);
   command->append(yosys_executable_path.string());
   command->append("-s");
   command->append(ProjManager()->projectName() + ".ys");

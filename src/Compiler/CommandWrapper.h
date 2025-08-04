@@ -324,6 +324,15 @@ public:
     }
   }
 
+  void actualize() {
+    if (!m_modifiedDateTime.empty()) {
+      m_modifiedDateTime =  FileUtils::ModifiedTimeStr(m_filePath);
+    }
+    if (!m_contentHash.empty()) {
+      m_contentHash = FileUtils::calcFileContentHash(m_filePath);
+    }
+  }
+
   const std::filesystem::path& filePath() const { return m_filePath; }
   const std::string& mask() const { return m_mask; }
 
@@ -395,6 +404,15 @@ public:
     append(command);
   }
 
+  void actualize() {
+    if (m_scriptRenderer) {
+      m_scriptHash = m_scriptRenderer->calcHash();
+    }
+    for (auto& [id, file]: m_files) {
+      file.actualize();
+    }
+  }
+
   static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
   static const std::filesystem::path& projectPath() { return s_projectPath; }
   static void addBigFileName(const std::string& fileName) { s_bigFilesSet.insert(fileName); }
@@ -415,7 +433,10 @@ public:
   const std::unordered_map<std::string, FileIdentity>& files() const { return m_files; }
   const std::unordered_map<std::string, std::string>& arguments() const { return m_arguments; }
 
-  void setScriptHash(const std::string& scriptHash) { m_scriptHash = scriptHash; }
+  void setScriptRenderer(const ScriptRendererPtr& scriptRenderer) { 
+    m_scriptRenderer = scriptRenderer; 
+    m_scriptHash = scriptRenderer->calcHash();
+  }
 
   const std::string& scriptHash() const { return m_scriptHash; }
 
@@ -453,6 +474,7 @@ public:
 private:
   std::unordered_map<std::string, std::string> m_arguments;
   std::unordered_map<std::string, FileIdentity> m_files;
+  ScriptRendererPtr m_scriptRenderer;
   std::string m_scriptHash;
   std::string m_string;
 
@@ -463,6 +485,9 @@ private:
       {"string", obj.m_string},
       {"script_hash", obj.m_scriptHash}
     };
+    // note we don't care about m_scriptRenderer serialization, because we needed only cache from it.
+    // m_scriptRenderer is used only during CommandWrapper lifetime, when we need re-render the script after 
+    // command execution is done with success
   }
 
   friend void from_json(const nlohmann::json& j, CommandWrapper& obj) {
@@ -470,6 +495,9 @@ private:
     j.at("files").get_to(obj.m_files);
     j.at("string").get_to(obj.m_string);
     j.at("script_hash").get_to(obj.m_scriptHash);
+    // note we don't care about m_scriptRenderer serialization, because we needed only cache from it.
+    // m_scriptRenderer is used only during CommandWrapper lifetime, when we need re-render the script after 
+    // command execution is done with success
   }
 
   void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "") {

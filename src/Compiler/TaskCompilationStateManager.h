@@ -49,11 +49,13 @@ public:
   }
 
   void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
+    command->actualize(); // to take into account date time and hash changes after task execution
     m_taskCommandsMap[key(taskId)] = command;
     save();
   }
 
   void storeTaskCommand(int taskId, const std::string& profile, const CommandWrapperPtr& command) {
+    command->actualize(); // to take into account date time and hash changes after task execution
     m_taskCommandsMap[key(taskId, profile)] = command;
     save();
   }
