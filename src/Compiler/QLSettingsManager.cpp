@@ -584,7 +584,9 @@ const json* QLSettingsManager::getJson(std::string category) {
 
 
 std::filesystem::path QLSettingsManager::getSDCFilePath() {
-
+  if (!std::filesystem::exists(instance->sdc_file_path)) {
+    instance->sdc_file_path.clear();
+  }
   return instance->sdc_file_path;
 }
 
