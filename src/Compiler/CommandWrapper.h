@@ -325,6 +325,12 @@ public:
   }
 
   void actualize() {
+    if (!m_mask.empty() && !std::filesystem::exists(m_filePath)) {
+      // because masked files is not something task execution could change, and mask files more play role of
+      // secret files, they could be deleted from tmp, right the task execution is done. Actualization
+      // hash and date time changes in this case doesn't make sense, and skipped.
+      return;
+    }
     if (!m_modifiedDateTime.empty()) {
       m_modifiedDateTime =  FileUtils::ModifiedTimeStr(m_filePath);
     }
