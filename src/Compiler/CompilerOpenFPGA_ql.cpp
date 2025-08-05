@@ -8206,7 +8206,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   command->append("--place");
 
   if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command->append("--fix_clusters", filepath_fpga_fix_pins_place_str);
+    command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
   }
   else
   {
