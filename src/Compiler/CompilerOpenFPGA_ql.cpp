@@ -1811,6 +1811,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 }
 
 std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
+  std::string scriptTemplate;
+
   if (m_customYosysScript.empty()) {
     bool use_external_template_yosys = false;
     std::string aurora_template_script_yosys;
@@ -1834,20 +1836,23 @@ std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
     if(use_external_template_yosys) {
       Message("Using External Yosys Template Script: " +
                                 std::string(m_aurora_template_script_yosys_path.string()));
-      return aurora_template_script_yosys;
+      scriptTemplate = aurora_template_script_yosys;
     }
     else {
       Message("Cannot load Yosys Template Script: " +
                                 std::string(m_aurora_template_script_yosys_path.string()));
       Message("Using Internal Yosys Template Script.");
-      return qlYosysScript;
+      scriptTemplate = qlYosysScript;
     } 
   } else {
-    return m_customYosysScript;
+    scriptTemplate = m_customYosysScript;
   }
+
+  return scriptTemplate;
 }
 
 std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() const {
+  std::string scriptTemplate;
   // Default or custom Synplify script
   bool use_external_template_synplify = false;
   std::string aurora_template_script_synplify;
@@ -1871,13 +1876,15 @@ std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() const {
   if(use_external_template_synplify) {
     Message("Using External Synplify Template Script: " +
                               std::string(m_aurora_template_script_synplify_path.string()));
-    return aurora_template_script_synplify;
+    scriptTemplate = aurora_template_script_synplify;
   } else {
     Message("Cannot load Synplify Template Script: " +
                               std::string(m_aurora_template_script_synplify_path.string()));
     Message("Using Internal Synplify Template Script.");
-    return qlSynplifyScript;
+    scriptTemplate = qlSynplifyScript;
   }
+
+  return scriptTemplate;
 }
 
 
