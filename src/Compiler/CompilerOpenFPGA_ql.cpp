@@ -2425,9 +2425,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 #endif // #if UPSTREAM_UNUSED
   if(m_autoLayoutGenerationMode) {
     Message("Base VPR Command running with Auto Layout Generated Device!\n");
-    vpr_options += std::string(" --device") + 
-                   std::string(" ") + 
-                   m_autoLayoutGeneratedLayoutName;
+    command->append("--device", m_autoLayoutGeneratedLayoutName);
   } 
   else {
     if (!m_deviceSize.empty()) {
@@ -3063,7 +3061,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // easiest way is to take the previous command as is, and 
     // - replace the architecture file path
     // - replace the layout name
-    std::string command_rerun = command;
+    std::string command_rerun = command->string();
 
     // ensure that 'FPGA_AUTO' replacement is done first!!
     command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
