@@ -149,7 +149,7 @@ void FileUtils::WriteToFile(const std::filesystem::path& path,
   ofs.close();
 }
 
-void FileUtils::MoveFile(const std::filesystem::path& src, const std::filesystem::path& dst)
+void FileUtils::moveFile(const std::filesystem::path& src, const std::filesystem::path& dst)
 {
   if (IsExistedRegularFile(src)) {
     copy(src, dst);

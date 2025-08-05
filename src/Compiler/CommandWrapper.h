@@ -49,7 +49,7 @@ public:
       //std::cout << "~~~ doing backup of" << m_path << std::endl;
       m_backup = path;
       m_backup += ".backup";
-      FileUtils::MoveFile(m_path, m_backup);
+      FileUtils::moveFile(m_path, m_backup);
     }
   }
 
@@ -82,7 +82,7 @@ public:
     // restore backup
     if (std::filesystem::exists(m_backup)) {
       //std::cout << "~~~ restore backup" << m_backup << std::endl;
-      FileUtils::MoveFile(m_backup, m_path);
+      FileUtils::moveFile(m_backup, m_path);
     }
     m_isApplied = true;
   }

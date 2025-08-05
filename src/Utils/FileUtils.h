@@ -57,7 +57,7 @@ class FileUtils final {
   static void WriteToFile(const std::filesystem::path& path,
                           const std::string& content, bool newLine = true);
 
-  static void MoveFile(const std::filesystem::path& src, const std::filesystem::path& dst);
+  static void moveFile(const std::filesystem::path& src, const std::filesystem::path& dst); // don't use MoveFile it conflicts with min32 macro
 
   static std::filesystem::path GetPreferredPath(
       const std::filesystem::path& path);
