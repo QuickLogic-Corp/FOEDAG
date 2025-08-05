@@ -3180,8 +3180,6 @@ bool CompilerOpenFPGA_ql::Placement() {
     QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
   });
 
-  // PostTaskFileRemover routeFileRemover(ProjManager()->projectPath() / std::filesystem::path(ProjManager()->projectName() + "_post_synth.route"));
-
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
