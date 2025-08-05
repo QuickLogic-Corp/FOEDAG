@@ -3616,8 +3616,6 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement is being run with Auto Layout Generated Device!");
   }
 
-  // PostTaskFileRemover routeFileRemover(ProjManager()->projectPath() / std::filesystem::path(ProjManager()->projectName() + "_post_synth.route"));
-
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
