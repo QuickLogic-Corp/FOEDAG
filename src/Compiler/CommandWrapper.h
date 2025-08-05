@@ -33,7 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <optional>
 #include <regex>
 #include <memory>
-#include <iostream>
+//#include <iostream>
 
 // #define DEBUG_ENABLE_PARANOIC_CHECK
 
@@ -46,7 +46,7 @@ public:
   PostTaskFileRemover(const std::filesystem::path& path): m_path(path) {
     // if file was created by other task we do a backup
     if (std::filesystem::exists(path)) {
-      std::cout << "~~~ doing backup of" << m_path << std::endl;
+      //std::cout << "~~~ doing backup of" << m_path << std::endl;
       m_backup = path;
       m_backup += ".backup";
       FileUtils::MoveFile(m_path, m_backup);
@@ -72,16 +72,16 @@ public:
         }
       }
       if (!hasNotCommentedLined) {
-        std::cout << "~~~ all lines are comments, remove" << m_path << std::endl;
+        //std::cout << "~~~ all lines are comments, remove" << m_path << std::endl;
         FileUtils::removeFile(m_path);
       } else {
-        std::cout << "~~~ despite not commented line detected, remove" << m_path << std::endl;
+        //std::cout << "~~~ despite not commented line detected, remove" << m_path << std::endl;
         FileUtils::removeFile(m_path);
       }
     }
     // restore backup
     if (std::filesystem::exists(m_backup)) {
-      std::cout << "~~~ restore backup" << m_backup << std::endl;
+      //std::cout << "~~~ restore backup" << m_backup << std::endl;
       FileUtils::MoveFile(m_backup, m_path);
     }
     m_isApplied = true;
