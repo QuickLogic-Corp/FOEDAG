@@ -1072,25 +1072,25 @@ void QLDeviceManager::parseDeviceData() {
 
 
   // DEBUG
-  std::cout << "============ DEBUG++ ============" << std::endl;
-  for (QLDeviceType device: device_list) {
-      std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
-      for (QLDeviceVariant variant: device.device_variants) {
-        std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
-        for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
-          std::cout <<  "    layout_name:" + layout.name + "\n" +
-                        "              w:" + std::to_string(layout.width) + "\n" +
-                        "              h:" + std::to_string(layout.height) + "\n" +
-                        "            clb:" + std::to_string(layout.clb) + "\n" +
-                        "             io:" + std::to_string(layout.io) + "\n" +
-                        "           bram:" + std::to_string(layout.bram) + "\n" +
-                        "            dsp:" + std::to_string(layout.dsp)
-                        << std::endl;
-        }
-      }
-      std::cout << "\n" << std::endl;
-  }
-  std::cout << "============ DEBUG-- ============" << std::endl;
+  // std::cout << "============ DEBUG++ ============" << std::endl;
+  // for (QLDeviceType device: device_list) {
+  //     std::cout << "Device: " + device.family + " " + device.foundry + " " + device.node + " " + device.devicename << std::endl;
+  //     for (QLDeviceVariant variant: device.device_variants) {
+  //       std::cout << "  Variant: " +  variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
+  //       for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
+  //         std::cout <<  "    layout_name:" + layout.name + "\n" +
+  //                       "              w:" + std::to_string(layout.width) + "\n" +
+  //                       "              h:" + std::to_string(layout.height) + "\n" +
+  //                       "            clb:" + std::to_string(layout.clb) + "\n" +
+  //                       "             io:" + std::to_string(layout.io) + "\n" +
+  //                       "           bram:" + std::to_string(layout.bram) + "\n" +
+  //                       "            dsp:" + std::to_string(layout.dsp)
+  //                       << std::endl;
+  //       }
+  //     }
+  //     std::cout << "\n" << std::endl;
+  // }
+  // std::cout << "============ DEBUG-- ============" << std::endl;
   //DEBUG
 }
 
@@ -1835,7 +1835,8 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             std::filesystem::canonical(source_device_data_dir_path, ec);
     if(ec) {
       // error
-      compiler->ErrorMessage("Please check if the path specified exists!");
+      compiler->ErrorMessage("QLDeviceManager::encryptDevice() failed!\n");
+      compiler->ErrorMessage("Please check if the path specified exists!\n");
       compiler->ErrorMessage("path: " + source_device_data_dir_path.string());
       return -1;
     }
@@ -1946,6 +1947,20 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           }
           if (std::regex_match(dir_entry.path().filename().string(),
                                   std::regex(".*router_lookahead\\.bin",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
+          // include any python scripts to copy
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".+\\.py",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
+          // include any already encrypted files to copy
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".+\\.en",
                                   std::regex::icase))) {
               source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
@@ -2283,7 +2298,8 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
             std::filesystem::canonical(source_device_data_dir_path, ec);
     if(ec) {
       // error
-      compiler->ErrorMessage("Please check if the path specified exists!");
+      compiler->ErrorMessage("QLDeviceManager::addDevice() failed!\n");
+      compiler->ErrorMessage("Please check if the path specified exists!\n");
       compiler->ErrorMessage("path: " + source_device_data_dir_path.string());
       return -1;
     }
@@ -2682,6 +2698,18 @@ std::filesystem::path QLDeviceManager::deviceVPRArchitectureFile(QLDeviceTarget 
 
   std::filesystem::path empty_path;
   std::filesystem::path vpr_architecture_file_path;
+
+  // if we are in auto layout generation mode, then return the generated vpr xml filepath here
+  // as we will not be using the (auto) device's own vpr xml.
+
+  if(compiler->m_autoLayoutGenerationMode){
+    if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedVPRXMLPath)) {
+
+      compiler->ErrorMessage("Cannot find generated vpr architecture file: " + compiler->m_autoLayoutGeneratedVPRXMLPath.string());
+      return empty_path;
+    }
+    return compiler->m_autoLayoutGeneratedVPRXMLPath;
+  }
 
   if( !isDeviceTargetValid(device_target) ) {
     device_target = this->device_target;
@@ -3526,6 +3554,18 @@ std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget devic
   std::filesystem::path empty_path;
   std::filesystem::path vpr_rr_graph_file_path;
 
+  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
+  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
+
+  if(compiler->m_autoLayoutGenerationMode){
+    if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
+
+      compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
+      return empty_path;
+    }
+    return compiler->m_autoLayoutGeneratedRRGraphBinPath;
+  }
+
   if( !isDeviceTargetValid(device_target) ) {
     device_target = this->device_target;
   }
@@ -3628,6 +3668,19 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
 
   std::filesystem::path empty_path;
   std::filesystem::path vpr_router_lookahead_file_path;
+
+
+  // if we are in auto layout generation mode, then return the generated router_lookahead.bin filepath here
+  // as we will not be using the (auto) device's own router_lookahead.bin, even if it exists.
+
+  if(compiler->m_autoLayoutGenerationMode){
+    if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRouterLookaheadBinPath)) {
+
+      compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRouterLookaheadBinPath.string());
+      return empty_path;
+    }
+    return compiler->m_autoLayoutGeneratedRouterLookaheadBinPath;
+  }
 
   if( !isDeviceTargetValid(device_target) ) {
     device_target = this->device_target;

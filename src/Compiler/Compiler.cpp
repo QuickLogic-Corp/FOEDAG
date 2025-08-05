@@ -2234,9 +2234,15 @@ void Compiler::finish() {
 bool Compiler::RunCompileTask(Action action) {
   auto currentTask = m_taskManager->currentTask();
   // Use Scope Guard to add headers to new logs whenever this function exits
-  auto guard = sg::make_scope_guard([this, currentTask] {
+  auto guard = sg::make_scope_guard([this, action, currentTask] {
     AddHeadersToLogs();
-    AddErrorLink(currentTask);
+    if(action == Action::Pack && m_autoLayoutGenerationMode) {
+      // we do not add the link to the error in the log files,
+      // as it is expected that packing may fail in auto layout generation mode.
+    }
+    else {
+      AddErrorLink(currentTask);
+    }
   });
 
   switch (action) {
@@ -2655,6 +2661,11 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                          // we skip reporting this specific error because it is not under our control,
                          // and it can be ignored! [VPR P&R Viewer]
                        }
+                       else if (m_autoLayoutGenerationMode &&
+                                (errorstring.contains("Failed to find device which satisfies resource requirements required"))){
+                        // we skip reporting this specific error because it is not under our control,
+                        // and it can be ignored! [VPR P&R Viewer]
+                       }
                        else {
                         int bytes = data.size();
                         ofs.write(data, bytes);
@@ -2673,6 +2684,12 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
         // we skip reporting this specific error because it is not under our control,
         // and it can be ignored! [VPR P&R Viewer]
       }
+      // KK: this also needs to be condition in auto mode.
+      else if (m_autoLayoutGenerationMode &&
+              (errorstring.contains("Failed to find device which satisfies resource requirements required"))) {
+        // we skip reporting this specific error because it is not under our control,
+        // and it can be ignored! [VPR P&R Viewer]
+       }
       else {
         m_err->write(data, data.size());
       }

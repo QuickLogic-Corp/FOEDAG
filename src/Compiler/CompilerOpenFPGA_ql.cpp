@@ -1695,7 +1695,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
             SYNTHESIS_LOG);
     QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
   });
-  
+
   if (SynthOpt() == SynthesisOpt::Clean) {
     Message("Cleaning synthesis results for " + ProjManager()->projectName());
     m_state = State::IPGenerated;
