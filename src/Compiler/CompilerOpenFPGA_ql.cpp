@@ -8539,7 +8539,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
   yosysScript->addFile(output_vhdl_filepath);
 
   std::filesystem::path output_edif_filepath{ProjManager()->projectName() + "_post_synth.edif"};
-  yosysScript->apply("${OUTPUT_EDIF}", output_edif_filepath);
+  yosysScript->apply("${OUTPUT_EDIF}", output_edif_filepath.string());
   yosysScript->addFile(output_edif_filepath);
 
   FinishSynthesisScript(yosysScript);
