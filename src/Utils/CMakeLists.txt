@@ -58,6 +58,7 @@ set (SRC_H_INSTALL_LIST
   QtUtils.h
   LogUtils.h
   JsonWriter.h
+  SerializationUtils.h
 )
 
 set (SRC_H_LIST

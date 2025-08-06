@@ -36,6 +36,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QDebug>
 #include <QProcess>
+#include <QFile>
+#include <QByteArray>
+#include <QCryptographicHash>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -66,6 +69,10 @@ bool FileUtils::FileIsDirectory(const std::filesystem::path& name) {
 
 bool FileUtils::FileIsRegular(const std::filesystem::path& name) {
   return std::filesystem::is_regular_file(name);
+}
+
+bool FileUtils::IsExistedRegularFile(const std::filesystem::path& name) {
+  return FileExists(name) && FileIsRegular(name);
 }
 
 bool FileUtils::MkDirs(const std::filesystem::path& path) {
@@ -121,12 +128,35 @@ std::string FileUtils::GetFileContent(const std::filesystem::path& filename) {
   return result;
 }
 
+std::vector<std::string> FileUtils::GetFileContentLines(const std::filesystem::path& filepath) {
+  std::vector<std::string> lines;
+  std::ifstream in(filepath);
+  if (!in) {
+    return {};
+  }
+
+  for (std::string line; std::getline(in, line); ) {
+    lines.push_back(std::move(line));
+  }
+  return lines;
+}
+
 void FileUtils::WriteToFile(const std::filesystem::path& path,
                             const std::string& content, bool newLine) {
   std::ofstream ofs{path};
   ofs << content;
   if (newLine) ofs << std::endl;
   ofs.close();
+}
+
+void FileUtils::moveFile(const std::filesystem::path& src, const std::filesystem::path& dst)
+{
+  if (IsExistedRegularFile(src)) {
+    copy(src, dst);
+    if (IsExistedRegularFile(dst)) {
+      removeFile(src);
+    }
+  }
 }
 
 std::filesystem::path FileUtils::GetPathName(
@@ -293,6 +323,21 @@ time_t FileUtils::Mtime(const std::filesystem::path& path) {
     return -1;
   }
   return statbuf.st_mtime;
+}
+
+std::string FileUtils::ModifiedTimeStr(const std::filesystem::path& path) {
+  std::time_t t = Mtime(path);
+  std::tm tmTime;
+
+#if defined(_WIN32) || defined(_WIN64)
+  localtime_s(&tmTime, &t);  // Windows
+#else
+  localtime_r(&t, &tmTime);  // POSIX
+#endif
+
+  std::ostringstream oss;
+  oss << std::put_time(&tmTime, "%Y-%m-%d %H:%M:%S");
+  return oss.str();
 }
 
 bool FileUtils::IsSystemCommandAvailable(const std::string& command) {
@@ -473,7 +518,7 @@ void FileUtils::printArgs(int argc, const char* argv[]) {
 bool FileUtils::removeFile(const std::string& file) noexcept {
   bool result = true;
   if (file.find("*") != std::string::npos) {
-    std::vector<std::filesystem::path> foundFiles = FileUtilsfindFilePathsByWildcard(file);
+    std::vector<std::filesystem::path> foundFiles = findFilePathsByWildcard(file);
     for (const std::filesystem::path& found: foundFiles) {
       if (!removeFile(found)) {
         result = false;
@@ -535,7 +580,7 @@ std::string FileUtils::resolvePathStr(const std::string& pathStr) {
 }
 
 
-std::vector<std::filesystem::path> FileUtils::FileUtilsfindFilePathsByWildcard(const std::string& wildCardFilePathPattern) 
+std::vector<std::filesystem::path> FileUtils::findFilePathsByWildcard(const std::string& wildCardFilePathPattern) 
 {
   std::vector<std::filesystem::path> result;
 
@@ -576,6 +621,39 @@ std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& p
   return result;
 }
 
+std::string FileUtils::calcHash(const std::string& content) 
+{
+  QCryptographicHash hash(QCryptographicHash::Md5);
+  hash.addData(content.data(), content.size());
+  QByteArray hexResult = hash.result().toHex();
+  return std::string(hexResult.constData(), hexResult.size());
+}
+
+std::string FileUtils::calcFileContentHash(const std::filesystem::path& filePath) 
+{
+  QFile file(QString::fromStdString(filePath.string()));
+  if (!file.open(QIODevice::ReadOnly)) {
+      return "";
+  }
+
+  QCryptographicHash hash(QCryptographicHash::Md5);
+
+  const qint64 bufferSize = 10 * 1024 * 1024; // 10 MB buffer
+  QByteArray buffer;
+  buffer.resize(bufferSize);
+
+  while (!file.atEnd()) {
+    qint64 bytesRead = file.read(buffer.data(), bufferSize);
+    if (bytesRead > 0) {
+      hash.addData(buffer.constData(), bytesRead);
+    } else {
+      break; // read error or EOF
+    }
+  }
+
+  QByteArray hexResult = hash.result().toHex();
+  return std::string(hexResult.constData(), hexResult.size());
+}
 
 bool FileUtils::findAndReplaceInFile(const std::filesystem::path& filepath, const std::string& searchPattern, const std::string& replaceString) {
 

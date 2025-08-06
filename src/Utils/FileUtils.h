@@ -19,8 +19,6 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef FOEDAG_FILEUTILS_H
-#define FOEDAG_FILEUTILS_H
 #pragma once
 
 #include <cstdint>
@@ -31,7 +29,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <map>
 
 class QProcess;
-
 namespace FOEDAG {
 
 struct Return {
@@ -44,6 +41,7 @@ class FileUtils final {
   static bool FileExists(const std::filesystem::path& name);
   static bool FileIsRegular(const std::filesystem::path& name);
   static bool FileIsDirectory(const std::filesystem::path& name);
+  static bool IsExistedRegularFile(const std::filesystem::path& name);
 
   static bool MkDirs(const std::filesystem::path& path);
   static bool RmDirRecursively(const std::filesystem::path& path);
@@ -55,8 +53,11 @@ class FileUtils final {
   static uint64_t FileSize(const std::filesystem::path& name);
 
   static std::string GetFileContent(const std::filesystem::path& name);
+  static std::vector<std::string> GetFileContentLines(const std::filesystem::path& filepath);
   static void WriteToFile(const std::filesystem::path& path,
                           const std::string& content, bool newLine = true);
+
+  static void moveFile(const std::filesystem::path& src, const std::filesystem::path& dst); // don't use MoveFile it conflicts with min32 macro
 
   static std::filesystem::path GetPreferredPath(
       const std::filesystem::path& path);
@@ -96,6 +97,7 @@ class FileUtils final {
                                      bool startDetached = false);
 
   static time_t Mtime(const std::filesystem::path& path);
+  static std::string ModifiedTimeStr(const std::filesystem::path& path);
 
   static bool IsUptoDate(const std::string& sourceFile,
                          const std::string& outputFile);
@@ -113,9 +115,12 @@ class FileUtils final {
 
   static std::string resolvePathStr(const std::string& pathStr);
 
-  static std::vector<std::filesystem::path> FileUtilsfindFilePathsByWildcard(const std::string& wildCardFilePathPattern);
+  static std::vector<std::filesystem::path> findFilePathsByWildcard(const std::string& wildCardFilePathPattern);
   static std::vector<std::string> findFileNamesByWildcard(const std::string& path, const std::string& wildCardFileNamePattern);
   static bool findAndReplaceInFile(const std::filesystem::path& filepath, const std::string& searchPattern, const std::string& replaceString);
+
+  static std::string calcHash(const std::string& content);
+  static std::string calcFileContentHash(const std::filesystem::path& filePath);
 
  private:
   FileUtils() = delete;
@@ -127,4 +132,4 @@ class FileUtils final {
 
 };  // namespace FOEDAG
 
-#endif /* FOEDAG_FILEUTILS_H */
+

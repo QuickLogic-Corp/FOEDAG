@@ -31,6 +31,7 @@ enum class TaskStatus {
   InProgress,
   Success,
   Fail,
+  Dirty
 };
 
 enum class TaskType {
