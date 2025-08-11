@@ -1731,7 +1731,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
-    auto it = commandsMap.find("sinplify");
+    auto it = commandsMap.find("synplify");
     if (it == commandsMap.end()) {
       // error message reported inside the getSynthesisCommands
       return false;
