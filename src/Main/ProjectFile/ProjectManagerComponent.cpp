@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ProjectManagerComponent.h"
 
 #include "Compiler/CompilerDefines.h"
+#include <Compiler/QLSettingsManager.h>
 #include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
 
@@ -543,6 +544,10 @@ void ProjectManagerComponent::Load(QXmlStreamReader* r) {
       }
     }
   }
+
+  ProjectConfiguration* tmpProCfg =
+              Project::Instance()->projectConfig();
+  QLSettingsManager::getInstance()->updateJSONSettingsForProjectType(tmpProCfg->projectType(), tmpProCfg->synthesisTool());
 }
 
 }  // namespace FOEDAG
