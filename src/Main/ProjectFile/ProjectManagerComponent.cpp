@@ -75,6 +75,11 @@ void ProjectManagerComponent::Save(QXmlStreamWriter* writer) {
   stream.writeAttribute(PROJECT_VAL, QString::number(tmpProCfg->projectType()));
   stream.writeEndElement();
 
+  stream.writeStartElement(PROJECT_OPTION);
+  stream.writeAttribute(PROJECT_NAME, PROJECT_SYNTHESIS_TOOL);
+  stream.writeAttribute(PROJECT_VAL, QString::number(tmpProCfg->synthesisTool()));
+  stream.writeEndElement();
+
   QMap<QString, QString> tmpOption = tmpProCfg->getMapOption();
   for (auto iter = tmpOption.begin(); iter != tmpOption.end(); ++iter) {
     stream.writeStartElement(PROJECT_OPTION);
@@ -246,6 +251,11 @@ void ProjectManagerComponent::Load(QXmlStreamReader* r) {
               bool ok{true};
               auto type = reader.attributes().value(PROJECT_VAL).toInt(&ok);
               tmpProCfg->setProjectType(ok ? type : RTL);
+            } else if (PROJECT_SYNTHESIS_TOOL ==
+                       reader.attributes().value(PROJECT_NAME).toString()) {
+              bool ok{false};
+              auto type = reader.attributes().value(PROJECT_VAL).toInt(&ok);
+              tmpProCfg->setSynthesisTool(ok ? type : Yosys);
             } else {
               tmpProCfg->setOption(
                   reader.attributes().value(PROJECT_NAME).toString(),
