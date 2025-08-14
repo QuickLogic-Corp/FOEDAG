@@ -1909,6 +1909,9 @@ void MainWindow::ReShowWindow(QString strProject) {
   updateViewMenu();
   updateTaskTable();
   updateBitstream();
+
+  // Update watcher files on newly created project
+  DesignFileWatcher::Instance()->updateDesignFileWatchers(m_projectManager);
 }
 
 void MainWindow::clearDockWidgets() {
