@@ -1754,6 +1754,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       Message("##################################################");
       Message("Synthesis (Synplify) skipped, not required");
       Message("##################################################");
+      m_state = State::Synthesized;
     }
   }
   
@@ -1784,6 +1785,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     Message("##################################################");
     Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
+    m_state = State::Synthesized;
     return true;
   }
   // incr compilation
@@ -2856,6 +2858,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     Message("##################################################");
     Message("Packing skipped, not required");
     Message("##################################################");
+    m_state = State::Packed;
     return true;
   }
  
@@ -3606,6 +3609,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("##################################################");
     Message("Placement skipped, not required");
     Message("##################################################");
+    m_state = State::Placed;
     return true;
   }
 
@@ -3796,6 +3800,7 @@ bool CompilerOpenFPGA_ql::Route() {
     Message("##################################################");
     Message("Routing skipped, not required");
     Message("##################################################");
+    m_state = State::Routed;
     return true;
   }
 
