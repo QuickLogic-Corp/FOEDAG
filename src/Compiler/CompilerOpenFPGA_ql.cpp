@@ -8803,6 +8803,14 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
 
 void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 {
+  if (ProjManager()) {
+    if (ProjManager()->getDesignFiles().empty()) {
+      // we skip task status invalidation if project doesn't have any design files yet.
+      // for more details see https://github.com/QL-Proprietary/aurora2/issues/1344
+      return;
+    }
+  }
+
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
     m_state = State::IPGenerated;
