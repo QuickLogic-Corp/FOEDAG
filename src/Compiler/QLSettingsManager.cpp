@@ -1205,6 +1205,9 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     FileUtils::overwriteFile(power_json_template_filepath,
                              power_estimation_json_filepath,
                              ec);
+
+    emit settingsChanged();
+
     if(ec) {
       // error
       std::cout << std::string("failed to copy: ") + power_json_template_filepath.string() << std::endl;
