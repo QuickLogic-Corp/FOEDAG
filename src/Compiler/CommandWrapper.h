@@ -159,7 +159,10 @@ ScriptRenderer()=default;
     script = StringUtils::replaceAll(script, FILES_INFO_PLACEHOLDER, collectFileInfosStr(m_isMaskingEnabled));
 
     if (script.find("${") != std::string::npos) {
-      m_errors.push_back("script is not fully parameterized, still contains pattern ${}");
+      std::unordered_set<std::string> varNames = StringUtils::findShellVariableNames(script);
+      for (const std::string& varName: varNames) {
+        m_errors.push_back("varaible ${" + varName + "} is not paramerized in script");
+      }
     }
     return script;
   }
