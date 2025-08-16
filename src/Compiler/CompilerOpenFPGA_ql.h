@@ -247,7 +247,7 @@ private:
   BlifParser m_blifParser;
   TaskCompilationStateManager m_taskCompilationStateManager;
 
-  std::unordered_map<std::string, CommandWrapperPtr> getSynthesisCommands();
+  std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
   CommandWrapperPtr getRoutingCommand();      

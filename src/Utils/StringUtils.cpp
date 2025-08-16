@@ -230,6 +230,21 @@ std::string StringUtils::evaluateEnvVars(std::string_view text) {
   return input;
 }
 
+std::unordered_set<std::string> StringUtils::findShellVariableNames(const std::string& text) {
+    std::unordered_set<std::string> result;
+
+    static const std::regex re(R"(\$\{([A-Za-z_][A-Za-z0-9_]*)\})");
+    std::smatch m;
+    std::string::const_iterator searchStart(text.cbegin());
+
+    while (std::regex_search(searchStart, text.cend(), m, re)) {
+        result.insert(m[1].str());
+        searchStart = m.suffix().first;
+    }
+
+    return result;
+}
+
 std::string StringUtils::unquoted(const std::string& text) {
   if ((text.size() >= 2) && (text.front() == '\"') && (text.back() == '\"')) {
     return text.substr(1, text.length() - 2);

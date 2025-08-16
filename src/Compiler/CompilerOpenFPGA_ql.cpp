@@ -1727,17 +1727,17 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  const std::unordered_map<std::string, CommandWrapperPtr> commandsMap = getSynthesisCommands();
+  const std::unordered_map<int, CommandWrapperPtr> commandsMap = getSynthesisCommands();
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
-    auto it = commandsMap.find("sinplify");
+    auto it = commandsMap.find(SynthesisTool::Synplify);
     if (it == commandsMap.end()) {
       // error message reported inside the getSynthesisCommands
       return false;
     }
     CommandWrapperPtr command = it->second;
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), "synplify", command)) {
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -1748,7 +1748,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       } else {
         m_state = State::Synthesized;
         Message("Design " + ProjManager()->projectName() + " is synthesized");
-        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "synplify", command);
+        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
       }
     } else {
       Message("##################################################");
@@ -1775,13 +1775,13 @@ bool CompilerOpenFPGA_ql::Synthesize() {
 #endif // #if UPSTREAM_UNUSED
 
   // incr compilation
-  auto it = commandsMap.find("yosys");
+  auto it = commandsMap.find(SynthesisTool::Yosys);
   if (it == commandsMap.end()) {
     // error message reported inside the getSynthesisCommands
     return false;
   }
   CommandWrapperPtr command = it->second;
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), "yosys", command)) {
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command)) {
     Message("##################################################");
     Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
@@ -1807,7 +1807,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), "yosys", command);
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     return true;
   }
 }
@@ -7834,9 +7834,9 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
   return power_leakage;
 }
 
-std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
+std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
 {
-  std::unordered_map<std::string, CommandWrapperPtr> commands;
+  std::unordered_map<int, CommandWrapperPtr> commands;
 
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
@@ -8050,7 +8050,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
 
 #endif
     // TODO: handle synplify_script_path
-    commands["synplify"] = command;
+    commands[SynthesisTool::Synplify] = command;
   }
   
   // use the device specific yosys script
@@ -8610,7 +8610,7 @@ std::unordered_map<std::string, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynth
   command->append("-l");
   command->append(ProjManager()->projectName() + "_synth.log");
 
-  commands["yosys"] = command;
+  commands[SynthesisTool::Yosys] = command;
   return commands;
 }
 
@@ -8808,6 +8808,14 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
 
 void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 {
+  if (ProjManager()) {
+    if (ProjManager()->getDesignFiles().empty()) {
+      // we skip task status invalidation if project doesn't have any design files yet.
+      // for more details see https://github.com/QL-Proprietary/aurora2/issues/1344
+      return;
+    }
+  }
+
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
     m_state = State::IPGenerated;
@@ -8874,9 +8882,9 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
 bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 {
-  std::unordered_map<std::string, CommandWrapperPtr> commands = getSynthesisCommands();
-  for (const auto& [profile, command]: commands) {
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), profile, command)) {
+  std::unordered_map<int, CommandWrapperPtr> commands = getSynthesisCommands();
+  for (const auto& [id, command]: commands) {
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
       return false;
     }
   }
