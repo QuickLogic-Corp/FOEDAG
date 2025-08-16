@@ -38,6 +38,7 @@ project object is singleton mode.
 #define PROJECT_CONFIG_ID "ID"
 #define PROJECT_CONFIG_ACTIVESIMSET "ActiveSimSet"
 #define PROJECT_CONFIG_TYPE "Project Type"
+#define PROJECT_SYNTHESIS_TOOL "Synthesis Tool"
 
 #define PROJECT_OPTION "Option"
 #define PROJECT_NAME "Name"
