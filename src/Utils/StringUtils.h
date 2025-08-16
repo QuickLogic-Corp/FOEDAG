@@ -113,6 +113,8 @@ class StringUtils final {
     envVars.insert(std::make_pair(var, value));
   }
 
+  static std::unordered_set<std::string> findShellVariableNames(const std::string& text);
+
   static std::string unquoted(const std::string& text);
 
   // Returns bool indicating if `text` ends with `ending`
