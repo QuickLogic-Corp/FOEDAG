@@ -8817,9 +8817,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
   if (!isSynthesisStatusActual()) {
-    GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
+    GetTaskManager()->tryMarkDirty(SYNTHESIS);
     m_state = State::IPGenerated;
-    return;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(SYNTHESIS)) {
       m_state = State::Synthesized;
@@ -8827,9 +8826,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
   if (!isPackingStatusActual()) {
-    GetTaskManager()->tryMarkDirtyFrom(PACKING);
+    GetTaskManager()->tryMarkDirty(PACKING);
     m_state = State::Synthesized;
-    return;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(PACKING)) {
       m_state = State::Packed;
@@ -8837,9 +8835,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
   if (!isPlacementStatusActual()) {
-    GetTaskManager()->tryMarkDirtyFrom(PLACEMENT);
+    GetTaskManager()->tryMarkDirty(PLACEMENT);
     m_state = State::Packed;
-    return;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(PLACEMENT)) {
       m_state = State::Placed;
@@ -8847,9 +8844,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
   if (!isRoutingStatusActual()) {
-    GetTaskManager()->tryMarkDirtyFrom(ROUTING);
+    GetTaskManager()->tryMarkDirty(ROUTING);
     m_state = State::Placed;
-    return;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(ROUTING)) {
       m_state = State::Routed;
@@ -8858,9 +8854,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   if (!isTimingAnalysysStatusActual()) {
-    GetTaskManager()->tryMarkDirtyFrom(TIMING_SIGN_OFF);
+    GetTaskManager()->tryMarkDirty(TIMING_SIGN_OFF);
     m_state = State::Routed;
-    return;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
       m_state = State::TimingAnalyzed;

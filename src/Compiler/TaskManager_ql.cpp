@@ -391,6 +391,16 @@ void TaskManager::tryMarkDirtyFrom(uint from) {
   }
 }
 
+void TaskManager::tryMarkDirty(uint id) {
+  auto it = m_tasks.find(id);
+  if (it != m_tasks.end()) {
+    Task* task = it.value();
+    if (task->status() == TaskStatus::Success) {
+      task->setStatus(TaskStatus::Dirty);
+    }
+  }
+}
+
 bool TaskManager::tryRestoreSuccessFor(uint id) {
   Task* t = task(id);
   if (t) {
