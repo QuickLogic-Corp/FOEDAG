@@ -108,6 +108,13 @@ private:
   }
 
   bool isCompilationRequired(const std::string& id, const CommandWrapperPtr& command) const {
+    if (!command) {
+      // if in some reason current command is nullptr, means we cannot reconstruct current state and we do mark task as needed to compile.
+      // the user will get error message about why the command reconstruction failed. After user sort the issue, by correcting settings or so, 
+      // invalidation task will be re-triggered.
+      return true;
+    }
+
     auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
       if (m_isLogEnabled) {
