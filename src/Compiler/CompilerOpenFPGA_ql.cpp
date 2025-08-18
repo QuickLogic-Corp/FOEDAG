@@ -8816,63 +8816,62 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  Compiler::State lastSuccessState = Compiler::State::None;
+
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirty(SYNTHESIS);
-    m_state = State::IPGenerated;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(SYNTHESIS)) {
-      m_state = State::Synthesized;
+      lastSuccessState = State::Synthesized;
     }
   }
 
   if (!isPackingStatusActual()) {
     GetTaskManager()->tryMarkDirty(PACKING);
-    m_state = State::Synthesized;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(PACKING)) {
-      m_state = State::Packed;
+      lastSuccessState = State::Packed;
     }
   }
 
   if (!isPlacementStatusActual()) {
     GetTaskManager()->tryMarkDirty(PLACEMENT);
-    m_state = State::Packed;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(PLACEMENT)) {
-      m_state = State::Placed;
+      lastSuccessState = State::Placed;
     }
   }
 
   if (!isRoutingStatusActual()) {
     GetTaskManager()->tryMarkDirty(ROUTING);
-    m_state = State::Placed;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(ROUTING)) {
-      m_state = State::Routed;
+      lastSuccessState = State::Routed;
     }
   }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   if (!isTimingAnalysysStatusActual()) {
     GetTaskManager()->tryMarkDirty(TIMING_SIGN_OFF);
-    m_state = State::Routed;
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
-      m_state = State::TimingAnalyzed;
+      lastSuccessState = State::TimingAnalyzed;
     }
   }
 #else
   if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
-    m_state = State::TimingAnalyzed;
+    lastSuccessState = State::TimingAnalyzed;
   }
 #endif
 
   if (GetTaskManager()->tryRestoreSuccessFor(POWER)) {
-    m_state = State::PowerAnalyzed;
+    lastSuccessState = State::PowerAnalyzed;
   }
   if (GetTaskManager()->tryRestoreSuccessFor(BITSTREAM)) {
-    m_state = State::BistreamGenerated;
+    lastSuccessState = State::BistreamGenerated;
   }
+
+  m_state = lastSuccessState;
 }
 
 bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
