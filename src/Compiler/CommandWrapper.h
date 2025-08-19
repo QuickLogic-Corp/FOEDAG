@@ -34,7 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
-#include <QDebug>
+#include <iostream>
 
 // #define DEBUG_ENABLE_PARANOIC_CHECK
 
@@ -325,7 +325,7 @@ public:
       m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
     } else {
       m_contentHash = FileUtils::calcFileContentHash(filePath);
-      qInfo() << "FileIdentity()" << m_filePath.string().c_str() << m_contentHash.c_str();
+      std::cout << "FileIdentity()" << m_filePath.string() << m_contentHash << std::endl;
     }
   }
 
@@ -406,10 +406,10 @@ private:
 using FileIdentityPtr = std::shared_ptr<FileIdentity>;
 
 
-class FileIdentityProvider {
+class FilesIdentityCache {
 public:
-  static FileIdentityProvider& instance() {
-    static FileIdentityProvider inst;
+  static FilesIdentityCache& instance() {
+    static FilesIdentityCache inst;
     return inst;
   }
 
@@ -418,11 +418,12 @@ public:
   }
 
   const FileIdentityPtr& get(const std::filesystem::path& filePath, const std::string& mask, bool skipHashCheck) {
-    if (auto it = m_data.find(filePath); it == m_data.end()) {
+    std::string key = mask.empty()? filePath.string(): mask;
+    if (auto it = m_data.find(key); it == m_data.end()) {
       // if no element has found, we create new one
-      m_data[filePath] = std::make_shared<FileIdentity>(filePath, mask, skipHashCheck);
+      m_data[key] = std::make_shared<FileIdentity>(filePath, mask, skipHashCheck);
     }
-    return m_data[filePath];
+    return m_data[key];
   }
 
   void actualize() {
@@ -432,8 +433,8 @@ public:
   }
 
 private:
-  FileIdentityProvider()=default;
-  std::map<std::filesystem::path, FileIdentityPtr> m_data;
+  FilesIdentityCache()=default;
+  std::map<std::string, FileIdentityPtr> m_data;
 };
 
 
@@ -606,7 +607,7 @@ private:
     }
 
     std::string key = mask.empty()? resolvedFilePath.string(): mask;
-    m_files[key] = FileIdentityProvider::instance().get(resolvedFilePath, mask, skipHashCheck);
+    m_files[key] = FilesIdentityCache::instance().get(resolvedFilePath, mask, skipHashCheck);
   }
 
   void compareArguments(
