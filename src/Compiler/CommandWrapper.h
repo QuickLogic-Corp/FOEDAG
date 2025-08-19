@@ -33,7 +33,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <optional>
 #include <regex>
 #include <memory>
-//#include <iostream>
+
+#include <QDebug>
 
 // #define DEBUG_ENABLE_PARANOIC_CHECK
 
@@ -319,11 +320,12 @@ class FileIdentity {
 public:
   FileIdentity()=default;
   FileIdentity(const std::filesystem::path& filePath, const std::string& mask, bool skipHashCheck)
-  : m_filePath(filePath), m_mask(mask) {
+  : m_filePath(filePath), m_mask(mask), m_skipHashCheck(skipHashCheck) {
     if (skipHashCheck) {
       m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
     } else {
       m_contentHash = FileUtils::calcFileContentHash(filePath);
+      qInfo() << "FileIdentity()" << m_filePath.string().c_str() << m_contentHash.c_str();
     }
   }
 
@@ -334,10 +336,9 @@ public:
       // hash and date time changes in this case doesn't make sense, and skipped.
       return;
     }
-    if (!m_modifiedDateTime.empty()) {
+    if (m_skipHashCheck) {
       m_modifiedDateTime =  FileUtils::ModifiedTimeStr(m_filePath);
-    }
-    if (!m_contentHash.empty()) {
+    } else {
       m_contentHash = FileUtils::calcFileContentHash(m_filePath);
     }
   }
@@ -398,9 +399,43 @@ private:
 
   std::filesystem::path m_filePath;
   std::string m_mask;
+  bool m_skipHashCheck = false;
   std::string m_modifiedDateTime;
   std::string m_contentHash;
 };
+using FileIdentityPtr = std::shared_ptr<FileIdentity>;
+
+
+class FileIdentityProvider {
+public:
+  static FileIdentityProvider& instance() {
+    static FileIdentityProvider inst;
+    return inst;
+  }
+
+  void clear() {
+    m_data.clear();
+  }
+
+  const FileIdentityPtr& get(const std::filesystem::path& filePath, const std::string& mask, bool skipHashCheck) {
+    if (auto it = m_data.find(filePath); it == m_data.end()) {
+      // if no element has found, we create new one
+      m_data[filePath] = std::make_shared<FileIdentity>(filePath, mask, skipHashCheck);
+    }
+    return m_data[filePath];
+  }
+
+  void actualize() {
+    for (auto& [path, fileIdentity]: m_data) {
+      fileIdentity->actualize();
+    }
+  }
+
+private:
+  FileIdentityProvider()=default;
+  std::map<std::filesystem::path, FileIdentityPtr> m_data;
+};
+
 
 class CommandWrapper {
   static std::filesystem::path s_projectPath;
@@ -418,7 +453,7 @@ public:
       m_scriptHash = m_scriptRenderer->calcHash();
     }
     for (auto& [id, file]: m_files) {
-      file.actualize();
+      file->actualize();
     }
   }
 
@@ -439,7 +474,7 @@ public:
   bool isEmpty() const { return m_string.empty(); }
 
   const std::string& string() const { return m_string; }
-  const std::unordered_map<std::string, FileIdentity>& files() const { return m_files; }
+  const std::unordered_map<std::string, FileIdentityPtr>& files() const { return m_files; }
   const std::unordered_map<std::string, std::string>& arguments() const { return m_arguments; }
 
   void setScriptRenderer(const ScriptRendererPtr& scriptRenderer) { 
@@ -482,7 +517,7 @@ public:
 
 private:
   std::unordered_map<std::string, std::string> m_arguments;
-  std::unordered_map<std::string, FileIdentity> m_files;
+  std::unordered_map<std::string, FileIdentityPtr> m_files;
   ScriptRendererPtr m_scriptRenderer;
   std::string m_scriptHash;
   std::string m_string;
@@ -571,7 +606,7 @@ private:
     }
 
     std::string key = mask.empty()? resolvedFilePath.string(): mask;
-    m_files[key] = FileIdentity{resolvedFilePath, mask, skipHashCheck};
+    m_files[key] = FileIdentityProvider::instance().get(resolvedFilePath, mask, skipHashCheck);
   }
 
   void compareArguments(
@@ -603,15 +638,15 @@ private:
   }
 
   void compareFiles(
-    const std::unordered_map<std::string, FileIdentity>& filesOld, 
-    const std::unordered_map<std::string, FileIdentity>& filesNew, 
+    const std::unordered_map<std::string, FileIdentityPtr>& filesOld, 
+    const std::unordered_map<std::string, FileIdentityPtr>& filesNew, 
     const DiffCommandPtr& diff) 
   {
     for (const auto& [keyNew, fileIdentityNew]: filesNew) {
       auto itOld = filesOld.find(keyNew);
       if (itOld != filesOld.end()) {
-        const FileIdentity& fileIdentityOld = itOld->second;
-        fileIdentityNew.compare(fileIdentityOld, diff);
+        const FileIdentityPtr& fileIdentityOld = itOld->second;
+        fileIdentityNew->compare(*fileIdentityOld.get(), diff);
       }
     }
   }
