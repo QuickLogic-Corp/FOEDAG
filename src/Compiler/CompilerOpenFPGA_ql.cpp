@@ -8818,32 +8818,42 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
   Compiler::State lastSuccessState = Compiler::State::None;
 
-  if (!isSynthesisStatusActual()) {
-    GetTaskManager()->tryMarkDirty(SYNTHESIS);
+  bool previouslyDirtyStateDetected = false;
+
+  if (previouslyDirtyStateDetected || !isSynthesisStatusActual()) {
+    if (GetTaskManager()->tryMarkDirtyFor(SYNTHESIS)) {
+      previouslyDirtyStateDetected = true;
+    }
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(SYNTHESIS)) {
       lastSuccessState = State::Synthesized;
     }
   }
 
-  if (!isPackingStatusActual()) {
-    GetTaskManager()->tryMarkDirty(PACKING);
+  if (previouslyDirtyStateDetected || !isPackingStatusActual()) {
+    if (GetTaskManager()->tryMarkDirtyFor(PACKING)) {
+      previouslyDirtyStateDetected = true;
+    }
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(PACKING)) {
       lastSuccessState = State::Packed;
     }
   }
 
-  if (!isPlacementStatusActual()) {
-    GetTaskManager()->tryMarkDirty(PLACEMENT);
+  if (previouslyDirtyStateDetected || !isPlacementStatusActual()) {
+    if (GetTaskManager()->tryMarkDirtyFor(PLACEMENT)) {
+      previouslyDirtyStateDetected = true;
+    }
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(PLACEMENT)) {
       lastSuccessState = State::Placed;
     }
   }
 
-  if (!isRoutingStatusActual()) {
-    GetTaskManager()->tryMarkDirty(ROUTING);
+  if (previouslyDirtyStateDetected || !isRoutingStatusActual()) {
+    if (GetTaskManager()->tryMarkDirtyFor(ROUTING)) {
+      previouslyDirtyStateDetected = true;
+    }
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(ROUTING)) {
       lastSuccessState = State::Routed;
@@ -8851,24 +8861,38 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
-  if (!isTimingAnalysysStatusActual()) {
-    GetTaskManager()->tryMarkDirty(TIMING_SIGN_OFF);
+  if (previouslyDirtyStateDetected || !isTimingAnalysysStatusActual()) {
+#else
+  if (previouslyDirtyStateDetected /*|| !isTimingAnalysysStatusActual()*/) {
+#endif
+    if (GetTaskManager()->tryMarkDirtyFor(TIMING_SIGN_OFF)) {
+      previouslyDirtyStateDetected = true;
+    }
   } else {
     if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
       lastSuccessState = State::TimingAnalyzed;
     }
   }
-#else
-  if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
-    lastSuccessState = State::TimingAnalyzed;
-  }
-#endif
 
-  if (GetTaskManager()->tryRestoreSuccessFor(POWER)) {
-    lastSuccessState = State::PowerAnalyzed;
+
+  if (previouslyDirtyStateDetected /*|| !isPowerEstimationStatusActual()*/) {
+    if (GetTaskManager()->tryMarkDirtyFor(POWER)) {
+      previouslyDirtyStateDetected = true;
+    }
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(POWER)) {
+      lastSuccessState = State::PowerAnalyzed;
+    }
   }
-  if (GetTaskManager()->tryRestoreSuccessFor(BITSTREAM)) {
-    lastSuccessState = State::BistreamGenerated;
+
+  if (previouslyDirtyStateDetected /*|| !isBitstreamGenerationStatusActual()*/) {
+    if (GetTaskManager()->tryMarkDirtyFor(BITSTREAM)) {
+      previouslyDirtyStateDetected = true;
+    }
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(BITSTREAM)) {
+      lastSuccessState = State::BistreamGenerated;
+    }
   }
 
   m_state = lastSuccessState;
