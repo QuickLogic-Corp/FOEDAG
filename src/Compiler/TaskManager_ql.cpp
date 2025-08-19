@@ -379,26 +379,16 @@ void TaskManager::reset() {
   }
 }
 
-void TaskManager::tryMarkDirtyFrom(uint from) {
-  for (auto it = m_tasks.begin(); it != m_tasks.end(); ++it) {
-    uint id = it.key();
-    Task* task = it.value();
-    if (id >= from) {
-      if (task->status() == TaskStatus::Success) {
-        task->setStatus(TaskStatus::Dirty);
-      }
-    }
-  }
-}
-
-void TaskManager::tryMarkDirty(uint id) {
+bool TaskManager::tryMarkDirtyFor(uint id) {
   auto it = m_tasks.find(id);
   if (it != m_tasks.end()) {
     Task* task = it.value();
     if (task->status() == TaskStatus::Success) {
       task->setStatus(TaskStatus::Dirty);
+      return true;
     }
   }
+  return false;
 }
 
 bool TaskManager::tryRestoreSuccessFor(uint id) {
