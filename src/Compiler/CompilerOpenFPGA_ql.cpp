@@ -8816,6 +8816,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  CompilationFilesScopedSession compilationFilesScopedSession;
+
   Compiler::State lastSuccessState = Compiler::State::None;
 
   if (!isSynthesisStatusActual()) {

@@ -413,8 +413,14 @@ public:
     return inst;
   }
 
-  void clear() {
-    m_data.clear();
+  bool isEnabled() const { return m_isEnabled; }
+
+  void enable() {
+    m_isEnabled = true;
+  }
+  void disable() {
+    m_isEnabled = false;
+    clear();
   }
 
   const FileIdentityPtr& get(const std::filesystem::path& filePath, const std::string& mask, bool skipHashCheck) {
@@ -426,17 +432,33 @@ public:
     return m_data[key];
   }
 
-  void actualize() {
-    for (auto& [path, fileIdentity]: m_data) {
-      fileIdentity->actualize();
-    }
-  }
-
 private:
   FilesIdentityCache()=default;
+
+  bool m_isEnabled = false;
   std::map<std::string, FileIdentityPtr> m_data;
+
+  void clear() {
+    m_data.clear();
+  }
 };
 
+class CompilationFilesScopedSession {
+public:
+CompilationFilesScopedSession() {
+  FilesIdentityCache::instance().enable();
+}
+
+~CompilationFilesScopedSession() noexcept {
+  FilesIdentityCache::instance().disable();
+}
+
+// non-copiable
+CompilationFilesScopedSession(const CompilationFilesScopedSession&) = delete;
+CompilationFilesScopedSession& operator=(const CompilationFilesScopedSession&) = delete;
+CompilationFilesScopedSession(CompilationFilesScopedSession&&) = delete;
+CompilationFilesScopedSession& operator=(CompilationFilesScopedSession&&) = delete;
+};
 
 class CommandWrapper {
   static std::filesystem::path s_projectPath;
@@ -607,7 +629,11 @@ private:
     }
 
     std::string key = mask.empty()? resolvedFilePath.string(): mask;
-    m_files[key] = FilesIdentityCache::instance().get(resolvedFilePath, mask, skipHashCheck);
+    if (FilesIdentityCache::instance().isEnabled()) {
+      m_files[key] = FilesIdentityCache::instance().get(resolvedFilePath, mask, skipHashCheck);
+    } else {
+      m_files[key] = std::make_shared<FileIdentity>(resolvedFilePath, mask, skipHashCheck);
+    }
   }
 
   void compareArguments(
