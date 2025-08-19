@@ -115,6 +115,8 @@ class TaskManager : public QObject {
   bool tryRestoreSuccessFor(uint from);
 
  signals:
+  void refreshViewRequested();
+
   /*!
    * \brief taskStateChanged. Emits whenever any task change its status.
    */

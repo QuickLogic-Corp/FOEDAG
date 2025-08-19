@@ -64,6 +64,9 @@ TaskTableView::TaskTableView(TaskManager *tManager, QWidget *parent)
     m_viewDisabled = m_taskManager->status() == TaskStatus::InProgress;
     viewport()->setEnabled(!m_viewDisabled);
   });
+  connect(m_taskManager, &TaskManager::refreshViewRequested, this, [this]() {
+    viewport()->update();
+  });
   initializeResources();
 }
 
