@@ -8638,6 +8638,15 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
     command->append(vpr_custom_options_string);
   }
 
+  // ref: https://github.com/QL-Proprietary/aurora2/issues/1372
+  // default parameter values for packing stage, if **not** already specified in the custom vpr options:
+  // `--target_ext_pin_util clb:0.8,1`
+  std::size_t found_target_ext_pin_util = command->string().find("target_ext_pin_util");
+  if(found_target_ext_pin_util == std::string::npos) {
+    std::string vpr_target_ext_pin_util_param_string = "--target_ext_pin_util clb:0.8,1";
+    command->append(vpr_target_ext_pin_util_param_string);
+  }
+
   command->append("--pack");
 
   return command;
@@ -8701,6 +8710,15 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
     // add the options string to the end of the vpr options with one whitespace separator
     command->append(vpr_custom_options_string);
+  }
+
+  // ref: https://github.com/QL-Proprietary/aurora2/issues/1372
+  // default parameter values for routing stage, if **not** already specified in the custom vpr options:
+  // `--router_initial_acc_cost_chan_congestion_weight 0.0`
+  std::size_t found_router_initial_acc_cost_chan_congestion_weight = command->string().find("router_initial_acc_cost_chan_congestion_weight");
+  if(found_router_initial_acc_cost_chan_congestion_weight == std::string::npos) {
+    std::string vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string = "--router_initial_acc_cost_chan_congestion_weight 0.0";
+    command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
   }
 
   command->append("--route");
