@@ -8816,6 +8816,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  CompilationFilesScopedSession compilationFilesScopedSession;
+
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
     m_state = State::IPGenerated;
