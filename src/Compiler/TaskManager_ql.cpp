@@ -379,6 +379,39 @@ void TaskManager::reset() {
   }
 }
 
+void TaskManager::tryMarkDirtyFrom(uint from) {
+  bool statusChanged = false;
+  for (auto it = m_tasks.begin(); it != m_tasks.end(); ++it) {
+    uint id = it.key();
+    Task* task = it.value();
+    if (id >= from) {
+      if (task->status() == TaskStatus::Success) {
+        task->blockSignals(true);
+        task->setStatus(TaskStatus::Dirty);
+        task->blockSignals(false);
+        statusChanged = true;
+      }
+    }
+  }
+  if (statusChanged) {
+    emit refreshViewRequested();
+  }
+}
+
+bool TaskManager::tryRestoreSuccessFor(uint id) {
+  Task* t = task(id);
+  if (t) {
+    if (t->status() == TaskStatus::Dirty) {
+      t->blockSignals(true);
+      t->setStatus(TaskStatus::Success);
+      t->blockSignals(false);
+      emit refreshViewRequested();
+      return true;
+    }
+  }
+  return false;
+}
+
 void TaskManager::cleanDownStreamStatus(Task *t) {
   for (auto it{m_taskQueue.begin()}; it != m_taskQueue.end(); ++it) {
     if (*it == t) {

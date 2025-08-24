@@ -3,14 +3,14 @@
 #include <QElapsedTimer>
 #include <QDebug>
 
-class ScopeTimer {
+class ScopedTimer {
 public:
-    ScopeTimer(const QString& scopeName)
+    ScopedTimer(const QString& scopeName)
         : m_name(scopeName), m_timer() {
         m_timer.start();
     }
 
-    ~ScopeTimer() {
+    ~ScopedTimer() {
         qDebug() << m_name << "took" << m_timer.elapsed() << "ms";
     }
 

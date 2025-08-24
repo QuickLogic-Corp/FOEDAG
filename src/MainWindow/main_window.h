@@ -95,6 +95,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void onShowLicenses();
   void stopCompilation();
   void forceStopCompilation();
+  void clearCompilationStates();
   void showMessagesTab();
   void showReportsTab();
   void fileModified(const QString& file);
@@ -203,6 +204,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QAction* startAction = nullptr;
   QAction* startSimAction = nullptr;
   QAction* stopAction = nullptr;
+  QAction* clearCompilationStatesAction = nullptr;
   QAction* aboutAction = nullptr;
   QAction* documentationAction = nullptr;
   QAction* releaseNotesAction = nullptr;

@@ -104,7 +104,19 @@ class TaskManager : public QObject {
    */
   void reset();
 
+  /*!
+   * \brief mark all tasks from specific id to further as required recompilation.
+   */
+  void tryMarkDirtyFrom(uint from);
+
+  /*!
+   * \brief Turn from dirty to success. Note: only succeeded tasks could be marked dirty
+   */
+  bool tryRestoreSuccessFor(uint from);
+
  signals:
+  void refreshViewRequested();
+
   /*!
    * \brief taskStateChanged. Emits whenever any task change its status.
    */

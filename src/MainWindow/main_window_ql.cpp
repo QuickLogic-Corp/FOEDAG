@@ -246,6 +246,13 @@ MainWindow::MainWindow(Session* session)
     refreshPinPlanner();
   });
 #endif
+
+  QObject::connect(QLSettingsManager::getInstance(), &QLSettingsManager::settingsChanged, this, [this](){
+    m_compiler->invalidateTaskStatuses();
+  });
+  QObject::connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designFilesChanged, this, [this](){
+    m_compiler->invalidateTaskStatuses();
+  });
 }
 
 void MainWindow::Tcl_NewProject(int argc, const char* argv[]) {
@@ -605,6 +612,13 @@ void MainWindow::forceStopCompilation() {
   m_progressBar->hide();
 }
 
+void MainWindow::clearCompilationStates() {
+  if (m_compiler) {
+    m_compiler->clearCompilationCache();
+  }
+  clearCompilationStatesAction->setEnabled(false);
+}
+
 void MainWindow::showMessagesTab() {
   auto newWidget = new MessagesTabWidget(*m_taskManager);
 
@@ -860,7 +874,9 @@ void MainWindow::loadFile(const QString& file) {
   if (m_projectFileLoader) {
     m_projectFileLoader->Load(file);
     if (sourcesForm) sourcesForm->InitSourcesForm();
-    updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
+    if (m_compiler) {
+      updatePRViewButton(static_cast<int>(m_compiler->CompilerState()));
+    }
     updateTaskTable();
   }
 }
@@ -949,6 +965,7 @@ void MainWindow::createMenus() {
   processMenu->addAction(startAction);
 //   processMenu->addAction(startSimAction);
   processMenu->addAction(stopAction);
+  processMenu->addAction(clearCompilationStatesAction);
 
   helpMenu = menuBar()->addMenu("&Help");
   helpMenu->addAction(aboutAction);
@@ -980,6 +997,7 @@ void MainWindow::createToolBars() {
   debugToolBar->addAction(startAction);
 //   debugToolBar->addAction(startSimAction);
   debugToolBar->addAction(stopAction);
+  debugToolBar->addAction(clearCompilationStatesAction);
 }
 
 void MainWindow::updateMenusVisibility(bool welcomePageShown) {
@@ -1059,11 +1077,17 @@ void MainWindow::createActions() {
   stopAction->setToolTip(tr("Stop compilation tasks"));
   stopAction->setEnabled(false);
 
+  clearCompilationStatesAction = new QAction(tr("Clear compilation states"), this);
+  clearCompilationStatesAction->setIcon(QIcon(":/images/erase_colored.png"));
+  clearCompilationStatesAction->setToolTip(tr("Clear compilation states"));
+  clearCompilationStatesAction->setEnabled(true);
+
   connect(startAction, &QAction::triggered, this,
           [this]() { startProject(false); });
   connect(startSimAction, &QAction::triggered, this,
           [this]() { startProject(true); });
   connect(stopAction, &QAction::triggered, this, &MainWindow::stopCompilation);
+  connect(clearCompilationStatesAction, &QAction::triggered, this, &MainWindow::clearCompilationStates);
 
   aboutAction = new QAction(tr("About"), this);
   connect(aboutAction, &QAction::triggered, this, [this]() {
@@ -1868,6 +1892,15 @@ void MainWindow::ReShowWindow(QString strProject) {
 
 #ifndef UPSTREAM_PINPLANNER
   connect(m_taskManager, &TaskManager::taskDone, TaskStatusWatcher::Instance(), &TaskStatusWatcher::onTaskDone);
+  connect(m_taskManager, &TaskManager::taskDone, this, [this](){
+    if (!clearCompilationStatesAction->isEnabled()) {
+      if (m_compiler) {
+        if (m_compiler->hasCompilationCache()) {
+          clearCompilationStatesAction->setEnabled(true);
+        }
+      }
+    }
+  });
 #endif
 
   sourcesForm->InitSourcesForm();
@@ -1876,6 +1909,9 @@ void MainWindow::ReShowWindow(QString strProject) {
   updateViewMenu();
   updateTaskTable();
   updateBitstream();
+
+  // Update watcher files on newly created project
+  DesignFileWatcher::Instance()->updateDesignFileWatchers(m_projectManager);
 }
 
 void MainWindow::clearDockWidgets() {

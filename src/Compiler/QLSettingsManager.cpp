@@ -451,6 +451,10 @@ std::filesystem::path QLSettingsManager::getFilePathByExt(const std::string& ext
   return ext_file_path;
 }
 
+std::filesystem::path QLSettingsManager::getPathValue(std::string category, std::string subcategory, std::string parameter) {
+  return std::filesystem::path{getStringValue(category, subcategory, parameter)};
+}
+
 std::string QLSettingsManager::getStringValue(std::string category, std::string subcategory, std::string parameter) {
 
   std::string value;
@@ -584,7 +588,9 @@ const json* QLSettingsManager::getJson(std::string category) {
 
 
 std::filesystem::path QLSettingsManager::getSDCFilePath() {
-
+  if (!std::filesystem::exists(instance->sdc_file_path)) {
+    instance->sdc_file_path.clear();
+  }
   return instance->sdc_file_path;
 }
 
@@ -1199,6 +1205,9 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     FileUtils::overwriteFile(power_json_template_filepath,
                              power_estimation_json_filepath,
                              ec);
+
+    emit settingsChanged();
+
     if(ec) {
       // error
       std::cout << std::string("failed to copy: ") + power_json_template_filepath.string() << std::endl;

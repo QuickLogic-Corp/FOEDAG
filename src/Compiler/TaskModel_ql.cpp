@@ -101,6 +101,8 @@ QVariant TaskModel::data(const QModelIndex &index, int role) const {
           return QIcon(":/failed.png");
         case TaskStatus::InProgress:
           return true;
+        case TaskStatus::Dirty:
+          return QIcon(":/warning.png");;
         default:
           return QVariant();
       }

@@ -241,6 +241,10 @@ class Compiler {
   bool copyFilesOnAdd() { return m_copyFilesWhileAdding; }
   void setCopyFilesOnAdd(bool copyFilesWhileAdding) { m_copyFilesWhileAdding = copyFilesWhileAdding; }
 
+  virtual bool hasCompilationCache() const { return false; }
+  virtual void clearCompilationCache() {}
+  virtual void invalidateTaskStatuses() {}
+
  protected:
   /* Methods that can be customized for each new compiler flow */
   virtual bool IPGenerate();
@@ -312,6 +316,12 @@ class Compiler {
   // call 'copy_files_on_add on' to enable this feature.
   // this will apply to all file types as of now.
   bool m_copyFilesWhileAdding = false;
+  bool m_autoLayoutGenerationMode = false;
+  std::string m_autoLayoutGeneratedLayoutName{};
+  std::filesystem::path m_autoLayoutGeneratedVPRXMLPath{};
+  std::filesystem::path m_autoLayoutGeneratedRRGraphBinPath{};
+  std::filesystem::path m_autoLayoutGeneratedRouterLookaheadBinPath{};
+  bool m_useAnalyticalPlace = false;
 
   // Tasks generic options
   IPGenerateOpt m_ipGenerateOpt = IPGenerateOpt::None;

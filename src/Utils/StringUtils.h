@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <string_view>
 #include <vector>
+#include <unordered_set>
 
 namespace FOEDAG {
 
@@ -112,6 +113,8 @@ class StringUtils final {
     envVars.insert(std::make_pair(var, value));
   }
 
+  static std::unordered_set<std::string> findShellVariableNames(const std::string& text);
+
   static std::string unquoted(const std::string& text);
 
   // Returns bool indicating if `text` ends with `ending`
@@ -144,6 +147,17 @@ class StringUtils final {
   static bool matchesWildcardPattern(const std::string& text, const std::string& pattern);
   static std::string extractWildcardSegment(const std::string& text, const std::string& pattern);
   static void removePrefix(std::string& str, const std::string& prefix);
+
+  static std::string toString(const std::unordered_set<std::string>& set, char delimiter = ',') {
+    std::string result;
+    for (const auto& e: set) {
+        result += e + delimiter;
+    }
+    if (!result.empty()) {
+      result.erase(result.size() - 1); // remove the last ","
+    }
+    return result;
+  };
 
  private:
   StringUtils() = delete;

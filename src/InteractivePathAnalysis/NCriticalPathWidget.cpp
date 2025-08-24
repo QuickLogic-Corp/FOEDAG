@@ -118,8 +118,8 @@ NCriticalPathWidget::NCriticalPathWidget(
             m_statusBar->onConnectionStatusChanged(isConnected);
           });
 
-  connect(FOEDAG::QLSettingsManager::getInstance(),
-          &FOEDAG::QLSettingsManager::settingsChanged, this, [this]() {
+  connect(QLSettingsManager::getInstance(),
+          &QLSettingsManager::settingsChanged, this, [this]() {
             const auto& parameters = m_toolsWidget->parameters();
             parameters->resetChangedFlags();
             if (bool foundChanges = parameters->loadFromFile()) {

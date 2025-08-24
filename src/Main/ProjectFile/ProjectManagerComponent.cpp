@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "ProjectManagerComponent.h"
 
 #include "Compiler/CompilerDefines.h"
+#include <Compiler/QLSettingsManager.h>
 #include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
 
@@ -73,6 +74,11 @@ void ProjectManagerComponent::Save(QXmlStreamWriter* writer) {
   stream.writeStartElement(PROJECT_OPTION);
   stream.writeAttribute(PROJECT_NAME, PROJECT_CONFIG_TYPE);
   stream.writeAttribute(PROJECT_VAL, QString::number(tmpProCfg->projectType()));
+  stream.writeEndElement();
+
+  stream.writeStartElement(PROJECT_OPTION);
+  stream.writeAttribute(PROJECT_NAME, PROJECT_SYNTHESIS_TOOL);
+  stream.writeAttribute(PROJECT_VAL, QString::number(tmpProCfg->synthesisTool()));
   stream.writeEndElement();
 
   QMap<QString, QString> tmpOption = tmpProCfg->getMapOption();
@@ -246,6 +252,11 @@ void ProjectManagerComponent::Load(QXmlStreamReader* r) {
               bool ok{true};
               auto type = reader.attributes().value(PROJECT_VAL).toInt(&ok);
               tmpProCfg->setProjectType(ok ? type : RTL);
+            } else if (PROJECT_SYNTHESIS_TOOL ==
+                       reader.attributes().value(PROJECT_NAME).toString()) {
+              bool ok{false};
+              auto type = reader.attributes().value(PROJECT_VAL).toInt(&ok);
+              tmpProCfg->setSynthesisTool(ok ? type : Yosys);
             } else {
               tmpProCfg->setOption(
                   reader.attributes().value(PROJECT_NAME).toString(),
@@ -533,6 +544,10 @@ void ProjectManagerComponent::Load(QXmlStreamReader* r) {
       }
     }
   }
+
+  ProjectConfiguration* tmpProCfg =
+              Project::Instance()->projectConfig();
+  QLSettingsManager::getInstance()->updateJSONSettingsForProjectType(tmpProCfg->projectType(), tmpProCfg->synthesisTool());
 }
 
 }  // namespace FOEDAG

@@ -30,11 +30,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/BlifParser.h"
+#include "Compiler/CommandWrapper.h"
+#include "Compiler/TaskCompilationStateManager.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
 #ifndef COMPILER_OPENFPGA_QL_H
 #define COMPILER_OPENFPGA_QL_H
+
+struct VprStageCfg {
+  bool use_place_file = true;
+  bool use_route_file = true;
+};
 
 namespace FOEDAG {
 #if UPSTREAM_UNUSED
@@ -46,7 +53,7 @@ class CompilerOpenFPGA_ql : public Compiler {
     friend class QLMetricsManager;
     friend class QLDeviceManager;
  public:
-  CompilerOpenFPGA_ql() = default;
+  CompilerOpenFPGA_ql();
 #if UPSTREAM_UNUSED
   ~CompilerOpenFPGA_ql() = default;
 #endif // #if UPSTREAM_UNUSED
@@ -73,7 +80,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   void ArchitectureFile(const std::filesystem::path& path) {
     m_architectureFile = path;
   }
-  void YosysScript(const std::string& script) { m_yosysScript = script; }
+  void setCustomYosysScript(const std::string& script) { m_customYosysScript = script; }
   void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }
   void OpenFpgaArchitectureFile(const std::filesystem::path& path) {
     m_OpenFpgaArchitectureFile = path;
@@ -134,7 +141,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
-  virtual std::string BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget());
+  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
+  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
 
   std::string staProfile(const QLDeviceTarget& device) const;  
   bool collectStaDevices(std::map<std::string, QLDeviceTarget>& devices) const;
@@ -164,13 +172,13 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::vector<std::string> GetCleanFiles(
       Action action, const std::string& projectName,
       const std::string& topModule) const;
-  virtual std::string InitSynthesisScript();
-  virtual std::string FinishSynthesisScript(const std::string& script);
+  std::string GetYosysScriptTemplate() const;
+  void FinishSynthesisScript(const ScriptRendererPtr& script);
   virtual std::string InitAnalyzeScript();
   virtual std::string FinishAnalyzeScript(const std::string& script);
   virtual std::string InitOpenFPGAScript();
   virtual std::string FinishOpenFPGAScript(const std::string& script);
-  virtual std::string InitSynplifyScript();
+  std::string GetSynplifyScriptTemplate() const;
   virtual std::filesystem::path FindSynthSDCPaths();
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
@@ -217,12 +225,15 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaPinMapXml = "";
   std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
   std::string m_deviceSize;
-  std::string m_yosysScript;
-  std::string m_synplifyScript;
+  std::string m_customYosysScript;
   std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
-  virtual std::string BaseStaCommand();
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+  CommandWrapperPtr BaseStaCommand();
+#else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+  std::string BaseStaCommand();
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   virtual std::string BaseStaScript(std::string libFileName,
                                     std::string netlistFileName,
                                     std::string sdfFileName,
@@ -234,6 +245,27 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
+  TaskCompilationStateManager m_taskCompilationStateManager;
+
+  std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
+  CommandWrapperPtr getPackingCommand();
+  CommandWrapperPtr getPlacementCommand();
+  CommandWrapperPtr getRoutingCommand();      
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA       
+  CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
+#endif
+
+  void invalidateTaskStatuses() override final;
+  bool isSynthesisStatusActual();
+  bool isPackingStatusActual();
+  bool isPlacementStatusActual();
+  bool isRoutingStatusActual();
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+  bool isTimingAnalysysStatusActual();
+#endif
+
+  void clearCompilationCache() override final;
+  bool hasCompilationCache() const override final;
 };
 
 }  // namespace FOEDAG

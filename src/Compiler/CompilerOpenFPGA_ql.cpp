@@ -84,6 +84,17 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
+#define USE_INCREMENTAL_COMPILATION
+
+CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
+{
+  QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
+    std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
+    m_taskCompilationStateManager.setProjectPath(projectPath);
+    m_taskCompilationStateManager.load();
+  });
+}
+
 void CompilerOpenFPGA_ql::Version(std::ostream* out) {
   (*out) << "QuickLogic Aurora"
          << "\n";
@@ -627,7 +638,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     std::string script((std::istreambuf_iterator<char>(stream)),
                        std::istreambuf_iterator<char>());
     stream.close();
-    compiler->YosysScript(script);
+    compiler->setCustomYosysScript(script);
     return TCL_OK;
   };
   interp->registerCmd("custom_synth_script", custom_synth_script, this, 0);
@@ -1716,776 +1727,46 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
-  QLSettingsManager::reloadJSONSettings();
-
-  // check if settings were loaded correctly before proceeding:
-  if((QLSettingsManager::getInstance()->settings_json).empty()) {
-    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return false;
-  }
-
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
-    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
-    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
-    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
-    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
-    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
-    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
-    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
-    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
-    Message("family: " + family);
-    Message("foundry: " + foundry);
-    Message("node: " + node);
-    Message("devicename: " + devicename);
-    Message("voltage_threshold: " + voltage_threshold);
-    Message("p_v_t_corner: " + p_v_t_corner);
-    Message("layout: " + layout);
-    return false;
-  }
+  const std::unordered_map<int, CommandWrapperPtr> commandsMap = getSynthesisCommands();
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
   {
-    std::string synplifyScript; 
-    m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
-    if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
-      ErrorMessage("This Device is Not Supported by Synplify.");
+    auto it = commandsMap.find(SynthesisTool::Synplify);
+    if (it == commandsMap.end()) {
+      // error message reported inside the getSynthesisCommands
       return false;
     }
-    synplifyScript = InitSynplifyScript();
-
-    std::string includes;
-    for (auto path : ProjManager()->includePathList()) {
-      includes += "set_option -include_path " + FileUtils::AdjustPath(path) + "\n";
-    }
-    if(!includes.empty()) {
-      synplifyScript =
-        ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", includes);
-    }
-    else{
-      synplifyScript = ReplaceAll(synplifyScript, "${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
-    }
-
-    std::string designFiles;
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string filesScript =
-          "add_file ${LANGUAGE_STANDARD} ${FILES}";
-      std::string lang;
-
-      auto files = lang_file.second + " ";
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-        case Design::Language::VHDL_1993:
-        case Design::Language::VHDL_2000:
-        case Design::Language::VHDL_2008:
-        case Design::Language::VHDL_2019:
-          lang = "-vhdl";
-          break;
-        case Design::Language::VERILOG_1995:
-          lang = "-verilog -vlog_std v95";
-          break;
-        case Design::Language::VERILOG_2001:
-          lang = "-verilog -vlog_std v2001";
-          break;
-        case Design::Language::SYSTEMVERILOG_2005:
-        case Design::Language::SYSTEMVERILOG_2009:
-        case Design::Language::SYSTEMVERILOG_2012:
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-verilog -vlog_std sysv";
-          break;
-        case Design::Language::VERILOG_NETLIST:
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          ErrorMessage("Unsupported language (Synplify default parser)");
-          break;
-        case Design::Language::OTHER:
-          // don't include it in the compilation process
-          continue;
-      }
-      filesScript = ReplaceAll(filesScript, "${LANGUAGE_STANDARD}", lang);
-      filesScript = ReplaceAll(filesScript, "${FILES}", files);
-      designFiles += filesScript + "\n";
-    }
-#ifdef _WIN32
-    designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
-#endif
-    synplifyScript =
-        ReplaceAll(synplifyScript, "${READ_DESIGN_FILES}", designFiles);
-
-    if (!ProjManager()->DesignTopModule().empty()) {
-      synplifyScript = ReplaceAll(synplifyScript, "${TOP_MODULE}",
-                                ProjManager()->DesignTopModule());
-    } else {
-      ErrorMessage("Cannot proceed without the top module specified.");
-    }
-
-    std::string synplify_family_name = 
-      QLDeviceManager::getInstance()->deviceSynplifyFamilyName();
-    if(!synplify_family_name.empty()) {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FAMILY}", synplify_family_name);
-    }
-    else {
-      ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
-      return false;
-    }
-
-    std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
-    if (synplify_mode == "speed")
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "1");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "auto");
-    }
-    else if (synplify_mode == "area")
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
-    }
-    else
-    {
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${RETIMING_VALUE}", "0");
-      synplifyScript = 
-            ReplaceAll(synplifyScript, "${FREQUENCY_VALUE}", "1");
-    }
-
-    std::filesystem::path synth_sdc_filepath;
-
-    if (synplify_mode == "speed"){
-      synth_sdc_filepath = QLSettingsManager::getSDCFilePath();
-
-      // if we have a valid sdc_file_path at this point, pass it on to vpr:
-      if(!synth_sdc_filepath.empty()) {
-        // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
-
-        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("add_file") +
-                                                                  std::string(" -constraint ") + 
-                                                                  synth_sdc_filepath.string());
-      }
-      else {
-        //std::cout << "synth sdc file not available." << std::endl;
-
-        synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
-      }
-    }
-    else
-    {
-       synplifyScript = ReplaceAll(synplifyScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
-    }
-
-    std::string synplify_script_path = ProjManager()->projectName() + ".prj";
-    synplify_script_path =
-      (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
-          .string();
-    std::ofstream ofs(synplify_script_path);
-    ofs << synplifyScript;
-#ifdef _WIN32
-    ofs << "\n";
-    ofs << "# Run all implementations of the active project.\n";
-    ofs << "run -all\n";
-    ofs << "\n";
-    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
-    ofs << "program_terminate\n";
-#endif
-    ofs.close();
-
-#ifdef _WIN32
-    // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
-    // let's use synplify_base_console instead to have proper logging into compiler console.
-    const std::string synplifyExecName{"synplify_base_console"};
-#else
-    const std::string synplifyExecName{"synplify_base"};
-#endif
-
-    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
-      ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
-      return false;
-    }
-
-    const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
-
-    std::string synplify_license_wait = "";
-
-    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
-      synplify_license_wait = "-license_wait ";
-
-#ifdef _WIN32
-    // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
-    std::string command = synplifyExecName + " -licensetype synplifybase_quicklogic " + synplify_license_wait +
-    synplify_script_path + " -log " + synplifyLogFilePath;
-#else
-    // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
-    std::string command = synplifyExecName + " -batch " + "-licensetype synplifybase_quicklogic " + synplify_license_wait +
-    synplify_script_path + " >> " + synplifyLogFilePath;
-#endif
-    Message("Synthesis command: " + command);
-    int status = ExecuteAndMonitorSystemCommand(command);
-    CleanTempFiles();
-    if (status) {
-      ErrorMessage("Design " + ProjManager()->projectName() +
-                  " synthesis failed");
-      return false;
-    } else {
-      m_state = State::Synthesized;
-      Message("Design " + ProjManager()->projectName() + " is synthesized");
-    }
-  }
-  
-  // use the device specific yosys script
-  m_aurora_template_script_yosys_path = QLDeviceManager::getInstance()->deviceYosysScriptFile();
-
-  if(m_aurora_template_script_yosys_path.empty()) {
-
-    ErrorMessage("Cannot proceed without Yosys Template Script.");
-    return false;
-  }
-
-
-  // init synthesis script from the right location according to the selected device.
-  std::string yosysScript = InitSynthesisScript();
-
-
-  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  }
-  else {
-    m_useVerific = false;
-  }
-
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF:
-        Message("Skipping synthesis, gate-level design.");
-        return true;
-        break;
-      default:
-        break;
-    }
-  }
-  
-  if(m_projManager->synthesisTool() != Synplify)
-  {
-    if (m_useVerific) {
-      // Verific parser
-      std::string fileList;
-      std::string includes;
-
-      for (auto msg_sev : MsgSeverityMap()) {
-        switch (msg_sev.second) {
-          case MsgSeverity::Ignore:
-            fileList += "verific -set-ignore " + msg_sev.first + "\n";
-            break;
-          case MsgSeverity::Info:
-            fileList += "verific -set-info " + msg_sev.first + "\n";
-            break;
-          case MsgSeverity::Warning:
-            fileList += "verific -set-warning " + msg_sev.first + "\n";
-            break;
-          case MsgSeverity::Error:
-            fileList += "verific -set-error " + msg_sev.first + "\n";
-            break;
-        }
-      }
-
-      // workaround for enabling usage of '-lib' option, suggested by yosyshq
-      // add the following line in the ys script:
-      fileList += std::string("verific -cfg veri_create_empty_box 1\n");
-
-      // ProjectManager::addIncludePath(const std::string& includePath)
-      for (auto path : ProjManager()->includePathList()) {
-        includes += FileUtils::AdjustPath(path) + " ";
-      }
-      if(!includes.empty()) {
-        fileList += "verific -vlog-incdir " + includes + "\n";
-      }
-
-      // incdir:always add the project's 'sources' directory 
-      //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
-      std::filesystem::path design_sources_dir_path =
-          ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
-                                          ProjManager()->projectName(),
-                                          ProjManager()->getDesignActiveFileSet().toStdString());
-      fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
-      
-      // incdir: if executed via TCL script, and copy_files_on_add is *not* set
-      //   add the TCL script directory 
-      std::filesystem::path tcl_script_dir_path = 
-          QLSettingsManager::getTCLScriptDirPath();
-      if(!tcl_script_dir_path.empty()) {
-        if(!copyFilesOnAdd()) {
-          fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
-        }
-      }
-
-      std::string libraries;
-      // ProjectManager::addLibraryPath(const std::string& libraryPath)
-      for (auto path : ProjManager()->libraryPathList()) {
-        libraries += FileUtils::AdjustPath(path) + " ";
-      }
-      if(!libraries.empty()) {
-        fileList += "verific -vlog-libdir " + libraries + "\n";
-      }
-
-      // -vlog-libdir : currently it does not solve anything, so it is commented out.
-      // std::filesystem::path device_yosys_modules_dir_path = 
-      //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
-      //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
-      // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
-      
-      // recommendation by: <nak@yosyshq.com>
-      // with the -vlog-libdir option, if verific can't find a module named "Foo",
-      // it will look in the given directory for a file named "Foo.v".
-      // if we want to use the -vlog-libdir option we would have to split
-      // the primitive library into one file per module.
-      // instead of using -vlog-libdir, we could use the existing files by
-      // reading them in with the -lib option like this:
-      //      verific -vlog2k -lib /path/to/dsp_sim.v
-      // we should do this with all files that contain primitives that
-      // the user might want to instantiate manually, such as the BRAM sim files.
-      std::vector<std::filesystem::path> yosys_modules_pathlist = 
-          QLDeviceManager::getInstance()->deviceYosysModulesPathList();
-
-      for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
-
-        std::string sim_verilog_pattern = ".*_sim\\.v";
-
-        if (std::regex_match(yosys_module_path.filename().string(),
-                            std::regex(sim_verilog_pattern, std::regex::icase))) {
-
-            fileList += std::string("verific -vlog2k -lib ") + 
-                        yosys_module_path.string() +
-                        "\n";
-        }
-      }
-
-      // ProjectManager::addLibraryExtension(const std::string& libraryExt)
-      for (auto ext : ProjManager()->libraryExtensionList()) {
-        fileList += "verific -vlog-libext " + ext + "\n";
-      }
-
-      // ProjectManager::addMacro(const std::string& macroName,
-      //                          const std::string& macroValue)
-      std::string macros;
-      for (auto& macro_value : ProjManager()->macroList()) {
-        macros += macro_value.first + "=" + macro_value.second + " ";
-      }
-      if(!macros.empty()) {
-        fileList += "verific -vlog-define " + macros + "\n";
-      }
-
-      std::string importLibs;
-      auto importDesignFilesLibs = false;
-
-      // this is available only if TCL command has specified a top module library
-      // with -work <libname>
-      // set_top_module <top> ?-work <libName>?
-      auto topModuleLib = ProjManager()->DesignTopModuleLib();
-
-      // this is available only if TCL command has specified a design library
-      // with -work <libname>
-      // add_design_file <file list> ?type? ?-work <libName>?
-      auto commandsLibs = ProjManager()->DesignLibraries();
-
-      size_t filesIndex{0};
-      for (const auto& lang_file : ProjManager()->DesignFiles()) {
-        std::string lang;
-        std::string designLibraries;
-        switch (lang_file.first.language) {
-          case Design::Language::VHDL_1987:
-            lang = "-vhdl87";
-            break;
-          case Design::Language::VHDL_1993:
-            lang = "-vhdl93";
-            break;
-          case Design::Language::VHDL_2000:
-            lang = "-vhdl2k";
-            break;
-          case Design::Language::VHDL_2008:
-            lang = "-vhdl2008";
-            break;
-          case Design::Language::VHDL_2019:
-            lang = "-vhdl2019";
-            break;
-          case Design::Language::VERILOG_1995:
-            lang = "-vlog95";
-            break;
-          case Design::Language::VERILOG_2001:
-            lang = "-vlog2k";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2005:
-            lang = "-sv2005";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2009:
-            lang = "-sv2009";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2012:
-            lang = "-sv2012";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::SYSTEMVERILOG_2017:
-            lang = "-sv";
-            importDesignFilesLibs = true;
-            break;
-          case Design::Language::VERILOG_NETLIST:
-            lang = "";
-            break;
-          case Design::Language::BLIF:
-          case Design::Language::EBLIF:
-            lang = "BLIF";
-            ErrorMessage("Unsupported file format:" + lang);
-            return false;
-          case Design::Language::OTHER:
-            // don't include it in the compilation process
-            continue;
-        }
-        if (filesIndex < commandsLibs.size()) {
-          const auto& filesCommandsLibs = commandsLibs[filesIndex];
-          for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
-            auto libName = filesCommandsLibs.second[i];
-            if (!libName.empty()) {
-              auto commandLib = "-work " + libName + " ";
-              designLibraries += commandLib;
-              if (importDesignFilesLibs && libName != topModuleLib) {
-                importLibs += "-L " + libName + " ";
-              }
-            }
-          }
-        }
-        ++filesIndex;
-
-        if (designLibraries.empty()) {
-          fileList += "verific " + lang + " " + lang_file.second + "\n";
-        }
-        else {
-          fileList +=
-              "verific " + designLibraries + lang + " " + lang_file.second + "\n";
-        }
-      }
-      auto topModuleLibImport = std::string{};
-      if (!topModuleLib.empty())
-        topModuleLibImport = "-work " + topModuleLib + " ";
-      if (ProjManager()->DesignTopModule().empty()) {
-        fileList += "verific -import -all\n";
+    CommandWrapperPtr command = it->second;
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
+      Message("Synthesis command: " + command->string());
+      int status = ExecuteAndMonitorSystemCommand(command->string());
+      CleanTempFiles();
+      if (status) {
+        ErrorMessage("Design " + ProjManager()->projectName() +
+                    " synthesis failed");
+        return false;
       } else {
-        fileList += "verific " + topModuleLibImport + importLibs + "-import " +
-                    ProjManager()->DesignTopModule() + "\n";
+        m_state = State::Synthesized;
+        Message("Design " + ProjManager()->projectName() + " is synthesized");
+        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
       }
-      yosysScript = ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", fileList);
     } else {
-    // Default Yosys parser
-
-    for (const auto& commandLib : ProjManager()->DesignLibraries()) {
-      if (!commandLib.first.empty()) {
-        ErrorMessage(
-            "Yosys default parser doesn't support '-work' design file "
-            "command");
-        break;
-      }
+      Message("##################################################");
+      Message("Synthesis (Synplify) skipped, not required");
+      Message("##################################################");
+      m_state = State::Synthesized;
     }
-
-    std::string macros = "";
-	  std::string includes = "";
-#if UPSTREAM_UNUSED
-    std::string macros = "verilog_defines ";
-    for (auto& macro_value : ProjManager()->macroList()) {
-      macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
-    }
-    macros += "\n";
-    std::string includes;
-    for (auto path : ProjManager()->includePathList()) {
-      includes += "-I" + FileUtils::AdjustPath(path) + " ";
-    }
-#endif // #if UPSTREAM_UNUSED
-
-    std::string designFiles;
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string filesScript =
-          "read_verilog ${READ_VERILOG_OPTIONS} ${INCLUDE_PATHS} "
-          "${VERILOG_FILES}";
-      std::string lang;
-
-      auto files = lang_file.second + " ";
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-        case Design::Language::VHDL_1993:
-        case Design::Language::VHDL_2000:
-        case Design::Language::VHDL_2008:
-        case Design::Language::VHDL_2019:
-          ErrorMessage("Unsupported language (Yosys default parser)");
-          break;
-        case Design::Language::VERILOG_1995:
-        case Design::Language::VERILOG_2001:
-        case Design::Language::SYSTEMVERILOG_2005:
-          break;
-        case Design::Language::SYSTEMVERILOG_2009:
-        case Design::Language::SYSTEMVERILOG_2012:
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-sv";
-          break;
-        case Design::Language::VERILOG_NETLIST:
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          ErrorMessage("Unsupported language (Yosys default parser)");
-          break;
-        case Design::Language::OTHER:
-          // don't include it in the compilation process
-          continue;
-      }
-      std::string options = lang;
-      filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
-      filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
-      filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
-
-      designFiles += filesScript + "\n";
-    }
-    yosysScript =
-        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", macros + designFiles);
-    }
-  }
-  else
-  {
-    #if UPSTREAM_UNUSED
-        std::string macros = "verilog_defines ";
-        for (auto& macro_value : ProjManager()->macroList()) {
-          macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
-        }
-        macros += "\n";
-        std::string includes;
-        for (auto path : ProjManager()->includePathList()) {
-          includes += "-I" + FileUtils::AdjustPath(path) + " ";
-        }
-    #endif // #if UPSTREAM_UNUSED
-    std::string vm_file_path = ProjManager()->DesignTopModule() + "/" + ProjManager()->DesignTopModule() + ".vm";
-    std::string filesScript =
-            "read_verilog ${READ_VERILOG_OPTIONS} "
-            "${VERILOG_FILES}";
-    std::string options = "";
-    filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
-    filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
-    std::string designFiles = filesScript + "\n";
-    yosysScript =
-        ReplaceAll(yosysScript, "${READ_DESIGN_FILES}", designFiles);
   }
   
-  yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
-
-#if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
-// https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
-#define STRINGIZE2(s) #s
-#define STRINGIZE(s) STRINGIZE2(s)
-  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
-#else
-  yosysScript = ReplaceAll(yosysScript, "${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
-#endif
-
-  if (!ProjManager()->DesignTopModule().empty()) {
-    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}",
-                             "-top " + ProjManager()->DesignTopModule());
-    yosysScript = ReplaceAll(yosysScript, "${TOP_MODULE}",
-                             ProjManager()->DesignTopModule());
-  } else {
-    yosysScript =
-        ReplaceAll(yosysScript, "${TOP_MODULE_DIRECTIVE}", "-auto-top");
-  }
-
-  std::string yosys_family_name = 
-    QLDeviceManager::getInstance()->deviceYosysFamilyName();
-  if(!yosys_family_name.empty()) {
-    yosysScript = 
-          ReplaceAll(yosysScript, "${FAMILY}", yosys_family_name);
-  }
-  else {
-    ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
-    return false;
-  }
-
-
-  
-  std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
-  // if we have a valid sdc_file_path at this point, pass it on to vpr:
-  if(!synth_sdc_filepath.empty()) {
-    // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
-    
-    // we have a valid SDC file
-    std::filesystem::path aurora_yosys_import_script_path =
-        GetSession()->Context()->DataPath() /
-        std::filesystem::path("..") /
-        std::filesystem::path("scripts") /
-        std::filesystem::path("aurora_yosys_import.tcl");
-
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
-
-    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("tcl") + 
-                                                                       std::string(" ") + 
-                                                                       aurora_yosys_import_script_path.string());
-    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("read_sdc") +
-                                                              std::string(" ") + 
-                                                              synth_sdc_filepath.string());
-  }
-  else {
-    //std::cout << "synth sdc file not available." << std::endl;
-
-    yosysScript = ReplaceAll(yosysScript, "${PLUGIN_LOAD_SDC}", std::string("# [skipped] sdc plugin load as there is no synth sdc file"));
-
-    yosysScript = ReplaceAll(yosysScript, "${CALL_TCL_IMPORT_SCRIPT}", std::string("# [skipped] call tcl import script as there is no synth sdc file"));
-
-    yosysScript = ReplaceAll(yosysScript, "${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
-  }
-  // ---------------------------------------------------------------- synth_sdc_file --
-
-  yosysScript = ReplaceAll(
-      yosysScript, "${OUTPUT_BLIF}",
-      std::string(ProjManager()->projectName() + "_post_synth.blif"));
-
-
-  // use settings to populate yosys_options
-  std::string yosys_options;
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "verilog") == "checked" ) {
-
-    yosys_options += " -verilog " + std::string(m_projManager->projectName() + "_post_synth.v");
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc_opt") == "checked" ) {
-
-    yosys_options += " -no_abc_opt";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc9") == "checked" ) {
-
-    yosys_options += " -no_abc9";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_opt") == "checked" ) {
-
-    yosys_options += " -no_opt";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_adder") == "checked" ) {
-
-    yosys_options += " -no_adder";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_ff_map") == "checked" ) {
-
-    yosys_options += " -no_ff_map";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_dsp") == "checked" ) {
-
-    yosys_options += " -no_dsp";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {
-
-    yosys_options += " -no_bram";
-  }
-
-  // moving towards multi-arch support (v2.6), this setting is arch specific and should be removed
-  // from user settings json, so we ignore it, even if set.
-  // if( QLSettingsManager::getStringValue("yosys", "general", "no_sdff") == "checked" ) {
-
-  //   yosys_options += " -nosdff";
-  // }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "edif") == "checked" ) {
-
-    yosys_options += " -edif " + std::string(m_projManager->projectName() + ".edif");
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "bram_types") == "checked" ) {
-
-    yosys_options += " -bram_types";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "use_dsp_cfg_params") == "checked" ) {
-
-    yosys_options += " -use_dsp_cfg_params";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
-
-    yosys_options += " -synplify";
-  }
-
-  if( !QLSettingsManager::getStringValue("yosys", "general", "mince_num").empty() ) {
-    yosys_options += std::string(" -mince_num") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("yosys", "general", "mince_num");
-  }
-
-  // pass in the path to the device specific yosys libraries directly.
-  std::string yosys_modules_dir_path_string = 
-      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
-  if (yosys_modules_dir_path_string.back() != '/') {
-    // tack on a '/' separator if it is missing to be safe:
-    yosys_modules_dir_path_string += "/";
-  }
-  yosys_options += " -lib_path " + 
-                   yosys_modules_dir_path_string;
-
-  // TODO: trim yosys_options at the front
-  yosysScript = ReplaceAll(yosysScript, "${YOSYS_OPTIONS}", yosys_options);
-
-
-  yosysScript =
-      ReplaceAll(yosysScript, "${OUTPUT_VERILOG}",
-                 std::string(ProjManager()->projectName() + "_post_synth.v"));
-  yosysScript =
-      ReplaceAll(yosysScript, "${OUTPUT_VHDL}",
-                 std::string(ProjManager()->projectName() + "_post_synth.vhd"));
-
-  yosysScript = ReplaceAll(
-      yosysScript, "${OUTPUT_EDIF}",
-      std::string(ProjManager()->projectName() + "_post_synth.edif"));
-
-  yosysScript = FinishSynthesisScript(yosysScript);
-
-  std::string script_path = ProjManager()->projectName() + ".ys";
-  std::string output_path;
-  switch (GetNetlistType()) {
-    case NetlistType::Verilog:
-      output_path = ProjManager()->projectName() + "_post_synth.v";
-      break;
-    case NetlistType::VHDL:
-      // Until we have a VHDL netlist reader in VPR
-      output_path = ProjManager()->projectName() + "_post_synth.v";
-      break;
-    case NetlistType::Edif:
-      output_path = ProjManager()->projectName() + "_post_synth.edif";
-      break;
-    case NetlistType::Blif:
-      output_path = ProjManager()->projectName() + "_post_synth.blif";
-      break;
-  }
-
+  #ifndef USE_INCREMENTAL_COMPILATION
+  // this should be handled by inc compilation
   if (!DesignChanged(yosysScript, script_path, output_path)) {
     Message("Design didn't change: " + ProjManager()->projectName() +
             ", skipping synthesis.");
     return true;
   }
-  std::filesystem::remove(
-      std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.blif"));
-  std::filesystem::remove(
-      std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.v"));
-  // Create Yosys command and execute
-  script_path =
-      (std::filesystem::path(ProjManager()->projectPath()) / script_path)
-          .string();
-  std::ofstream ofs(script_path);
-  ofs << yosysScript;
-  ofs.close();
+  #endif
+
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
     ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
@@ -2493,24 +1774,31 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-
-  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-#if(AURORA_USE_TABBYCAD == 1)
-  if(m_useVerific) {
-    yosys_executable_path = GetSession()->Context()->BinaryPath() /
-                            ".." /
-                            "tabby" /
-                            "bin" /
-                            "yosys_verific";
+  // incr compilation
+  auto it = commandsMap.find(SynthesisTool::Yosys);
+  if (it == commandsMap.end()) {
+    // error message reported inside the getSynthesisCommands
+    return false;
   }
-#endif // #if(AURORA_USE_TABBYCAD == 1)
+  CommandWrapperPtr command = it->second;
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command)) {
+    Message("##################################################");
+    Message("Synthesis(yosys) skipped, not required");
+    Message("##################################################");
+    m_state = State::Synthesized;
+    return true;
+  }
+  // incr compilation
 
-  std::string command =
-      yosys_executable_path.string() + " -s " +
-      std::string(ProjManager()->projectName() + ".ys -l " +
-                  ProjManager()->projectName() + "_synth.log");
-  Message("Synthesis command: " + command);
-  int status = ExecuteAndMonitorSystemCommand(command);
+  std::filesystem::remove(
+      std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.blif"));
+  std::filesystem::remove(
+      std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.v"));
+
+  Message("Synthesis command: " + command->string());
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -2519,17 +1807,15 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     return true;
   }
 }
 
-std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
-  // Default or custom Yosys script
-  if (m_yosysScript.empty()) {
-#if UPSTREAM_UNUSED
-    m_yosysScript = basicYosysScript;
-#endif // #if UPSTREAM_UNUSED
+std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
+  std::string scriptTemplate;
 
+  if (m_customYosysScript.empty()) {
     bool use_external_template_yosys = false;
     std::string aurora_template_script_yosys;
 
@@ -2542,7 +1828,7 @@ std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
       if (stream.good()) {
         aurora_template_script_yosys = 
           std::string((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
+                        std::istreambuf_iterator<char>());
           stream.close();
           use_external_template_yosys = true;
           
@@ -2552,58 +1838,59 @@ std::string CompilerOpenFPGA_ql::InitSynthesisScript() {
     if(use_external_template_yosys) {
       Message("Using External Yosys Template Script: " +
                                 std::string(m_aurora_template_script_yosys_path.string()));
-      m_yosysScript = aurora_template_script_yosys;
+      scriptTemplate = aurora_template_script_yosys;
     }
     else {
       Message("Cannot load Yosys Template Script: " +
                                 std::string(m_aurora_template_script_yosys_path.string()));
       Message("Using Internal Yosys Template Script.");
-      m_yosysScript = qlYosysScript;
-    }
+      scriptTemplate = qlYosysScript;
+    } 
+  } else {
+    scriptTemplate = m_customYosysScript;
   }
-  return m_yosysScript;
+
+  return scriptTemplate;
 }
 
-std::string CompilerOpenFPGA_ql::InitSynplifyScript() {
+std::string CompilerOpenFPGA_ql::GetSynplifyScriptTemplate() const {
+  std::string scriptTemplate;
   // Default or custom Synplify script
-  if (m_synplifyScript.empty()) {
-    bool use_external_template_synplify = false;
-    std::string aurora_template_script_synplify;
+  bool use_external_template_synplify = false;
+  std::string aurora_template_script_synplify;
 
-    // check if we have the device aurora template script available:
-    if(FileUtils::FileExists(m_aurora_template_script_synplify_path)) {
-      
-      // get it into a ifstream
-      std::ifstream stream(m_aurora_template_script_synplify_path.string());
-      
-      if (stream.good()) {
-        aurora_template_script_synplify = 
-          std::string((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
-          stream.close();
-          use_external_template_synplify = true;
-          
-        }
-    }
-
-    if(use_external_template_synplify) {
-      Message("Using External Synplify Template Script: " +
-                                std::string(m_aurora_template_script_synplify_path.string()));
-      m_synplifyScript = aurora_template_script_synplify;
-    }
-    else {
-      Message("Cannot load Synplify Template Script: " +
-                                std::string(m_aurora_template_script_synplify_path.string()));
-      Message("Using Internal Synplify Template Script.");
-      m_synplifyScript = qlSynplifyScript;
-    }
+  // check if we have the device aurora template script available:
+  if(FileUtils::FileExists(m_aurora_template_script_synplify_path)) {
+    
+    // get it into a ifstream
+    std::ifstream stream(m_aurora_template_script_synplify_path.string());
+    
+    if (stream.good()) {
+      aurora_template_script_synplify = 
+        std::string((std::istreambuf_iterator<char>(stream)),
+                      std::istreambuf_iterator<char>());
+        stream.close();
+        use_external_template_synplify = true;
+        
+      }
   }
-  return m_synplifyScript;
+
+  if(use_external_template_synplify) {
+    Message("Using External Synplify Template Script: " +
+                              std::string(m_aurora_template_script_synplify_path.string()));
+    scriptTemplate = aurora_template_script_synplify;
+  } else {
+    Message("Cannot load Synplify Template Script: " +
+                              std::string(m_aurora_template_script_synplify_path.string()));
+    Message("Using Internal Synplify Template Script.");
+    scriptTemplate = qlSynplifyScript;
+  }
+
+  return scriptTemplate;
 }
 
 
-std::string CompilerOpenFPGA_ql::FinishSynthesisScript(const std::string& script) {
-  std::string result = script;
+void CompilerOpenFPGA_ql::FinishSynthesisScript(const ScriptRendererPtr& script) {
   // Keeps for Synthesis, preserve nodes used in constraints
   std::string keeps;
   if (m_keepAllSignals) {
@@ -2615,13 +1902,12 @@ std::string CompilerOpenFPGA_ql::FinishSynthesisScript(const std::string& script
     Message("Keep name: " + keep);
     keeps += "setattr -set keep 1 w:\\" + keep + "\n";
   }
-  result = ReplaceAll(result, "${KEEP_NAMES}", keeps);
-  result = ReplaceAll(result, "${OPTIMIZATION}", SynthMoreOpt());
-  result = ReplaceAll(result, "${PLUGIN_LIB}", YosysPluginLibName());
-  result = ReplaceAll(result, "${PLUGIN_NAME}", YosysPluginName());
-  result = ReplaceAll(result, "${MAP_TO_TECHNOLOGY}", YosysMapTechnology());
-  result = ReplaceAll(result, "${LUT_SIZE}", std::to_string(m_lut_size));
-  return result;
+  script->apply("${KEEP_NAMES}", keeps);
+  script->apply("${OPTIMIZATION}", SynthMoreOpt());
+  script->apply("${PLUGIN_LIB}", YosysPluginLibName());
+  script->apply("${PLUGIN_NAME}", YosysPluginName());
+  script->apply("${MAP_TO_TECHNOLOGY}", YosysMapTechnology());
+  script->apply("${LUT_SIZE}", std::to_string(m_lut_size));
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
@@ -2698,7 +1984,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
+std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2746,19 +2032,27 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
     device_size = " --device " + m_deviceSize;
   }
 #endif // #if UPSTREAM_UNUSED
-  if (!m_deviceSize.empty()) {
+ if(m_autoLayoutGenerationMode) {
+    Message("Base VPR Command running with Auto Layout Generated Device!\n");
     vpr_options += std::string(" --device") + 
-                    std::string(" ") + 
-                    m_deviceSize;
-  }
-  else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
-    vpr_options += std::string(" --device") + 
-                    std::string(" ") + 
-                    QLSettingsManager::getStringValue("general", "device", "layout");
-  }
+                   std::string(" ") + 
+                   m_autoLayoutGeneratedLayoutName;
+  } 
   else {
-      std::cout << "Should never be here, we should have a layout specified!" << std::endl;
-      return std::string("");
+    if (!m_deviceSize.empty()) {
+      vpr_options += std::string(" --device") + 
+                      std::string(" ") + 
+                      m_deviceSize;
+    }
+    else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
+      vpr_options += std::string(" --device") + 
+                      std::string(" ") + 
+                      QLSettingsManager::getStringValue("general", "device", "layout");
+    }
+    else {
+        std::cout << "Should never be here, we should have a layout specified!" << std::endl;
+        return std::string("");
+    }
   }
 
   if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "checked" ) {
@@ -3093,6 +2387,378 @@ std::string CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target) {
   return base_vpr_command;
 }
 
+CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target, const VprStageCfg& cfg) {
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+  // note: at this point, the current_path() is the project 'source' directory.
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return nullptr;
+  }
+
+  // if device_target is explicitly specified (STA does this):
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(device_target) ) {
+    device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  }
+
+  // this check continues as is for the original target device as specified in the JSON.
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return nullptr;
+  }
+
+  // parse vpr general options
+#if UPSTREAM_UNUSED
+  std::string device_size = "";
+  if (!m_deviceSize.empty()) {
+    device_size = " --device " + m_deviceSize;
+  }
+#endif // #if UPSTREAM_UNUSED
+  if(m_autoLayoutGenerationMode) {
+    Message("Base VPR Command running with Auto Layout Generated Device!\n");
+    command->append("--device", m_autoLayoutGeneratedLayoutName);
+  } 
+  else {
+    if (!m_deviceSize.empty()) {
+      command->append("--device", m_deviceSize);
+    } else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
+      command->append("--device", QLSettingsManager::getStringValue("general", "device", "layout"));
+    } else {
+      std::cout << "Should never be here, we should have a layout specified!" << std::endl;
+      return nullptr;
+    }
+  }
+
+  if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "checked" ) {
+    command->append("--timing_analysis", "on");
+  } else if( QLSettingsManager::getStringValue("vpr", "general", "timing_analysis") == "unchecked" ) {
+    command->append("--timing_analysis", "off");
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "general", "constant_net_method").empty() ) {
+    command->append("--constant_net_method", QLSettingsManager::getStringValue("vpr", "general", "constant_net_method"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "general", "clock_modeling").empty() ) {
+    command->append("--clock_modeling", QLSettingsManager::getStringValue("vpr", "general", "clock_modeling"));
+  }
+
+
+  if( QLSettingsManager::getStringValue("vpr", "general", "exit_before_pack") == "checked" ) {
+    command->append("--exit_before_pack", "on");
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "general", "exit_before_pack") == "unchecked" ) {
+    command->append("--exit_before_pack", "off");
+  }
+
+  // parse vpr filename options
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "circuit_format").empty() ) {
+    command->append("--circuit_format", QLSettingsManager::getStringValue("vpr", "filename", "circuit_format"));
+  }
+
+  std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+    if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        ErrorMessage("Could not find the net file file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        return nullptr;
+    }
+    command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
+  } else {
+    command->appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
+  }
+
+  if (cfg.use_place_file) {
+    if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+          ErrorMessage("Could not find the place file file in: " + 
+            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+          return nullptr;
+      }
+      command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+    } else {
+      command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+    }
+  }
+
+  if (cfg.use_route_file) {
+    if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+          ErrorMessage("Could not find the route file file in: " + 
+            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+          return nullptr;
+        }
+      command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+    } else {
+      command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+    }
+  }
+
+
+  // ---------------------------------------------------------------- sdc_file ++
+
+  std::filesystem::path sdc_file_path = QLSettingsManager::getSDCFilePath();
+
+  // if(QLSettingsManager::getInstance()->sdc_file_path_from_json && sdc_file_path.empty()) {
+  //   // this is ideally an error, and should be notified.
+  //   // current implementation is to ignore any invalid sdc file path.
+  // }
+
+  // if we have a valid sdc_file_path at this point, pass it on to vpr:
+  if(!sdc_file_path.empty()) {
+    Message(std::string("SDC file found: ") + sdc_file_path.string());
+    command->appendFile("--sdc_file", sdc_file_path);
+  }
+  else {
+    Message(std::string("SDC file not found, no constraints passed to vpr."));
+  }
+  // ---------------------------------------------------------------- sdc_file --
+
+
+  if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
+    command->appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
+  }
+
+  // parse vpr netlist options
+  if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "checked" ) {
+    command->append("--absorb_buffer_luts", "on");
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "unchecked" ) {
+    command->append("--absorb_buffer_luts", "off");
+  }
+
+  // parse vpr pack options: nothing here
+
+  // parse vpr place options: nothing here
+
+  // parse vpr route options
+  if( !QLSettingsManager::getStringValue("vpr", "route", "route_chan_width").empty() ) {
+    command->append("--route_chan_width", QLSettingsManager::getStringValue("vpr", "route", "route_chan_width"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
+    command->append("--max_router_iterations", QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations"));
+  }
+
+  if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+    command->append("--flat_routing", "on");
+    if( QLSettingsManager::getStringValue("vpr", "route", "max_router_iterations").empty() ) {
+      // if flat_routing is enabled, and user has not specified the max_router_iterations
+      // then, increase maximum router iterations to a good default, to give flat router enough
+      // time to converage to a legal routing solution
+      command->append("--max_router_iterations",  "100");
+    }
+    // otherwise, user specified max_router_iterations is honored.
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "unchecked" ) {
+    command->append("--flat_routing", "off");
+  }
+
+  // parse vpr analysis options
+  if( QLSettingsManager::getStringValue("vpr", "analysis", "gen_post_synthesis_netlist") == "checked" ) {
+    command->append("--gen_post_synthesis_netlist", "on");
+  }
+  else if( QLSettingsManager::getStringValue("vpr", "analysis", "gen_post_synthesis_netlist") == "unchecked" ) {
+    command->append("--gen_post_synthesis_netlist", "off");
+  }
+
+  if( !QLSettingsManager::getStringValue("yosys", "general", "mince_num").empty() ) {
+    yosys_options += std::string(" -mince_num") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("yosys", "general", "mince_num");
+  }
+
+  // pass in the path to the device specific yosys libraries directly.
+  std::string yosys_modules_dir_path_string = 
+      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
+  if (yosys_modules_dir_path_string.back() != '/') {
+    // tack on a '/' separator if it is missing to be safe:
+    yosys_modules_dir_path_string += "/";
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs").empty() ) {
+    command->append("--post_synth_netlist_unconn_inputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs").empty() ) {
+    command->append("--post_synth_netlist_unconn_outputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_outputs"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths").empty() ) {
+    command->append("--timing_report_npaths", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_npaths"));
+  }
+
+  if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail").empty() ) {
+    command->append("--timing_report_detail", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail"));
+  }
+
+  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
+    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
+      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
+      // until Synplify side is fixed to resolve the root cause of the error.
+      command->append("--skip_sync_clustering_and_routing_results", "on");
+    }
+  }
+
+  // custom vpr command-line options for *all* stages
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command->append(vpr_custom_options_string);
+  }
+
+  std::string netlistFile;
+  switch (GetNetlistType()) {
+    case NetlistType::Verilog:
+      netlistFile = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::VHDL:
+      // Until we have a VHDL netlist reader in VPR
+      netlistFile = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::Edif:
+      netlistFile = ProjManager()->projectName() + "_post_synth.edif";
+      break;
+    case NetlistType::Blif:
+      netlistFile = ProjManager()->projectName() + "_post_synth.blif";
+      break;
+  }
+
+  for (const auto& lang_file : ProjManager()->DesignFiles()) {
+    switch (lang_file.first.language) {
+      case Design::Language::VERILOG_NETLIST:
+      case Design::Language::BLIF:
+      case Design::Language::EBLIF: {
+        netlistFile = lang_file.second;
+        std::filesystem::path the_path = netlistFile;
+        if (!the_path.is_absolute()) {
+          netlistFile =
+              std::filesystem::path(std::filesystem::path("..") / netlistFile)
+                  .string();
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+#if UPSTREAM_UNUSED
+  std::string pnrOptions;
+  if (!PnROpt().empty()) pnrOptions += " " + PnROpt();
+  if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
+#endif // #if UPSTREAM_UNUSED
+
+  // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+  // use rr_graph and router_lookahead files, if available in the device data:
+  std::filesystem::path rr_graph_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
+
+  std::filesystem::path router_lookahead_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
+
+  if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
+    command->appendFile("--read_rr_graph", rr_graph_file_path);
+    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+  }
+
+
+  m_architectureFile = 
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
+  if(m_architectureFile.empty()) {
+
+    ErrorMessage("Cannot proceed without VPR Architecture file.");
+    return nullptr;
+  }
+
+  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+    
+    std::filesystem::path vpr_xml_en_path = m_architectureFile;
+    m_architectureFile = GenerateTempFilePath();
+
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
+
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      Message("load cryptdb failed!");
+      // empty string returned on error.
+      return nullptr;
+    }
+
+    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+      ErrorMessage("decryption failed!");
+      // empty string returned on error.
+      return nullptr;
+    }
+  }
+
+  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
+
+  // add the *internal* option to allow dangling nodes in the logic.
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
+  // this is a workaround, to avoid putting timing arcs for static input ports.
+  command->append("--allow_dangling_combinational_nodes", "on");
+
+  // construct the base vpr command with all the options here.
+#if UPSTREAM_UNUSED
+  std::string command =
+      m_vprExecutablePath.string() + std::string(" ") +
+      m_architectureFile.string() + std::string(" ") +
+      std::string(netlistFile + std::string(" --sdc_file ") +
+                  std::string(ProjManager()->projectName() + "_openfpga.sdc") +
+                  std::string(" --clock_modeling ideal --route_chan_width ") +
+                  std::to_string(m_channel_width) + device_size + pnrOptions);
+
+  return command;
+#endif // #if UPSTREAM_UNUSED
+
+  if (GenerateIOFloorPlanConstraints()){
+    std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
+    std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    if (fs::exists(fp_constraint_filepath_absolute)) {
+      command->appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
+    }
+  }
+  else { //IO floorplanning generation failed, must stop the flow
+    return nullptr;
+  }
+
+  command->prependFile(std::filesystem::path{netlistFile});
+  command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
+  command->prepend(m_vprExecutablePath.string());
+  
+  return command;
+}
+
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+CommandWrapperPtr CompilerOpenFPGA_ql::BaseStaCommand() {
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>(m_staExecutablePath.string());
+  command->append("-exit");  // allow open sta exit its tcl shell even there is error
+  return command;
+}
+#else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 std::string CompilerOpenFPGA_ql::BaseStaCommand() {
   std::string command =
       m_staExecutablePath.string() +
@@ -3100,6 +2766,7 @@ std::string CompilerOpenFPGA_ql::BaseStaCommand() {
           " -exit ");  // allow open sta exit its tcl shell even there is error
   return command;
 }
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
                                             std::string netlistFileName,
@@ -3123,15 +2790,8 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   ofssta.close();
   return openStaFile;
 }
-bool CompilerOpenFPGA_ql::Packing() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", PACKING_LOG);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
-  });
 
+bool CompilerOpenFPGA_ql::Packing() {
   if (PackOpt() == PackingOpt::Clean) {
     Message("Cleaning packing results for " + ProjManager()->projectName());
     m_state = State::Synthesized;
@@ -3139,6 +2799,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     CleanFiles(Action::Pack);
     return true;
   }
+
 #if UPSTREAM_UNUSED
   if (!HasTargetDevice()) return false;
 #endif // #if UPSTREAM_UNUSED
@@ -3193,7 +2854,6 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   ofssdc.close();
 #endif // #if UPSTREAM_UNUSED
-
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
                 std::string(ProjManager()->projectName() + "_constraints.xml");
   if (fs::exists(io_floor_planningpath)) {
@@ -3202,33 +2862,19 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
-#if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand() + " --pack";
-#endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
+  CommandWrapperPtr command = getPackingCommand();
+  if(!command) {
     return false;
   }
-
-  // custom vpr command-line options for pack stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+    Message("##################################################");
+    Message("Packing skipped, not required");
+    Message("##################################################");
+    m_state = State::Packed;
+    return true;
   }
-
-  command += std::string(" ") + 
-             std::string("--pack");
-
-  std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                     std::string(ProjManager()->projectName() + "_pack.cmd"))
-                        .string());
-  ofs << command << std::endl;
-  ofs.close();
+ 
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
 
 #if UPSTREAM_UNUSED
   if (FileUtils::IsUptoDate(
@@ -3242,11 +2888,442 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this] {
+    // Rename log file
+    copyLog(ProjManager(), "vpr_stdout.log", PACKING_LOG);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
+  });
+
+  // in some reason empty place file is still generated by packing flow, sometimes overwrite the .place file with good content (generated by place task)
+  PostTaskFileRemover placeFileRemover(ProjManager()->projectPath() / std::filesystem::path(ProjManager()->projectName() + "_post_synth.place"));
+
+  int status = ExecuteAndMonitorSystemCommand(command->string());
+
+
+  // FPGA_AUTO device logic ++
+  // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
+  m_autoLayoutGenerationMode = false;
+  QLDeviceTarget current_device_target = 
+      QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
+    m_autoLayoutGenerationMode = true;
+  }
+
+  if(m_autoLayoutGenerationMode) {
+    Message("Packing is running in Auto Layout Generation Mode!\n");
+
+    // Regardless of the status (whether the design fits into the base auto layout or now)
+    // we generated a device package.
+    // Even if the design fits, the layout being is called 'FPGA_AUTO' necessary to trigger the
+    // auto layout generation mode, prevents it from being used in the normal flow.
+    // So, we generate a device package (which will be identical to the FPGA_AUTO) with the
+    // devicename and layoutname changed according to the generated layout from the script.
+
+    // m_architectureFile -> decrypted vpr.xml of current device target.
+    std::filesystem::path generated_vpr_xml_path = 
+          std::filesystem::path(ProjManager()->projectPath()) / "vpr_generated.xml";
+
+    // layout to be used in generated device
+    int generated_layout_width = 0;
+    int generated_layout_height = 0;
+    m_autoLayoutGeneratedLayoutName = "";
+
+    if (status) {
+      Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
+      Message("Try to generate a device that can accomodate current design...\n");
+
+      std::filesystem::path add_layout_script_path = 
+          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout.py";
+
+      std::filesystem::path vpr_stdout_log_filepath = 
+          std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
+
+
+      // overhead settings and other settings, read from file 'add_layout_params.json' if it exists:
+      std::filesystem::path add_layout_params_json_filepath = 
+          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout_params.json";
+
+      json add_layout_params_json = json::object();
+      int overhead_percentage = 0;
+      if(FileUtils::FileExists(add_layout_params_json_filepath)) {
+        std::ifstream add_layout_params_json_ifstream(add_layout_params_json_filepath.string());
+        add_layout_params_json = json::parse(add_layout_params_json_ifstream);
+        if(!add_layout_params_json.empty()) {
+          if(add_layout_params_json.contains("overhead_percentage")){
+            overhead_percentage = add_layout_params_json["overhead_percentage"].get<int>();
+            // std::cout << "overhead_percentage: " << overhead_percentage << std::endl;
+          }
+        }
+      }
+
+      std::string command_auto_device = 
+          std::string("python3") + std::string(" ") +
+          add_layout_script_path.string() + std::string(" ") +
+          std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
+          std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
+          std::string("--output ") + generated_vpr_xml_path.string();
+
+      if(overhead_percentage > 0) {
+        command_auto_device += 
+            std::string(" --overhead_percentage ") + std::to_string(overhead_percentage);
+      }
+
+      std::filesystem::path logfile_auto_device = 
+          std::filesystem::path(ProjManager()->projectPath()) / "auto_device.log";
+      int status_auto_device = ExecuteAndMonitorSystemCommand(command_auto_device,
+                                                              logfile_auto_device.string());
+
+      if (status_auto_device == 0) {
+
+        // get the layout name generated from the log file:
+        const QRegularExpression auto_layout_regex("Layout: (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
+        QFile file{QString::fromStdString(logfile_auto_device.string())};
+        file.open(QFile::ReadOnly);
+        while (!file.atEnd()) {
+          auto line = file.readLine();
+          auto match = auto_layout_regex.match(line);
+          if (match.hasMatch()) {
+            bool ok;
+            m_autoLayoutGeneratedLayoutName = QString(match.captured(1)).toStdString();
+            generated_layout_width = QString(match.captured(2)).toInt(&ok);
+            if(!ok) {
+              ErrorMessage("Error parsing log from auto-layout script: width\n");
+              return false;
+            }
+
+            generated_layout_height = QString(match.captured(3)).toInt(&ok);
+            if(!ok) {
+              ErrorMessage("Error parsing log from auto-layout script: height\n");
+              return false;
+            }
+            break;
+          }
+        }
+        if(m_autoLayoutGeneratedLayoutName.empty()) {
+          ErrorMessage("Error parsing log from auto-layout script: layoutname\n");
+          return false;
+        }
+      }
+      else {
+        ErrorMessage("Generating Device Failed, Error Code: " + std::to_string(status_auto_device) + "\n");
+        return false;
+      }
+    }
+    else {
+      Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
+      Message("Generating Device equivalent to the current device...\n");
+
+      generated_layout_width = current_device_target.device_variant_layout.width;
+      generated_layout_height = current_device_target.device_variant_layout.height;
+      m_autoLayoutGeneratedLayoutName = 
+              std::string("AUTOFPGA") + 
+              std::to_string(generated_layout_width) + 
+              std::to_string(generated_layout_height);
+
+      // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
+      FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
+
+      // update the layout_name in the vpr.xml
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+    }
+
+
+    // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
+    // so that the next stages can be run quicker.
+    // use a basic blif file for generating the rr_graph.bin and router_lookahead.bin
+    // this requires us to run pack and place (router_lookahead is only generated in place)
+    std::filesystem::path blif_filepath = 
+            std::filesystem::canonical(GlobalSession->Context()->DataPath() /
+            std::filesystem::path("..") /
+            std::filesystem::path("scripts") / 
+            "and2.blif");
+
+    m_autoLayoutGeneratedRRGraphBinPath = 
+            generated_vpr_xml_path.parent_path() /
+            std::string("rr_graph.bin");
+
+    m_autoLayoutGeneratedRouterLookaheadBinPath = 
+            generated_vpr_xml_path.parent_path() /
+            std::string("router_lookahead.bin");
+
+    std::string command_generate_rr_graph = 
+        std::string("vpr") + std::string(" ") +
+        generated_vpr_xml_path.string() + std::string(" ") + // arch
+        blif_filepath.string() + std::string(" ") + // blif
+        std::string("--device ") + m_autoLayoutGeneratedLayoutName + std::string(" ") + // layout
+        std::string("--write_rr_graph ") + m_autoLayoutGeneratedRRGraphBinPath.string() + std::string(" ") + 
+        std::string("--write_router_lookahead ") + m_autoLayoutGeneratedRouterLookaheadBinPath.string() + std::string(" ") +
+        std::string("--pack") + std::string(" ") + 
+        std::string("--place");
+
+    std::filesystem::path logfile_generate_rr_graph = 
+        std::filesystem::path(ProjManager()->projectPath()) / "generate_rr_graph.log";
+    int status_generate_rr_graph = ExecuteAndMonitorSystemCommand(command_generate_rr_graph,
+                                                                  logfile_generate_rr_graph.string());
+
+    if (status_generate_rr_graph == 0) {
+      // std::cout << "status_generate_rr_graph ok" << std::endl;
+    }
+    else {
+      ErrorMessage("Error Generating RRG!\n");
+      return false;
+    }
+
+    // delete extra logs from generate rrg step:
+    std::filesystem::path logfile_vpr_stdout = 
+        std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
+    FileUtils::removeFile(logfile_vpr_stdout);
+    FileUtils::removeFile(logfile_generate_rr_graph);
+
+
+
+    // re-run packing with the generated vpr xml now.
+    // easiest way is to take the previous command as is, and 
+    // - replace the architecture file path
+    // - replace the layout name
+    std::string command_rerun = command->string();
+
+    // ensure that 'FPGA_AUTO' replacement is done first!!
+    command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+    command_rerun = ReplaceAll(command_rerun, m_architectureFile.string(), generated_vpr_xml_path.string());
+
+    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
+                      std::string(ProjManager()->projectName() + "_pack.cmd"))
+                          .string());
+    ofs << command_rerun << std::endl;
+    ofs.close();
+
+    Message("Packing is being re-run with Auto Layout Generated Device!\n");
+    status = ExecuteAndMonitorSystemCommand(command_rerun);
+
+    // the 'status' will be checked as in the usual flow, as for us, the usual flow
+    // resumes, but in 'm_autoLayoutGenerationMode'
+
+    // encrypt the generated vpr xml with the same key as the current device
+    // this will be saved into m_autoLayoutGeneratedVPRXMLPath.
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      ErrorMessage("load cryptdb failed\n");
+      return false;
+    }
+
+    // existing API forces us to use a list of files to be encrypted...
+    std::vector<std::filesystem::path> file_list_to_encrypt;
+    file_list_to_encrypt.push_back(generated_vpr_xml_path);
+    if (!CRFileCryptProc::getInstance()->encryptFiles(file_list_to_encrypt)) {
+      ErrorMessage("encryption failed!");
+      return false;
+    }
+    m_autoLayoutGeneratedVPRXMLPath = generated_vpr_xml_path;
+    m_autoLayoutGeneratedVPRXMLPath += ".en";
+
+    // delete the unencrypted vpr xml as we can use the encrypted vpr xml
+    // for the next stages
+    FileUtils::removeFile(generated_vpr_xml_path);
+
+
+    // DEVICE CREATION LOGIC ++
+    // At this point, (if) the packing is completed with the generated device vpr xml, and we can create a usable device
+    // 1 copy <device>: as a copy of the FPGA_AUTO device parallel to the device (device_data location)
+    //   where devicename: replace FPGA_AUTO with the generated layout name
+    // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
+    // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
+    // 4 cryptdb: replace FPGA_AUTO with the generated layout name
+    // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
+    // 6 example logs: if currently running design within examples, clean up logs
+    // 7 remove other files: add_layout.py, add_layout_params.json if existing
+    if(status == 0) {
+      // packing succeeded with the generated vpr xml, package the device
+
+      // 1 copy the FPGA_AUTO device directory recursively to create new device.
+      //   and replace devicename using the generated layoutname.
+      std::string target_device_copy_devicename = 
+          StringUtils::replaceAll(current_device_target.device_variant.devicename,
+                                  std::string("FPGA_AUTO"),
+                                  m_autoLayoutGeneratedLayoutName);
+
+      std::filesystem::path source_device_copy_dirpath = 
+          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
+
+      std::filesystem::path target_device_copy_dirpath = 
+          source_device_copy_dirpath / 
+          std::string("..") / 
+          target_device_copy_devicename;
+
+      // if the same name device is already generated previously, then we replace that
+      // with the new device.
+      // 1. if this is not desirable, we would need to add additional data to the name, and
+      //    that means communicating this with the script, maybe as a parameter?
+      // 2. the other option is prompting user to enter a 'suffix' or 'prefix' for the devicename.
+      //    this is complicated, as we need to handle both batch mode and gui mode for the prompt.
+      // this is a decision for future releases.
+      if(FileUtils::FileExists(target_device_copy_dirpath)) {
+        Message("[WARNING] Device Already Exists: " + target_device_copy_devicename +"\n");
+        Message("[WARNING] Deleting the Existing Device, It will be regenerated.\n");
+
+        FileUtils::RmDirRecursively(target_device_copy_dirpath);
+      }
+
+      try {
+        std::filesystem::copy(source_device_copy_dirpath,
+                              target_device_copy_dirpath,
+                              std::filesystem::copy_options::recursive);
+      }
+      catch (const fs::filesystem_error& e) {
+        ErrorMessage("Error Copying Device 1\n");
+        // std::cerr << "Filesystem error: " << e.what() << std::endl;
+        // std::cerr << "Path 1: " << e.path1() << std::endl;
+        // std::cerr << "Path 2: " << e.path2() << std::endl;
+        return false;
+      }
+      catch (const std::exception& e) {
+          ErrorMessage("Error Copying Device 2\n");
+          // std::cerr << "General error: " << e.what() << std::endl;
+          return false;
+      }
+
+
+      // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
+      std::filesystem::path target_device_vpr_xml_filepath =
+          target_device_copy_dirpath / 
+          current_device_target.device_variant.voltage_threshold /
+          current_device_target.device_variant.p_v_t_corner /
+          "vpr.xml.en";
+      FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
+
+
+      // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
+      std::filesystem::path target_device_rr_graph_filepath =
+          target_device_vpr_xml_filepath.parent_path() /
+          "rr_graph.bin";
+      FileUtils::overwriteFile(m_autoLayoutGeneratedRRGraphBinPath, target_device_rr_graph_filepath);
+
+      std::filesystem::path target_device_router_lookahead_filepath =
+          target_device_vpr_xml_filepath.parent_path() /
+          "router_lookahead.bin";
+      FileUtils::overwriteFile(m_autoLayoutGeneratedRouterLookaheadBinPath, target_device_router_lookahead_filepath);
+
+
+      // 4 cryptdb: replace FPGA_AUTO with the generated layout name
+      std::filesystem::path source_device_cryptdb_filepath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
+                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString());
+      std::string source_device_cryptdb_filename = 
+          source_device_cryptdb_filepath.filename().string();
+
+      std::string target_device_copy_cryptdb_filename = 
+          StringUtils::replaceAll(source_device_cryptdb_filename,
+                                  std::string("FPGA_AUTO"),
+                                  m_autoLayoutGeneratedLayoutName);
+
+      std::filesystem::path target_device_copy_cryptdb_filepath_original = 
+          target_device_copy_dirpath / source_device_cryptdb_filename;
+
+      std::filesystem::path target_device_copy_cryptdb_filepath_renamed = 
+          target_device_copy_dirpath / target_device_copy_cryptdb_filename;
+
+      try {
+        std::filesystem::rename(target_device_copy_cryptdb_filepath_original,
+                                target_device_copy_cryptdb_filepath_renamed);
+      }
+      catch (const std::filesystem::filesystem_error& e) {
+        ErrorMessage("Error Renaming File 1\n");
+        //std::cerr << "Error renaming file: " << e.what() << std::endl;
+        return false;
+      }
+
+
+      // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
+      {
+        std::regex filename_pattern(".+\\.json");
+
+        std::vector<std::filesystem::path> filepath_list;
+
+        // this will include settings.json, settings_template.json, config.json
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath)) {
+          if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
+            filepath_list.push_back(entry.path());
+          }
+        }
+
+        // replace "FPGA_AUTO" with generated layout name in all the files
+        for(auto filepath: filepath_list) {
+          FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+        }
+      }
+
+
+      // 6 example logs: if currently running design within examples, clean up logs
+      // cleanup the currently run example files in the copied device (logs/working_directory etc.)
+      // **if** it is part of the examples in the FPGA_AUTO device.
+      // <example_dir>/<project_dir>
+      // <example_dir>/*.log
+      // <example_dir>/aurora*.tcl
+      std::filesystem::path current_project_path = 
+          std::filesystem::path(ProjManager()->projectPath());
+
+      std::filesystem::path current_project_expected_device_dirpath = 
+          current_project_path.parent_path().parent_path().parent_path();
+
+      if(std::filesystem::equivalent(current_project_expected_device_dirpath, source_device_copy_dirpath)) {
+
+        // then we are running an example within the FPGA_AUTO device itself, the logs need to be cleaned up
+        // where it has been copied into the newly created device
+
+        std::string current_project_name = current_project_path.filename().string();
+
+        std::filesystem::path current_example_path = 
+            current_project_path.parent_path();
+
+        try {
+          current_example_path = std::filesystem::canonical(current_example_path);
+          source_device_copy_dirpath = std::filesystem::canonical(source_device_copy_dirpath);
+          target_device_copy_dirpath = std::filesystem::canonical(target_device_copy_dirpath);
+        }
+        catch (const std::filesystem::filesystem_error& e) {
+          ErrorMessage("Error Canonicalizing Directory Paths\n");
+          //std::cerr << "Error: " << e.what() << std::endl;
+          return false;
+        }
+
+        std::filesystem::path current_example_path_relative = 
+            std::filesystem::relative(current_example_path, source_device_copy_dirpath);
+
+        std::filesystem::path current_example_path_target_device = 
+            target_device_copy_dirpath / current_example_path_relative;
+
+        FileUtils::RmDirRecursively(current_example_path_target_device / current_project_name );
+        FileUtils::removeFile(current_example_path_target_device / "aurora_perf.log");
+        FileUtils::removeFile(current_example_path_target_device / "aurora.log");
+        FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
+      }
+
+      // 7 remove other files: add_layout.py, add_layout_params.json if existing
+      FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout.py");
+      FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout_params.json");
+
+
+      // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
+      QLDeviceManager::getInstance()->parseDeviceData();
+
+      Message("\n\n >> Generating Device ok: " + target_device_copy_devicename +"\n");
+      Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
+    }
+    // DEVICE CREATION LOGIC --
+  }
+  // FPGA_AUTO device logic --
+
+
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
+  } else {
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
   Message("Design " + ProjManager()->projectName() + " is packed");
@@ -3299,14 +3376,6 @@ bool CompilerOpenFPGA_ql::GlobalPlacement() {
 }
 
 bool CompilerOpenFPGA_ql::Placement() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", PLACEMENT_LOG);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
-  });
-
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3544,54 +3613,40 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  // generate pin contraints file or use pre-generated .place file, if required.
-  // this string should contain the path of the PinConstraints file, if generated correctly.
-  // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
-  // - there is no pre-generated .place file AND
-  // - there is no pcf file in the project.
-  std::string filepath_fpga_fix_pins_place_str;
-  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return false;
-
-  std::string command = BaseVprCommand();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
+  CommandWrapperPtr command = getPlacementCommand();
+  if(!command) {
     return false;
   }
-
-  // custom vpr command-line options for place stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+    Message("##################################################");
+    Message("Placement skipped, not required");
+    Message("##################################################");
+    m_state = State::Placed;
+    return true;
   }
 
-  command += std::string(" ") + 
-             std::string("--place");
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
-  if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command += std::string(" --fix_clusters") + 
-               std::string(" ") + 
-               filepath_fpga_fix_pins_place_str;
-  }
-  else
-  {
-    Message("no pcf file found, skipping PinConstraints usage!");
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this] {
+    // Rename log file
+    copyLog(ProjManager(), "vpr_stdout.log", PLACEMENT_LOG);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
+  });
+
+  if(m_autoLayoutGenerationMode) {
+    Message("Placement is being run with Auto Layout Generated Device!");
   }
 
-  std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                     std::string(ProjManager()->projectName() + "_place.cmd"))
-                        .string());
-  ofs << command << std::endl;
-  ofs.close();
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " placement failed");
     return false;
+  } else {
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Detailed), command);
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
@@ -3647,15 +3702,6 @@ bool CompilerOpenFPGA_ql::ConvertSdcPinConstrainToPcf(
 }
 
 bool CompilerOpenFPGA_ql::Route() {
-  // Using a Scope Guard so this will fire even if we exit mid function
-  // This will fire when the containing function goes out of scope
-  auto guard = sg::make_scope_guard([this] {
-    // Rename log file
-    copyLog(ProjManager(), "vpr_stdout.log", ROUTING_LOG);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
-    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
-  });
-
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3757,35 +3803,41 @@ bool CompilerOpenFPGA_ql::Route() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
-  std::string command = BaseVprCommand();
-  if(command.empty()) {
-    ErrorMessage("Base VPR Command is empty!");
+
+  CommandWrapperPtr command = getRoutingCommand();
+  if (!command) {
     return false;
   }
-
-  // custom vpr command-line options for route stage only
-  // it is upto the user to ensure that the options are passed in correctly.
-  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
-    // first, trim the entire string to eliminate any extra whitespace in the front and the back
-    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
-    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
-    // add the options string to the end of the vpr options with one whitespace separator
-    command += std::string(" ") + vpr_custom_options_string;
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
+    Message("##################################################");
+    Message("Routing skipped, not required");
+    Message("##################################################");
+    m_state = State::Routed;
+    return true;
   }
 
-  command += std::string(" ") + 
-             std::string("--route");
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_route.cmd"), command->string());
 
-  std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                     std::string(ProjManager()->projectName() + "_route.cmd"))
-                        .string());
-  ofs << command << std::endl;
-  ofs.close();
-  int status = ExecuteAndMonitorSystemCommand(command);
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this] {
+    // Rename log file
+    copyLog(ProjManager(), "vpr_stdout.log", ROUTING_LOG);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
+    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
+  });
+
+  if(m_autoLayoutGenerationMode) {
+    Message("Route is being run with Auto Layout Generated Device!");
+  }
+
+  int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
     return false;
+  } else {
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Routing), command);
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
@@ -3891,7 +3943,389 @@ QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staP
   return QLDeviceTarget();
 }
 
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 bool CompilerOpenFPGA_ql::TimingAnalysis() {
+  if (!ProjManager()->HasDesign()) {
+    ErrorMessage("No design specified");
+    return false;
+  }
+
+  ErrorMessage("~~~ TODO: DON'T REMOVE STA LOGS, THIS BRINGS LOG LOST WHEN INCREMENtAL COMPILATION IS ENABLED");
+  CleanFiles(Action::STA); // this is required to remove the not actual multi corner reports left from previous run
+
+#if UPSTREAM_UNUSED
+  if (!HasTargetDevice()) return false;
+#endif // #if UPSTREAM_UNUSED
+  if (TimingAnalysisOpt() == STAOpt::Clean) {
+    Message("Cleaning TimingAnalysis results for " +
+            ProjManager()->projectName());
+    TimingAnalysisOpt(STAOpt::None);
+    m_state = State::Routed;
+    CleanFiles(Action::STA);
+    return true;
+  }
+
+  PERF_LOG("TimingAnalysis has started");
+  Message("##################################################");
+  Message("Timing Analysis for design: " + ProjManager()->projectName());
+  Message("##################################################");
+
+#ifdef _WIN32
+
+// under WIN32, running the analysis stage alone causes issues, hence we call the
+// route and analysis stages together
+// hence, we can also be at Placed state here.
+  // state check: requires "Placed"/"Routed" to be completed.
+  // we should be *atleast* at "Placed"/"Routed" or later state.
+  if( (m_state == State::Placed) ||
+      (m_state == State::Routed) ||
+      (m_state == State::TimingAnalyzed) ||
+      (m_state == State::PowerAnalyzed) ||
+      (m_state == State::BistreamGenerated) ) {
+  }
+  else {
+    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in placed/routed state"));
+    return false;
+  }
+
+#else // #ifdef _WIN32
+
+  // state check: requires "Routed" to be completed.
+  // we should be *atleast* at "Routed" or later state.
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + std::string(net_file_path));
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + std::string(net_file_path));
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + std::string(place_file_path));
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + std::string(place_file_path));
+      m_state = State::Placed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      Message("Attempting to read the route file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        Message("Found the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+        m_state = State::Routed;
+      } else {
+        ErrorMessage("Could not find the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      }
+  } else { 
+    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.route");
+    Message("Attempting to read the route file from: " + route_file_path.string());
+    if (fs::exists(route_file_path)) {
+      Message("Found the route file in: " + route_file_path.string());
+      m_state = State::Routed;
+    }
+  }
+  if( (m_state == State::Routed) ||
+      (m_state == State::TimingAnalyzed) ||
+      (m_state == State::PowerAnalyzed) ||
+      (m_state == State::BistreamGenerated) ) {
+  }
+  else {
+    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in routed state"));
+    return false;
+  }
+
+#endif // #ifdef _WIN32
+
+#if UPSTREAM_UNUSED
+  if (!FileUtils::FileExists(m_vprExecutablePath)) {
+    ErrorMessage("Cannot find executable: " + m_vprExecutablePath.string());
+    return false;
+  }
+#endif // #if UPSTREAM_UNUSED
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return false;
+  }
+
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return false;
+  }
+
+  // Check the STA specified device, and if it is different from the current target device
+  // explicitly ask to form the base vpr command using the specific variant instead of the
+  // current target device:
+  // currently we only expect the p_v_t_corner to be specified in JSON, but the code
+  // supports voltage_threshold also, if it is added to the JSON.
+  std::map<std::string, QLDeviceTarget> devices;
+
+  if (!collectStaDevices(devices)) {
+    return false;
+  }
+
+  QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+  if (devices.empty()) {
+    // run sta with current device
+    devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  }
+
+  for (const auto& [profile, device]: devices) {
+    if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {
+      if (!TimingAnalysisHelper(device, profile)) {
+        return false;
+      }
+    } else {
+      ErrorMessage("Attempt to run STA on invalid device");
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
+{
+  std::string sta_vpr_options;
+#ifndef _WIN32
+  // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+  // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+  // due to mismatch in switch blocks, which needs to be fixed yet.
+  // https://github.com/QL-Proprietary/aurora2/issues/1267
+  // Until this is fixed, we need to run the route and analysis stages together.
+  if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+    sta_vpr_options += std::string("--route");
+  }
+#endif // #ifdef _WIN32
+
+  // As the architecture file for PnR will not match the architecture file for STA in this case,
+  // vpr will fail on verifying the file hashes, so explicitly ask vpr to ignore the 
+  // file hash checks.
+  // example error message:
+  // >> Netlist was generated from a different architecture file (loaded architecture ID: SHA256:f73c6dffee1739f500e80ed13797d3bb78fb14ef9904f06368c8c0a407205617, netlist file architecture ID: SHA256:af8742ca39cc2f748b691015adaef1561ea258f433904565b2f84e00954c9e87)
+  sta_vpr_options += std::string(" --verify_file_digests off");
+
+  return sta_vpr_options;
+}
+
+bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& profile)
+{
+  std::string sta_suffix{};
+  if (!profile.empty()) {
+    sta_suffix = "_" + profile;
+  } 
+
+  // Using a Scope Guard so this will fire even if we exit mid function
+  // This will fire when the containing function goes out of scope
+  auto guard = sg::make_scope_guard([this, sta_suffix] {
+    if (sta_suffix.empty()) {
+      // Rename log file
+      copyLog(ProjManager(), "vpr_stdout.log", TIMING_ANALYSIS_LOG);
+    } else {
+      std::string corner_timing_analysis_log = StringUtils::replaceAll(TIMING_ANALYSIS_LOG_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), "vpr_stdout.log", corner_timing_analysis_log);
+      removeLog(ProjManager(), "vpr_stdout.log");
+
+      std::string corner_report_timing_hold = StringUtils::replaceAll(TA_REPORT_TIMING_HOLD_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), TA_REPORT_TIMING_HOLD, corner_report_timing_hold);
+      removeLog(ProjManager(), TA_REPORT_TIMING_HOLD);
+      
+      std::string corner_report_timing_setup = StringUtils::replaceAll(TA_REPORT_TIMING_SETUP_PATTERN, "*", sta_suffix);
+      copyLog(ProjManager(), TA_REPORT_TIMING_SETUP, corner_report_timing_setup);
+      removeLog(ProjManager(), TA_REPORT_TIMING_SETUP);
+    }
+  });
+
+  std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
+
+  if (TimingAnalysisOpt() == STAOpt::View) {
+    CommandWrapperPtr taCommand = getTimingAnalysisCommand(current_device_sta, profile);
+    TimingAnalysisOpt(STAOpt::None); // this must be set after command constructing
+    if (!taCommand) {
+      return false;
+    }
+    const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
+    if (status) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                   " place and route view failed");
+      return false;
+    }
+    return true;
+  }
+
+#if UPSTREAM_UNUSED
+  if (FileUtils::IsUptoDate(
+          (std::filesystem::path(ProjManager()->projectPath()) /
+           std::string(ProjManager()->projectName() + "_post_synth.route"))
+              .string(),
+          (std::filesystem::path(ProjManager()->projectPath()) /
+           std::string(ProjManager()->projectName() + "_sta.cmd"))
+              .string())) {
+    Message("Design " + ProjManager()->projectName() + " timing didn't change");
+    return true;
+  }
+#endif // #if UPSTREAM_UNUSED
+  CommandWrapperPtr taCommand = nullptr;
+  // use OpenSTA to do the job
+  if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
+    // allows SDF to be generated for OpenSTA
+    CommandWrapperPtr command = getTimingAnalysisCommand(current_device_sta, profile);
+    if (!command) {
+      return false;
+    }
+
+    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+      Message("##################################################");
+      if (profile.empty()) {
+        Message("timing analysis skipped, not required");
+      } else {
+        Message("timing analysis for corner[" + profile + "] skipped, not required");
+      }
+      Message("##################################################");
+      return true;
+    }
+
+    std::ofstream ofs(sta_cmd_filepath);
+    ofs.close();
+
+    int status = ExecuteAndMonitorSystemCommand(command->string());
+    if (status) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                   " timing analysis failed");
+      return false;
+    } else {
+      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, command);
+    }
+    // find files
+    std::string libFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".lib"))
+            .string();  // this is the standard sdc file
+    std::string netlistFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.v"))
+            .string();
+    std::string sdfFileName =
+        (std::filesystem::path(ProjManager()->projectPath()) /
+         std::string(ProjManager()->projectName() + "_post_synthesis.sdf"))
+            .string();
+    // std::string sdcFile = ProjManager()->getConstrFiles();
+    std::string sdcFileName =
+        (std::filesystem::current_path() /
+         std::string(ProjManager()->projectName() + ".sdc"))
+            .string();  // this is the standard sdc file
+    if (std::filesystem::is_regular_file(libFileName) &&
+        std::filesystem::is_regular_file(netlistFileName) &&
+        std::filesystem::is_regular_file(sdfFileName) &&
+        std::filesystem::is_regular_file(sdcFileName)) {
+      taCommand = BaseStaCommand();
+      taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
+      
+      FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
+    } else {
+      ErrorMessage(
+          "No required design info generated for user design, required "
+          "for timing analysis");
+      return false;
+    }
+  } 
+  else {
+    // use vpr/tatum engine
+
+    taCommand = getTimingAnalysisCommand(current_device_sta, profile);
+    if(!taCommand) {
+      return false;
+    }
+  }
+
+  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
+    Message("##################################################");
+    if (profile.empty()) {
+      Message("timing analysis skipped, not required");
+    } else {
+      Message("timing analysis for corner[" + profile + "] skipped, not required");
+    }
+    Message("##################################################");
+    return true;
+  }
+  FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
+  int status = ExecuteAndMonitorSystemCommand(taCommand->string());
+  CleanTempFiles();
+  if (status) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " timing analysis failed");
+    return false;
+  } else {
+    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, taCommand);
+  }
+
+  Message("Design " + ProjManager()->projectName() + " is timing analysed");
+
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+// hence, we set the state here, so that just sta can be called instead of route and sta as well.
+  m_state = State::Routed;
+#endif // #ifdef _WIN32
+
+  return true;
+}
+
+#else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
+bool CompilerOpenFPGA_ql::TimingAnalysis() {
+  if(m_autoLayoutGenerationMode) {
+    Message("Timing Analysis is being run with Auto Layout Generated Device!");
+  }
+
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -4075,6 +4509,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   return true;
 }
 
+
 std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
 {
   std::string sta_vpr_options;
@@ -4136,9 +4571,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    std::string taCommand = BaseVprCommand() + " --route --analysis --disp on";
+    std::string taCommand = BaseVprCommandLEGACY() + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::string taCommand = BaseVprCommand(current_device_sta) + " --analysis --disp on";
+    std::string taCommand = BaseVprCommandLEGACY(current_device_sta) + " --analysis --disp on";
 #endif // #ifdef _WIN32
 
     if(!profile.empty()){
@@ -4170,7 +4605,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    std::string command = BaseVprCommand() + " --gen_post_synthesis_netlist on";
+    std::string command = BaseVprCommandLEGACY() + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
     int status = ExecuteAndMonitorSystemCommand(command);
@@ -4219,7 +4654,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     std::string vpr_options;
 
-    taCommand = BaseVprCommand(current_device_sta);
+    taCommand = BaseVprCommandLEGACY(current_device_sta);
     if(taCommand.empty()) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
@@ -4276,6 +4711,8 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   return true;
 }
 
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
 bool CompilerOpenFPGA_ql::PowerAnalysis() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -4286,6 +4723,10 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     copyLog(ProjManager(), "vpr_stdout.log", POWER_ANALYSIS_LOG);
   });
 #endif // Disable VPR Power Analysis
+
+  if(m_autoLayoutGenerationMode) {
+    Message("Power Analysis is being run with Auto Layout Generated Device!");
+  }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
@@ -4940,7 +5381,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // call vpr to execute analysis
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
 
-  std::string vpr_analysis_command = BaseVprCommand();
+  std::string vpr_analysis_command = BaseVprCommandLEGACY();
   if(vpr_analysis_command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     // empty string returned on error.
@@ -5041,11 +5482,18 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   }
 
   result = ReplaceAll(result, "${OPENFPGA_VPR_CIRCUIT_FORMAT}", netlistFormat);
-  if (m_deviceSize.size()) {
+  if (m_autoLayoutGenerationMode) {
+    Message("OpenFPGA script running with Auto Layout Generated Device!\n");
     result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
-                        " --device " + m_deviceSize);
-  } else {
-    result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}", "");
+                        " --device " + m_autoLayoutGeneratedLayoutName);
+  } 
+  else { 
+    if (m_deviceSize.size()) {
+      result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
+                          " --device " + m_deviceSize);
+    } else {
+      result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}", "");
+    }
   }
 
   result = ReplaceAll(result, "${OPENFPGA_VPR_ROUTE_CHAN_WIDTH}",
@@ -5151,6 +5599,10 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     copyLog(ProjManager(), "vpr_stdout.log", BITSTREAM_LOG);
   });
 
+  if(m_autoLayoutGenerationMode) {
+    Message("Generate Biststream is being run with Auto Layout Generated Device!");
+  }
+  
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -5691,18 +6143,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
 
   std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
 
-  // Convert sets to comma-separated strings
-  auto setToString = [](const std::unordered_set<std::string>& set) {
-      std::string result;
-      for (const auto& sig : set) {
-          result += sig + ",";
-      }
-      if (!result.empty()) {
-        result.erase(result.size() - 1); // remove the last ","
-      }
-      return result;
-  };
-
   while (std::getline(infile, line)) {
     line = StringUtils::trim(line);
 
@@ -5722,7 +6162,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
    
     static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
     if (supportedCommands.find(token) == supportedCommands.end()){
-      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + setToString(supportedCommands)+ "].");
+      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
       return false;
     }
 
@@ -5765,14 +6205,14 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     }
   }
 
-  std::string leftStr   = setToString(leftSet);
-  std::string rightStr  = setToString(rightSet);
-  std::string topStr    = setToString(topSet);
-  std::string bottomStr = setToString(bottomSet);
+  std::string leftStr   = StringUtils::toString(leftSet);
+  std::string rightStr  = StringUtils::toString(rightSet);
+  std::string topStr    = StringUtils::toString(topSet);
+  std::string bottomStr = StringUtils::toString(bottomSet);
 
   std::string regionStr;
   for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += "region:" + region + "=" + setToString(patternsSet) + ";";
+    regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
   }
 
   // Output results
@@ -6116,7 +6556,7 @@ int CompilerOpenFPGA_ql::CleanTempFiles() {
 }
 
 void CompilerOpenFPGA_ql::CleanScripts() {
-  m_yosysScript = "";
+  m_customYosysScript = "";
   m_openFPGAScript = "";
 }
 
@@ -7405,5 +7845,1120 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
   return power_leakage;
 }
+
+std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
+{
+  std::unordered_map<int, CommandWrapperPtr> commands;
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return {};
+  }
+
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
+    std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
+    std::string node                = QLSettingsManager::getStringValue("general", "device", "node");
+    std::string devicename          = QLSettingsManager::getStringValue("general", "device", "devicename");
+    std::string voltage_threshold   = QLSettingsManager::getStringValue("general", "device", "voltage_threshold");
+    std::string p_v_t_corner        = QLSettingsManager::getStringValue("general", "device", "p_v_t_corner");
+    std::string layout              = QLSettingsManager::getStringValue("general", "device", "layout");
+    Message("family: " + family);
+    Message("foundry: " + foundry);
+    Message("node: " + node);
+    Message("devicename: " + devicename);
+    Message("voltage_threshold: " + voltage_threshold);
+    Message("p_v_t_corner: " + p_v_t_corner);
+    Message("layout: " + layout);
+    return {};
+  }
+
+  if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
+  {
+    m_aurora_template_script_synplify_path = QLDeviceManager::getInstance()->deviceSynplifyScriptFile();
+    if(m_aurora_template_script_synplify_path.empty() || fs::is_directory(m_aurora_template_script_synplify_path)) { 
+      ErrorMessage("This Device is Not Supported by Synplify.");
+      return {};
+    }
+    ScriptRendererPtr synplifyScript = std::make_shared<ScriptRenderer>(GetSynplifyScriptTemplate());
+
+    std::string includes;
+    for (auto path : ProjManager()->includePathList()) {
+      includes += "set_option -include_path " + FileUtils::AdjustPath(path) + "\n";
+    }
+    if(!includes.empty()) {
+      synplifyScript->apply("${INCLUDE_PATHS}", includes);
+    } else{
+      synplifyScript->apply("${INCLUDE_PATHS}", std::string("# [skipped] as there is no include path"));
+    }
+
+    std::string designFiles;
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string filesScript =
+          "add_file ${LANGUAGE_STANDARD} ${FILES}";
+      std::string lang;
+
+      auto files = lang_file.second + " ";
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+        case Design::Language::VHDL_1993:
+        case Design::Language::VHDL_2000:
+        case Design::Language::VHDL_2008:
+        case Design::Language::VHDL_2019:
+          lang = "-vhdl";
+          break;
+        case Design::Language::VERILOG_1995:
+          lang = "-verilog -vlog_std v95";
+          break;
+        case Design::Language::VERILOG_2001:
+          lang = "-verilog -vlog_std v2001";
+          break;
+        case Design::Language::SYSTEMVERILOG_2005:
+        case Design::Language::SYSTEMVERILOG_2009:
+        case Design::Language::SYSTEMVERILOG_2012:
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-verilog -vlog_std sysv";
+          break;
+        case Design::Language::VERILOG_NETLIST:
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Unsupported language (Synplify default parser)");
+          break;
+        case Design::Language::OTHER:
+          // don't include it in the compilation process
+          continue;
+      }
+      filesScript = ReplaceAll(filesScript, "${LANGUAGE_STANDARD}", lang);
+      filesScript = ReplaceAll(filesScript, "${FILES}", files);
+      designFiles += filesScript + "\n";
+    }
+#ifdef _WIN32
+    designFiles = ReplaceAll(designFiles, "\\", "\\\\"); // without this design files won't be found by synplify
+#endif
+    synplifyScript->apply("${READ_DESIGN_FILES}", designFiles);
+    for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+      synplifyScript->addFile(std::filesystem::path{file});
+    }
+
+    if (!ProjManager()->DesignTopModule().empty()) {
+      synplifyScript->apply("${TOP_MODULE}", ProjManager()->DesignTopModule());
+    } else {
+      ErrorMessage("Cannot proceed without the top module specified.");
+    }
+
+    std::string synplify_family_name = 
+      QLDeviceManager::getInstance()->deviceSynplifyFamilyName();
+    if(!synplify_family_name.empty()) {
+      synplifyScript->apply("${FAMILY}", synplify_family_name);
+    } else {
+      ErrorMessage("Synplify Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
+      return {};
+    }
+
+    std::string synplify_mode = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "mode");
+    if (synplify_mode == "speed") {
+      synplifyScript->apply("${RETIMING_VALUE}", "1");
+      synplifyScript->apply("${FREQUENCY_VALUE}", "auto");
+    } else if (synplify_mode == "area") {
+      synplifyScript->apply("${RETIMING_VALUE}", "0");
+      synplifyScript->apply("${FREQUENCY_VALUE}", "1");
+    } else {
+      synplifyScript->apply("${RETIMING_VALUE}", "0");
+      synplifyScript->apply("${FREQUENCY_VALUE}", "1");
+    }
+
+    std::filesystem::path synth_sdc_filepath;
+
+    if (synplify_mode == "speed"){
+      synth_sdc_filepath = QLSettingsManager::getSDCFilePath();
+
+      // if we have a valid sdc_file_path at this point, pass it on to vpr:
+      if(!synth_sdc_filepath.empty()) {
+        // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
+
+        synplifyScript->applyFile("${READ_SDC_FILE}", std::string("add_file") +
+                                                  std::string(" -constraint ") + 
+                                                  synth_sdc_filepath.string());
+      } else {
+        //std::cout << "synth sdc file not available." << std::endl;
+
+        synplifyScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+      }
+    } else {
+       synplifyScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
+    }
+
+    std::string synplify_script_path = ProjManager()->projectName() + ".prj";
+    synplify_script_path =
+      (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
+          .string();
+    std::string synplify_script_content = synplifyScript->render();
+    if (synplifyScript->hasErrors()) {
+      std::vector<std::string> errors = synplifyScript->takeErrors();
+      for (const std::string& error: errors) {
+        ErrorMessage(error);
+      }
+    }
+    std::ofstream ofs(synplify_script_path);
+    ofs << synplify_script_content;
+#ifdef _WIN32
+    ofs << "\n";
+    ofs << "# Run all implementations of the active project.\n";
+    ofs << "run -all\n";
+    ofs << "\n";
+    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
+    ofs << "program_terminate\n";
+#endif
+    ofs.close();
+
+#ifdef _WIN32
+    // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
+    // let's use synplify_base_console instead to have proper logging into compiler console.
+    const std::string synplifyExecName{"synplify_base_console"};
+#else
+    const std::string synplifyExecName{"synplify_base"};
+#endif
+
+    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
+      ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
+      return {};
+    }
+
+    const std::string synplifyLogFilePath{ProjManager()->projectName() + "_synplify.log"};
+
+    std::string synplify_license_wait = "";
+
+    if (GlobalSession->CmdLine()->SynplifyLicenseWait())
+      synplify_license_wait = "-license_wait ";
+
+    CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+    command->setScriptRenderer(synplifyScript);
+#ifdef _WIN32
+    // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
+    command->append(synplifyExecName);
+    command->append("-licensetype", "synplifybase_quicklogic");
+    if (!synplify_license_wait.empty()) {
+      command->append(synplify_license_wait);
+    }
+    command->append(synplify_script_path);
+    command->append("-log");
+    command->append(synplifyLogFilePath);
+#else
+    // synplify_base -batch -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) >> $(SYNPLIFY_LOG_FILE) 2>&1;
+    command->append(synplifyExecName);
+    command->append("-batch");
+    command->append("-licensetype", "synplifybase_quicklogic");
+    if (!synplify_license_wait.empty()) {
+      command->append(synplify_license_wait);
+    }
+    command->append(synplify_script_path);
+    command->append(">>");
+    command->append(synplifyLogFilePath);
+
+#endif
+    // TODO: handle synplify_script_path
+    commands[SynthesisTool::Synplify] = command;
+  }
+  
+  // use the device specific yosys script
+  m_aurora_template_script_yosys_path = QLDeviceManager::getInstance()->deviceYosysScriptFile();
+
+  if(m_aurora_template_script_yosys_path.empty()) {
+
+    ErrorMessage("Cannot proceed without Yosys Template Script.");
+    return {};
+  }
+
+  // init synthesis script from the right location according to the selected device.
+  ScriptRendererPtr yosysScript = std::make_shared<ScriptRenderer>(GetYosysScriptTemplate());
+
+  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
+    m_useVerific = true;
+  } else {
+    m_useVerific = false;
+  }
+ 
+  if(m_projManager->synthesisTool() != Synplify)
+  {
+    if (m_useVerific) {
+      // Verific parser
+      std::string fileList;
+      std::string includes;
+
+      for (auto msg_sev : MsgSeverityMap()) {
+        switch (msg_sev.second) {
+          case MsgSeverity::Ignore:
+            fileList += "verific -set-ignore " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Info:
+            fileList += "verific -set-info " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Warning:
+            fileList += "verific -set-warning " + msg_sev.first + "\n";
+            break;
+          case MsgSeverity::Error:
+            fileList += "verific -set-error " + msg_sev.first + "\n";
+            break;
+        }
+      }
+
+      // workaround for enabling usage of '-lib' option, suggested by yosyshq
+      // add the following line in the ys script:
+      fileList += std::string("verific -cfg veri_create_empty_box 1\n");
+
+      // ProjectManager::addIncludePath(const std::string& includePath)
+      for (auto path : ProjManager()->includePathList()) {
+        includes += FileUtils::AdjustPath(path) + " ";
+      }
+      if(!includes.empty()) {
+        fileList += "verific -vlog-incdir " + includes + "\n";
+      }
+
+      // incdir:always add the project's 'sources' directory 
+      //   (works for GUI copy_to_project/ TCL copy_files_on_add cases)
+      std::filesystem::path design_sources_dir_path =
+          ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
+                                          ProjManager()->projectName(),
+                                          ProjManager()->getDesignActiveFileSet().toStdString());
+      fileList += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
+      
+      // incdir: if executed via TCL script, and copy_files_on_add is *not* set
+      //   add the TCL script directory 
+      std::filesystem::path tcl_script_dir_path = 
+          QLSettingsManager::getTCLScriptDirPath();
+      if(!tcl_script_dir_path.empty()) {
+        if(!copyFilesOnAdd()) {
+          fileList += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
+        }
+      }
+
+      std::string libraries;
+      // ProjectManager::addLibraryPath(const std::string& libraryPath)
+      for (auto path : ProjManager()->libraryPathList()) {
+        libraries += FileUtils::AdjustPath(path) + " ";
+      }
+      if(!libraries.empty()) {
+        fileList += "verific -vlog-libdir " + libraries + "\n";
+      }
+
+      // -vlog-libdir : currently it does not solve anything, so it is commented out.
+      // std::filesystem::path device_yosys_modules_dir_path = 
+      //     QLDeviceManager::getInstance()->deviceYosysModulesDirPath() /
+      //     QLDeviceManager::getInstance()->deviceYosysFamilyName();
+      // fileList += "verific -vlog-libdir " + device_yosys_modules_dir_path + "\n";
+      
+      // recommendation by: <nak@yosyshq.com>
+      // with the -vlog-libdir option, if verific can't find a module named "Foo",
+      // it will look in the given directory for a file named "Foo.v".
+      // if we want to use the -vlog-libdir option we would have to split
+      // the primitive library into one file per module.
+      // instead of using -vlog-libdir, we could use the existing files by
+      // reading them in with the -lib option like this:
+      //      verific -vlog2k -lib /path/to/dsp_sim.v
+      // we should do this with all files that contain primitives that
+      // the user might want to instantiate manually, such as the BRAM sim files.
+      std::vector<std::filesystem::path> yosys_modules_pathlist = 
+          QLDeviceManager::getInstance()->deviceYosysModulesPathList();
+
+      for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
+
+        std::string sim_verilog_pattern = ".*_sim\\.v";
+
+        if (std::regex_match(yosys_module_path.filename().string(),
+                            std::regex(sim_verilog_pattern, std::regex::icase))) {
+
+            fileList += std::string("verific -vlog2k -lib ") + 
+                        yosys_module_path.string() +
+                        "\n";
+        }
+      }
+
+      // ProjectManager::addLibraryExtension(const std::string& libraryExt)
+      for (auto ext : ProjManager()->libraryExtensionList()) {
+        fileList += "verific -vlog-libext " + ext + "\n";
+      }
+
+      // ProjectManager::addMacro(const std::string& macroName,
+      //                          const std::string& macroValue)
+      std::string macros;
+      for (auto& macro_value : ProjManager()->macroList()) {
+        macros += macro_value.first + "=" + macro_value.second + " ";
+      }
+      if(!macros.empty()) {
+        fileList += "verific -vlog-define " + macros + "\n";
+      }
+
+      std::string importLibs;
+      auto importDesignFilesLibs = false;
+
+      // this is available only if TCL command has specified a top module library
+      // with -work <libname>
+      // set_top_module <top> ?-work <libName>?
+      auto topModuleLib = ProjManager()->DesignTopModuleLib();
+
+      // this is available only if TCL command has specified a design library
+      // with -work <libname>
+      // add_design_file <file list> ?type? ?-work <libName>?
+      auto commandsLibs = ProjManager()->DesignLibraries();
+
+      size_t filesIndex{0};
+      for (const auto& lang_file : ProjManager()->DesignFiles()) {
+        std::string lang;
+        std::string designLibraries;
+        switch (lang_file.first.language) {
+          case Design::Language::VHDL_1987:
+            lang = "-vhdl87";
+            break;
+          case Design::Language::VHDL_1993:
+            lang = "-vhdl93";
+            break;
+          case Design::Language::VHDL_2000:
+            lang = "-vhdl2k";
+            break;
+          case Design::Language::VHDL_2008:
+            lang = "-vhdl2008";
+            break;
+          case Design::Language::VHDL_2019:
+            lang = "-vhdl2019";
+            break;
+          case Design::Language::VERILOG_1995:
+            lang = "-vlog95";
+            break;
+          case Design::Language::VERILOG_2001:
+            lang = "-vlog2k";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2005:
+            lang = "-sv2005";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2009:
+            lang = "-sv2009";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2012:
+            lang = "-sv2012";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::SYSTEMVERILOG_2017:
+            lang = "-sv";
+            importDesignFilesLibs = true;
+            break;
+          case Design::Language::VERILOG_NETLIST:
+            lang = "";
+            break;
+          case Design::Language::BLIF:
+          case Design::Language::EBLIF:
+            lang = "BLIF";
+            ErrorMessage("Unsupported file format:" + lang);
+            return {};
+          case Design::Language::OTHER:
+            // don't include it in the compilation process
+            continue;
+        }
+        if (filesIndex < commandsLibs.size()) {
+          const auto& filesCommandsLibs = commandsLibs[filesIndex];
+          for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
+            auto libName = filesCommandsLibs.second[i];
+            if (!libName.empty()) {
+              auto commandLib = "-work " + libName + " ";
+              designLibraries += commandLib;
+              if (importDesignFilesLibs && libName != topModuleLib) {
+                importLibs += "-L " + libName + " ";
+              }
+            }
+          }
+        }
+        ++filesIndex;
+
+        if (designLibraries.empty()) {
+          fileList += "verific " + lang + " " + lang_file.second + "\n";
+        }
+        else {
+          fileList +=
+              "verific " + designLibraries + lang + " " + lang_file.second + "\n";
+        }
+      }
+      auto topModuleLibImport = std::string{};
+      if (!topModuleLib.empty())
+        topModuleLibImport = "-work " + topModuleLib + " ";
+      if (ProjManager()->DesignTopModule().empty()) {
+        fileList += "verific -import -all\n";
+      } else {
+        fileList += "verific " + topModuleLibImport + importLibs + "-import " +
+                    ProjManager()->DesignTopModule() + "\n";
+      }
+      yosysScript->apply("${READ_DESIGN_FILES}", fileList);
+      for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+        yosysScript->addFile(std::filesystem::path{file});
+      }
+    } else {
+    // Default Yosys parser
+
+    for (const auto& commandLib : ProjManager()->DesignLibraries()) {
+      if (!commandLib.first.empty()) {
+        ErrorMessage(
+            "Yosys default parser doesn't support '-work' design file "
+            "command");
+        break;
+      }
+    }
+
+    std::string macros = "";
+	  std::string includes = "";
+#if UPSTREAM_UNUSED
+    std::string macros = "verilog_defines ";
+    for (auto& macro_value : ProjManager()->macroList()) {
+      macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
+    }
+    macros += "\n";
+    std::string includes;
+    for (auto path : ProjManager()->includePathList()) {
+      includes += "-I" + FileUtils::AdjustPath(path) + " ";
+    }
+#endif // #if UPSTREAM_UNUSED
+
+    std::string designFiles;
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string filesScript =
+          "read_verilog ${READ_VERILOG_OPTIONS} ${INCLUDE_PATHS} "
+          "${VERILOG_FILES}";
+      std::string lang;
+
+      auto files = lang_file.second + " ";
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+        case Design::Language::VHDL_1993:
+        case Design::Language::VHDL_2000:
+        case Design::Language::VHDL_2008:
+        case Design::Language::VHDL_2019:
+          ErrorMessage("Unsupported language (Yosys default parser)");
+          break;
+        case Design::Language::VERILOG_1995:
+        case Design::Language::VERILOG_2001:
+        case Design::Language::SYSTEMVERILOG_2005:
+          break;
+        case Design::Language::SYSTEMVERILOG_2009:
+        case Design::Language::SYSTEMVERILOG_2012:
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-sv";
+          break;
+        case Design::Language::VERILOG_NETLIST:
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Unsupported language (Yosys default parser)");
+          break;
+        case Design::Language::OTHER:
+          // don't include it in the compilation process
+          continue;
+      }
+      std::string options = lang;
+      filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
+      filesScript = ReplaceAll(filesScript, "${INCLUDE_PATHS}", includes);
+      filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", files);
+
+      designFiles += filesScript + "\n";
+    }
+    yosysScript->apply("${READ_DESIGN_FILES}", macros + designFiles);
+    for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+      yosysScript->addFile(std::filesystem::path{file});
+    }
+    }
+  }
+  else
+  {
+    #if UPSTREAM_UNUSED
+        std::string macros = "verilog_defines ";
+        for (auto& macro_value : ProjManager()->macroList()) {
+          macros += "-D" + macro_value.first + "=" + macro_value.second + " ";
+        }
+        macros += "\n";
+        std::string includes;
+        for (auto path : ProjManager()->includePathList()) {
+          includes += "-I" + FileUtils::AdjustPath(path) + " ";
+        }
+    #endif // #if UPSTREAM_UNUSED
+    std::string vm_file_path = ProjManager()->DesignTopModule() + "/" + ProjManager()->DesignTopModule() + ".vm";
+    std::string filesScript =
+            "read_verilog ${READ_VERILOG_OPTIONS} "
+            "${VERILOG_FILES}";
+    std::string options = "";
+    filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
+    filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
+    std::string designFiles = filesScript + "\n";
+    yosysScript->apply("${READ_DESIGN_FILES}", designFiles);
+    for (const std::string& file: ProjManager()->CollectDesignFiles()) {
+      yosysScript->addFile(std::filesystem::path{file});
+    }
+  }
+  
+  yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
+
+#if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
+// https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
+#define STRINGIZE2(s) #s
+#define STRINGIZE(s) STRINGIZE2(s)
+  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
+#else
+  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
+#endif
+
+  if (!ProjManager()->DesignTopModule().empty()) {
+    yosysScript->apply("${TOP_MODULE_DIRECTIVE}", "-top " + ProjManager()->DesignTopModule());
+    yosysScript->apply("${TOP_MODULE}", ProjManager()->DesignTopModule());
+  } else {
+    yosysScript->apply("${TOP_MODULE_DIRECTIVE}", "-auto-top");
+  }
+
+  std::string yosys_family_name = 
+    QLDeviceManager::getInstance()->deviceYosysFamilyName();
+  if(!yosys_family_name.empty()) {
+    yosysScript->apply("${FAMILY}", yosys_family_name);
+  } else {
+    ErrorMessage("Yosys Family unknown for: " + QLDeviceManager::getInstance()->convertToDeviceString());
+    return {};
+  }
+
+  std::filesystem::path synth_sdc_filepath = FindSynthSDCPaths();
+  // if we have a valid sdc_file_path at this point, pass it on to vpr:
+  if(!synth_sdc_filepath.empty()) {
+    // std::cout << "synth sdc file available: " << synth_sdc_filepath << std::endl;
+    
+    // we have a valid SDC file
+    std::filesystem::path aurora_yosys_import_script_path =
+        GetSession()->Context()->DataPath() /
+        std::filesystem::path("..") /
+        std::filesystem::path("scripts") /
+        std::filesystem::path("aurora_yosys_import.tcl");
+
+    yosysScript->apply("${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
+
+    yosysScript->apply("${CALL_TCL_IMPORT_SCRIPT}", std::string("tcl") + 
+                                                    std::string(" ") + 
+                                                    aurora_yosys_import_script_path.string());
+    yosysScript->addFile(aurora_yosys_import_script_path);
+
+    yosysScript->apply("${READ_SDC_FILE}", std::string("read_sdc") +
+                                                        std::string(" ") + 
+                                                        synth_sdc_filepath.string());
+    yosysScript->addFile(synth_sdc_filepath);                                         
+  }
+  else {
+    //std::cout << "synth sdc file not available." << std::endl;
+
+    yosysScript->apply("${PLUGIN_LOAD_SDC}", std::string("# [skipped] sdc plugin load as there is no synth sdc file"));
+
+    yosysScript->apply("${CALL_TCL_IMPORT_SCRIPT}", std::string("# [skipped] call tcl import script as there is no synth sdc file"));
+
+    yosysScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as there is no synth sdc file"));
+  }
+  // ---------------------------------------------------------------- synth_sdc_file --
+
+  std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
+  yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
+  yosysScript->addFile(output_blif_filepath);
+
+  // use settings to populate yosys_options
+  std::string yosys_options;
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "verilog") == "checked" ) {
+
+    yosys_options += " -verilog " + std::string(m_projManager->projectName() + "_post_synth.v");
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc_opt") == "checked" ) {
+
+    yosys_options += " -no_abc_opt";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_abc9") == "checked" ) {
+
+    yosys_options += " -no_abc9";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_opt") == "checked" ) {
+
+    yosys_options += " -no_opt";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_adder") == "checked" ) {
+
+    yosys_options += " -no_adder";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_ff_map") == "checked" ) {
+
+    yosys_options += " -no_ff_map";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_dsp") == "checked" ) {
+
+    yosys_options += " -no_dsp";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {
+
+    yosys_options += " -no_bram";
+  }
+
+  // moving towards multi-arch support (v2.6), this setting is arch specific and should be removed
+  // from user settings json, so we ignore it, even if set.
+  // if( QLSettingsManager::getStringValue("yosys", "general", "no_sdff") == "checked" ) {
+
+  //   yosys_options += " -nosdff";
+  // }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "edif") == "checked" ) {
+
+    yosys_options += " -edif " + std::string(m_projManager->projectName() + ".edif");
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "bram_types") == "checked" ) {
+
+    yosys_options += " -bram_types";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "use_dsp_cfg_params") == "checked" ) {
+
+    yosys_options += " -use_dsp_cfg_params";
+  }
+
+  if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
+
+    yosys_options += " -synplify";
+  }
+
+  // pass in the path to the device specific yosys libraries directly.
+  std::string yosys_modules_dir_path_string = 
+      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
+  if (yosys_modules_dir_path_string.back() != '/') {
+    // tack on a '/' separator if it is missing to be safe:
+    yosys_modules_dir_path_string += "/";
+  }
+  yosys_options += " -lib_path " + 
+                   yosys_modules_dir_path_string;
+
+  // TODO: trim yosys_options at the front
+  yosysScript->apply("${YOSYS_OPTIONS}", yosys_options);
+
+
+  std::filesystem::path output_verilog_filepath{ProjManager()->projectName() + "_post_synth.v"};
+  yosysScript->apply("${OUTPUT_VERILOG}", output_verilog_filepath.string());
+  yosysScript->addFile(output_verilog_filepath);
+
+  std::filesystem::path output_vhdl_filepath{ProjManager()->projectName() + "_post_synth.vhd"};
+  yosysScript->apply("${OUTPUT_VHDL}", output_vhdl_filepath.string());
+  yosysScript->addFile(output_vhdl_filepath);
+
+  std::filesystem::path output_edif_filepath{ProjManager()->projectName() + "_post_synth.edif"};
+  yosysScript->apply("${OUTPUT_EDIF}", output_edif_filepath.string());
+  yosysScript->addFile(output_edif_filepath);
+
+  FinishSynthesisScript(yosysScript);
+
+  std::string script_path = ProjManager()->projectName() + ".ys";
+  std::string output_path;
+  switch (GetNetlistType()) {
+    case NetlistType::Verilog:
+      output_path = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::VHDL:
+      // Until we have a VHDL netlist reader in VPR
+      output_path = ProjManager()->projectName() + "_post_synth.v";
+      break;
+    case NetlistType::Edif:
+      output_path = ProjManager()->projectName() + "_post_synth.edif";
+      break;
+    case NetlistType::Blif:
+      output_path = ProjManager()->projectName() + "_post_synth.blif";
+      break;
+  }
+
+  // Create Yosys command
+  script_path =
+      (std::filesystem::path(ProjManager()->projectPath()) / script_path)
+          .string();
+
+  const std::string yosys_script_content = yosysScript->render();
+  if (yosysScript->hasErrors()) {
+    std::vector<std::string> errors = yosysScript->takeErrors();
+    for (const std::string& error: errors) {
+      ErrorMessage(error);
+    }
+  }
+
+  std::ofstream ofs(script_path);
+  ofs << yosys_script_content;
+  ofs.close();
+#if UPSTREAM_UNUSED
+  if (!FileUtils::FileExists(m_yosysExecutablePath)) {
+    ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
+    return false;
+  }
+#endif // #if UPSTREAM_UNUSED
+
+
+  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
+#if(AURORA_USE_TABBYCAD == 1)
+  if(m_useVerific) {
+    yosys_executable_path = GetSession()->Context()->BinaryPath() /
+                            ".." /
+                            "tabby" /
+                            "bin" /
+                            "yosys_verific";
+  }
+#endif // #if(AURORA_USE_TABBYCAD == 1)
+
+  CommandWrapperPtr command = std::make_shared<CommandWrapper>();
+  command->setScriptRenderer(yosysScript);
+  command->append(yosys_executable_path.string());
+  command->append("-s");
+  command->append(ProjManager()->projectName() + ".ys");
+  command->append("-l");
+  command->append(ProjManager()->projectName() + "_synth.log");
+
+  commands[SynthesisTool::Yosys] = command;
+  return commands;
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
+  VprStageCfg cfg;
+  cfg.use_place_file = false;
+  cfg.use_route_file = false;
+
+#if UPSTREAM_UNUSED
+  std::string command = BaseVprCommand(QLDeviceTarget(), cfg) + " --pack";
+#endif // #if UPSTREAM_UNUSED
+  CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
+  if(!command) {
+    ErrorMessage("VPR Command is empty!");
+    return nullptr;
+  }
+
+  // custom vpr command-line options for pack stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command->append(vpr_custom_options_string);
+  }
+
+  // ref: https://github.com/QL-Proprietary/aurora2/issues/1372
+  // default parameter values for packing stage, if **not** already specified in the custom vpr options:
+  // `--target_ext_pin_util clb:0.8,1`
+  std::size_t found_target_ext_pin_util = command->string().find("target_ext_pin_util");
+  if(found_target_ext_pin_util == std::string::npos) {
+    std::string vpr_target_ext_pin_util_param_string = "--target_ext_pin_util clb:0.8,1";
+    command->append(vpr_target_ext_pin_util_param_string);
+  }
+
+  command->append("--pack");
+
+  return command;
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
+  // generate pin contraints file or use pre-generated .place file, if required.
+  // this string should contain the path of the PinConstraints file, if generated correctly.
+  // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
+  // - there is no pre-generated .place file AND
+  // - there is no pcf file in the project.
+  std::string filepath_fpga_fix_pins_place_str;
+  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
+
+  VprStageCfg cfg;
+  cfg.use_place_file = true;
+  cfg.use_route_file = false;
+
+  CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
+  if(!command) {
+    ErrorMessage("Base VPR Command is empty!");
+    return nullptr;
+  }
+
+  // custom vpr command-line options for place stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command->append(vpr_custom_options_string);
+  }
+
+  command->append("--place");
+
+  if (!filepath_fpga_fix_pins_place_str.empty()) {
+    command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  }
+  else
+  {
+    Message("no pcf file found, skipping PinConstraints usage!");
+  }
+
+  return command;
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
+{
+  CommandWrapperPtr command = BaseVprCommand();
+  if(!command) {
+    ErrorMessage("Base VPR Command is empty!");
+    return nullptr;
+  }
+
+  // custom vpr command-line options for route stage only
+  // it is upto the user to ensure that the options are passed in correctly.
+  if( !QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str").empty() ) {
+    // first, trim the entire string to eliminate any extra whitespace in the front and the back
+    std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
+    vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    // add the options string to the end of the vpr options with one whitespace separator
+    command->append(vpr_custom_options_string);
+  }
+
+  // ref: https://github.com/QL-Proprietary/aurora2/issues/1372
+  // default parameter values for routing stage, if **not** already specified in the custom vpr options:
+  // `--router_initial_acc_cost_chan_congestion_weight 0.0`
+  std::size_t found_router_initial_acc_cost_chan_congestion_weight = command->string().find("router_initial_acc_cost_chan_congestion_weight");
+  if(found_router_initial_acc_cost_chan_congestion_weight == std::string::npos) {
+    std::string vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string = "--router_initial_acc_cost_chan_congestion_weight 0.0";
+    command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
+  }
+
+  command->append("--route");
+
+  return command;
+}
+
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile)
+{
+  std::string sta_suffix{};
+  if (!profile.empty()) {
+    sta_suffix = "_" + profile;
+  } 
+  
+  if (TimingAnalysisOpt() == STAOpt::View) {
+#ifdef _WIN32
+    // under WIN32, running the analysis stage alone causes issues, hence we call the
+    // route and analysis stages together
+    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
+    taCommand->append("--route");
+    taCommand->append("--analysis");
+    taCommand->append("--disp", "on");
+#else // #ifdef _WIN32
+    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
+    taCommand->append("--analysis");
+    taCommand->append("--disp", "on");
+    // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
+    // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
+    // due to mismatch in switch blocks, which needs to be fixed yet.
+    // https://github.com/QL-Proprietary/aurora2/issues/1267
+    // Until this is fixed, we need to run the route and analysis stages together.
+    if(QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_sta)) {
+      if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
+        taCommand->append("--route");
+      }
+    }
+#endif // #ifdef _WIN32
+
+    if(!profile.empty()){
+      taCommand->append(uniqueStaVprOptions());
+    }
+
+    return taCommand;
+  }
+
+  CommandWrapperPtr taCommand = nullptr;
+  // use OpenSTA to do the job
+  if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
+    // allows SDF to be generated for OpenSTA
+    CommandWrapperPtr command = BaseVprCommand();
+    command->append("--gen_post_synthesis_netlist", "on");
+    return command;
+  } 
+  else {
+    // use vpr/tatum engine
+
+    std::string vpr_options;
+
+    taCommand = BaseVprCommand(current_device_sta);
+    if(!taCommand) {
+        ErrorMessage("Base VPR Command is empty!");
+        return nullptr;
+    }
+
+    // custom vpr command-line options for analysis stage
+    // it is upto the user to ensure that the options are passed in correctly.
+    if( !QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str").empty() ) {
+      // first, trim the entire string to eliminate any extra whitespace in the front and the back
+      std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
+      vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      // add the options string to the end of the vpr options with one whitespace separator
+      vpr_options += std::string(" ") + vpr_custom_options_string;
+    }
+
+    taCommand->append(vpr_options);
+
+    if(!profile.empty()){
+      taCommand->append(uniqueStaVprOptions());
+    }
+    
+#ifdef _WIN32
+    // under WIN32, running the analysis stage along causes issues, hence we call the
+    // route and analysis stages together
+    taCommand->append("--route");
+#endif // #ifdef _WIN32
+
+    taCommand->append("--analysis");
+  }
+
+  return taCommand;
+}
+
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
+void CompilerOpenFPGA_ql::clearCompilationCache()
+{
+  m_taskCompilationStateManager.clear();
+}
+
+bool CompilerOpenFPGA_ql::hasCompilationCache() const
+{
+  return !m_taskCompilationStateManager.isEmpty();
+}
+
+void CompilerOpenFPGA_ql::invalidateTaskStatuses()
+{
+  if (ProjManager()) {
+    if (ProjManager()->getDesignFiles().empty()) {
+      // we skip task status invalidation if project doesn't have any design files yet.
+      // for more details see https://github.com/QL-Proprietary/aurora2/issues/1344
+      return;
+    }
+  }
+
+  if (!isSynthesisStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
+    m_state = State::IPGenerated;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(SYNTHESIS)) {
+      m_state = State::Synthesized;
+    }
+  }
+
+  if (!isPackingStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(PACKING);
+    m_state = State::Synthesized;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(PACKING)) {
+      m_state = State::Packed;
+    }
+  }
+
+  if (!isPlacementStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(PLACEMENT);
+    m_state = State::Packed;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(PLACEMENT)) {
+      m_state = State::Placed;
+    }
+  }
+
+  if (!isRoutingStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(ROUTING);
+    m_state = State::Placed;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(ROUTING)) {
+      m_state = State::Routed;
+    }
+  }
+
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+  if (!isTimingAnalysysStatusActual()) {
+    GetTaskManager()->tryMarkDirtyFrom(TIMING_SIGN_OFF);
+    m_state = State::Routed;
+    return;
+  } else {
+    if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
+      m_state = State::TimingAnalyzed;
+    }
+  }
+#else
+  if (GetTaskManager()->tryRestoreSuccessFor(TIMING_SIGN_OFF)) {
+    m_state = State::TimingAnalyzed;
+  }
+#endif
+
+  if (GetTaskManager()->tryRestoreSuccessFor(POWER)) {
+    m_state = State::PowerAnalyzed;
+  }
+  if (GetTaskManager()->tryRestoreSuccessFor(BITSTREAM)) {
+    m_state = State::BistreamGenerated;
+  }
+}
+
+bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
+{
+  std::unordered_map<int, CommandWrapperPtr> commands = getSynthesisCommands();
+  for (const auto& [id, command]: commands) {
+    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
+      return false;
+    }
+  }
+  return !commands.empty();  
+}
+
+bool CompilerOpenFPGA_ql::isPackingStatusActual()
+{
+  CommandWrapperPtr command = getPackingCommand();
+  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command);
+}
+
+bool CompilerOpenFPGA_ql::isPlacementStatusActual()
+{
+  CommandWrapperPtr command = getPlacementCommand();
+  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command);
+}
+
+bool CompilerOpenFPGA_ql::isRoutingStatusActual()
+{
+  CommandWrapperPtr command = getRoutingCommand();
+  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command);
+}
+
+#ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
+{
+  std::map<std::string, QLDeviceTarget> devices;
+  if (collectStaDevices(devices)) {
+    // handle sta multicorner case
+    for (const auto& [profile, device]: devices) {
+      CommandWrapperPtr command = getTimingAnalysisCommand(device, "");
+      if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+        return false;
+      }
+    }
+    return true;
+  } else {
+    // regular sta case
+    QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    CommandWrapperPtr command = getTimingAnalysisCommand(current_device, "");
+    return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), command);
+  }
+}
+#endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 // clang-format on
