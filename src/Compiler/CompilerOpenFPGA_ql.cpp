@@ -2093,8 +2093,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        ErrorMessage("Could not find the net file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --net_file") + 
@@ -2109,8 +2109,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        ErrorMessage("Could not find the place file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+                ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --place_file") + 
@@ -2126,8 +2126,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        ErrorMessage("Could not find the route file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+      ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --route_file") + 
@@ -2478,8 +2478,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        ErrorMessage("Could not find the net file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+      ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return nullptr;
     }
     command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
@@ -2490,8 +2490,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (cfg.use_place_file) {
     if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
       if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-          ErrorMessage("Could not find the place file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
           return nullptr;
       }
       command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
@@ -2503,8 +2503,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (cfg.use_route_file) {
     if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
       if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-          ErrorMessage("Could not find the route file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
           return nullptr;
         }
       command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
