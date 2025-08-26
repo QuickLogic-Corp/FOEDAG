@@ -6110,9 +6110,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     return false;
   }
 
+#ifdef FLOORPLANNING_REGION_EXPAND_WILDCARD 
   m_blifParser.load(netlist_path);
   //m_blifParser.printHierachy(); // debug
-  
+#endif
+
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
@@ -6166,6 +6168,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       }
     } else if (token == "set_region") {
       iss >> signalName;
+#ifdef FLOORPLANNING_REGION_EXPAND_WILDCARD 
       std::vector<std::string> elements;
       std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
       for (const std::string& pattern: patterns) {
@@ -6179,6 +6182,9 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
               std::make_move_iterator(patternElements.end()));
         }
       }
+#else
+      std::vector<std::string> elements = StringUtils::tokenize(signalName, ",");
+#endif
 
       std::string region;
       while (iss >> region) {
