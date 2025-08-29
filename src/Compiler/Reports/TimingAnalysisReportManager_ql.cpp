@@ -246,6 +246,8 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName,
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_PLACEMENT_SECTION, {});
     else if (line.startsWith(LOAD_ROUTING_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_ROUTING_SECTION, {});
+    else if (FIND_RESOURCES.indexIn(line) != -1)
+      parseResourceUsage(in, lineNr);
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
