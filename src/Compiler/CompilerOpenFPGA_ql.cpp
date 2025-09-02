@@ -2581,18 +2581,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     command->append("--gen_post_synthesis_netlist", "off");
   }
 
-  if( !QLSettingsManager::getStringValue("yosys", "general", "mince_num").empty() ) {
-    yosys_options += std::string(" -mince_num") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("yosys", "general", "mince_num");
-  }
-
-  // pass in the path to the device specific yosys libraries directly.
-  std::string yosys_modules_dir_path_string = 
-      (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
-  if (yosys_modules_dir_path_string.back() != '/') {
-    // tack on a '/' separator if it is missing to be safe:
-    yosys_modules_dir_path_string += "/";
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs").empty() ) {
     command->append("--post_synth_netlist_unconn_inputs", QLSettingsManager::getStringValue("vpr", "analysis", "post_synth_netlist_unconn_inputs"));
   }
@@ -8531,6 +8519,12 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   if( QLSettingsManager::getStringValue("yosys", "general", "synplify") == "checked"  || m_projManager->projectType() == PostMapSynplify || (m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)) {
 
     yosys_options += " -synplify";
+  }
+
+  if( !QLSettingsManager::getStringValue("yosys", "general", "mince_num").empty() ) {
+    yosys_options += std::string(" -mince_num") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
 
   // pass in the path to the device specific yosys libraries directly.
