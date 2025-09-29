@@ -1127,6 +1127,12 @@ void MainWindow::createActions() {
   connect(ipConfiguratorAction, &QAction::triggered, this,
           &MainWindow::ipConfiguratorActionTriggered);
 
+  floorplanningAction = new QAction(tr("Floorplanning"), this);
+  floorplanningAction->setCheckable(true);
+  floorplanningAction->setEnabled(false);
+  connect(floorplanningAction, &QAction::triggered, this,
+          &MainWindow::floorplanningActionTriggered);
+          
   saveAction = new QAction(tr("Save"), this);
   connect(saveAction, &QAction::triggered, this,
           &MainWindow::saveActionTriggered);
@@ -2217,6 +2223,15 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_ipConfigDockWidget = nullptr;
     m_availableIpsgDockWidget = nullptr;
     m_ipCatalogTree = nullptr;
+  }
+}
+
+void MainWindow::floorplanningActionTriggered()
+{
+  if (floorplanningAction->isChecked()) {
+    
+  } else {
+    
   }
 }
 

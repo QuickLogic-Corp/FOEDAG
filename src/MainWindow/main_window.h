@@ -82,6 +82,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void pinAssignmentActionTriggered();
   void pinAssignmentChanged();
   void ipConfiguratorActionTriggered();
+  void floorplanningActionTriggered();
   void newDialogAccepted();
   void recentProjectOpen();
   void openProjectSettings();
@@ -221,6 +222,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QAction* simBitstreamAction = nullptr;
   QAction* defualtProjectPathAction = nullptr;
   QAction* pinPlannerPinNameAction = nullptr;
+  QAction* floorplanningAction = nullptr;
   std::vector<std::pair<QAction*, QString>> m_recentProjectsActions;
   newProjectDialog* newProjdialog = nullptr;
   /* Tool bar objects */

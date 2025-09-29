@@ -85,6 +85,7 @@ set (SRC_CPP_LIST
   BlifParser.cpp
   WildcardFileFinder.cpp
   DialogUtils.cpp
+  SynthResourceExtractor.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -122,6 +123,7 @@ set (SRC_H_INSTALL_LIST
   BlifParser.h
   WildcardFileFinder.h
   DialogUtils.h
+  SynthResourceExtractor.h
 )
 
 set (SRC_H_LIST
