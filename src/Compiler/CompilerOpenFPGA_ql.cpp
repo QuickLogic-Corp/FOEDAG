@@ -4884,6 +4884,8 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
 #endif // Disable VPR Power Analysis
 
+  bakePowerCalculatorInput();
+
   long double power_dynamic_mW = PowerEstimator_Dynamic();
   long double power_leakage_mW = PowerEstimator_Leakage();
   long double power_total_mW = power_dynamic_mW + power_leakage_mW;
@@ -6548,6 +6550,89 @@ void CompilerOpenFPGA_ql::CleanScripts() {
   m_openFPGAScript = "";
 }
 
+void CompilerOpenFPGA_ql::bakePowerCalculatorInput()
+{
+  int total_num_luts = 0;
+  int total_num_lut_inputs = 0;
+  {
+  // num_input_cbx_cby = num_input_xbar = total_lut_inputs_used (from spreadsheet theory)
+  // total_lut_inputs_used = 1*num_1_LUT + 2*num_2_LUT + ... + 6*num_6_LUT (from yosys metrics, we obtain these numbers)
+  int num_1_LUT = QLMetricsManager::getIntValue("synthesis", "num_1_LUT");
+  int num_2_LUT = QLMetricsManager::getIntValue("synthesis", "num_2_LUT");
+  int num_3_LUT = QLMetricsManager::getIntValue("synthesis", "num_3_LUT");
+  int num_4_LUT = QLMetricsManager::getIntValue("synthesis", "num_4_LUT");
+  int num_5_LUT = QLMetricsManager::getIntValue("synthesis", "num_5_LUT");
+  int num_6_LUT = QLMetricsManager::getIntValue("synthesis", "num_6_LUT");
+  
+  // note: we consider Adder Carry blocks as 3-LUTs, so account for those as well:
+  int num_adder_carry = QLMetricsManager::getIntValue("synthesis", "num_adder_carry");
+  num_3_LUT += num_adder_carry;
+
+  total_num_luts = num_1_LUT + num_2_LUT + num_3_LUT + num_4_LUT + num_5_LUT + num_6_LUT;
+
+  total_num_lut_inputs = (num_1_LUT*1) + (num_2_LUT*2) + 
+                            (num_3_LUT*3) + (num_4_LUT*4) + 
+                            (num_5_LUT*5) + (num_6_LUT*6);
+  }
+
+  int total_num_ffs = 0;
+    {
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dff");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dff");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffn");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffnre");
+  }
+
+  long double num_average_lut_input = 0;
+  {
+  // num_average_lut_input (only for spreadsheet purposes) == num_lut_inputs/num_luts
+  // avoid a NaN result if there are no LUTs in design.
+  if (total_num_luts > 0) {
+    num_average_lut_input = ((long double)total_num_lut_inputs / total_num_luts);      // num_average_lut_input
+  }
+  }
+
+  nlohmann::json j;
+
+  j["Voltage"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "voltage");                               // calculator_d8
+  j["System Frequency"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "system_frequency_mhz");         // calculator_e9
+  j["INPUT ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "input_activity_factor");   // calculator_f11
+  j["INPUT XBAR ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "input_xbar_activity_factor"); // calculator_f15
+  j["OUTPUT ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "output_activity_factor"); // calculator_f16
+  // v1.40 : F18 = F16 (removed from JSON, if value changes, we will add it back)
+  j["OUTPUT CLB ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "output_activity_factor"); // calculator_f18
+  // v1.40 : F21 = F16 (removed from JSON, if value changes, we will add it back)
+  j["TOTAL # SB ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "output_activity_factor"); // calculator_f21
+  j["TOTAL # LUT ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "lut_activity_factor");   // calculator_f22
+  j["CLOCK NETWORK ACTIVITY FACTOR"] =  QLSettingsManager::getLongDoubleValue("power", "power_inputs", "clock_network_activity_factor"); // calculator_f28
+  j["DSP ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "dsp_activity_factor");           // calculator_f29
+  j["BRAM ACTIVITY FACTOR"] = QLSettingsManager::getLongDoubleValue("power", "power_inputs", "bram_activity_factor");         // calculator_f30
+
+  j["Array X"] = QLMetricsManager::getDoubleValue("routing", "device_size_x");                // -> calculator_d6
+  j["Array Y"] = QLMetricsManager::getDoubleValue("routing", "device_size_y");                // -> calculator_d7
+  j["INPUT NUM"] = QLMetricsManager::getDoubleValue("routing", "num_input");                  // -> calculator_d11
+  j["INPUT FF NUM"] = 0;                                                                      // -> calculator_d12 (not used currently)
+  j["OUTPUT NUM"] = QLMetricsManager::getDoubleValue("routing", "num_output");                // -> calculator_d16
+  j["OUTPUT FF NUM"] = 0;                                                                     // -> calculator_d17 (not used currently)
+  j["TOTAL # SB NUM"] = QLMetricsManager::getDoubleValue("routing", "num_wiring_segments");   // -> calculator_d21
+  j["TOTAL # LUT NUM"] = total_num_luts;                                                      // -> calculator_d22
+  j["TOTAL CLB FF Only NUM"] = total_num_ffs;                                                 // -> calculator_d26
+  j["Average # of LUT input NUM"] = num_average_lut_input;                                    // -> calculator_d27
+  j["CLOCK Network NUM"] = QLMetricsManager::getDoubleValue("routing", "num_clock_network");  // -> calculator_d28
+  j["DSP NUM"] = QLMetricsManager::getDoubleValue("routing", "num_dsp");                      // -> calculator_d29
+  j["BRAM (w/ sram) NUM"] = QLMetricsManager::getDoubleValue("routing", "num_bram");          // -> calculator_d30
+
+  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath())/"power_calculator_inputs.json", j.dump(2));
+}
 
 long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {
 
