@@ -138,7 +138,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
-  void bakePowerCalculatorInput();
+  bool configurePowerCalculatorInput();
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
@@ -267,6 +267,13 @@ private:
 
   void clearCompilationCache() override final;
   bool hasCompilationCache() const override final;
+
+  struct Offset {
+    Offset() {}
+    Offset(int col, int row): col(col), row(row) {}
+    int col = 0;
+    int row = 0;
+  };
 };
 
 }  // namespace FOEDAG
