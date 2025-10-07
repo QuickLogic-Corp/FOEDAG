@@ -4931,14 +4931,11 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     std::filesystem::path python_exec{"python3"};
   #endif // _WIN32
 
-  // TODO: deploy py script and execute it properly
-  // std::filesystem::path power_calculator_script_filepath =
-  //   GetSession()->Context()->DataPath() /
-  //   std::filesystem::path("..") /
-  //   std::filesystem::path("scripts") /
-  //   std::fielsystem::path("power_calculator") /
-  //   std::filesystem::path("power_calculator.py");
-  std::filesystem::path power_calculator_script_filepath = "/home/work/workspace/repos/aurora2/scripts/power_calculator/power_calculator.py";
+  std::filesystem::path power_calculator_script_filepath =
+    GetSession()->Context()->DataPath() /
+    std::filesystem::path("..") /
+    std::filesystem::path("scripts") /
+    std::filesystem::path("power_calculator.py");
 
   // TODO: unpack embedding file and use tmp path
   std::filesystem::path xlsx_filepath = "/home/work/workspace/repos/aurora2/scripts/power_calculator/doc.xlsx";
