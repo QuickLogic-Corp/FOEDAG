@@ -4884,12 +4884,10 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
 #endif // Disable VPR Power Analysis
 
-  if (!configurePowerCalculatorInput()) {
-    return false;
-  }
-
+#ifdef LEGACY_POWER_CALCULATOR
   long double power_dynamic_mW = PowerEstimator_Dynamic();
   long double power_leakage_mW = PowerEstimator_Leakage();
+
   long double power_total_mW = power_dynamic_mW + power_leakage_mW;
 
   if(power_dynamic_mW != 0 && power_leakage_mW != 0 && power_total_mW != 0) {
@@ -4920,6 +4918,51 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
   Message("Design " + ProjManager()->projectName() + " is power analysed");
   return true;
+#else
+  QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    return false;
+  }
+
+  #ifdef _WIN32
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  // TODO: deploy py script and execute it properly
+  // std::filesystem::path power_calculator_script_filepath =
+  //   GetSession()->Context()->DataPath() /
+  //   std::filesystem::path("..") /
+  //   std::filesystem::path("scripts") /
+  //   std::fielsystem::path("power_calculator") /
+  //   std::filesystem::path("power_calculator.py");
+  std::filesystem::path power_calculator_script_filepath = "/home/work/workspace/repos/aurora2/scripts/power_calculator/power_calculator.py";
+
+  // TODO: unpack embedding file and use tmp path
+  std::filesystem::path xlsx_filepath = "/home/work/workspace/repos/aurora2/scripts/power_calculator/doc.xlsx";
+  std::filesystem::path power_calculator_input_json_filepath = configurePowerCalculatorInput();
+
+  std::filesystem::path power_analysis_rpt_filepath = 
+      std::filesystem::path(ProjManager()->projectPath()) / POWER_ANALYSIS_LOG;
+
+  std::string command = python_exec.string() + " " +
+                        power_calculator_script_filepath.string() + " " +
+                        std::string("--device_foundry ") + current_device.device_variant.foundry + " " +
+                        std::string("--device_node ") + current_device.device_variant.node + " " +
+                        std::string("--xlsx_filepath ") + xlsx_filepath.string() + " " +
+                        std::string("--json_filepath ") + power_calculator_input_json_filepath.string();
+  // write power analysis into file
+  int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath);
+  if (status == 1) { //Failure
+    ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
+    return false;
+  } else { //Success
+    Message("Design " + ProjManager()->projectName() + " is power analysed");
+    return true;
+  }
+#endif
 }
 
 const std::string basicOpenFPGABitstreamScript = R"( 
@@ -6552,14 +6595,8 @@ void CompilerOpenFPGA_ql::CleanScripts() {
   m_openFPGAScript = "";
 }
 
-bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
+std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
 {
-  QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device) ) {
-    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
-    return false;
-  }
-
   int total_num_luts = 0;
   int total_num_lut_inputs = 0;
   {
@@ -6584,7 +6621,6 @@ bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
   }
 
   int total_num_ffs = 0;
-    {
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffsre");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnsre");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffsre");
@@ -6598,15 +6634,12 @@ bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnre");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffre");
   total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffnre");
-  }
 
   long double num_average_lut_input = 0;
-  {
   // num_average_lut_input (only for spreadsheet purposes) == num_lut_inputs/num_luts
   // avoid a NaN result if there are no LUTs in design.
   if (total_num_luts > 0) {
     num_average_lut_input = ((long double)total_num_lut_inputs / total_num_luts);      // num_average_lut_input
-  }
   }
 
   nlohmann::json j = nlohmann::json::array();
@@ -6627,21 +6660,21 @@ bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
     j.push_back(ej);
   };
 
-  static const std::string KEY_ARRAY_X{"Array X"};      // +
-  static const std::string KEY_ARRAY_Y{"Array Y"};      // +
-  static const std::string KEY_INPUT{"INPUT"};          // +
-  static const std::string KEY_INPUT_FF{"INPUT FF"};    // +
-  static const std::string KEY_OUTPUT{"OUTPUT"};        // +
-  static const std::string KEY_OUTPUT_FF{"OUTPUT FF"};  // +
-  static const std::string KEY_OUTPUT_CLB{"OUTPUT CLB"}; // +
-  static const std::string KEY_TOTAL_SB{"Total # SB"};  // +
-  static const std::string KEY_INPUT_XBAR{"INPUT XBAR"};  // +
-  static const std::string KEY_TOTAL_LUT{"Total # of LUT"};             // +
-  static const std::string KEY_TOTAL_CLB_FF_ONLY{"Total CLB FF only"};  // +
-  static const std::string KEY_AVR_LUT_INPUT{"Average # of LUT input"}; // +
-  static const std::string KEY_CLOCK_NETWORK{"CLOCK Network"};          // +
-  static const std::string KEY_DSP{"DSP"};                              // +
-  static const std::string KEY_BRAM_W_SRAM{"BRAM (w/ sram)"};           // +
+  static const std::string KEY_ARRAY_X{"Array X"};
+  static const std::string KEY_ARRAY_Y{"Array Y"};
+  static const std::string KEY_INPUT{"INPUT"};
+  static const std::string KEY_INPUT_FF{"INPUT FF"};
+  static const std::string KEY_OUTPUT{"OUTPUT"};
+  static const std::string KEY_OUTPUT_FF{"OUTPUT FF"};
+  static const std::string KEY_OUTPUT_CLB{"OUTPUT CLB"};
+  static const std::string KEY_TOTAL_SB{"Total # SB"};
+  static const std::string KEY_INPUT_XBAR{"INPUT XBAR"};
+  static const std::string KEY_TOTAL_LUT{"Total # of LUT"};
+  static const std::string KEY_TOTAL_CLB_FF_ONLY{"Total CLB FF only"};
+  static const std::string KEY_AVR_LUT_INPUT{"Average # of LUT input"};
+  static const std::string KEY_CLOCK_NETWORK{"CLOCK Network"};
+  static const std::string KEY_DSP{"DSP"};
+  static const std::string KEY_BRAM_W_SRAM{"BRAM (w/ sram)"};
 
   std::string device_size_x_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "device_size_x"));
   std::string device_size_y_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "device_size_y"));
@@ -6672,7 +6705,7 @@ bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
   addElement("Calculator", KEY_BRAM_W_SRAM, "int", num_bram_str, Offset{1,0});                   // -> calculator_d30
 
   static const std::string KEY_VOLTAGE{"Voltage"};
-  static const std::string KEY_SYSTEM_FREQUENCY{"System Frequency"};          // +
+  static const std::string KEY_SYSTEM_FREQUENCY{"System Frequency"};
   static const std::string KEY_INPUT_ACTIVITY_FACTOR{"INPUT ACTIVITY FACTOR"};
   static const std::string KEY_INPUT_XBAR_ACTIVITY_FACTOR{"INPUT XBAR ACTIVITY FACTOR"};
   static const std::string KEY_OUTPUT_ACTIVITY_FACTOR{"OUTPUT ACTIVITY FACTOR"};
@@ -6694,6 +6727,7 @@ bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
   std::string bram_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "bram_activity_factor"));
 
   // ${DEVICE_FOUNDRY_NODE} is placeholder which will be replaced properly on python side with device foundry and node
+  // v1.40 : not used
   // addElement("Calculator", KEY_VOLTAGE, "float", voltage_str, Offset{0,2}, "${DEVICE_FOUNDRY_NODE}"); // calculator_d8
   addElement("Calculator", KEY_SYSTEM_FREQUENCY, "float", system_frequency_mhz_str, Offset(2,0));     // calculator_e9
   addElement("Calculator", KEY_INPUT_ACTIVITY_FACTOR, "float", input_activity_factor_str, Offset(3,0), KEY_INPUT);            // calculator_f11
@@ -6708,9 +6742,11 @@ bool CompilerOpenFPGA_ql::configurePowerCalculatorInput()
   addElement("Calculator", KEY_DSP_ACTIVITY_FACTOR, "float", dsp_activity_factor_str, Offset(3,0), KEY_DSP);                      // calculator_f29
   addElement("Calculator", KEY_BRAM_ACTIVITY_FACTOR, "float", bram_activity_factor_str, Offset(3,0), KEY_BRAM_W_SRAM);            // calculator_f30
 
-  FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath())/"power_calculator_inputs.json", j.dump(2));
+  std::filesystem::path filepath = std::filesystem::path(ProjManager()->projectPath()) / "power_calculator_inputs.json";
 
-  return true;
+  FileUtils::WriteToFile(filepath, j.dump(2));
+
+  return filepath;
 }
 
 long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {

@@ -138,7 +138,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
-  bool configurePowerCalculatorInput();
+  std::filesystem::path configurePowerCalculatorInput() const;
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
 
