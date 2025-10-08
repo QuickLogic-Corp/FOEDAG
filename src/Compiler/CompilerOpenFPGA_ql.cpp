@@ -37,6 +37,7 @@
 #include <QTextStream>
 #include <QJsonArray>
 #include <QDirIterator>
+#include <QTemporaryFile>
 #include <chrono>
 #include <filesystem>
 #include <sstream>
@@ -4937,8 +4938,30 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     std::filesystem::path("scripts") /
     std::filesystem::path("power_calculator.py");
 
-  // TODO: unpack embedding file and use tmp path
-  std::filesystem::path xlsx_filepath = "/home/work/workspace/repos/aurora2/scripts/power_calculator/doc.xlsx";
+  // unpack embedded xlsx file to a temprorary location
+  QFile qrc_xlsx_filepath(":/build/power_calculator.xlsx");
+  if (!qrc_xlsx_filepath.open(QIODevice::ReadOnly)) {
+    ErrorMessage("Cannot open power calculator file");
+    return false;
+  }
+
+  QString pattern = QDir::tempPath() + "/XXXXXX.xlsx";
+  QTemporaryFile tmp_xlsx_filepath(pattern);
+  tmp_xlsx_filepath.setAutoRemove(false);
+
+  if (!tmp_xlsx_filepath.open()) {
+    ErrorMessage("Cannot create power calculator tmp file");
+    return false;
+  }
+
+  if (tmp_xlsx_filepath.write(qrc_xlsx_filepath.readAll()) == -1) {
+    ErrorMessage("Write tmp power calculator file failed");
+    return false;
+  }
+  tmp_xlsx_filepath.flush();
+  tmp_xlsx_filepath.close();
+  //
+
   std::filesystem::path power_calculator_input_json_filepath = configurePowerCalculatorInput();
 
   std::filesystem::path power_analysis_rpt_filepath = 
@@ -4948,10 +4971,11 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
                         power_calculator_script_filepath.string() + " " +
                         std::string("--device_foundry ") + current_device.device_variant.foundry + " " +
                         std::string("--device_node ") + current_device.device_variant.node + " " +
-                        std::string("--xlsx_filepath ") + xlsx_filepath.string() + " " +
+                        std::string("--xlsx_filepath ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
                         std::string("--json_filepath ") + power_calculator_input_json_filepath.string();
   // write power analysis into file
   int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath);
+  tmp_xlsx_filepath.remove();
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
     return false;
@@ -6657,8 +6681,11 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
     j.push_back(ej);
   };
 
-  static const std::string KEY_ARRAY_X{"Array X"};
-  static const std::string KEY_ARRAY_Y{"Array Y"};
+  // static const std::string KEY_ARRAY_X{"Array X"}; // Calculator!C6 renamed from "Array X" to "# of CLB col  "
+  // static const std::string KEY_ARRAY_Y{"Array Y"}; // Calculator!C7 renamed from "Array Y" to "# of clb row"
+  static const std::string KEY_ARRAY_X{"# of CLB col  "};
+  static const std::string KEY_ARRAY_Y{"# of clb row"};
+
   static const std::string KEY_INPUT{"INPUT"};
   static const std::string KEY_INPUT_FF{"INPUT FF"};
   static const std::string KEY_OUTPUT{"OUTPUT"};
