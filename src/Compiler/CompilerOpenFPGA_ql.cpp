@@ -4985,6 +4985,10 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   //
 
   std::filesystem::path power_calculator_input_json_filepath = configurePowerCalculatorInput();
+  if (!FileUtils::FileExists(power_calculator_input_json_filepath)) {
+    ErrorMessage("Power input json file wasn't created, but required");
+    return false;
+  }
 
   std::filesystem::path power_analysis_rpt_filepath = 
       std::filesystem::path(ProjManager()->projectPath()) / POWER_ANALYSIS_LOG;
@@ -4997,7 +5001,9 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
                         std::string("--json_filepath ") + power_calculator_input_json_filepath.string();
   // write power analysis into file
   int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath);
-  tmp_xlsx_filepath.remove();
+  if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
+    tmp_xlsx_filepath.remove();
+  }
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
     return false;
@@ -6774,19 +6780,19 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
 
   // ${DEVICE_FOUNDRY_NODE} is placeholder which will be replaced properly on python side with device foundry and node
   // v1.40 : not used
-  // addElement("Calculator", KEY_VOLTAGE, "float", voltage_str, Offset{0,2}, "${DEVICE_FOUNDRY_NODE}"); // calculator_d8
-  addElement("Calculator", KEY_SYSTEM_FREQUENCY, "float", system_frequency_mhz_str, Offset(2,0));     // calculator_e9
-  addElement("Calculator", KEY_INPUT_ACTIVITY_FACTOR, "float", input_activity_factor_str, Offset(3,0), KEY_INPUT);            // calculator_f11
-  addElement("Calculator", KEY_INPUT_XBAR_ACTIVITY_FACTOR, "float", input_xbar_activity_factor_str, Offset(3,0), KEY_INPUT_XBAR);  // calculator_f15
-  addElement("Calculator", KEY_OUTPUT_ACTIVITY_FACTOR, "float", output_activity_factor_str, Offset(3,0), KEY_OUTPUT);          // calculator_f16
+  // addElement("Calculator", KEY_VOLTAGE, "float", voltage_str, Offset{0,2}, "${DEVICE_FOUNDRY_NODE}");                        // calculator_d8
+  addElement("Calculator", KEY_SYSTEM_FREQUENCY, "float", system_frequency_mhz_str, Offset(2,0));                               // calculator_e9
+  addElement("Calculator", KEY_INPUT_ACTIVITY_FACTOR, "%float", input_activity_factor_str, Offset(3,0), KEY_INPUT);              // calculator_f11
+  addElement("Calculator", KEY_INPUT_XBAR_ACTIVITY_FACTOR, "%float", input_xbar_activity_factor_str, Offset(3,0), KEY_INPUT_XBAR);  // calculator_f15
+  addElement("Calculator", KEY_OUTPUT_ACTIVITY_FACTOR, "%float", output_activity_factor_str, Offset(3,0), KEY_OUTPUT);           // calculator_f16
   // v1.40 : F18 = F16 (removed from JSON, if value changes, we will add it back)
-  addElement("Calculator", KEY_OUTPUT_CLB_ACTIVITY_FACTOR, "float", output_activity_factor_str, Offset(3,0), KEY_OUTPUT_CLB);    // calculator_f18
+  addElement("Calculator", KEY_OUTPUT_CLB_ACTIVITY_FACTOR, "%float", output_activity_factor_str, Offset(3,0), KEY_OUTPUT_CLB);    // calculator_f18
   // v1.40 : F21 = F16 (removed from JSON, if value changes, we will add it back)
-  addElement("Calculator", KEY_TOTAL_SB_ACTIVITY_FACTOR, "float", output_activity_factor_str, Offset(3,0), KEY_TOTAL_SB);        // calculator_f21
-  addElement("Calculator", KEY_TOTAL_LUT_ACTIVITY_FACTOR, "float", lut_activity_factor_str, Offset(3,0), KEY_TOTAL_LUT);         // calculator_f22
-  addElement("Calculator", KEY_CLOCK_NETWORK_ACTIVITY_FACTOR, "float", clock_network_activity_factor_str, Offset(3,0), KEY_CLOCK_NETWORK); // calculator_f28
-  addElement("Calculator", KEY_DSP_ACTIVITY_FACTOR, "float", dsp_activity_factor_str, Offset(3,0), KEY_DSP);                      // calculator_f29
-  addElement("Calculator", KEY_BRAM_ACTIVITY_FACTOR, "float", bram_activity_factor_str, Offset(3,0), KEY_BRAM_W_SRAM);            // calculator_f30
+  addElement("Calculator", KEY_TOTAL_SB_ACTIVITY_FACTOR, "%float", output_activity_factor_str, Offset(3,0), KEY_TOTAL_SB);        // calculator_f21
+  addElement("Calculator", KEY_TOTAL_LUT_ACTIVITY_FACTOR, "%float", lut_activity_factor_str, Offset(3,0), KEY_TOTAL_LUT);         // calculator_f22
+  addElement("Calculator", KEY_CLOCK_NETWORK_ACTIVITY_FACTOR, "%float", clock_network_activity_factor_str, Offset(3,0), KEY_CLOCK_NETWORK); // calculator_f28
+  addElement("Calculator", KEY_DSP_ACTIVITY_FACTOR, "%float", dsp_activity_factor_str, Offset(3,0), KEY_DSP);                     // calculator_f29
+  addElement("Calculator", KEY_BRAM_ACTIVITY_FACTOR, "%float", bram_activity_factor_str, Offset(3,0), KEY_BRAM_W_SRAM);           // calculator_f30
 
   std::filesystem::path filepath = std::filesystem::path(ProjManager()->projectPath()) / "power_calculator_inputs.json";
 
