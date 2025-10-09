@@ -4920,6 +4920,28 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   Message("Design " + ProjManager()->projectName() + " is power analysed");
   return true;
 #else
+  // ===================================================== User Inputs ++
+  // check for user inputs power json:
+  if( QLSettingsManager::getJson("power", "power_inputs") == nullptr ) {
+    // there are no power_inputs parameters required for power analysis!
+    Message("\n>> power_inputs in JSON unavailable, skipping power analysis!");
+    return false;
+  }
+
+  // check if the user has explicitly enabled power estimation:
+  if( QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") != "checked" ) {
+    // user has not enabled power analysis
+    Message("\n>> dynamic_power is disabled in JSON, skipping power analysis!");
+    return false;
+  }
+
+  // check if the user has explicitly enabled power estimation:
+  if( QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") != "checked" ) {
+    // user has not enabled power analysis
+    Message("\n>> leakage_power is disabled in JSON, skipping power analysis!");
+    return false;
+  }
+
   QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device) ) {
     ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
@@ -6773,6 +6795,7 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
   return filepath;
 }
 
+#ifdef LEGACY_POWER_CALCULATOR
 long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {
 
   // Based on v1.38: https://github.com/QL-Proprietary/eFPGA_PowerCalculator/blob/main/K6N10%20TSMC%2016nm%20Power%20Calculator%20v1.38.xlsx
@@ -8057,6 +8080,7 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
   return power_leakage;
 }
+#endif // LEGACY_POWER_CALCULATOR
 
 std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
 {

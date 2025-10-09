@@ -139,8 +139,10 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string ToLower(std::string str);
   
   std::filesystem::path configurePowerCalculatorInput() const;
+#ifdef LEGACY_POWER_CALCULATOR
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
+#endif // LEGACY_POWER_CALCULATOR
 
   virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
