@@ -53,6 +53,7 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Utils/FileUtils.h"
@@ -4984,7 +4985,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   tmp_xlsx_filepath.close();
   //
 
-  std::filesystem::path power_calculator_input_json_filepath = configurePowerCalculatorInput();
+  std::filesystem::path power_calculator_input_json_filepath = configurePowerCalculatorInput(current_device);
   if (!FileUtils::FileExists(power_calculator_input_json_filepath)) {
     ErrorMessage("Power input json file wasn't created, but required");
     return false;
@@ -6644,7 +6645,7 @@ void CompilerOpenFPGA_ql::CleanScripts() {
   m_openFPGAScript = "";
 }
 
-std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
+std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(const QLDeviceTarget& device) const
 {
   int total_num_luts = 0;
   int total_num_lut_inputs = 0;
@@ -6709,11 +6710,10 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
     j.push_back(ej);
   };
 
-  // static const std::string KEY_ARRAY_X{"Array X"}; // Calculator!C6 renamed from "Array X" to "# of CLB col  "
-  // static const std::string KEY_ARRAY_Y{"Array Y"}; // Calculator!C7 renamed from "Array Y" to "# of clb row"
-  static const std::string KEY_ARRAY_X{"# of CLB col  "};
-  static const std::string KEY_ARRAY_Y{"# of clb row"};
-
+  static const std::string KEY_CLB_COLUMNS{"# of CLB col  "};
+  static const std::string KEY_CLB_ROWS{"# of clb row"};
+  static const std::string KEY_BRAM_COLUMNS{"# of BRAM col"};
+  static const std::string KEY_DSP_COLUMNS{"# of DSP col"};
   static const std::string KEY_INPUT{"INPUT"};
   static const std::string KEY_INPUT_FF{"INPUT FF"};
   static const std::string KEY_OUTPUT{"OUTPUT"};
@@ -6728,8 +6728,49 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
   static const std::string KEY_DSP{"DSP"};
   static const std::string KEY_BRAM_W_SRAM{"BRAM (w/ sram)"};
 
-  std::string device_size_x_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "device_size_x"));
-  std::string device_size_y_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "device_size_y"));
+  // Q1: ARRAY=34x34. VPR SHOWS grid 32x32, where border size 1 is IO. CLB are 30x30.
+  const int device_size_x = QLMetricsManager::getDoubleValue("routing", "device_size_x");
+  const int device_size_y = QLMetricsManager::getDoubleValue("routing", "device_size_y");
+  const int device_clb_rows = device_size_y - 2;
+
+  std::map<std::string, std::pair<int, int>> tiles_cfg = parseTilesCfg(m_architectureFile);
+  const int bram_clb_num = tiles_cfg["bram"].second;
+  const int dsp_clb_num = tiles_cfg["dsp"].second;
+
+  const int clb_rows_without_io = device_size_y - 2;
+  const int per_column_bram_num = clb_rows_without_io / bram_clb_num;
+  const int per_column_dsp_num = clb_rows_without_io / dsp_clb_num;
+
+  int total_brams_num = 0;
+  int total_dsps_num = 0;
+  std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
+  for (const auto& [resource, value]: resources) {
+    if (resource == "bram") {
+      total_brams_num = value;
+    }
+    if (resource == "dsp") {
+      total_dsps_num = value;
+    }
+  }
+
+  const int device_bram_columns = total_brams_num / per_column_bram_num;
+  const int device_dsp_columns = total_dsps_num / per_column_dsp_num;
+
+  const int device_clb_columns = device_size_x - 2 - device_bram_columns - device_dsp_columns; // Q2: is it right?
+  const std::string device_clb_columns_str = std::to_string(device_clb_columns);
+  const std::string device_clb_rows_str = std::to_string(device_clb_rows);
+
+  std::cout << "per_column_bram_num=" << per_column_bram_num << std::endl;
+  std::cout << "per_column_dsp_num=" << per_column_dsp_num << std::endl;
+  std::cout << "total_brams_num=" << total_brams_num << std::endl;
+  std::cout << "total_dsps_num=" << total_dsps_num << std::endl;
+  std::cout << "device_bram_columns=" << device_bram_columns << std::endl;
+  std::cout << "device_dsp_columns=" << device_dsp_columns << std::endl;
+  std::cout << "device_clb_columns=" << device_clb_columns << std::endl;
+
+  const std::string device_bram_columns_str = std::to_string(device_bram_columns);
+  const std::string device_dsp_columns_str = std::to_string(device_dsp_columns);
+
   std::string num_input_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_input"));
   std::string num_output_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_output"));
   std::string num_wiring_segments_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_wiring_segments"));
@@ -6742,8 +6783,10 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput() const
   std::string num_dsp_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_dsp"));
   std::string num_bram_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_bram"));
 
-  addElement("Calculator", KEY_ARRAY_X, "int", device_size_x_str, Offset{1,0});                  // -> calculator_d6
-  addElement("Calculator", KEY_ARRAY_Y, "int", device_size_y_str, Offset{1,0});                  // -> calculator_d7
+  addElement("Calculator", KEY_CLB_COLUMNS, "int", device_clb_columns_str, Offset{1,0});         // -> calculator_d6
+  addElement("Calculator", KEY_CLB_ROWS, "int", device_clb_rows_str, Offset{1,0});               // -> calculator_d7
+  addElement("Calculator", KEY_BRAM_COLUMNS, "int", device_bram_columns_str, Offset{1,0});       // -> calculator_f6
+  addElement("Calculator", KEY_DSP_COLUMNS, "int", device_dsp_columns_str, Offset{1,0});         // -> calculator_f7
   addElement("Calculator", KEY_INPUT, "int", num_input_str, Offset{1,0});                        // -> calculator_d11
   addElement("Calculator", KEY_INPUT_FF, "int", std::to_string(0), Offset{1,0});                 // -> calculator_d12 (not used currently)
   addElement("Calculator", KEY_OUTPUT, "int", num_output_str, Offset{1,0});                      // -> calculator_d16
