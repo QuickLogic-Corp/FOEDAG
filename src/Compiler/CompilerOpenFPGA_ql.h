@@ -138,7 +138,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
-  std::filesystem::path configurePowerCalculatorInput(const QLDeviceTarget&) const;
+  std::filesystem::path configurePowerCalculatorInput(QLDeviceTarget);
 #ifdef LEGACY_POWER_CALCULATOR
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();

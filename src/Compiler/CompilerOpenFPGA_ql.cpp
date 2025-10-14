@@ -6645,7 +6645,7 @@ void CompilerOpenFPGA_ql::CleanScripts() {
   m_openFPGAScript = "";
 }
 
-std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(const QLDeviceTarget& device) const
+std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDeviceTarget device)
 {
   int total_num_luts = 0;
   int total_num_lut_inputs = 0;
@@ -6733,13 +6733,45 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(const Q
   const int device_size_y = QLMetricsManager::getDoubleValue("routing", "device_size_y");
   const int device_clb_rows = device_size_y - 2;
 
-  std::map<std::string, std::pair<int, int>> tiles_cfg = parseTilesCfg(m_architectureFile);
-  const int bram_clb_num = tiles_cfg["bram"].second;
-  const int dsp_clb_num = tiles_cfg["dsp"].second;
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /// fetching data from vpr.xml, probably will be replaced with simplier solution, see https://github.com/QL-Proprietary/aurora2/issues/1465
+  std::filesystem::path architectureFile = 
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
+  if(architectureFile.empty()) {
+    ErrorMessage("Cannot proceed without VPR Architecture file.");
+    return "";
+  }
+
+  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(architectureFile)) {
+
+    std::filesystem::path vpr_xml_en_path = architectureFile;
+    architectureFile = GenerateTempFilePath();
+
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
+
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      Message("load cryptdb failed!");
+      // empty string returned on error.
+      return "";
+    }
+
+    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
+      ErrorMessage("decryption failed!");
+      // empty string returned on error.
+      return "";
+    }
+  }
+  std::map<std::string, std::pair<int, int>> tiles_cfg = parseTilesCfg(architectureFile);
+  const int bram_size_y = tiles_cfg["bram"].second;
+  const int dsp_size_y = tiles_cfg["dsp"].second;
+  /// fetching data from vpr.xml
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   const int clb_rows_without_io = device_size_y - 2;
-  const int per_column_bram_num = clb_rows_without_io / bram_clb_num;
-  const int per_column_dsp_num = clb_rows_without_io / dsp_clb_num;
+  const int per_column_bram_num = clb_rows_without_io / bram_size_y;
+  const int per_column_dsp_num = clb_rows_without_io / dsp_size_y;
 
   int total_brams_num = 0;
   int total_dsps_num = 0;
@@ -6760,13 +6792,15 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(const Q
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
   const std::string device_clb_rows_str = std::to_string(device_clb_rows);
 
-  std::cout << "per_column_bram_num=" << per_column_bram_num << std::endl;
-  std::cout << "per_column_dsp_num=" << per_column_dsp_num << std::endl;
-  std::cout << "total_brams_num=" << total_brams_num << std::endl;
-  std::cout << "total_dsps_num=" << total_dsps_num << std::endl;
-  std::cout << "device_bram_columns=" << device_bram_columns << std::endl;
-  std::cout << "device_dsp_columns=" << device_dsp_columns << std::endl;
-  std::cout << "device_clb_columns=" << device_clb_columns << std::endl;
+  // std::cout << "bram_size_y=" << bram_size_y << std::endl;
+  // std::cout << "dsp_size_y=" << dsp_size_y << std::endl;
+  // std::cout << "per_column_bram_num=" << per_column_bram_num << std::endl;
+  // std::cout << "per_column_dsp_num=" << per_column_dsp_num << std::endl;
+  // std::cout << "total_brams_num=" << total_brams_num << std::endl;
+  // std::cout << "total_dsps_num=" << total_dsps_num << std::endl;
+  // std::cout << "device_bram_columns=" << device_bram_columns << std::endl;
+  // std::cout << "device_dsp_columns=" << device_dsp_columns << std::endl;
+  // std::cout << "device_clb_columns=" << device_clb_columns << std::endl;
 
   const std::string device_bram_columns_str = std::to_string(device_bram_columns);
   const std::string device_dsp_columns_str = std::to_string(device_dsp_columns);
