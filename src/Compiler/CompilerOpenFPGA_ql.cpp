@@ -6753,19 +6753,31 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
-      // empty string returned on error.
       return "";
     }
 
     if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
       ErrorMessage("decryption failed!");
-      // empty string returned on error.
       return "";
     }
   }
-  std::map<std::string, std::pair<int, int>> tiles_cfg = parseTilesCfg(architectureFile);
-  const int bram_size_y = tiles_cfg["bram"].second;
-  const int dsp_size_y = tiles_cfg["dsp"].second;
+  TilesCfgResult tiles_cfg_result = parseTilesCfg(architectureFile);
+  if (!tiles_cfg_result.error.empty()) {
+    ErrorMessage(tiles_cfg_result.error);
+    return "";
+  }
+
+  if (!tiles_cfg_result.contains("bram")) {
+    ErrorMessage("BRAM tile configuration is missing in architecture file");
+    return "";
+  }
+  const int bram_size_y = tiles_cfg_result.tiles_cfg["bram"].second;
+  
+  if (!tiles_cfg_result.contains("dsp")) {
+    ErrorMessage("DSP tile configuration is missing in architecture file");
+    return "";
+  }
+  const int dsp_size_y = tiles_cfg_result.tiles_cfg["dsp"].second;
   /// fetching data from vpr.xml
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

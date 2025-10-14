@@ -8,20 +8,20 @@
 
 namespace FOEDAG {
 
-std::map<std::string, std::pair<int, int>> parseTilesCfg(const std::filesystem::path& xmlPath)
+TilesCfgResult parseTilesCfg(const std::filesystem::path& xmlPath)
 {
-    std::map<std::string, std::pair<int, int>> tilesCfg;
+    TilesCfgResult tilesCfgResult;
 
     QFile file(QString::fromStdString(xmlPath.string()));
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        std::cout << "Failed to open file:" << xmlPath << std::endl;
-        return tilesCfg;
+        tilesCfgResult.error = "Failed to open file:" + xmlPath.string();
+        return tilesCfgResult;
     }
 
     QDomDocument doc;
     if (!doc.setContent(&file)) {
-        std::cout << "Failed to parse XML:" << xmlPath << std::endl;
-        return tilesCfg;
+        tilesCfgResult.error = "Failed to parse XML:" + xmlPath.string();
+        return tilesCfgResult;
     }
 
     file.close();
@@ -29,8 +29,8 @@ std::map<std::string, std::pair<int, int>> parseTilesCfg(const std::filesystem::
     QDomElement root = doc.documentElement();
     QDomElement tilesElem = root.firstChildElement("tiles");
     if (tilesElem.isNull()) {
-        std::cout << "No <tiles> element in XML" << std::endl;
-        return tilesCfg;
+        tilesCfgResult.error = "No <tiles> element in XML:" + xmlPath.string();
+        return tilesCfgResult;
     }
 
     QDomElement tileElem = tilesElem.firstChildElement("tile");
@@ -40,14 +40,13 @@ std::map<std::string, std::pair<int, int>> parseTilesCfg(const std::filesystem::
         int height = tileElem.attribute("height", "1").toInt();
 
         if (!name.isEmpty()) {
-            tilesCfg[name.toStdString()] = std::make_pair(width, height);
-            std::cout << name.toStdString() << " " << width << " " << height << std::endl;
+            tilesCfgResult.tiles_cfg[name.toStdString()] = std::make_pair(width, height);
         }
 
         tileElem = tileElem.nextSiblingElement("tile");
     }
 
-    return tilesCfg;   
+    return tilesCfgResult;   
 }
 
 }  // namespace FOEDAG
