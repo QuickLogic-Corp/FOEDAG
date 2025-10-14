@@ -6728,10 +6728,13 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   static const std::string KEY_DSP{"DSP"};
   static const std::string KEY_BRAM_W_SRAM{"BRAM (w/ sram)"};
 
-  // Q1: ARRAY=34x34. VPR SHOWS grid 32x32, where border size 1 is IO. CLB are 30x30.
   const int device_size_x = QLMetricsManager::getDoubleValue("routing", "device_size_x");
   const int device_size_y = QLMetricsManager::getDoubleValue("routing", "device_size_y");
-  const int device_clb_rows = device_size_y - 2;
+  const int EMPTY_ROWS = 2;
+  const int EMPTY_COLUMNS = 2;
+  const int IO_ROWS = 2;
+  const int IO_COLUMNS = 2;
+  const int device_clb_rows = device_size_y - EMPTY_ROWS - IO_ROWS;
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /// fetching data from vpr.xml, probably will be replaced with simplier solution, see https://github.com/QL-Proprietary/aurora2/issues/1465
@@ -6785,22 +6788,30 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const int per_column_bram_num = clb_rows_without_io / bram_size_y;
   const int per_column_dsp_num = clb_rows_without_io / dsp_size_y;
 
-  int total_brams_num = 0;
-  int total_dsps_num = 0;
+  std::optional<int> total_brams_num_opt;
+  std::optional<int> total_dsps_num_opt;
   std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
   for (const auto& [resource, value]: resources) {
     if (resource == "bram") {
-      total_brams_num = value;
+      total_brams_num_opt = value;
     }
     if (resource == "dsp") {
-      total_dsps_num = value;
+      total_dsps_num_opt = value;
     }
   }
+  if (!total_brams_num_opt) {
+    ErrorMessage("Cannot get resource BRAM num from resources.json");
+    return "";
+  }
+  if (!total_dsps_num_opt) {
+    ErrorMessage("Cannot get resource DSP num from resources.json");
+    return "";
+  }
 
-  const int device_bram_columns = total_brams_num / per_column_bram_num;
-  const int device_dsp_columns = total_dsps_num / per_column_dsp_num;
+  const int device_bram_columns = total_brams_num_opt.value() / per_column_bram_num;
+  const int device_dsp_columns = total_dsps_num_opt.value() / per_column_dsp_num;
 
-  const int device_clb_columns = device_size_x - 2 - device_bram_columns - device_dsp_columns; // Q2: is it right?
+  const int device_clb_columns = device_size_x - EMPTY_COLUMNS - IO_COLUMNS - device_bram_columns - device_dsp_columns;
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
   const std::string device_clb_rows_str = std::to_string(device_clb_rows);
 
