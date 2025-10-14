@@ -4926,21 +4926,21 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   if( QLSettingsManager::getJson("power", "power_inputs") == nullptr ) {
     // there are no power_inputs parameters required for power analysis!
     Message("\n>> power_inputs in JSON unavailable, skipping power analysis!");
-    return false;
+    return true;
   }
 
   // check if the user has explicitly enabled power estimation:
   if( QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") != "checked" ) {
     // user has not enabled power analysis
     Message("\n>> dynamic_power is disabled in JSON, skipping power analysis!");
-    return false;
+    return true;
   }
 
   // check if the user has explicitly enabled power estimation:
   if( QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") != "checked" ) {
     // user has not enabled power analysis
     Message("\n>> leakage_power is disabled in JSON, skipping power analysis!");
-    return false;
+    return true;
   }
 
   QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
