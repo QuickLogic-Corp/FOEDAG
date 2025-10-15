@@ -6851,7 +6851,7 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   addElement("Calculator", KEY_TOTAL_SB, "int", num_wiring_segments_str, Offset{1,0});           // -> calculator_d21
   addElement("Calculator", KEY_TOTAL_LUT, "int", total_num_luts_str, Offset{1,0});               // -> calculator_d22
   addElement("Calculator", KEY_TOTAL_CLB_FF_ONLY, "int", total_num_ffs_str, Offset{1,0});        // -> calculator_d26
-  addElement("Calculator", KEY_AVR_LUT_INPUT, "int", num_average_lut_input_str, Offset{1,0});    // -> calculator_d27
+  addElement("Calculator", KEY_AVR_LUT_INPUT, "float", num_average_lut_input_str, Offset{1,0});    // -> calculator_d27
   addElement("Calculator", KEY_CLOCK_NETWORK, "int", num_clock_network_str, Offset{1,0});        // -> calculator_d28
   addElement("Calculator", KEY_DSP, "int", num_dsp_str, Offset{1,0});                            // -> calculator_d29
   addElement("Calculator", KEY_BRAM_W_SRAM, "int", num_bram_str, Offset{1,0});                   // -> calculator_d30
