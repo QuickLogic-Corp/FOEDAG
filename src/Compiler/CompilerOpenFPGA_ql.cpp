@@ -4775,6 +4775,19 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
 
+  /// when we restart aurora after complete compilation flow
+  /// and run power_estimation task directly (without previous tasks) the metrics are empty,
+  /// so we restore them (https://github.com/QL-Proprietary/aurora2/issues/1459)
+  if (QLMetricsManager::getInstance()->isEmpty()) {
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
+    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
+  }
+  ///
+
+
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
