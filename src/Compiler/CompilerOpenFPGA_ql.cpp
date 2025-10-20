@@ -4962,22 +4962,18 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     return false;
   }
 
-  #ifdef _WIN32
-    std::filesystem::path python_exec{"python.exe"};
-  #else // _WIN32
-    std::filesystem::path python_exec{"python3"};
-  #endif // _WIN32
+#ifdef _WIN32
+  std::filesystem::path power_calculator_exec{"power-calculator.exe"};
+#else // _WIN32
+  std::filesystem::path power_calculator_exec{"power-calculator"};
+#endif // _WIN32
 
-  std::filesystem::path power_calculator_script_filepath =
-    GetSession()->Context()->DataPath() /
-    std::filesystem::path("..") /
-    std::filesystem::path("scripts") /
-    std::filesystem::path("power_calculator.py");
+
 
   // unpack embedded xlsx file to a temprorary location
-  QFile qrc_xlsx_filepath(":/build/power_calculator.xlsx");
+  QFile qrc_xlsx_filepath(":/build/power_calculator/power_calculator.xlsx");
   if (!qrc_xlsx_filepath.open(QIODevice::ReadOnly)) {
-    ErrorMessage("Cannot open power calculator file");
+    ErrorMessage("Cannot open power calculator data file");
     return false;
   }
 
@@ -5007,8 +5003,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   std::filesystem::path power_analysis_rpt_filepath = 
       std::filesystem::path(ProjManager()->projectPath()) / POWER_ANALYSIS_LOG;
 
-  std::string command = python_exec.string() + " " +
-                        power_calculator_script_filepath.string() + " " +
+  std::string command = power_calculator_exec.string() + " " +
                         std::string("--device_foundry ") + current_device.device_variant.foundry + " " +
                         std::string("--device_node ") + current_device.device_variant.node + " " +
                         std::string("--xlsx_filepath ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
