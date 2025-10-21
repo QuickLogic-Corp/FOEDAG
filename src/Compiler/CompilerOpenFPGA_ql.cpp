@@ -6787,28 +6787,20 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
   const int per_column_dsp_num = dsp_size_y? clb_rows_without_io / dsp_size_y: 0;
 
-  std::optional<int> total_brams_num_opt;
-  std::optional<int> total_dsps_num_opt;
+  int total_brams_num = 0;
+  int total_dsps_num = 0;
   std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
   for (const auto& [resource, value]: resources) {
     if (resource == "bram") {
-      total_brams_num_opt = value;
+      total_brams_num = value;
     }
     if (resource == "dsp") {
-      total_dsps_num_opt = value;
+      total_dsps_num = value;
     }
   }
-  if (!total_brams_num_opt) {
-    ErrorMessage("Cannot get resource BRAM num from resources.json");
-    return "";
-  }
-  if (!total_dsps_num_opt) {
-    ErrorMessage("Cannot get resource DSP num from resources.json");
-    return "";
-  }
 
-  const int device_bram_columns = per_column_bram_num ? total_brams_num_opt.value() / per_column_bram_num: 0;
-  const int device_dsp_columns = per_column_dsp_num ? total_dsps_num_opt.value() / per_column_dsp_num: 0;
+  const int device_bram_columns = per_column_bram_num && total_brams_num ? total_brams_num / per_column_bram_num: 0;
+  const int device_dsp_columns = per_column_dsp_num && total_dsps_num ? total_dsps_num / per_column_dsp_num: 0;
 
   const int device_clb_columns = device_size_x - EMPTY_COLUMNS - IO_COLUMNS - device_bram_columns - device_dsp_columns;
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
