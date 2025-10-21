@@ -6778,23 +6778,14 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
     return "";
   }
 
-  if (!tiles_cfg_result.contains("bram")) {
-    ErrorMessage("BRAM tile configuration is missing in architecture file");
-    return "";
-  }
-  const int bram_size_y = tiles_cfg_result.tiles_cfg["bram"].second;
-  
-  if (!tiles_cfg_result.contains("dsp")) {
-    ErrorMessage("DSP tile configuration is missing in architecture file");
-    return "";
-  }
-  const int dsp_size_y = tiles_cfg_result.tiles_cfg["dsp"].second;
+  const int bram_size_y = tiles_cfg_result.contains("bram") ? tiles_cfg_result.tiles_cfg["bram"].second: 0;
+  const int dsp_size_y = tiles_cfg_result.contains("dsp") ? tiles_cfg_result.tiles_cfg["dsp"].second: 0;
   /// fetching data from vpr.xml
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   const int clb_rows_without_io = device_size_y - 2;
-  const int per_column_bram_num = clb_rows_without_io / bram_size_y;
-  const int per_column_dsp_num = clb_rows_without_io / dsp_size_y;
+  const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
+  const int per_column_dsp_num = dsp_size_y? clb_rows_without_io / dsp_size_y: 0;
 
   std::optional<int> total_brams_num_opt;
   std::optional<int> total_dsps_num_opt;
@@ -6816,8 +6807,8 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
     return "";
   }
 
-  const int device_bram_columns = total_brams_num_opt.value() / per_column_bram_num;
-  const int device_dsp_columns = total_dsps_num_opt.value() / per_column_dsp_num;
+  const int device_bram_columns = per_column_bram_num ? total_brams_num_opt.value() / per_column_bram_num: 0;
+  const int device_dsp_columns = per_column_dsp_num ? total_dsps_num_opt.value() / per_column_dsp_num: 0;
 
   const int device_clb_columns = device_size_x - EMPTY_COLUMNS - IO_COLUMNS - device_bram_columns - device_dsp_columns;
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
