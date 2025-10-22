@@ -4970,7 +4970,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
 
 
-  // unpack embedded xlsx file to a temprorary location
+  // unpack embedded in qrc xlsx file to a temprorary location
   QFile qrc_xlsx_filepath(":/build/power_calculator/power_calculator.xlsx");
   if (!qrc_xlsx_filepath.open(QIODevice::ReadOnly)) {
     ErrorMessage("Cannot open power calculator data file");
