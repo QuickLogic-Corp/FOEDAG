@@ -5009,7 +5009,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
                         std::string("--xlsx_filepath ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
                         std::string("--json_filepath ") + power_calculator_input_json_filepath.string();
   // write power analysis into file
-  int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath);
+  int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath.string());
   if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
     tmp_xlsx_filepath.remove();
   }
