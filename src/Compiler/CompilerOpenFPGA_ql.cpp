@@ -5006,8 +5006,8 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   std::string command = power_calculator_exec.string() + " " +
                         std::string("--device_foundry ") + current_device.device_variant.foundry + " " +
                         std::string("--device_node ") + current_device.device_variant.node + " " +
-                        std::string("--xlsx_filepath ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
-                        std::string("--json_filepath ") + power_calculator_input_json_filepath.string();
+                        std::string("--xlsx_file_path ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
+                        std::string("--json_file_path ") + power_calculator_input_json_filepath.string();
   // write power analysis into file
   int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath.string());
   if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
