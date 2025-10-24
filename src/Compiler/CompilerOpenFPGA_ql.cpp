@@ -2379,7 +2379,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  vpr_options += " --suppress_warnings  vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:rec_create_dir_path:sum_pin_class";
+  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:rec_create_dir_path:sum_pin_class";
   //
 
   std::string base_vpr_command =
