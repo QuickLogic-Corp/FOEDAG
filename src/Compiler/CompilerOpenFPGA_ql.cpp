@@ -2378,6 +2378,10 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     return std::string("");
   }
 
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  vpr_options += " --suppress_warnings  vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:rec_create_dir_path:sum_pin_class";
+  //
+
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
@@ -2732,6 +2736,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   else { //IO floorplanning generation failed, must stop the flow
     return nullptr;
   }
+
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  command->append("--suppress_warnings", 
+  "vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:rec_create_dir_path:sum_pin_class"
+  );
+  //
 
   command->prependFile(std::filesystem::path{netlistFile});
   command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
