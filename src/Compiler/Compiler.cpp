@@ -2629,6 +2629,7 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
   (*m_out) << "Command: " << command << std::endl;
   auto path = std::filesystem::current_path();                  // getting path
   std::filesystem::current_path(m_projManager->projectPath());  // setting path
+  m_environmentVariableMap["PWD"] = m_projManager->projectPath(); // fix "PWD environment variable doesn't match current directory; pwd = ..." warning
   // new QProcess must be created here to avoid issues related to creating
   // QObjects in different threads
   m_process = new QProcess;
