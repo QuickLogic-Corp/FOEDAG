@@ -5019,6 +5019,9 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   if (status == 0) {
     Message("Design " + ProjManager()->projectName() + " is power analysed");
     return true;
+  } else if (status == 1) {
+    Message("Design " + ProjManager()->projectName() + " power analysis is skipped");
+    return true;
   } else {
     ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
     return false;
@@ -6809,6 +6812,8 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
   const std::string device_clb_rows_str = std::to_string(device_clb_rows);
 
+  // std::cout << "device_size_x=" << device_size_x << std::endl;
+  // std::cout << "device_size_y=" << device_size_y << std::endl;
   // std::cout << "bram_size_y=" << bram_size_y << std::endl;
   // std::cout << "dsp_size_y=" << dsp_size_y << std::endl;
   // std::cout << "per_column_bram_num=" << per_column_bram_num << std::endl;
