@@ -6802,8 +6802,8 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
     }
   }
 
-  const int device_bram_columns = per_column_bram_num && total_brams_num ? total_brams_num / per_column_bram_num: 0;
-  const int device_dsp_columns = per_column_dsp_num && total_dsps_num ? total_dsps_num / per_column_dsp_num: 0;
+  const int device_bram_columns = (per_column_bram_num && total_brams_num) ? total_brams_num / per_column_bram_num: 0;
+  const int device_dsp_columns = (per_column_dsp_num && total_dsps_num) ? total_dsps_num / per_column_dsp_num: 0;
 
   const int device_clb_columns = device_size_x - EMPTY_COLUMNS - IO_COLUMNS - device_bram_columns - device_dsp_columns;
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
