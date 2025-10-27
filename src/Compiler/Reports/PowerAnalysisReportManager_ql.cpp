@@ -112,15 +112,19 @@ void PowerAnalysisReportManager::parseLogFile() {
   power_estimate_cols.push_back(ReportColumn{"Power (mW)", Qt::AlignCenter});
 
   IDataReport::TableData power_estimate_data = IDataReport::TableData{};
-  power_estimate_data.push_back(QStringList{"Dynamic", dynamic_power_value});
-  power_estimate_data.push_back(QStringList{"Leakage",leakage_power_value});
+  if (!dynamic_power_value.isEmpty()) {
+    power_estimate_data.push_back(QStringList{"Dynamic", dynamic_power_value});
+  }
+  if (!leakage_power_value.isEmpty()) {
+    power_estimate_data.push_back(QStringList{"Leakage",leakage_power_value});
+  }
   power_estimate_data.push_back(QStringList{"Total",total_power_value});
 
   power_estimate_table = std::make_unique<TableReport>(power_estimate_cols,
                                                        power_estimate_data,
                                                        QString{"Power Estimates"});
 
-
+#ifdef LEGACY_POWER_CALCULATOR
   // read power analysis debug rpt
   auto logFile_debug = createLogFile(QString("power_analysis_debug.rpt"));
   if (!logFile_debug) return;
@@ -193,6 +197,7 @@ void PowerAnalysisReportManager::parseLogFile() {
                                                     power_debug_data,
                                                     QString{"Power Debug Inputs"});
 
+#endif // LEGACY_POWER_CALCULATOR
   setFileParsed(true);
 }
 

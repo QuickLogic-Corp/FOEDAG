@@ -4942,18 +4942,22 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     return true;
   }
 
+  const bool is_dynamic_power_checked = QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") == "checked";
+  const bool is_leakage_power_checked = QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") == "checked";
+
   // check if the user has explicitly enabled power estimation:
-  if( QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") != "checked" ) {
+  if(!is_dynamic_power_checked && !is_leakage_power_checked) {
     // user has not enabled power analysis
-    Message("\n>> dynamic_power is disabled in JSON, skipping power analysis!");
+    Message("\n>> dynamic_power and leakage_power are disabled in JSON, skipping power analysis!");
     return true;
   }
 
-  // check if the user has explicitly enabled power estimation:
-  if( QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") != "checked" ) {
-    // user has not enabled power analysis
-    Message("\n>> leakage_power is disabled in JSON, skipping power analysis!");
-    return true;
+  std::vector<std::string> modes;
+  if (is_dynamic_power_checked) {
+    modes.push_back("dynamic_power");
+  }
+  if (is_leakage_power_checked) {
+    modes.push_back("leakage_power");
   }
 
   QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
@@ -4967,8 +4971,6 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 #else // _WIN32
   std::filesystem::path power_calculator_exec{"power-calculator"};
 #endif // _WIN32
-
-
 
   // unpack embedded in qrc xlsx file to a temprorary location
   QFile qrc_xlsx_filepath(":/build/power_calculator/power_calculator.xlsx");
@@ -5004,6 +5006,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
       std::filesystem::path(ProjManager()->projectPath()) / POWER_ANALYSIS_LOG;
 
   std::string command = power_calculator_exec.string() + " " +
+                        std::string("--modes ") + StringUtils::join(modes, ",") + " " +
                         std::string("--device_foundry ") + current_device.device_variant.foundry + " " +
                         std::string("--device_node ") + current_device.device_variant.node + " " +
                         std::string("--xlsx_file_path ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
@@ -5013,14 +5016,14 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
     tmp_xlsx_filepath.remove();
   }
-  if (status == 1) { //Failure
-    ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
-    return false;
-  } else { //Success
+  if (status == 0) {
     Message("Design " + ProjManager()->projectName() + " is power analysed");
     return true;
-  }
-#endif
+  } else {
+    ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
+    return false;
+  } 
+#endif // LEGACY_POWER_CALCULATOR
 }
 
 const std::string basicOpenFPGABitstreamScript = R"( 
