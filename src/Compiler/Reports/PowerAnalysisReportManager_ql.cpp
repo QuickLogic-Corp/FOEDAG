@@ -63,10 +63,11 @@ std::unique_ptr<ITaskReport> PowerAnalysisReportManager::createReport(
   if(power_estimate_table) {
     dataReports.push_back(std::move(power_estimate_table));
   }
+#ifdef LEGACY_POWER_CALCULATOR
   if(power_debug_table) {
     dataReports.push_back(std::move(power_debug_table));
   }
-
+#endif
   emit reportCreated(QString(REPORT_NAME));
 
   return std::make_unique<DefaultTaskReport>(std::move(dataReports),
