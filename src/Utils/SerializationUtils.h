@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // ---------------------------------------------------------------------
 namespace FOEDAG { 
     struct CommandWrapper; 
+    struct FileIdentity;
 } // namespace FOEDAG
 
 // ---------------------------------------------------------------------

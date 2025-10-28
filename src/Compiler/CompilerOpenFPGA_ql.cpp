@@ -37,6 +37,7 @@
 #include <QTextStream>
 #include <QJsonArray>
 #include <QDirIterator>
+#include <QTemporaryFile>
 #include <chrono>
 #include <filesystem>
 #include <sstream>
@@ -52,6 +53,7 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Utils/FileUtils.h"
@@ -2093,8 +2095,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        ErrorMessage("Could not find the net file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --net_file") + 
@@ -2109,8 +2111,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        ErrorMessage("Could not find the place file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+                ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --place_file") + 
@@ -2126,8 +2128,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        ErrorMessage("Could not find the route file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+      ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --route_file") + 
@@ -2378,6 +2380,10 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     return std::string("");
   }
 
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
+  //
+
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
@@ -2478,8 +2484,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        ErrorMessage("Could not find the net file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+      ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return nullptr;
     }
     command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
@@ -2490,8 +2496,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (cfg.use_place_file) {
     if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
       if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-          ErrorMessage("Could not find the place file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
           return nullptr;
       }
       command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
@@ -2503,8 +2509,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (cfg.use_route_file) {
     if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
       if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-          ErrorMessage("Could not find the route file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
           return nullptr;
         }
       command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
@@ -2732,6 +2738,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   else { //IO floorplanning generation failed, must stop the flow
     return nullptr;
   }
+
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  command->append("--suppress_warnings", 
+  "vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models"
+  );
+  //
 
   command->prependFile(std::filesystem::path{netlistFile});
   command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
@@ -4773,6 +4785,19 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
 
+  /// when we restart aurora after complete compilation flow
+  /// and run power_estimation task directly (without previous tasks) the metrics are empty,
+  /// so we restore them (https://github.com/QL-Proprietary/aurora2/issues/1459)
+  if (QLMetricsManager::getInstance()->isEmpty()) {
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
+    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
+    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
+  }
+  ///
+
+
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
@@ -4884,8 +4909,10 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
 #endif // Disable VPR Power Analysis
 
+#ifdef LEGACY_POWER_CALCULATOR
   long double power_dynamic_mW = PowerEstimator_Dynamic();
   long double power_leakage_mW = PowerEstimator_Leakage();
+
   long double power_total_mW = power_dynamic_mW + power_leakage_mW;
 
   if(power_dynamic_mW != 0 && power_leakage_mW != 0 && power_total_mW != 0) {
@@ -4916,6 +4943,100 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
   Message("Design " + ProjManager()->projectName() + " is power analysed");
   return true;
+#else
+  // ===================================================== User Inputs ++
+  // check for user inputs power json:
+  if( QLSettingsManager::getJson("power", "power_inputs") == nullptr ) {
+    // there are no power_inputs parameters required for power analysis!
+    Message("\n>> power_inputs in JSON unavailable, skipping power analysis!");
+    return true;
+  }
+
+  const bool is_dynamic_power_checked = QLSettingsManager::getStringValue("power", "power_outputs", "dynamic_power") == "checked";
+  const bool is_leakage_power_checked = QLSettingsManager::getStringValue("power", "power_outputs", "leakage_power") == "checked";
+
+  // check if the user has explicitly enabled power estimation:
+  if(!is_dynamic_power_checked && !is_leakage_power_checked) {
+    // user has not enabled power analysis
+    Message("\n>> dynamic_power and leakage_power are disabled in JSON, skipping power analysis!");
+    return true;
+  }
+
+  std::vector<std::string> modes;
+  if (is_dynamic_power_checked) {
+    modes.push_back("dynamic_power");
+  }
+  if (is_leakage_power_checked) {
+    modes.push_back("leakage_power");
+  }
+
+  QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device) ) {
+    ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
+    return false;
+  }
+
+#ifdef _WIN32
+  std::filesystem::path power_calculator_exec{"power-calculator.exe"};
+#else // _WIN32
+  std::filesystem::path power_calculator_exec{"power-calculator"};
+#endif // _WIN32
+
+  // unpack embedded in qrc xlsx file to a temprorary location
+  QFile qrc_xlsx_filepath(":/build/power_calculator/power_calculator.xlsx");
+  if (!qrc_xlsx_filepath.open(QIODevice::ReadOnly)) {
+    ErrorMessage("Cannot open power calculator data file");
+    return false;
+  }
+
+  QString pattern = QDir::tempPath() + "/XXXXXX.xlsx";
+  QTemporaryFile tmp_xlsx_filepath(pattern);
+  tmp_xlsx_filepath.setAutoRemove(false);
+
+  if (!tmp_xlsx_filepath.open()) {
+    ErrorMessage("Cannot create power calculator tmp file");
+    return false;
+  }
+
+  if (tmp_xlsx_filepath.write(qrc_xlsx_filepath.readAll()) == -1) {
+    ErrorMessage("Write tmp power calculator file failed");
+    return false;
+  }
+  tmp_xlsx_filepath.flush();
+  tmp_xlsx_filepath.close();
+  //
+
+  std::filesystem::path power_calculator_input_json_filepath = configurePowerCalculatorInput(current_device);
+  if (!FileUtils::FileExists(power_calculator_input_json_filepath)) {
+    ErrorMessage("Power input json file wasn't created, but required");
+    return false;
+  }
+
+  std::filesystem::path power_analysis_rpt_filepath = 
+      std::filesystem::path(ProjManager()->projectPath()) / POWER_ANALYSIS_LOG;
+
+  std::string command = power_calculator_exec.string() + " " +
+                        std::string("--modes ") + StringUtils::join(modes, ",") + " " +
+                        std::string("--device_foundry ") + current_device.device_variant.foundry + " " +
+                        std::string("--device_node ") + current_device.device_variant.node + " " +
+                        std::string("--xlsx_file_path ") + tmp_xlsx_filepath.fileName().toStdString() + " " +
+                        std::string("--json_file_path ") + power_calculator_input_json_filepath.string();
+  // write power analysis into file
+  int status = ExecuteAndMonitorSystemCommand(command, power_analysis_rpt_filepath.string());
+  if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
+    tmp_xlsx_filepath.remove();
+  }
+  if (status == 0) {
+    Message("Design " + ProjManager()->projectName() + " is power analysed");
+    return true;
+  } else if (status == 1) {
+    Message("Design " + ProjManager()->projectName() + " power analysis is skipped");
+    return true;
+  } else {
+    ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
+    return false;
+  } 
+#endif // LEGACY_POWER_CALCULATOR
 }
 
 const std::string basicOpenFPGABitstreamScript = R"( 
@@ -6548,7 +6669,248 @@ void CompilerOpenFPGA_ql::CleanScripts() {
   m_openFPGAScript = "";
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDeviceTarget device)
+{
+  int total_num_luts = 0;
+  int total_num_lut_inputs = 0;
+  {
+  // num_input_cbx_cby = num_input_xbar = total_lut_inputs_used (from spreadsheet theory)
+  // total_lut_inputs_used = 1*num_1_LUT + 2*num_2_LUT + ... + 6*num_6_LUT (from yosys metrics, we obtain these numbers)
+  int num_1_LUT = QLMetricsManager::getIntValue("synthesis", "num_1_LUT");
+  int num_2_LUT = QLMetricsManager::getIntValue("synthesis", "num_2_LUT");
+  int num_3_LUT = QLMetricsManager::getIntValue("synthesis", "num_3_LUT");
+  int num_4_LUT = QLMetricsManager::getIntValue("synthesis", "num_4_LUT");
+  int num_5_LUT = QLMetricsManager::getIntValue("synthesis", "num_5_LUT");
+  int num_6_LUT = QLMetricsManager::getIntValue("synthesis", "num_6_LUT");
+  
+  // note: we consider Adder Carry blocks as 3-LUTs, so account for those as well:
+  int num_adder_carry = QLMetricsManager::getIntValue("synthesis", "num_adder_carry");
+  num_3_LUT += num_adder_carry;
 
+  total_num_luts = num_1_LUT + num_2_LUT + num_3_LUT + num_4_LUT + num_5_LUT + num_6_LUT;
+
+  total_num_lut_inputs = (num_1_LUT*1) + (num_2_LUT*2) + 
+                            (num_3_LUT*3) + (num_4_LUT*4) + 
+                            (num_5_LUT*5) + (num_6_LUT*6);
+  }
+
+  int total_num_ffs = 0;
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnsre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dff");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dff");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffn");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_dffnre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sdffnre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffre");
+  total_num_ffs += QLMetricsManager::getIntValue("synthesis", "num_sh_dffnre");
+
+  long double num_average_lut_input = 0;
+  // num_average_lut_input (only for spreadsheet purposes) == num_lut_inputs/num_luts
+  // avoid a NaN result if there are no LUTs in design.
+  if (total_num_luts > 0) {
+    num_average_lut_input = ((long double)total_num_lut_inputs / total_num_luts);      // num_average_lut_input
+  }
+
+  nlohmann::json j = nlohmann::json::array();
+  
+  auto addElement = [&j](const std::string& sheet, const std::string& name, const std::string& type, const std::string& value, const Offset& val_offset = Offset(), const std::string& base_addr = "") {
+    nlohmann::json ej;
+    ej["sheet"] = sheet;
+    ej["name"] = name;
+    ej["type"] = type;
+    ej["value"] = value;
+    if (!base_addr.empty()) {
+      ej["ref_name"] = base_addr;
+    }
+    if (val_offset.col != 0)
+      ej["offset_col"] = val_offset.col;
+    if (val_offset.row != 0)
+      ej["offset_row"] = val_offset.row;
+    j.push_back(ej);
+  };
+
+  static const std::string KEY_CLB_COLUMNS{"# of CLB col  "};
+  static const std::string KEY_CLB_ROWS{"# of clb row"};
+  static const std::string KEY_BRAM_COLUMNS{"# of BRAM col"};
+  static const std::string KEY_DSP_COLUMNS{"# of DSP col"};
+  static const std::string KEY_INPUT{"INPUT"};
+  static const std::string KEY_INPUT_FF{"INPUT FF"};
+  static const std::string KEY_OUTPUT{"OUTPUT"};
+  static const std::string KEY_OUTPUT_FF{"OUTPUT FF"};
+  static const std::string KEY_OUTPUT_CLB{"OUTPUT CLB"};
+  static const std::string KEY_TOTAL_SB{"Total # SB"};
+  static const std::string KEY_INPUT_XBAR{"INPUT XBAR"};
+  static const std::string KEY_TOTAL_LUT{"Total # of LUT"};
+  static const std::string KEY_TOTAL_CLB_FF_ONLY{"Total CLB FF only"};
+  static const std::string KEY_AVR_LUT_INPUT{"Average # of LUT input"};
+  static const std::string KEY_CLOCK_NETWORK{"CLOCK Network"};
+  static const std::string KEY_DSP{"DSP"};
+  static const std::string KEY_BRAM_W_SRAM{"BRAM (w/ sram)"};
+
+  const int device_size_x = QLMetricsManager::getDoubleValue("routing", "device_size_x");
+  const int device_size_y = QLMetricsManager::getDoubleValue("routing", "device_size_y");
+  const int EMPTY_ROWS = 2;
+  const int EMPTY_COLUMNS = 2;
+  const int IO_ROWS = 2;
+  const int IO_COLUMNS = 2;
+  const int device_clb_rows = device_size_y - EMPTY_ROWS - IO_ROWS;
+
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  /// fetching data from vpr.xml, probably will be replaced with simplier solution, see https://github.com/QL-Proprietary/aurora2/issues/1465
+  std::filesystem::path architectureFile = 
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
+  if(architectureFile.empty()) {
+    ErrorMessage("Cannot proceed without VPR Architecture file.");
+    return "";
+  }
+
+  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(architectureFile)) {
+
+    std::filesystem::path vpr_xml_en_path = architectureFile;
+    architectureFile = GenerateTempFilePath();
+
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
+                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
+
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      Message("load cryptdb failed!");
+      return "";
+    }
+
+    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
+      ErrorMessage("decryption failed!");
+      return "";
+    }
+  }
+  TilesCfgResult tiles_cfg_result = parseTilesCfg(architectureFile);
+  if (!tiles_cfg_result.error.empty()) {
+    ErrorMessage(tiles_cfg_result.error);
+    return "";
+  }
+
+  const int bram_size_y = tiles_cfg_result.contains("bram") ? tiles_cfg_result.tiles_cfg["bram"].second: 0;
+  const int dsp_size_y = tiles_cfg_result.contains("dsp") ? tiles_cfg_result.tiles_cfg["dsp"].second: 0;
+  /// fetching data from vpr.xml
+  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  const int clb_rows_without_io = device_size_y - 2;
+  const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
+  const int per_column_dsp_num = dsp_size_y? clb_rows_without_io / dsp_size_y: 0;
+
+  int total_brams_num = 0;
+  int total_dsps_num = 0;
+  std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
+  for (const auto& [resource, value]: resources) {
+    if (resource == "bram") {
+      total_brams_num = value;
+    }
+    if (resource == "dsp") {
+      total_dsps_num = value;
+    }
+  }
+
+  const int device_bram_columns = (per_column_bram_num && total_brams_num) ? total_brams_num / per_column_bram_num: 0;
+  const int device_dsp_columns = (per_column_dsp_num && total_dsps_num) ? total_dsps_num / per_column_dsp_num: 0;
+
+  const int device_clb_columns = device_size_x - EMPTY_COLUMNS - IO_COLUMNS - device_bram_columns - device_dsp_columns;
+  const std::string device_clb_columns_str = std::to_string(device_clb_columns);
+  const std::string device_clb_rows_str = std::to_string(device_clb_rows);
+
+  // std::cout << "device_size_x=" << device_size_x << std::endl;
+  // std::cout << "device_size_y=" << device_size_y << std::endl;
+  // std::cout << "bram_size_y=" << bram_size_y << std::endl;
+  // std::cout << "dsp_size_y=" << dsp_size_y << std::endl;
+  // std::cout << "per_column_bram_num=" << per_column_bram_num << std::endl;
+  // std::cout << "per_column_dsp_num=" << per_column_dsp_num << std::endl;
+  // std::cout << "total_brams_num=" << total_brams_num << std::endl;
+  // std::cout << "total_dsps_num=" << total_dsps_num << std::endl;
+  // std::cout << "device_bram_columns=" << device_bram_columns << std::endl;
+  // std::cout << "device_dsp_columns=" << device_dsp_columns << std::endl;
+  // std::cout << "device_clb_columns=" << device_clb_columns << std::endl;
+
+  const std::string device_bram_columns_str = std::to_string(device_bram_columns);
+  const std::string device_dsp_columns_str = std::to_string(device_dsp_columns);
+
+  std::string num_input_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_input"));
+  std::string num_output_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_output"));
+  std::string num_wiring_segments_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_wiring_segments"));
+
+  std::string total_num_luts_str = std::to_string(total_num_luts);
+  std::string total_num_ffs_str = std::to_string(total_num_ffs);
+  std::string num_average_lut_input_str = std::to_string(num_average_lut_input);
+
+  std::string num_clock_network_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_clock_network"));
+  std::string num_dsp_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_dsp"));
+  std::string num_bram_str = std::to_string(QLMetricsManager::getDoubleValue("routing", "num_bram"));
+
+  addElement("Calculator", KEY_CLB_COLUMNS, "int", device_clb_columns_str, Offset{1,0});         // -> calculator_d6
+  addElement("Calculator", KEY_CLB_ROWS, "int", device_clb_rows_str, Offset{1,0});               // -> calculator_d7
+  addElement("Calculator", KEY_BRAM_COLUMNS, "int", device_bram_columns_str, Offset{1,0});       // -> calculator_f6
+  addElement("Calculator", KEY_DSP_COLUMNS, "int", device_dsp_columns_str, Offset{1,0});         // -> calculator_f7
+  addElement("Calculator", KEY_INPUT, "int", num_input_str, Offset{1,0});                        // -> calculator_d11
+  addElement("Calculator", KEY_INPUT_FF, "int", std::to_string(0), Offset{1,0});                 // -> calculator_d12 (not used currently)
+  addElement("Calculator", KEY_OUTPUT, "int", num_output_str, Offset{1,0});                      // -> calculator_d16
+  addElement("Calculator", KEY_OUTPUT_FF, "int", std::to_string(0), Offset{1,0});                // -> calculator_d17 (not used currently)
+  addElement("Calculator", KEY_TOTAL_SB, "int", num_wiring_segments_str, Offset{1,0});           // -> calculator_d21
+  addElement("Calculator", KEY_TOTAL_LUT, "int", total_num_luts_str, Offset{1,0});               // -> calculator_d22
+  addElement("Calculator", KEY_TOTAL_CLB_FF_ONLY, "int", total_num_ffs_str, Offset{1,0});        // -> calculator_d26
+  addElement("Calculator", KEY_AVR_LUT_INPUT, "float", num_average_lut_input_str, Offset{1,0});    // -> calculator_d27
+  addElement("Calculator", KEY_CLOCK_NETWORK, "int", num_clock_network_str, Offset{1,0});        // -> calculator_d28
+  addElement("Calculator", KEY_DSP, "int", num_dsp_str, Offset{1,0});                            // -> calculator_d29
+  addElement("Calculator", KEY_BRAM_W_SRAM, "int", num_bram_str, Offset{1,0});                   // -> calculator_d30
+
+  static const std::string KEY_VOLTAGE{"Voltage"};
+  static const std::string KEY_SYSTEM_FREQUENCY{"System Frequency"};
+  static const std::string KEY_INPUT_ACTIVITY_FACTOR{"INPUT ACTIVITY FACTOR"};
+  static const std::string KEY_INPUT_XBAR_ACTIVITY_FACTOR{"INPUT XBAR ACTIVITY FACTOR"};
+  static const std::string KEY_OUTPUT_ACTIVITY_FACTOR{"OUTPUT ACTIVITY FACTOR"};
+  static const std::string KEY_OUTPUT_CLB_ACTIVITY_FACTOR{"OUTPUT CLB ACTIVITY FACTOR"};
+  static const std::string KEY_TOTAL_SB_ACTIVITY_FACTOR{"TOTAL # SB ACTIVITY FACTOR"};
+  static const std::string KEY_TOTAL_LUT_ACTIVITY_FACTOR{"TOTAL # LUT ACTIVITY FACTOR"};
+  static const std::string KEY_CLOCK_NETWORK_ACTIVITY_FACTOR{"CLOCK NETWORK ACTIVITY FACTOR"};
+  static const std::string KEY_DSP_ACTIVITY_FACTOR{"DSP ACTIVITY FACTOR"};
+  static const std::string KEY_BRAM_ACTIVITY_FACTOR{"BRAM ACTIVITY FACTOR"};
+
+  std::string voltage_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "voltage"));
+  std::string system_frequency_mhz_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "system_frequency_mhz"));
+  std::string input_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "input_activity_factor"));
+  std::string input_xbar_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "input_xbar_activity_factor"));
+  std::string output_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "output_activity_factor"));
+  std::string lut_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "lut_activity_factor"));
+  std::string clock_network_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "clock_network_activity_factor"));
+  std::string dsp_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "dsp_activity_factor"));
+  std::string bram_activity_factor_str = std::to_string(QLSettingsManager::getLongDoubleValue("power", "power_inputs", "bram_activity_factor"));
+
+  // ${DEVICE_FOUNDRY_NODE} is placeholder which will be replaced properly on python side with device foundry and node
+  // v1.40 : not used
+  // addElement("Calculator", KEY_VOLTAGE, "float", voltage_str, Offset{0,2}, "${DEVICE_FOUNDRY_NODE}");                        // calculator_d8
+  addElement("Calculator", KEY_SYSTEM_FREQUENCY, "float", system_frequency_mhz_str, Offset(2,0));                               // calculator_e9
+  addElement("Calculator", KEY_INPUT_ACTIVITY_FACTOR, "%float", input_activity_factor_str, Offset(3,0), KEY_INPUT);              // calculator_f11
+  addElement("Calculator", KEY_INPUT_XBAR_ACTIVITY_FACTOR, "%float", input_xbar_activity_factor_str, Offset(3,0), KEY_INPUT_XBAR);  // calculator_f15
+  addElement("Calculator", KEY_OUTPUT_ACTIVITY_FACTOR, "%float", output_activity_factor_str, Offset(3,0), KEY_OUTPUT);           // calculator_f16
+  // v1.40 : F18 = F16 (removed from JSON, if value changes, we will add it back)
+  addElement("Calculator", KEY_OUTPUT_CLB_ACTIVITY_FACTOR, "%float", output_activity_factor_str, Offset(3,0), KEY_OUTPUT_CLB);    // calculator_f18
+  // v1.40 : F21 = F16 (removed from JSON, if value changes, we will add it back)
+  addElement("Calculator", KEY_TOTAL_SB_ACTIVITY_FACTOR, "%float", output_activity_factor_str, Offset(3,0), KEY_TOTAL_SB);        // calculator_f21
+  addElement("Calculator", KEY_TOTAL_LUT_ACTIVITY_FACTOR, "%float", lut_activity_factor_str, Offset(3,0), KEY_TOTAL_LUT);         // calculator_f22
+  addElement("Calculator", KEY_CLOCK_NETWORK_ACTIVITY_FACTOR, "%float", clock_network_activity_factor_str, Offset(3,0), KEY_CLOCK_NETWORK); // calculator_f28
+  addElement("Calculator", KEY_DSP_ACTIVITY_FACTOR, "%float", dsp_activity_factor_str, Offset(3,0), KEY_DSP);                     // calculator_f29
+  addElement("Calculator", KEY_BRAM_ACTIVITY_FACTOR, "%float", bram_activity_factor_str, Offset(3,0), KEY_BRAM_W_SRAM);           // calculator_f30
+
+  std::filesystem::path filepath = std::filesystem::path(ProjManager()->projectPath()) / "power_calculator_inputs.json";
+
+  FileUtils::WriteToFile(filepath, j.dump(2));
+
+  return filepath;
+}
+
+#ifdef LEGACY_POWER_CALCULATOR
 long double CompilerOpenFPGA_ql::PowerEstimator_Dynamic() {
 
   // Based on v1.38: https://github.com/QL-Proprietary/eFPGA_PowerCalculator/blob/main/K6N10%20TSMC%2016nm%20Power%20Calculator%20v1.38.xlsx
@@ -7833,6 +8195,7 @@ long double CompilerOpenFPGA_ql::PowerEstimator_Leakage() {
 
   return power_leakage;
 }
+#endif // LEGACY_POWER_CALCULATOR
 
 std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisCommands()
 {
@@ -8839,6 +9202,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
       return;
     }
   }
+
+  CompilationFilesScopedSession compilationFilesScopedSession;
 
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);

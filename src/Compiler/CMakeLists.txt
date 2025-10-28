@@ -60,6 +60,7 @@ set (SRC_CPP_LIST
   Task.cpp
   TaskCompilationStateManager.cpp
   CommandWrapper.cpp
+  TilesCfgParser.cpp
   #TaskManager.cpp
   TaskManager_ql.cpp
   CompilerDefines.cpp
@@ -98,6 +99,7 @@ set (SRC_H_INSTALL_LIST
   Task.h
   TaskCompilationStateManager.h
   CommandWrapper.h
+  TilesCfgParser.h
   TaskManager.h
   CompilerDefines.h
   Log.h
