@@ -1124,6 +1124,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
       std::ofstream settings_json_ofstream(settings_json_filepath.string());
       settings_json_ofstream << std::setw(4) << settings_json << std::endl;
 
+      emit settingsChanged(); // we need this emit in order to task_incremental_compilator invalidate taskstatuses after settings json file changed
       // this call is not needed as nothing in the settings actually changed except device selection change.
       //updateSettingsWidget();
     }
@@ -1144,7 +1145,6 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   std::filesystem::path power_json_template_filepath = device_data_dir_path / "aurora" / "power_template.json";
 
   if(newProjectMode) {
-
     // new project with specified device_target use-case
 
     // we cannot copy the json files, as we don't know where to copy/save them yet.
@@ -1185,7 +1185,6 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     updateSettingsWidget();
   }
   else {
-
     // existing opened project -> change device_target scenario
 
     // copy and replace the json settings files according to the new device selected
@@ -1201,12 +1200,12 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
       std::cout << std::string("failed to copy: ") + settings_json_template_filepath.string() << std::endl;
       return;
     }
+    
+    emit settingsChanged(); // we need this emit in order to task_incremental_compilator invalidate taskstatuses after settings json file changed
 
     FileUtils::overwriteFile(power_json_template_filepath,
                              power_estimation_json_filepath,
                              ec);
-
-    emit settingsChanged();
 
     if(ec) {
       // error
