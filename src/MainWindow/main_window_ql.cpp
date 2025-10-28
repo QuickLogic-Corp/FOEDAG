@@ -2360,6 +2360,9 @@ void MainWindow::handlewaveFormRequested(const QString& moduleName) {
 void MainWindow::handleIpAddToDesignRequested(const QString& moduleName) {
   m_interpreter->evalCmd(
       StringUtils::format("ip_add_to_design %", moduleName.toStdString()));
+  
+  // Update watcher files on adding ip to design
+  DesignFileWatcher::Instance()->updateDesignFileWatchers(m_projectManager);
 }
 
 void MainWindow::resetIps() {

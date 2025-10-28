@@ -213,6 +213,7 @@ int AbstractReportManager::parseErrorWarningSection(QTextStream &in, int lineNr,
             createWarningErrorItem(MessageSeverity::WARNING_MESSAGE, warnings);
         sectionMsg.m_childMessages.insert(wrnItem.m_lineNr, wrnItem);
       }
+/// TODO: is it right place for this? Maybe this should be moved to upper hierarhy class?
     } else if (FIND_RESOURCES.indexIn(line) != -1) {
       parseResourceUsage(in, lineNr);
     } else if (isStatisticalTimingLine(line)) {
@@ -220,6 +221,7 @@ int AbstractReportManager::parseErrorWarningSection(QTextStream &in, int lineNr,
     } else if (isStatisticalTimingHistogram(line)) {
       histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
     }
+///
   }
 
   fillErrorsWarnings();

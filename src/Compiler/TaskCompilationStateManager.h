@@ -90,7 +90,7 @@ public:
   }
 
 private:
-  bool m_isLogEnabled = true;
+  bool m_isLogEnabled = false;
   Compiler* m_compiler = nullptr; // used for log messages
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
