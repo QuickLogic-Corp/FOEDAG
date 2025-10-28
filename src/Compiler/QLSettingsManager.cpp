@@ -1145,6 +1145,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   std::filesystem::path power_json_template_filepath = device_data_dir_path / "aurora" / "power_template.json";
 
   if(newProjectMode) {
+
     // new project with specified device_target use-case
 
     // we cannot copy the json files, as we don't know where to copy/save them yet.
@@ -1185,6 +1186,7 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
     updateSettingsWidget();
   }
   else {
+
     // existing opened project -> change device_target scenario
 
     // copy and replace the json settings files according to the new device selected
