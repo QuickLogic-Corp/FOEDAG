@@ -191,7 +191,7 @@ void PowerAnalysisReportManager::parseLogFile() {
     // std::cout << user_input[2].toStdString() << std::endl;
     power_debug_data.push_back(std::move(user_input));
   }
- #ifdef // LEGACY_POWER_CALCULATOR
+ #endif // LEGACY_POWER_CALCULATOR
   setFileParsed(true);
 }
 
