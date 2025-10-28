@@ -9,5 +9,6 @@
         <file>search.png</file>
         <file>loading.gif</file>
         <file>warning.png</file>
+        <file>../../../../build/power_calculator/power_calculator.xlsx</file>
     </qresource>
 </RCC>
