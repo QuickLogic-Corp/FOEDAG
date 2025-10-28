@@ -115,7 +115,6 @@ void PowerAnalysisReportManager::parseLogFile() {
   power_estimate_cols.push_back(ReportColumn{"Power (mW)", Qt::AlignCenter});
 
   power_estimate_data.clear();
-  IDataReport::TableData power_estimate_data = IDataReport::TableData{};
   if (!dynamic_power_value.isEmpty()) {
     power_estimate_data.push_back(QStringList{"Dynamic", dynamic_power_value});
   }
