@@ -90,7 +90,7 @@ public:
   }
 
 private:
-  bool m_isLogEnabled = true;
+  bool m_isLogEnabled = false;
   Compiler* m_compiler = nullptr; // used for log messages
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
@@ -108,6 +108,13 @@ private:
   }
 
   bool isCompilationRequired(const std::string& id, const CommandWrapperPtr& command) const {
+    if (!command) {
+      // if in some reason current command is nullptr, means we cannot reconstruct current state and we do mark task as needed to compile.
+      // the user will get error message about why the command reconstruction failed. After user sort the issue, by correcting settings or so, 
+      // invalidation task will be re-triggered.
+      return true;
+    }
+
     auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
       if (m_isLogEnabled) {

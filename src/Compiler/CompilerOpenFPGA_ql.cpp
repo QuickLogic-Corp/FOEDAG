@@ -2378,6 +2378,10 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     return std::string("");
   }
 
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
+  //
+
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
@@ -2732,6 +2736,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   else { //IO floorplanning generation failed, must stop the flow
     return nullptr;
   }
+
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  command->append("--suppress_warnings", 
+  "vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models"
+  );
+  //
 
   command->prependFile(std::filesystem::path{netlistFile});
   command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
@@ -8638,6 +8648,15 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
     command->append(vpr_custom_options_string);
   }
 
+  // ref: https://github.com/QL-Proprietary/aurora2/issues/1372
+  // default parameter values for packing stage, if **not** already specified in the custom vpr options:
+  // `--target_ext_pin_util clb:0.8,1`
+  std::size_t found_target_ext_pin_util = command->string().find("target_ext_pin_util");
+  if(found_target_ext_pin_util == std::string::npos) {
+    std::string vpr_target_ext_pin_util_param_string = "--target_ext_pin_util clb:0.8,1";
+    command->append(vpr_target_ext_pin_util_param_string);
+  }
+
   command->append("--pack");
 
   return command;
@@ -8701,6 +8720,15 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
     // add the options string to the end of the vpr options with one whitespace separator
     command->append(vpr_custom_options_string);
+  }
+
+  // ref: https://github.com/QL-Proprietary/aurora2/issues/1372
+  // default parameter values for routing stage, if **not** already specified in the custom vpr options:
+  // `--router_initial_acc_cost_chan_congestion_weight 0.0`
+  std::size_t found_router_initial_acc_cost_chan_congestion_weight = command->string().find("router_initial_acc_cost_chan_congestion_weight");
+  if(found_router_initial_acc_cost_chan_congestion_weight == std::string::npos) {
+    std::string vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string = "--router_initial_acc_cost_chan_congestion_weight 0.0";
+    command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
   }
 
   command->append("--route");
