@@ -2095,8 +2095,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        ErrorMessage("Could not find the net file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --net_file") + 
@@ -2111,8 +2111,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        ErrorMessage("Could not find the place file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+                ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --place_file") + 
@@ -2128,8 +2128,8 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        ErrorMessage("Could not find the route file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+      ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
         return "";
       }
     vpr_options += std::string(" --route_file") + 
@@ -2380,6 +2380,10 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     return std::string("");
   }
 
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
+  //
+
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
@@ -2480,8 +2484,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        ErrorMessage("Could not find the net file file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + "\n");
+      ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return nullptr;
     }
     command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
@@ -2492,8 +2496,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (cfg.use_place_file) {
     if( !QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
       if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-          ErrorMessage("Could not find the place file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "place_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
           return nullptr;
       }
       command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
@@ -2505,8 +2509,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (cfg.use_route_file) {
     if( !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
       if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-          ErrorMessage("Could not find the route file file in: " + 
-            QLSettingsManager::getStringValue("vpr", "filename", "route_file") + "\n");
+        ErrorMessage("Could not find " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
           return nullptr;
         }
       command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
@@ -2734,6 +2738,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   else { //IO floorplanning generation failed, must stop the flow
     return nullptr;
   }
+
+  // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
+  command->append("--suppress_warnings", 
+  "vpr_warnings.log,xml_read_arch:warn_model_missing_timing:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models"
+  );
+  //
 
   command->prependFile(std::filesystem::path{netlistFile});
   command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
@@ -9186,6 +9196,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
       return;
     }
   }
+
+  CompilationFilesScopedSession compilationFilesScopedSession;
 
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
