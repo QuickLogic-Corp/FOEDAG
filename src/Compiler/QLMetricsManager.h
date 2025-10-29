@@ -132,6 +132,7 @@ public:
   static int getIntValue(std::string stage, std::string name);
   static double getDoubleValue(std::string stage, std::string name);
   static void addParsedMetrics(std::vector<AuroraMetrics>& metrics_list);
+  bool isEmpty() const { return aurora_metrics_list.empty(); }
 
 private:
     bool parseJSON();

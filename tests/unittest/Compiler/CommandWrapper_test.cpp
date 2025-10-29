@@ -407,12 +407,12 @@ TEST(CommandWrapper, serialization)
     // Deserialize
     CommandWrapper commandRestored = json.get<CommandWrapper>();
     for (const auto& [key, fileIdentity]: commandRestored.files()) {
-        if (fileIdentity.filePath().extension() == ".bin") {
-            EXPECT_TRUE(!fileIdentity.modifiedDateTime().empty());
-            EXPECT_TRUE(fileIdentity.contentHash().empty());
+        if (fileIdentity->filePath().extension() == ".bin") {
+            EXPECT_TRUE(!fileIdentity->modifiedDateTime().empty());
+            EXPECT_TRUE(fileIdentity->contentHash().empty());
         } else {
-            EXPECT_TRUE(!fileIdentity.contentHash().empty());
-            EXPECT_TRUE(fileIdentity.modifiedDateTime().empty());
+            EXPECT_TRUE(!fileIdentity->contentHash().empty());
+            EXPECT_TRUE(fileIdentity->modifiedDateTime().empty());
         }
     }
 
