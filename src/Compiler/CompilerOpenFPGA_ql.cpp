@@ -362,6 +362,7 @@ set_option -infer_seqShift 1
 set_option -retiming ${RETIMING_VALUE}
 set_option -update_models_cp 0
 set_option -run_prop_extract 1
+set_option -use_bramsdp ${SDP_BRAM_VALUE}
 
 # common_options
 set_option -add_dut_hierarchy 0
@@ -7923,6 +7924,28 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       }
       filesScript = ReplaceAll(filesScript, "${LANGUAGE_STANDARD}", lang);
       filesScript = ReplaceAll(filesScript, "${FILES}", files);
+
+      QLDeviceTarget current_device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+      std::string bram_type;
+
+      std::filesystem::path device_target_config_json_filepath = 
+          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / std::string("config.json");
+
+      if(FileUtils::FileExists(device_target_config_json_filepath)) {
+          std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+          json device_target_config_json = json::parse(device_target_config_json_ifstream);
+          bram_type = device_target_config_json["BRAM_TYPE"].get<std::string>();
+      }
+      if(bram_type == "TDP"){
+        synplifyScript->apply("${SDP_BRAM_VALUE}", "0");
+      }
+      else if (bram_type == "SDP"){
+        synplifyScript->apply("${SDP_BRAM_VALUE}", "1");
+      }
+      else{
+        ErrorMessage("BRAM_TYPE specified is not TDP or SDP.");
+      }
       designFiles += filesScript + "\n";
     }
 #ifdef _WIN32
