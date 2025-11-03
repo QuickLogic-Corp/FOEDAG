@@ -1,4 +1,5 @@
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <set>
 #include <filesystem>
@@ -128,20 +129,20 @@ public:
 
 public:
   static QLMetricsManager* getInstance();
-  static std::string getStringValue(std::string stage, std::string name);
+  static std::string getStringValue(const std::string& stage, const std::string& name);
   static int getIntValue(std::string stage, std::string name);
   static double getDoubleValue(std::string stage, std::string name);
-  static void addParsedMetrics(std::vector<AuroraMetrics>& metrics_list);
-  bool isEmpty() const { return aurora_metrics_list.empty(); }
+  static void addParsedMetrics(std::vector<AuroraMetrics> metrics_list);
+  bool isEmpty() const { return auroraMetricsSize() == 0; }
 
 private:
     bool parseJSON();
     std::vector<AuroraMetrics> buildMetricsListForAction(Compiler::Action action);
-
+    std::size_t auroraMetricsSize() const;
 
 public:
   json metrics_json;
-  std::vector<AuroraMetrics> aurora_metrics_list;
+  std::unordered_map<std::string, std::unordered_map<std::string, AuroraMetrics>> aurora_metrics_map;
   std::string rpt_delimiter = ";";
   AuroraUtilization aurora_routing_utilization;
 

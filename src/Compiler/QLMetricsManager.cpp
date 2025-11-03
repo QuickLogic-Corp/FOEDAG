@@ -31,28 +31,23 @@ QLMetricsManager* QLMetricsManager::getInstance() {
   return instance;
 }
 
-std::string QLMetricsManager::getStringValue(std::string stage, std::string name) {
-
-  std::string string_value;
+std::string QLMetricsManager::getStringValue(const std::string& stage, const std::string& name) {
 
   // std::cout << "getStringValue(): " << ", " << stage << ", " << name << std::endl;
 
-  for (AuroraMetrics metric: QLMetricsManager::getInstance()->aurora_metrics_list) {
+  auto& outer = QLMetricsManager::getInstance()->aurora_metrics_map;
 
-    // std::cout << "\n\nmetric:" << std::endl;
-    // std::cout << "    " << ", " << metric.stage << ", " << metric.name << ", " << metric.found << ", " << metric.string_value << std::endl;
-
-    if(metric.stage == stage &&
-       metric.name == name &&
-       metric.found == true) {
-
-        string_value = metric.string_value;
+  if (auto outer_it = outer.find(stage); outer_it != outer.end()) {
+    if (auto inner_it = outer_it->second.find(name); inner_it != outer_it->second.end()) {
+      const AuroraMetrics& metric = inner_it->second;
+      if (metric.found) {
         // std::cout << "metric.string_value: " << metric.string_value << std::endl;
-        break;
+        return metric.string_value;
+      }
     }
   }
 
-  return string_value;
+  return "";
 }
 
 
@@ -110,14 +105,34 @@ double QLMetricsManager::getDoubleValue(std::string stage, std::string name) {
 }
 
 
-void QLMetricsManager::addParsedMetrics(std::vector<AuroraMetrics>& metrics_list) {
+void QLMetricsManager::addParsedMetrics(std::vector<AuroraMetrics> metrics_list) {
 
-  // add the list of metrics, to the full metrics list:
-  QLMetricsManager::getInstance()->aurora_metrics_list.insert(std::end(QLMetricsManager::getInstance()->aurora_metrics_list),
-                                                              std::begin(metrics_list),
-                                                              std::end(metrics_list));
+  auto& outer = QLMetricsManager::getInstance()->aurora_metrics_map;
 
-  // std::cout << "\n\naddParsedMetrics, new total number of metrics: " << QLMetricsManager::getInstance()->aurora_metrics_list.size() << "\n\n" << std::endl;
+  // since the metrics_list contains metrics grouped by stage, let's eliminate inner map lookup on each loop iteration
+  std::string stage;
+  std::unordered_map<std::string, AuroraMetrics>* inner = nullptr;
+
+  // add the list of metrics, to the full metrics map:
+  for (AuroraMetrics& metric: metrics_list) {
+    if (!inner || metric.stage != stage) {
+      stage = metric.stage;
+      // create inner map if missing and get reference to it
+      inner = &outer.try_emplace(stage).first->second;
+    }
+    // move metric into a inner map
+    inner->insert_or_assign(metric.name, std::move(metric));
+  }
+
+  //std::cout << "\n\naddParsedMetrics, new total number of metrics: " << QLMetricsManager::getInstance()->auroraMetricsSize() << "\n\n" << std::endl;
+}
+
+std::size_t QLMetricsManager::auroraMetricsSize() const {
+  std::size_t count = 0;
+  for (const auto& [stage, stage_metrics]: QLMetricsManager::getInstance()->aurora_metrics_map) {
+    count += stage_metrics.size();
+  }
+  return count;
 }
 
 

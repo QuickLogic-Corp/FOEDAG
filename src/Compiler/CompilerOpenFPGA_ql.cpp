@@ -2855,6 +2855,22 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   ofssdc.close();
 #endif // #if UPSTREAM_UNUSED
+
+  // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
+  QLSettingsManager::reloadJSONSettings();
+
+  // check if settings were loaded correctly before proceeding:
+  if((QLSettingsManager::getInstance()->settings_json).empty()) {
+    ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
+    return false;
+  }
+
+  if( QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+    m_state = State::Packed;
+    Message("Design " + ProjManager()->projectName() + " packing is skipped as we are in Analytical Place flow!");
+    return true;
+  }
+
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
                 std::string(ProjManager()->projectName() + "_constraints.xml");
   if (fs::exists(io_floor_planningpath)) {
@@ -8907,6 +8923,12 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosys_options += " -synplify";
   }
 
+  if( !QLSettingsManager::getStringValue("yosys", "general", "mince_num").empty() ) {
+    yosys_options += std::string(" -mince_num") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("yosys", "general", "mince_num");
+  }
+
   // pass in the path to the device specific yosys libraries directly.
   std::string yosys_modules_dir_path_string = 
       (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
@@ -9067,7 +9089,13 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
     command->append(vpr_custom_options_string);
   }
 
-  command->append("--place");
+  if( QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+    command->append("--analytical_place");
+  }
+  else {
+    command->append("--place");
+  }
+  
 
   if (!filepath_fpga_fix_pins_place_str.empty()) {
     command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
