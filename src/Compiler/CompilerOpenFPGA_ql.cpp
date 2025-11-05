@@ -8871,6 +8871,12 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosys_options += " -no_abc9";
   }
 
+  if( !QLSettingsManager::getStringValue("yosys", "general", "custom_abc_script").empty() ) {
+    yosys_options += std::string(" -custom_abc_script") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("yosys", "general", "custom_abc_script");
+  }
+
   if( QLSettingsManager::getStringValue("yosys", "general", "no_opt") == "checked" ) {
 
     yosys_options += " -no_opt";
