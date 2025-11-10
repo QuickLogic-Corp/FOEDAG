@@ -8316,14 +8316,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
           json device_target_config_json = json::parse(device_target_config_json_ifstream);
           bram_type = device_target_config_json["BRAM_TYPE"].get<std::string>();
       }
-      if(bram_type == "TDP"){
+      if(bram_type == "TDP" || bram_type == "TDP_ECC"){
         synplifyScript->apply("${SDP_BRAM_VALUE}", "0");
       }
-      else if (bram_type == "SDP"){
+      else if (bram_type == "SDP" || bram_type == "SDP_ECC"){
         synplifyScript->apply("${SDP_BRAM_VALUE}", "1");
       }
       else{
-        ErrorMessage("BRAM_TYPE specified is not TDP or SDP.");
+        ErrorMessage("BRAM_TYPE specified is not TDP, TDP_ECC, SDP, or SDP_ECC.");
       }
       designFiles += filesScript + "\n";
     }
