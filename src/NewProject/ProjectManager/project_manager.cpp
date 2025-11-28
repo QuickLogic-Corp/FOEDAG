@@ -53,7 +53,10 @@ void ProjectManager::CreateProject(const ProjectOptions& opt) {
   CreateProject(opt.projectName, opt.projectPath, opt.currentFileSet);
 
   setProjectType(opt.projectType);
-  setSynthesisTool(opt.synthesisTool);
+  if (opt.projectType == PostMapSynplify)
+    setSynthesisTool(Yosys);
+  else
+    setSynthesisTool(opt.synthesisTool);
   UpdateProjectInternal(opt, true);
 
   DesignFileWatcher::Instance()->emitDesignCreated();

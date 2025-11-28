@@ -788,9 +788,6 @@ void QLSettingsManager::populateSettingsWidget() {
     }
   }
 
-  if(postMapSynplifyProject || synplifyProject){
-    rootJson["yosys"]["general"]["synplify"]["userValue"] = "checked";
-  }
 
   for (auto [categoryId, categoryJson] : rootJson.items()) {
 
