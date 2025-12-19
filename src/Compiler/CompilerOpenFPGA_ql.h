@@ -138,8 +138,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
+  std::filesystem::path configurePowerCalculatorInput(QLDeviceTarget);
+#ifdef LEGACY_POWER_CALCULATOR
   long double PowerEstimator_Dynamic();
   long double PowerEstimator_Leakage();
+#endif // LEGACY_POWER_CALCULATOR
 
   virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
@@ -266,6 +269,13 @@ private:
 
   void clearCompilationCache() override final;
   bool hasCompilationCache() const override final;
+
+  struct Offset {
+    Offset() {}
+    Offset(int col, int row): col(col), row(row) {}
+    int col = 0;
+    int row = 0;
+  };
 };
 
 }  // namespace FOEDAG

@@ -491,6 +491,7 @@ QComboBox *sourceGrid::CreateLanguageCombo(int projectType, GridType gType) {
       combo->addItem("VERILOG 1995", Design::Language::VERILOG_1995);
       combo->addItem("VERILOG 2001", Design::Language::VERILOG_2001);
       combo->addItem("VERILOG NETLIST", Design::Language::VERILOG_NETLIST);
+      combo->addItem("VERILOG MAPPED NETLIST", Design::Language::VERILOG_MAPPED_NETLIST);
       combo->addItem("SV 2005", Design::Language::SYSTEMVERILOG_2005);
       combo->addItem("SV 2009", Design::Language::SYSTEMVERILOG_2009);
       combo->addItem("SV 2012", Design::Language::SYSTEMVERILOG_2012);
@@ -587,7 +588,7 @@ QStringList sourceGrid::GetAllDesignSourceExtentions(int projectType) const {
 }
 
 void sourceGrid::initLanguageCombo(int row, const QVariant &data) {
-  auto combo = CreateLanguageCombo(projectType(), m_type);
+  auto combo = CreateLanguageCombo(CurrentProjectType(), m_type);
   combo->setCurrentIndex(combo->findData(data));
   m_tableViewSrc->setIndexWidget(m_model->index(row, LANG_COL_NUM), combo);
   connect(combo, SIGNAL(currentIndexChanged(int)), this,

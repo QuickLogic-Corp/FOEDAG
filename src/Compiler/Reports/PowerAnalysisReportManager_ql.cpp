@@ -60,13 +60,16 @@ std::unique_ptr<ITaskReport> PowerAnalysisReportManager::createReport(
 
   ITaskReport::DataReports dataReports;
   
-  if(power_estimate_table) {
-    dataReports.push_back(std::move(power_estimate_table));
-  }
-  if(power_debug_table) {
-    dataReports.push_back(std::move(power_debug_table));
-  }
-
+  std::unique_ptr<TableReport> power_estimate_table = std::make_unique<TableReport>(power_estimate_cols,
+                                                       power_estimate_data,
+                                                       QString{"Power Estimates"});
+  dataReports.push_back(std::move(power_estimate_table));
+#ifdef LEGACY_POWER_CALCULATOR
+  std::unique_ptr<TableReport> power_debug_table = std::make_unique<TableReport>(power_debug_cols,
+                                                    power_debug_data,
+                                                    QString{"Power Debug Inputs"});
+  dataReports.push_back(std::move(power_debug_table));
+#endif
   emit reportCreated(QString(REPORT_NAME));
 
   return std::make_unique<DefaultTaskReport>(std::move(dataReports),
@@ -107,20 +110,20 @@ void PowerAnalysisReportManager::parseLogFile() {
 
 
   // create power analysis report
-  IDataReport::ColumnValues power_estimate_cols;
+  power_estimate_cols.clear();
   power_estimate_cols.push_back(ReportColumn{"Cateogory"});
   power_estimate_cols.push_back(ReportColumn{"Power (mW)", Qt::AlignCenter});
 
-  IDataReport::TableData power_estimate_data = IDataReport::TableData{};
-  power_estimate_data.push_back(QStringList{"Dynamic", dynamic_power_value});
-  power_estimate_data.push_back(QStringList{"Leakage",leakage_power_value});
+  power_estimate_data.clear();
+  if (!dynamic_power_value.isEmpty()) {
+    power_estimate_data.push_back(QStringList{"Dynamic", dynamic_power_value});
+  }
+  if (!leakage_power_value.isEmpty()) {
+    power_estimate_data.push_back(QStringList{"Leakage",leakage_power_value});
+  }
   power_estimate_data.push_back(QStringList{"Total",total_power_value});
 
-  power_estimate_table = std::make_unique<TableReport>(power_estimate_cols,
-                                                       power_estimate_data,
-                                                       QString{"Power Estimates"});
-
-
+ #ifdef LEGACY_POWER_CALCULATOR
   // read power analysis debug rpt
   auto logFile_debug = createLogFile(QString("power_analysis_debug.rpt"));
   if (!logFile_debug) return;
@@ -175,12 +178,12 @@ void PowerAnalysisReportManager::parseLogFile() {
 
 
   // create power analysis debug report
-  IDataReport::ColumnValues power_debug_cols;
+  power_debug_cols.clear();
   power_debug_cols.push_back(ReportColumn{"Spreadsheet Cell"});
   power_debug_cols.push_back(ReportColumn{"Label", Qt::AlignCenter});
   power_debug_cols.push_back(ReportColumn{"Value"});
 
-  IDataReport::TableData power_debug_data = IDataReport::TableData{};
+  power_debug_data.clear();
   for (QStringList user_input : user_input_lines) {
     // std::cout << "data\n" << std::endl;
     // std::cout << user_input[0].toStdString() << std::endl;
@@ -188,11 +191,7 @@ void PowerAnalysisReportManager::parseLogFile() {
     // std::cout << user_input[2].toStdString() << std::endl;
     power_debug_data.push_back(std::move(user_input));
   }
-
-  power_debug_table = std::make_unique<TableReport>(power_debug_cols,
-                                                    power_debug_data,
-                                                    QString{"Power Debug Inputs"});
-
+ #endif // LEGACY_POWER_CALCULATOR
   setFileParsed(true);
 }
 

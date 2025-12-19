@@ -53,8 +53,11 @@ class PowerAnalysisReportManager final : public AbstractReportManager {
   // messages)
   void parseLogFile() override;
 
-  std::unique_ptr<TableReport> power_estimate_table;
-  std::unique_ptr<TableReport> power_debug_table;
+  IDataReport::ColumnValues power_estimate_cols;
+  IDataReport::TableData power_estimate_data;
+
+  IDataReport::ColumnValues power_debug_cols;
+  IDataReport::TableData power_debug_data;
 };
 
 }  // namespace FOEDAG
