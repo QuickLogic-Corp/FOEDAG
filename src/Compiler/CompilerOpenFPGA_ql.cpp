@@ -8383,6 +8383,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
        synplifyScript->apply("${READ_SDC_FILE}", std::string("# [skipped] read sdc as the synplify mode is area."));
     }
 
+    std::string synplify_maxfan = QLSettingsManager::getInstance()->getStringValue("synplify", "general", "max_fan");
+    if (synplify_maxfan == "") {
+      synplifyScript->apply("${MAXFAN_OPTION}", "");
+    }
+    else {
+      synplifyScript->apply("${MAXFAN_OPTION}", "set_option -maxfan " + synplify_maxfan);
+    }
+
     std::string synplify_script_path = ProjManager()->projectName() + ".prj";
     synplify_script_path =
       (std::filesystem::path(ProjManager()->projectPath()) / synplify_script_path)
