@@ -6321,9 +6321,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
           ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
           return false;
         } else {
-          elements.insert(elements.end(),
-              std::make_move_iterator(patternElements.begin()),
-              std::make_move_iterator(patternElements.end()));
+          elements.push_back(pattern);
         }
       }
 
