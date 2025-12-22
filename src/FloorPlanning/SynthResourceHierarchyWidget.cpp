@@ -20,6 +20,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "SynthResourceHierarchyWidget.h"
+#include "SynthResourceExtractor.h"
+
+#include "Utils/FileUtils.h"
 
 #include <QVBoxLayout>
 #include <QHeaderView>
@@ -64,15 +67,20 @@ QStandardItem* SynthResourceHierarchyWidget::buildCategory(const QString& title,
     return parentItem;
 }
 
-void SynthResourceHierarchyWidget::setResources(const SynthResources& resource)
+void SynthResourceHierarchyWidget::loadPostSynthNetFile(const std::filesystem::path& post_synth_net_filepath)
 {
+    SynthResourceExtractor resourceExtractor;
+    resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
+    const SynthResources& resources = resourceExtractor.resources();
+    resources.print();
+
     m_model->clear();
     m_model->setHorizontalHeaderLabels(QList<QString>() << QStringLiteral("Resource"));
 
     // Build categories (always present; even if empty)
-    QStandardItem* clbRoot  = buildCategory(QStringLiteral("CLBs"),  resource.clbs);
-    QStandardItem* bramRoot = buildCategory(QStringLiteral("BRAMs"), resource.brams);
-    QStandardItem* dspRoot  = buildCategory(QStringLiteral("DSPs"),  resource.dsps);
+    QStandardItem* clbRoot  = buildCategory(QStringLiteral("CLBs"),  resources.clbs);
+    QStandardItem* bramRoot = buildCategory(QStringLiteral("BRAMs"), resources.brams);
+    QStandardItem* dspRoot  = buildCategory(QStringLiteral("DSPs"),  resources.dsps);
 
     QStandardItem* root = m_model->invisibleRootItem();
     root->appendRow(clbRoot);

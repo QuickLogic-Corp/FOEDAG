@@ -19,20 +19,32 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "FloorplanningWidget.h"
+#pragma once
 
-#include "SynthResourceHierarchyWidget.h"
+#include <QWidget>
+#include <QTreeView>
+#include <QStandardItemModel>
 
-#include <QHBoxLayout>
+#include <set>
+#include <string>
+#include <filesystem>
 
 namespace FOEDAG {
-	
-FloorplanningWidget::FloorplanningWidget(QWidget* parent)
-    : QWidget(parent)
-{
-    QHBoxLayout* layout = new QHBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->addWidget(new SynthResourceHierarchyWidget(this));
-}
 
-} // namespace FOEDAG
+class SynthResourceHierarchyWidget : public QWidget {
+public:
+    explicit SynthResourceHierarchyWidget(QWidget* parent = nullptr);
+
+    void loadPostSynthNetFile(const std::filesystem::path& path);
+
+    std::set<std::string> selectedItems(bool leavesOnly = false) const;
+
+private:
+    QStandardItem* buildCategory(const QString& title,
+                                 const std::set<std::string>& items);
+
+    QTreeView* m_view{nullptr};
+    QStandardItemModel* m_model{nullptr};
+};
+
+}  // namespace FOEDAG

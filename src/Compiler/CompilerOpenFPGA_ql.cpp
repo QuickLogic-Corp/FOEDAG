@@ -77,8 +77,6 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 
-#include "SynthResourceExtractor.h"
-
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
 extern const char* foedag_git_hash;
@@ -6199,6 +6197,10 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
+}
+
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
@@ -6253,13 +6255,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   m_blifParser.load(netlist_path);
   //m_blifParser.printHierachy(); // debug
 
-  std::filesystem::path post_synth_net_filepath = std::filesystem::path(ProjManager()->projectPath()) / 
-                                      std::string(ProjManager()->projectName() + "_post_synth.net");
+  std::filesystem::path post_synth_net_filepath = getPostSynthNetFilePath();
 
-  SynthResourceExtractor resourceExtractor;
-  resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
-  resourceExtractor.resources().print();
-  
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
     Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");

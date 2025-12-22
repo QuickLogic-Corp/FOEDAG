@@ -43,13 +43,15 @@ include_directories(${PROJECT_SOURCE_DIR}/../../src ${CMAKE_CURRENT_BINARY_DIR}/
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../lib)
 
 set (SRC_CPP_LIST
-  FloorplanningWidget.cpp
+  FloorPlanningWidget.cpp
   SynthResourceHierarchyWidget.cpp
+  SynthResourceExtractor.cpp
 )
 
 set (SRC_H_LIST
-  FloorplanningWidget.h
+  FloorPlanningWidget.h
   SynthResourceHierarchyWidget.h
+  SynthResourceExtractor.h
 )
 
 set (SRC_UI_LIST
@@ -75,9 +77,9 @@ install (
 
 set (HEADER_INSTALL_LIST "")
 foreach(HEADER ${SRC_H_LIST})
-  list(APPEND HEADER_INSTALL_LIST ${PROJECT_SOURCE_DIR}/../Floorplanning/${HEADER})
+  list(APPEND HEADER_INSTALL_LIST ${PROJECT_SOURCE_DIR}/../FloorPlanning/${HEADER})
 endforeach()
 
 install(
  FILES ${HEADER_INSTALL_LIST}
- DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/Floorplanning)
+ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/FloorPlanning)

@@ -79,6 +79,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "foedag_version.h"
 #include "Compiler/QLSettingsManager.h"
 
+#include "FloorPlanning/FloorPlanningWidget.h"
+
 using namespace FOEDAG;
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -1127,11 +1129,10 @@ void MainWindow::createActions() {
   connect(ipConfiguratorAction, &QAction::triggered, this,
           &MainWindow::ipConfiguratorActionTriggered);
 
-  floorplanningAction = new QAction(tr("Floorplanning"), this);
-  floorplanningAction->setCheckable(true);
-  floorplanningAction->setEnabled(false);
-  connect(floorplanningAction, &QAction::triggered, this,
-          &MainWindow::floorplanningActionTriggered);
+  floorPlanningAction = new QAction(tr("Floorplanning"), this);
+  floorPlanningAction->setCheckable(true);
+  connect(floorPlanningAction, &QAction::triggered, this,
+          &MainWindow::floorPlanningActionTriggered);
           
   saveAction = new QAction(tr("Save"), this);
   connect(saveAction, &QAction::triggered, this,
@@ -2226,12 +2227,24 @@ void MainWindow::ipConfiguratorActionTriggered() {
   }
 }
 
-void MainWindow::floorplanningActionTriggered()
+void MainWindow::floorPlanningActionTriggered()
 {
-  if (floorplanningAction->isChecked()) {
-    
+  if (floorPlanningAction->isChecked()) {
+    std::filesystem::path post_synth_net_filepath = static_cast<CompilerOpenFPGA_ql*>(m_compiler)->getPostSynthNetFilePath();
+    if (FileUtils::FileExists(post_synth_net_filepath)) {
+      if (!m_floorPlanningWidget) {
+        m_floorPlanningWidget = new FloorPlanningWidget;
+      }
+      m_floorPlanningWidget->setPostSynthNetFile(post_synth_net_filepath);
+      m_floorPlanningWidget->resize(800, 600);
+      m_floorPlanningWidget->show();
+    } else {
+      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("%1 file is missing.\nPlease run SYNTHESIS task and then activate Floor Planning again.").arg(post_synth_net_filepath.string().c_str()));
+      floorPlanningAction->setChecked(false);
+    }
   } else {
-    
+    m_floorPlanningWidget->deleteLater();
+    m_floorPlanningWidget = nullptr;
   }
 }
 
@@ -2394,6 +2407,7 @@ void MainWindow::updateViewMenu() {
   viewMenu->clear();
   viewMenu->addAction(ipConfiguratorAction);
   viewMenu->addAction(pinAssignmentAction);
+  viewMenu->addAction(floorPlanningAction);
   const QList<QDockWidget*> dockwidgets = findChildren<QDockWidget*>();
   if (!dockwidgets.empty()) {
     viewMenu->addSeparator();

@@ -124,7 +124,7 @@ add_subdirectory(src/PinAssignment)
 if (USE_IPA)
   add_subdirectory(src/InteractivePathAnalysis)
 endif()
-add_subdirectory(src/Floorplanning)
+add_subdirectory(src/FloorPlanning)
 
 if(NOT DEFINED AURORA_USE_TABBYCAD)
     set(AURORA_USE_TABBYCAD 0 CACHE STRING "" FORCE)

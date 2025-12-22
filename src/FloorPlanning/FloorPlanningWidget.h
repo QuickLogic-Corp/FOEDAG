@@ -22,30 +22,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <QWidget>
-#include <QTreeView>
-#include <QStandardItemModel>
 
-#include <Compiler/SynthResourceExtractor.h>
-
-#include <set>
-#include <string>
+#include <filesystem>
 
 namespace FOEDAG {
 
-class SynthResourceHierarchyWidget : public QWidget {
+class SynthResourceHierarchyWidget;
+
+class FloorPlanningWidget : public QWidget {
 public:
-    explicit SynthResourceHierarchyWidget(QWidget* parent = nullptr);
-
-    void setResources(const SynthResources& res);
-
-    std::set<std::string> selectedItems(bool leavesOnly = false) const;
+    explicit FloorPlanningWidget(QWidget* parent = nullptr);
+    void setPostSynthNetFile(const std::filesystem::path& path);
 
 private:
-    QStandardItem* buildCategory(const QString& title,
-                                 const std::set<std::string>& items);
-
-    QTreeView* m_view{nullptr};
-    QStandardItemModel* m_model{nullptr};
+    SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
 };
 
 }  // namespace FOEDAG
