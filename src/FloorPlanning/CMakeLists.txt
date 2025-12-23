@@ -44,14 +44,18 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../lib)
 
 set (SRC_CPP_LIST
   FloorPlanningWidget.cpp
+  DeviceWidget.cpp
   SynthResourceHierarchyWidget.cpp
   SynthResourceExtractor.cpp
+  Tile.cpp
 )
 
 set (SRC_H_LIST
   FloorPlanningWidget.h
+  DeviceWidget.h
   SynthResourceHierarchyWidget.h
   SynthResourceExtractor.h
+  Tile.h
 )
 
 set (SRC_UI_LIST

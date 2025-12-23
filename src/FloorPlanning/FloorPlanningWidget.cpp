@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FloorPlanningWidget.h"
 
 #include "SynthResourceHierarchyWidget.h"
+#include "DeviceWidget.h"
 
 #include <QHBoxLayout>
 #include <filesystem>
@@ -31,14 +32,24 @@ namespace FOEDAG {
 FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     : QWidget(parent)
 {
+    m_synthResourcesWidget = new SynthResourceHierarchyWidget;
+    m_deviceWidget = new DeviceWidget;
+    m_deviceWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
     QHBoxLayout* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    m_synthResourcesWidget = new SynthResourceHierarchyWidget(this);
+
     layout->addWidget(m_synthResourcesWidget);
+    layout->addWidget(m_deviceWidget);
 }
 
 void FloorPlanningWidget::setPostSynthNetFile(const std::filesystem::path& path) {
     m_synthResourcesWidget->loadPostSynthNetFile(path);
+}
+
+void FloorPlanningWidget::setDeviceDescriptor(const DeviceDescriptorPtr& deviceDescriptor)
+{
+    m_deviceWidget->constructTiles(deviceDescriptor);
 }
 
 } // namespace FOEDAG
