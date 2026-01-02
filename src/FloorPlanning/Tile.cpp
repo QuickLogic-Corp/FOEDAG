@@ -32,7 +32,7 @@ QColor Tile::s_emptyColor = QColor{0, 0, 0, 0};
 float Tile::s_unitPx{32.0};
 float Tile::s_borderPx{10.0};
 
-Tile::Tile(Type type, int x, int y, int w, int h): m_type(type), m_x(x), m_y(y), m_w(w), m_h(h) {
+Tile::Tile(Type type, int x, int y, int w, int h): m_type(type), m_index(x, y), m_w(w), m_h(h) {
     buildRect();
     buildLabel();
 }
@@ -42,8 +42,8 @@ const QColor& Tile::color() const { return Tile::color(m_type); }
 void Tile::buildRect() {
     const double pitch = s_unitPx + s_borderPx;   // distance between cell origins
 
-    const double x = m_x * pitch;
-    const double y = m_y * pitch;
+    const double x = m_index.col * pitch;
+    const double y = m_index.row * pitch;
 
     double w = m_w * s_unitPx + (m_w - 1) * s_borderPx;
     double h = m_h * s_unitPx + (m_h - 1) * s_borderPx;
@@ -62,10 +62,10 @@ const QColor& Tile::color(Type type) {
 
 void Tile::buildLabel() {
     switch(m_type) {
-    case Type::Clb:  m_label = QString("clb (%1,%2)").arg(m_x).arg(m_y); break;
-    case Type::Io:   m_label = QString("io (%1,%2)").arg(m_x).arg(m_y); break;
-    case Type::Bram: m_label = QString("bram (%1,%2)").arg(m_x).arg(m_y); break;
-    case Type::Dsp:  m_label = QString("dsp (%1,%2)").arg(m_x).arg(m_y); break;
+    case Type::Clb:  m_label = QString("clb (%1,%2)").arg(m_index.col).arg(m_index.row); break;
+    case Type::Io:   m_label = QString("io (%1,%2)").arg(m_index.col).arg(m_index.row); break;
+    case Type::Bram: m_label = QString("bram (%1,%2)").arg(m_index.col).arg(m_index.row); break;
+    case Type::Dsp:  m_label = QString("dsp (%1,%2)").arg(m_index.col).arg(m_index.row); break;
     case Type::Empty: break;
     }
 }
@@ -73,6 +73,20 @@ void Tile::buildLabel() {
 bool Tile::isVisible(const QRectF& visibleArea) const
 {
     return m_rect.intersects(visibleArea);
+}
+
+bool Tile::isLocated(const QRectF& area) const
+{
+    QRectF outer = area.normalized();
+    QRectF inner = m_rect.normalized();
+
+    bool inside =
+        outer.left()   <= inner.left()  &&
+        outer.right()  >= inner.right() &&
+        outer.top()    <= inner.top()   &&
+        outer.bottom() >= inner.bottom();
+
+    return inside;
 }
 
 } // namespace FOEDAG

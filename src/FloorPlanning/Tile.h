@@ -24,12 +24,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QRect>
 #include <QColor>
 
+#include <cstdint>
+
 namespace FOEDAG {
 
 class Tile {
 public:
+    struct Index {
+        Index(int col, int row): col(col), row(row) {}
+        bool operator==(const Index& rhs) const {
+            return col == rhs.col && row == rhs.row;
+        }
+        int col;
+        int row;
+    };
+
     enum class Type { Empty, Clb, Io, Bram, Dsp };
     Tile(Type type, int x, int y, int w, int h);
+    Tile(): m_index(-1, -1) {} // required for std::unordered_map
 
     Type type() const { return m_type; }
     const QColor& color() const;
@@ -38,9 +50,12 @@ public:
     static float unitPx() { return s_unitPx; }
     static float borderPx() { return s_borderPx; }
 
+    const Index& index() const { return m_index; }
+
     const QString& label() const { return m_label; }
     const QRectF& rect() const { return m_rect; }
     bool isVisible(const QRectF& screen) const;
+    bool isLocated(const QRectF& area) const;
 
 private:
     Type m_type;
@@ -50,8 +65,7 @@ private:
     static float s_unitPx;
     static float s_borderPx;
 
-    int m_x{0};
-    int m_y{0};
+    Index m_index;
     int m_w{1};
     int m_h{1};
 
@@ -65,5 +79,17 @@ private:
     void buildLabel();
 };
 
-
 }  // namespace FOEDAG
+
+// required to use Tile::Index in std::unordered_set
+namespace std {
+template<>
+struct hash<FOEDAG::Tile::Index> {
+    size_t operator()(const FOEDAG::Tile::Index& i) const noexcept {
+        std::uint64_t key =
+            (std::uint64_t(std::uint32_t(i.row)) << 32) ^
+            std::uint64_t(std::uint32_t(i.col));
+        return std::hash<std::uint64_t>{}(key);
+    }
+};
+}
