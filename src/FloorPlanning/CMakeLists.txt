@@ -47,6 +47,7 @@ set (SRC_CPP_LIST
   SynthResourceHierarchyWidget.cpp
   SynthResourceExtractor.cpp
   Tile.cpp
+  Region.cpp
 )
 
 set (SRC_H_LIST
@@ -55,6 +56,7 @@ set (SRC_H_LIST
   SynthResourceHierarchyWidget.h
   SynthResourceExtractor.h
   Tile.h
+  Region.h
 )
 
 set (SRC_UI_LIST

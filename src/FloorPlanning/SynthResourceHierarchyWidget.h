@@ -32,12 +32,17 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 namespace FOEDAG {
 
 class SynthResourceHierarchyWidget : public QWidget {
+    Q_OBJECT
 public:
     explicit SynthResourceHierarchyWidget(QWidget* parent = nullptr);
 
     void loadPostSynthNetFile(const std::filesystem::path& path);
 
     std::set<std::string> selectedItems(bool leavesOnly = false) const;
+    void setSelectedItems(const std::set<std::string>& items);
+
+signals:
+    void selectionChanged(std::set<std::string>);
 
 private:
     QStandardItem* buildCategory(const QString& title,

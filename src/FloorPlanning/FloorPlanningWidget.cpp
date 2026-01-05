@@ -36,6 +36,12 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     m_deviceWidget = new DeviceWidget;
     m_deviceWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
+    QObject::connect(m_synthResourcesWidget, &SynthResourceHierarchyWidget::selectionChanged,
+                     m_deviceWidget, &DeviceWidget::onSelectedPinsChanged);
+
+    QObject::connect(m_deviceWidget, &DeviceWidget::updatePinsSelectionRequested,
+                     m_synthResourcesWidget, &SynthResourceHierarchyWidget::setSelectedItems);
+
     QHBoxLayout* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 

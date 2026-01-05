@@ -22,16 +22,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "Tile.h"
+#include "Region.h"
 
 #include <QWidget>
 #include <QPoint>
 
-#include <vector>
-#include <unordered_set>
 #include <unordered_map>
 #include <set>
 #include <memory>
-#include <optional>
+
 
 class QPaintEvent;
 
@@ -50,48 +49,16 @@ using DeviceDescriptorPtr = std::shared_ptr<DeviceDescriptor>;
 class DeviceWidget final : public QWidget {
     Q_OBJECT
 
-    class Region {
-    public:
-        void start(const QPointF& point) {
-            m_startPos = point;
-            m_stopPosOpt = std::nullopt;
-        }
-        void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles) {
-            m_stopPosOpt = point;
-            m_tiles = tiles;
-        }
-        void reject() {
-            m_stopPosOpt = std::nullopt;
-        }
-        void setStopPos(const QPointF& point) { m_stopPosOpt = point; }
-        bool isClosed() const { return m_stopPosOpt.has_value(); }
-        bool isValid() const { return isClosed() && !m_tiles.empty(); }
-        const QPointF& startPos() const { return m_startPos; }
-        QPointF stopPos() const { return m_stopPosOpt.value(); }
-
-        const std::unordered_set<Tile::Index>& tiles() const { return m_tiles; }
-        bool isOverllapedWith(const Region& rhs) {
-            const auto& small = (m_tiles.size() < rhs.m_tiles.size()) ? m_tiles : rhs.m_tiles;
-            const auto& large = (m_tiles.size() < rhs.m_tiles.size()) ? rhs.m_tiles : m_tiles;
-
-            for (const auto& v: small) {
-                if (large.contains(v)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-    private:
-        QPointF m_startPos;
-        std::optional<QPointF> m_stopPosOpt;
-        std::unordered_set<Tile::Index> m_tiles;
-    };
 public:
     explicit DeviceWidget(QWidget* parent = nullptr);
     virtual ~DeviceWidget()=default;
 
     void constructTiles(const DeviceDescriptorPtr& device);
+
+    void onSelectedPinsChanged(const std::set<std::string>& pins);
+
+signals:
+    void updatePinsSelectionRequested(std::set<std::string>);
 
 protected:
     QSize sizeHint() const override final;
@@ -104,12 +71,17 @@ protected:
     void paintEvent(QPaintEvent*) override final;
 
 private:
+    std::set<std::string> m_selectedPins;
     QColor m_backgroundColor{25, 25, 28};
     QColor m_transparentColor{0, 0, 0, 0};
     QColor m_textColor{30, 30, 35};
-    QColor m_selectedColor{255, 120, 120};
+    QColor m_regionColor{50, 160, 50}; // green
+    QColor m_editRegionColor{50, 50, 160}; // blue
+    QColor m_editRegionTransparentColor{50, 50, 160, 150}; // blue
 
     double m_scale = 1.0f;
+
+    bool m_isMousePressed = false;
 
     QRectF m_viewPort;
     std::unordered_map<Tile::Index, Tile> m_tiles;
@@ -117,9 +89,9 @@ private:
 
     void drawBackground(QPainter& p);
     void drawTilesBatched(QPainter& p);
-    void drawSelectedTile(QPainter& p);
+    void drawRegions(QPainter& p);
     void drawTileLabels(QPainter& p);
-    void highLightTilesInArea(QPainter& p, const Region& area) const;
+    void highLightTilesInRegion(QPainter& p, const Region& area) const;
 
     // panning
     bool m_isPanning{false};
@@ -131,21 +103,33 @@ private:
     // panning
 
     // selection
-    bool m_isSelecting{false};
-    Region m_currentRegion;
+    bool m_isSelectingNewRegion{false};
+    RegionPtr m_currentRegion;
 
-    std::vector<Region> m_regions;
+    RegionPtr m_regionToEdit;
+    std::optional<Region::HandlerRole> m_editRoleOpt;
+    bool trySelectRegionToEdit(const QPointF& worldCoord);
+
+    std::unordered_map<int, RegionPtr> m_regions;
 
     void clearSelections() {
         m_regions.clear();
+        m_currentRegion.reset();
+        resetEditRegion();
         update();
     }
-    void startSelection(const QPoint& selection);
-    void stopSelection(const QPoint& selection);
-    void cancelSelection(const QString& msg);
+    void resetEditRegion() {
+        m_regionToEdit.reset();
+        m_editRoleOpt.reset();
+    }
+    void startNewSelection(const QPointF& worldCoord);
+    void stopSelection(const QPointF& selection);
+    void cancelSelection(const QString& msg = "");
     // selection
 
     QPointF toWorldCoord(const QPoint&);
+    void refreshRegion(const RegionPtr&);
+    void removeRegion(const RegionPtr&);
 };
 
 }  // namespace FOEDAG

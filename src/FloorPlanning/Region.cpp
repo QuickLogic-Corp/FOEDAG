@@ -19,28 +19,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#pragma once
-
-#include <QWidget>
-
-#include "DeviceWidget.h" // needed for DeviceDescriptorPtr
-
-#include <filesystem>
+#include "Region.h"
 
 namespace FOEDAG {
 
-class SynthResourceHierarchyWidget;
-class DeviceWidget;
+int Region::s_idGenerator = 0;
 
-class FloorPlanningWidget : public QWidget {
-public:
-    explicit FloorPlanningWidget(QWidget* parent = nullptr);
-    void setPostSynthNetFile(const std::filesystem::path& path);
-    void setDeviceDescriptor(const DeviceDescriptorPtr& deviceDescriptor);
-
-private:
-    SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
-    DeviceWidget* m_deviceWidget{nullptr};
-};
-
-}  // namespace FOEDAG
+} // namespace FOEDAG

@@ -29,7 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 
 namespace FOEDAG {
-	
+
 DeviceWidget::DeviceWidget(QWidget* parent)
     : QWidget(parent)
 {
@@ -82,7 +82,7 @@ void DeviceWidget::constructTiles(const DeviceDescriptorPtr& device) {
                     stepCounter++;
                     if (stepCounter == device->dspSize.height()) {
                         step_on_dsp = false;
-                        stepCounter= 0;
+                        stepCounter = 0;
                     }
                 }
             } else {
@@ -97,48 +97,88 @@ void DeviceWidget::constructTiles(const DeviceDescriptorPtr& device) {
     update();
 }
 
-void DeviceWidget::startSelection(const QPoint& screenCoord)
+void DeviceWidget::onSelectedPinsChanged(const std::set<std::string>& pins)
 {
-    m_isSelecting = true;
-    m_currentRegion.start(toWorldCoord(screenCoord));
+    m_selectedPins = pins;
+    if (m_regionToEdit) {
+        m_regionToEdit->setPins(pins);
+    }
+}
+
+bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
+{
+    resetEditRegion();
+    for (const auto& [id, region]: m_regions) {
+        if (region->rect().contains(worldCoord)) {
+            m_regionToEdit = region;
+            emit updatePinsSelectionRequested(region->pins());
+            update();
+            return true;
+        }
+    }
+    return false;
+}
+
+void DeviceWidget::startNewSelection(const QPointF& worldCoord)
+{
+    m_isSelectingNewRegion = true;
+    m_currentRegion = std::make_shared<Region>(worldCoord);
     update();
 }
 
-void DeviceWidget::stopSelection(const QPoint& pos)
+void DeviceWidget::stopSelection(const QPointF& worldCoord)
 {
-    m_isSelecting = false;
+    m_isSelectingNewRegion = false;
+
+    if (!m_currentRegion) {
+        return;
+    }
 
     std::unordered_set<Tile::Index> indexes;
-    QRectF outer(m_currentRegion.startPos(), m_currentRegion.stopPos());
     for (const auto& [index, tile]: m_tiles) {
-        if (tile.isLocated(outer)) {
+        if (tile.isLocated(m_currentRegion->rect())) {
             indexes.insert(tile.index());
         }
     }
 
     if (indexes.empty()) {
-        cancelSelection("Selection doesn't contains any tiles. Current selection removed..");
+        cancelSelection();
         return;
     }
 
-    m_currentRegion.accept(toWorldCoord(pos), indexes);
-    for (const Region& region: m_regions) {
-        if (m_currentRegion.isOverllapedWith(region)) {
-            cancelSelection("Selected region is overllaped with other region. Current selection removed.");
+    m_currentRegion->accept(worldCoord, indexes, m_selectedPins);
+
+    for (const auto& [id, region]: m_regions) {
+        if (m_currentRegion->isOverllapedWith(*region)) {
+            cancelSelection("Overllaped with other region");
             return;
         }
     }
 
-    m_regions.push_back(m_currentRegion);
-    update();
+    if (m_currentRegion->isValid()) {
+        // selected pins are baked inside the m_currentRegion
+        emit updatePinsSelectionRequested({});
+        m_selectedPins.clear();
+        //
+
+        m_regions[m_currentRegion->id()] = m_currentRegion;
+        m_currentRegion.reset();
+        update();
+    }
 }
 
 void DeviceWidget::cancelSelection(const QString& msg)
 {
+    if (!m_currentRegion) {
+        return;
+    }
+    if (!msg.isEmpty()) {
     QMessageBox::information(this,
-                             "Selection canceled",
+                             "Selection declined",
                              msg);
-    m_currentRegion.reject();
+    }
+
+    m_currentRegion->reject();
     update();
 }
 
@@ -149,9 +189,24 @@ void DeviceWidget::keyPressEvent(QKeyEvent* event)
 
 void DeviceWidget::mousePressEvent(QMouseEvent* event)
 {
+    m_isMousePressed = true;
+
+    const QPointF worldCoord{toWorldCoord(event->pos())};
     switch(event->button()) {
     case Qt::LeftButton: {
-        startSelection(event->pos());
+        if (m_regionToEdit) {
+            std::optional<Region::HandlerRole> roleOpt = m_regionToEdit->checkHandlerClick(worldCoord);
+            if (roleOpt) {
+                m_editRoleOpt = roleOpt;
+                return;
+            }
+        }
+
+        if (trySelectRegionToEdit(worldCoord)) {
+            return;
+        }
+
+        startNewSelection(worldCoord);
         break;
     }
     case Qt::MiddleButton:
@@ -164,9 +219,12 @@ void DeviceWidget::mousePressEvent(QMouseEvent* event)
 }
 
 void DeviceWidget::mouseReleaseEvent(QMouseEvent* event) {
+    m_isMousePressed = false;
+
+    const QPointF worldCoord{toWorldCoord(event->pos())};
     switch(event->button()) {
     case Qt::LeftButton: {
-        stopSelection(event->pos());
+        stopSelection(worldCoord);
         break;
     }
     case Qt::MiddleButton:
@@ -176,19 +234,49 @@ void DeviceWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
     default: break;
     }
+
+    if (m_regionToEdit && m_editRoleOpt) {
+        if (m_editRoleOpt == Region::HandlerRole::REMOVE) {
+            removeRegion(m_regionToEdit);
+            resetEditRegion();
+            update();
+        }
+    }
+}
+
+void DeviceWidget::removeRegion(const RegionPtr& region)
+{
+    m_regions.erase(m_regions.find(region->id()));
 }
 
 void DeviceWidget::mouseMoveEvent(QMouseEvent* event)
 {
+    const QPointF worldCoord = toWorldCoord(event->pos());
+
     if (m_isPanning) {
         QPointF delta = event->pos() - m_lastMousePos;
         m_lastMousePos = event->pos();
 
         m_panPixels -= delta;
         update();
+        return;
     }
-    if (m_isSelecting) {
-        m_currentRegion.setStopPos(toWorldCoord(event->pos()));
+    if (m_isSelectingNewRegion) {
+        m_currentRegion->setStopPos(worldCoord);
+        update();
+        return;
+    }
+    if (m_isMousePressed && m_regionToEdit && m_editRoleOpt) {
+        switch (m_editRoleOpt.value()) {
+        case Region::HandlerRole::BL: m_regionToEdit->rect().setBottomLeft(worldCoord); break;
+        case Region::HandlerRole::BR: m_regionToEdit->rect().setBottomRight(worldCoord); break;
+        case Region::HandlerRole::TR: m_regionToEdit->rect().setTopRight(worldCoord); break;
+        case Region::HandlerRole::TL: m_regionToEdit->rect().setTopLeft(worldCoord); break;
+        case Region::HandlerRole::MOVE: m_regionToEdit->rect().moveCenter(worldCoord); break;
+        default: break;
+        }
+
+        refreshRegion(m_regionToEdit);
         update();
     }
 }
@@ -249,7 +337,7 @@ void DeviceWidget::paintEvent(QPaintEvent* event)
   const bool isDrawingText = true;
 
   drawTilesBatched(p);
-  drawSelectedTile(p);
+  drawRegions(p);
 
    p.restore();
 
@@ -299,36 +387,49 @@ void DeviceWidget::drawTilesBatched(QPainter& p)
     p.setBrush(Tile::color(Tile::Type::Dsp));  p.drawRects(dspRects);
 }
 
-void DeviceWidget::drawSelectedTile(QPainter& p)
+void DeviceWidget::drawRegions(QPainter& p)
 {
-    QPen pen(m_selectedColor);
+    QPen pen(m_regionColor);
     pen.setCosmetic(true);
     pen.setWidth(3);
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
 
-    if (m_isSelecting) {
-        if (m_currentRegion.isClosed()) {
-            QRectF selectionRect(m_currentRegion.startPos(), m_currentRegion.stopPos());
-            p.drawRect(selectionRect.adjusted(1, 1, -1, -1));
+    if (m_isSelectingNewRegion) {
+        if (m_currentRegion->isClosed()) {
+            p.drawRect(m_currentRegion->rect());
         }
     }
 
-    for (const Region& area: m_regions) {
-        QRectF selectionRect(area.startPos(), area.stopPos());
-        p.drawRect(selectionRect.adjusted(1, 1, -1, -1));
+    for (const auto& [id, region]: m_regions) {
+        if (m_regionToEdit && (region->id() == m_regionToEdit->id())) {
+            continue;
+        }
+        p.drawRect(region->rect());
+        highLightTilesInRegion(p, *region);
+    }
 
-        highLightTilesInArea(p, area);
+    if (m_regionToEdit) {
+        pen.setColor(m_editRegionColor);
+        p.setPen(pen);
+        p.drawRect(m_regionToEdit->rect());
+        highLightTilesInRegion(p, *m_regionToEdit);
+
+        p.setPen(Qt::NoPen);
+        p.setBrush(m_editRegionTransparentColor);
+        for (const auto& [role, rect]: m_regionToEdit->handlers) {
+            p.drawRect(rect);
+        }
     }
 }
 
-void DeviceWidget::highLightTilesInArea(QPainter& p, const Region& area) const {
-    if (!area.isValid()) {
+void DeviceWidget::highLightTilesInRegion(QPainter& p, const Region& region) const {
+    if (!region.isValid()) {
         return;
     }
 
-    for (const Tile::Index& index: area.tiles()) {
-        p.drawRect(m_tiles.at(index).rect().adjusted(1, 1, -1, -1));
+    for (const Tile::Index& index: region.tiles()) {
+        p.drawRect(m_tiles.at(index).rect());
     }
 }
 
@@ -340,13 +441,27 @@ void DeviceWidget::drawTileLabels(QPainter& p)
         if (!tile.isVisible(m_viewPort)) {
             continue;
         }
-        p.drawText(tile.rect().adjusted(2, 1, -2, -1), Qt::AlignCenter | Qt::AlignBottom, tile.label());
+        p.drawText(tile.rect(), Qt::AlignCenter | Qt::AlignBottom, tile.label());
     }
 }
 
 QPointF DeviceWidget::toWorldCoord(const QPoint& screenCoord)
 {
     return (QPointF(screenCoord) + m_panPixels) / m_scale;
+}
+
+void DeviceWidget::refreshRegion(const RegionPtr& region)
+{
+    region->buildHandles();
+
+    std::unordered_set<Tile::Index> indexes;
+    for (const auto& [index, tile]: m_tiles) {
+        if (tile.isLocated(region->rect())) {
+            indexes.insert(tile.index());
+        }
+    }
+
+    region->setTiles(indexes);
 }
 
 } // namespace FOEDAG

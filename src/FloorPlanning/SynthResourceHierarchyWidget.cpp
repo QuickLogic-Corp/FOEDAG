@@ -50,6 +50,11 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(QWidget* parent)
     m_view->setAlternatingRowColors(true);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_view->header()->setStretchLastSection(true);
+
+
+    QObject::connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this, [this](){
+        emit selectionChanged(selectedItems());
+    });
 }
 
 QStandardItem* SynthResourceHierarchyWidget::buildCategory(const QString& title,
@@ -105,6 +110,47 @@ std::set<std::string> SynthResourceHierarchyWidget::selectedItems(bool leavesOnl
     }
 
     return items;
+}
+
+void SynthResourceHierarchyWidget::setSelectedItems(const std::set<std::string>& items)
+{
+    QItemSelectionModel* sel = m_view->selectionModel();
+    if (!sel) {
+        return;
+    }
+
+    QSignalBlocker blockSelection(sel);
+    {
+    sel->clearSelection();
+
+    // Helper: recursively walk the model and select matches by text
+    std::function<void(QStandardItem*)> visit = [&](QStandardItem* parent) {
+        if (!parent) return;
+
+        const int rows = parent->rowCount();
+        for (int r = 0; r < rows; ++r) {
+            QStandardItem* item = parent->child(r, 0); // column 0 (same as selectedRows(0))
+            if (!item) {
+                continue;
+            }
+
+            const std::string key = item->text().toStdString();
+            if (items.find(key) != items.end()) {
+                const QModelIndex idx = item->index(); // column 0
+                sel->select(idx, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+                sel->setCurrentIndex(idx, QItemSelectionModel::NoUpdate);
+            }
+
+
+            if (item->hasChildren()) {
+                visit(item);
+            }
+        }
+    };
+
+    visit(m_model->invisibleRootItem());
+    }
+    m_view->viewport()->update(); // since we block selection model signal emiting we need refresh viewport manually
 }
 
 } // namespace FOEDAG
