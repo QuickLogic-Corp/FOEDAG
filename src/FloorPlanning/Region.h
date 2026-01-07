@@ -28,7 +28,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QLine>
 
 #include <memory>
-#include <vector>
 #include <optional>
 #include <unordered_set>
 #include <set>
@@ -59,13 +58,13 @@ public:
         return std::nullopt;
     }
 
-    void setTiles(const std::unordered_set<Tile::Index>& tiles) { m_tiles = tiles; }
+    void setTiles(const std::unordered_set<Tile::Index>& tiles);
     void setPins(const std::set<std::string>& pins) { m_pins = pins; }
 
     void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles, const std::set<std::string>& pins) {
         m_stopPosOpt = point;
         m_rect = QRectF(startPos(), stopPos());
-        m_tiles = tiles;
+        setTiles(tiles);
         m_pins = pins;
         buildHandles();
     }
@@ -83,6 +82,9 @@ public:
     bool isValid() const { return isClosed() && !m_tiles.empty(); }
 
     const std::unordered_set<Tile::Index>& tiles() const { return m_tiles; }
+    Tile::Index bottomLeftGridCoord() const { return m_bottomLeftGridCoord; }
+    Tile::Index topRightGridCoord() const { return m_topRightGridCoord; }
+
     const std::set<std::string>& pins() const { return m_pins; }
 
     bool isOverllapedWith(const Region& rhs) {
@@ -121,6 +123,8 @@ private:
     QPointF m_startPos;
     std::optional<QPointF> m_stopPosOpt;
     std::unordered_set<Tile::Index> m_tiles;
+    Tile::Index m_bottomLeftGridCoord;
+    Tile::Index m_topRightGridCoord;
     std::set<std::string> m_pins;
     QRectF m_rect;
 
@@ -131,6 +135,8 @@ private:
         const qreal h = size * 0.5;
         return QRectF(c.x() - h, c.y() - h, size, size);
     }
+
+    void updateTileGridCoordBounds();
 };
 using RegionPtr = std::shared_ptr<Region>;
 

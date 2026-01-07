@@ -21,8 +21,53 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Region.h"
 
+#include <QDebug>
+
 namespace FOEDAG {
 
 int Region::s_idGenerator = 0;
+
+void Region::setTiles(const std::unordered_set<Tile::Index>& tiles)
+{
+    m_tiles = tiles;
+    updateTileGridCoordBounds();
+}
+
+void Region::updateTileGridCoordBounds()
+{
+    if (m_tiles.empty()) {
+        return;
+    }
+
+    auto [minCol, maxCol] = std::minmax_element(
+        m_tiles.begin(), m_tiles.end(),
+        [](const Tile::Index& a, const Tile::Index& b) {
+            return a.col < b.col;
+        });
+
+    auto [minRow, maxRow] = std::minmax_element(
+        m_tiles.begin(), m_tiles.end(),
+        [](const Tile::Index& a, const Tile::Index& b) {
+            return a.row < b.row;
+        });
+
+    Tile::Index bottomLeftIndex = Tile::Index(minCol->col, maxRow->row);
+    Tile::Index topRightIndex = Tile::Index(maxCol->col, minRow->row);
+
+    m_bottomLeftGridCoord = Tile::toGridCoord(bottomLeftIndex);
+    m_topRightGridCoord   = Tile::toGridCoord(topRightIndex);
+
+    // test
+    Tile::Index bottomLeftIndexReversed = Tile::fromGridCoord(m_bottomLeftGridCoord);
+    Tile::Index topRightIndexReversed = Tile::fromGridCoord(m_topRightGridCoord);
+
+    assert(bottomLeftIndex.row == bottomLeftIndexReversed.row);
+    assert(bottomLeftIndex.col == bottomLeftIndexReversed.col);
+    assert(topRightIndex.row == topRightIndexReversed.row);
+    assert(topRightIndex.col == topRightIndexReversed.col);
+    //
+}
+
+
 
 } // namespace FOEDAG

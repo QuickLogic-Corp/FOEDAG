@@ -31,7 +31,7 @@ class QDomElement;
 namespace FOEDAG {
 
 enum BlockType {
-  UNKNOWN, CLB, BRAM, DSP
+  UNKNOWN, FLE, CLB, BRAM, DSP
 };
 
 struct SynthResources {

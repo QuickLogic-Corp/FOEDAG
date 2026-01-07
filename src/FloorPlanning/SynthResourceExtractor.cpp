@@ -42,13 +42,19 @@ void SynthResourceExtractor::parseNetFileContent(const std::string& content)
 
     QDomNodeList blocks = doc.elementsByTagName("block");
 
-    for (int i=0; i <blocks.count(); ++i) {
+    for (int i=0; i<blocks.count(); ++i) {
         const QDomElement element = blocks.at(i).toElement();
         BlockType type = determineBlockType(element);
         if (type != BlockType::UNKNOWN) {
-            const std::string name = element.attribute("name").toStdString();
-            if (!name.empty()) {
-                m_resources.add(type, name);
+            QDomNodeList subBlocks = element.elementsByTagName("block");
+            for (int j=0; j<subBlocks.count(); ++j) {
+                const QDomElement subElement = subBlocks.at(j).toElement();
+                if (determineBlockType(subElement) == BlockType::FLE) {
+                    const std::string name = subElement.attribute("name").toStdString();
+                    if (!name.empty()) {
+                        m_resources.add(type, name);
+                    }
+                }
             }
         }
     }
@@ -57,7 +63,9 @@ void SynthResourceExtractor::parseNetFileContent(const std::string& content)
 BlockType SynthResourceExtractor::determineBlockType(const QDomElement& element) const
 {
     const auto instance = element.attribute("instance");
-    if (instance.contains("clb")) {
+    if (instance.contains("fle")) {
+        return BlockType::FLE;
+    } else if (instance.contains("clb")) {
         return BlockType::CLB;
     } else if (instance.contains("bram")) {
         return BlockType::BRAM;

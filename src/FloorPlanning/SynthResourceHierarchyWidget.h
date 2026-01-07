@@ -33,23 +33,34 @@ namespace FOEDAG {
 
 class SynthResourceHierarchyWidget : public QWidget {
     Q_OBJECT
+
+    enum COLUMN {
+      NETLIST = 0,
+      REGION
+    };
 public:
     explicit SynthResourceHierarchyWidget(QWidget* parent = nullptr);
 
     void loadPostSynthNetFile(const std::filesystem::path& path);
 
-    std::set<std::string> selectedItems(bool leavesOnly = false) const;
-    void setSelectedItems(const std::set<std::string>& items);
+    std::set<std::string> selectedItems() const;
+    void setSelectedItems(int id, const std::set<std::string>& items);
+    void clearSelection();
 
 signals:
     void selectionChanged(std::set<std::string>);
 
 private:
-    QStandardItem* buildCategory(const QString& title,
-                                 const std::set<std::string>& items);
-
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
+
+    QStandardItem* buildCategory(const QString& title,
+                                 const std::set<std::string>& items);
+    QStandardItem* findOrCreateChild(QStandardItem* parent,
+                                     const QString& text,
+                                     const Qt::ItemFlags flags);
+    QStandardItem* findRegionItem(QStandardItem* parent, const QString& text);
+    void hideLeaves(QTreeView* view, QStandardItem* parentItem, const QModelIndex& parentIndex);
 };
 
 }  // namespace FOEDAG

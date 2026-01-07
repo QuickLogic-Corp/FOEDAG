@@ -26,11 +26,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QWidget>
 #include <QPoint>
+#include <QLabel>
 
 #include <unordered_map>
 #include <set>
+#include <filesystem>
 #include <memory>
-
 
 class QPaintEvent;
 
@@ -49,6 +50,33 @@ using DeviceDescriptorPtr = std::shared_ptr<DeviceDescriptor>;
 class DeviceWidget final : public QWidget {
     Q_OBJECT
 
+    struct DrawStat {
+    public:
+        DrawStat() {
+            m_label = new QLabel;
+            m_label->setMinimumWidth(200);
+        }
+        void setLabel(QLabel* label) { m_label = label; }
+        void setDrawableTilesNum(int num) {
+            m_drawableTilesNum = num;
+            updateLabel();
+        }
+        void setDrawTimeMs(long long ms) {
+            m_drawTimeMs = ms;
+            updateLabel();
+        }
+
+        QLabel* label() { return m_label; }
+
+    private:
+        int m_drawableTilesNum = -1;
+        long long m_drawTimeMs = -1;
+        QLabel* m_label{nullptr};
+
+        void updateLabel() {
+            m_label->setText(QString("visible %1 tiles, took %2 ms").arg(m_drawableTilesNum).arg(m_drawTimeMs));
+        }
+    };
 public:
     explicit DeviceWidget(QWidget* parent = nullptr);
     virtual ~DeviceWidget()=default;
@@ -58,7 +86,8 @@ public:
     void onSelectedPinsChanged(const std::set<std::string>& pins);
 
 signals:
-    void updatePinsSelectionRequested(std::set<std::string>);
+    void clearSelectionRequested();
+    void updatePinsSelectionRequested(int, std::set<std::string>);
 
 protected:
     QSize sizeHint() const override final;
@@ -69,6 +98,9 @@ protected:
     void mouseMoveEvent(QMouseEvent*) override final;
     void wheelEvent(QWheelEvent* event) override final;
     void paintEvent(QPaintEvent*) override final;
+
+    void saveQdc();
+    void loadQdc();
 
 private:
     std::set<std::string> m_selectedPins;
@@ -82,6 +114,8 @@ private:
     double m_scale = 1.0f;
 
     bool m_isMousePressed = false;
+
+    DrawStat m_drawStat;
 
     QRectF m_viewPort;
     std::unordered_map<Tile::Index, Tile> m_tiles;
@@ -112,24 +146,31 @@ private:
 
     std::unordered_map<int, RegionPtr> m_regions;
 
-    void clearSelections() {
+    std::filesystem::path m_qdcFilepath = "floorplanning.qdc";
+
+    void clearRegions() {
         m_regions.clear();
         m_currentRegion.reset();
         resetEditRegion();
         update();
     }
     void resetEditRegion() {
+        emit clearSelectionRequested();
         m_regionToEdit.reset();
         m_editRoleOpt.reset();
     }
-    void startNewSelection(const QPointF& worldCoord);
-    void stopSelection(const QPointF& selection);
-    void cancelSelection(const QString& msg = "");
+    void startNewRegion(const QPointF& worldCoord);
+    void stopRegion(const QPointF& selection);
+    void cancelRegion(const QString& msg = "");
     // selection
 
     QPointF toWorldCoord(const QPoint&);
     void refreshRegion(const RegionPtr&);
     void removeRegion(const RegionPtr&);
+
+    std::unordered_set<Tile::Index> findTiles(const QRectF&);
+    std::optional<QPointF> findBottomLeftPoint(const Tile::Index&) const;
+    std::optional<QPointF> findTopRightPoint(const Tile::Index&) const;
 };
 
 }  // namespace FOEDAG

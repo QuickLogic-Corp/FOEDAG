@@ -24,15 +24,21 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 namespace FOEDAG {
 
 QColor Tile::s_clbColor = QColor{200, 200, 0};
-QColor Tile::s_ioColor = QColor{20, 20, 20};
+QColor Tile::s_ioColor = QColor{20, 20, 20, 50};
 QColor Tile::s_bramColor = QColor{100, 100, 200};
 QColor Tile::s_dspColor = QColor{100, 200, 100};
 QColor Tile::s_emptyColor = QColor{0, 0, 0, 0};
 
 float Tile::s_unitPx{32.0};
 float Tile::s_borderPx{10.0};
+int Tile::s_deviceRowsNum{-1};
 
-Tile::Tile(Type type, int x, int y, int w, int h): m_type(type), m_index(x, y), m_w(w), m_h(h) {
+Tile::Tile(Type type, int x, int y, int w, int h)
+    : m_type(type),
+    m_index(x, y),
+    m_w(w),
+    m_h(h)
+{
     buildRect();
     buildLabel();
 }
@@ -61,13 +67,32 @@ const QColor& Tile::color(Type type) {
 }
 
 void Tile::buildLabel() {
+    Tile::Index coord = toGridCoord(m_index, m_h);
     switch(m_type) {
-    case Type::Clb:  m_label = QString("clb (%1,%2)").arg(m_index.col).arg(m_index.row); break;
-    case Type::Io:   m_label = QString("io (%1,%2)").arg(m_index.col).arg(m_index.row); break;
-    case Type::Bram: m_label = QString("bram (%1,%2)").arg(m_index.col).arg(m_index.row); break;
-    case Type::Dsp:  m_label = QString("dsp (%1,%2)").arg(m_index.col).arg(m_index.row); break;
+    case Type::Clb:  m_label = QString("clb(%1,%2)").arg(coord.col).arg(coord.row); break;
+    case Type::Io:   m_label = QString("io(%1,%2)").arg(coord.col).arg(coord.row); break;
+    case Type::Bram: m_label = QString("bram(%1,%2)").arg(coord.col).arg(coord.row); break;
+    case Type::Dsp:  m_label = QString("dsp(%1,%2)").arg(coord.col).arg(coord.row); break;
     case Type::Empty: break;
     }
+}
+
+Tile::Index Tile::toGridCoord(const Tile::Index& index, int heightUnits)
+{
+    assert(s_deviceRowsNum != -1);
+    int col = index.col + 1;
+    int row = s_deviceRowsNum - (index.row + heightUnits) + 1;
+    return Tile::Index{col, row};
+}
+
+Tile::Index Tile::fromGridCoord(const Tile::Index& index, int heightUnits)
+{
+    assert(s_deviceRowsNum != -1);
+
+    int col = index.col - 1;
+    int row = s_deviceRowsNum - index.row - heightUnits + 1;
+
+    return Tile::Index{col, row};
 }
 
 bool Tile::isVisible(const QRectF& visibleArea) const

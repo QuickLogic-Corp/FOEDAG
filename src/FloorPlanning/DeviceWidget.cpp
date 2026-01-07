@@ -20,14 +20,23 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "DeviceWidget.h"
-#include "Utils/TimerUtils.h"
+#include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
 
+#include <QElapsedTimer>
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPushButton>
 #include <QMessageBox>
+#include <QHBoxLayout>
+#include <QLabel>
 #include <QDebug>
 
+/*
+ * TODO:
+ * - io tiles shoould be exluded from region based assignment
+ * - check all cases when region may contains overllaped tiles
+ */
 namespace FOEDAG {
 
 DeviceWidget::DeviceWidget(QWidget* parent)
@@ -36,8 +45,24 @@ DeviceWidget::DeviceWidget(QWidget* parent)
   setAutoFillBackground(false);
   setMouseTracking(true);
 
-  QPushButton* bnClearSelections = new QPushButton("x", this);
-  QObject::connect(bnClearSelections, &QPushButton::clicked, this, &DeviceWidget::clearSelections);
+  QHBoxLayout* layout = new QHBoxLayout;
+  QWidget* container = new QWidget(this);
+  container->setLayout(layout);
+
+  QPushButton* bnClearSelections = new QPushButton("x");
+  bnClearSelections->setFixedSize(20,20);
+  QObject::connect(bnClearSelections, &QPushButton::clicked, this, &DeviceWidget::clearRegions);
+
+  QPushButton* bnSaveQdc = new QPushButton("save qdc");
+  QObject::connect(bnSaveQdc, &QPushButton::clicked, this, &DeviceWidget::saveQdc);
+
+  QPushButton* bnLoadQdc = new QPushButton("load qdc");
+  QObject::connect(bnLoadQdc, &QPushButton::clicked, this, &DeviceWidget::loadQdc);
+
+  layout->addWidget(bnClearSelections);
+  layout->addWidget(bnSaveQdc);
+  layout->addWidget(bnLoadQdc);
+  layout->addWidget(m_drawStat.label());
 }
 
 QSize DeviceWidget::sizeHint() const {
@@ -102,16 +127,20 @@ void DeviceWidget::onSelectedPinsChanged(const std::set<std::string>& pins)
     m_selectedPins = pins;
     if (m_regionToEdit) {
         m_regionToEdit->setPins(pins);
+        emit updatePinsSelectionRequested(m_regionToEdit->id(), m_regionToEdit->pins());
     }
 }
 
 bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
 {
-    resetEditRegion();
+    if (m_regionToEdit) {
+        resetEditRegion();
+    }
+
     for (const auto& [id, region]: m_regions) {
         if (region->rect().contains(worldCoord)) {
             m_regionToEdit = region;
-            emit updatePinsSelectionRequested(region->pins());
+            emit updatePinsSelectionRequested(region->id(), region->pins());
             update();
             return true;
         }
@@ -119,14 +148,14 @@ bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
     return false;
 }
 
-void DeviceWidget::startNewSelection(const QPointF& worldCoord)
+void DeviceWidget::startNewRegion(const QPointF& worldCoord)
 {
     m_isSelectingNewRegion = true;
     m_currentRegion = std::make_shared<Region>(worldCoord);
     update();
 }
 
-void DeviceWidget::stopSelection(const QPointF& worldCoord)
+void DeviceWidget::stopRegion(const QPointF& worldCoord)
 {
     m_isSelectingNewRegion = false;
 
@@ -134,15 +163,9 @@ void DeviceWidget::stopSelection(const QPointF& worldCoord)
         return;
     }
 
-    std::unordered_set<Tile::Index> indexes;
-    for (const auto& [index, tile]: m_tiles) {
-        if (tile.isLocated(m_currentRegion->rect())) {
-            indexes.insert(tile.index());
-        }
-    }
-
+    std::unordered_set<Tile::Index> indexes = findTiles(m_currentRegion->rect());
     if (indexes.empty()) {
-        cancelSelection();
+        cancelRegion();
         return;
     }
 
@@ -150,14 +173,14 @@ void DeviceWidget::stopSelection(const QPointF& worldCoord)
 
     for (const auto& [id, region]: m_regions) {
         if (m_currentRegion->isOverllapedWith(*region)) {
-            cancelSelection("Overllaped with other region");
+            cancelRegion("Overllaped with other region");
             return;
         }
     }
 
     if (m_currentRegion->isValid()) {
         // selected pins are baked inside the m_currentRegion
-        emit updatePinsSelectionRequested({});
+        emit clearSelectionRequested();
         m_selectedPins.clear();
         //
 
@@ -167,7 +190,7 @@ void DeviceWidget::stopSelection(const QPointF& worldCoord)
     }
 }
 
-void DeviceWidget::cancelSelection(const QString& msg)
+void DeviceWidget::cancelRegion(const QString& msg)
 {
     if (!m_currentRegion) {
         return;
@@ -206,7 +229,7 @@ void DeviceWidget::mousePressEvent(QMouseEvent* event)
             return;
         }
 
-        startNewSelection(worldCoord);
+        startNewRegion(worldCoord);
         break;
     }
     case Qt::MiddleButton:
@@ -224,7 +247,7 @@ void DeviceWidget::mouseReleaseEvent(QMouseEvent* event) {
     const QPointF worldCoord{toWorldCoord(event->pos())};
     switch(event->button()) {
     case Qt::LeftButton: {
-        stopSelection(worldCoord);
+        stopRegion(worldCoord);
         break;
     }
     case Qt::MiddleButton:
@@ -309,17 +332,189 @@ void DeviceWidget::stopPanning()
     unsetCursor();
 }
 
+void DeviceWidget::saveQdc()
+{
+    auto correctedPinName = [](const std::string& in)->std::string{
+        std::string out{in};
+        constexpr std::string_view clbsPrefix = "CLBs.";
+        constexpr std::string_view bramsPrefix = "BRAMs.";
+        constexpr std::string_view dspsPrefix = "DSPs.";
+
+        if (out.starts_with(clbsPrefix)) {
+            out.erase(0, clbsPrefix.size());
+        } else if  (out.starts_with(bramsPrefix)) {
+            out.erase(0, bramsPrefix.size());
+        } else if (out.starts_with(dspsPrefix)) {
+            out.erase(0, dspsPrefix.size());
+        }
+
+        out += ".*";
+        return out;
+    };
+    constexpr std::string_view lineDelimeter = "\\\n";
+
+    std::string content;
+    for (const auto& [id, region]: m_regions) {
+        if (region->pins().empty()) {
+            continue;
+        }
+
+        std::string line = "set_region ";
+        line += lineDelimeter;
+
+        int counter = 0;
+        for (const std::string& pin: region->pins()) {
+            line += correctedPinName(pin);
+            counter++;
+            if (counter < region->pins().size()) {
+                line += ",";
+                line += lineDelimeter;
+            }
+        }
+
+        line += " ";
+        line += lineDelimeter;
+
+        line += region->bottomLeftGridCoord().toClbString();
+        line += ":";
+        line += region->topRightGridCoord().toClbString();
+
+        line += "\n\n";
+
+        content += line;
+    }
+
+    FileUtils::WriteToFile(m_qdcFilepath, content);
+}
+
+void DeviceWidget::loadQdc()
+{
+    resetEditRegion();
+    clearRegions();
+
+    std::string content = FileUtils::GetFileContent(m_qdcFilepath);
+
+    constexpr std::string_view lineDelimeter = "\\\n";
+
+    content = StringUtils::replaceAll(content, "  ", " ");
+    content = StringUtils::replaceAll(content, lineDelimeter, "");
+    //qInfo() << QString::fromStdString(content);
+
+    auto extractGridCoord = [](const std::string& idxStr)->std::optional<Tile::Index> {
+        std::vector<std::string> tokens = StringUtils::tokenize(idxStr, ",");
+        if (tokens.size() == 2) {
+            int col = std::stoi(tokens[0]);
+            int row = std::stoi(tokens[1]);
+            return Tile::Index(col, row);
+        }
+        return std::nullopt;
+    };
+
+    auto extractResolvedGridCoord = [&extractGridCoord](const std::string& data)->std::optional<Tile::Index> {
+        if (StringUtils::startsWith(data, "clb")) {
+            std::string idxStr = StringUtils::extractWildcardSegment(data, "clb(*)");
+            return extractGridCoord(idxStr);
+        } else if (StringUtils::startsWith(data, "bram")) {
+            assert(false && "TODO");
+        } else if (StringUtils::startsWith(data, "dsp")) {
+            assert(false && "TODO");
+        }
+        return std::nullopt;
+    };
+
+    auto splitIgnoringParens = [](const std::string& s, char delimiter)->std::vector<std::string> {
+        std::vector<std::string> result;
+        std::string current;
+
+        int depth = 0;
+
+        for (char c : s) {
+            if (c == '(') {
+                depth++;
+                current += c;
+            } else if (c == ')') {
+                depth--;
+                current += c;
+            } else if (c == delimiter && depth == 0) {
+                result.push_back(current);
+                current.clear();
+            } else {
+                current += c;
+            }
+        }
+
+        if (!current.empty()) {
+            result.push_back(current);
+        }
+
+        return result;
+    };
+
+    std::vector<std::string> lines = StringUtils::tokenize(content, "\n\n");
+    for (const std::string& line: lines) {
+        if (StringUtils::startsWith(line, "set_region")) {
+            std::vector<std::string> tokens = StringUtils::tokenize(line, " ");
+            if (tokens.size() == 3) {
+                // extract pins
+                std::vector<std::string> pinsDirty = StringUtils::tokenize(tokens[1], ",");
+                std::set<std::string> pins;
+                for (std::string pin: pinsDirty) {
+                    StringUtils::removeSuffix(pin, ".*");
+                    pins.insert("CLBs."+pin);
+                }
+                // extract regions
+                std::vector<std::string> regions = splitIgnoringParens(tokens[2], ',');
+                for (const std::string& region: regions) {
+                    std::vector<std::string> tokens = StringUtils::tokenize(region, ":");
+                    if (tokens.size() == 1) {
+                        assert(false && "TODO");
+                        // special case
+                    } else if (tokens.size() == 2) {
+                        std::optional<Tile::Index> bottomLeftGridCoordOpt = extractResolvedGridCoord(tokens[0]);
+                        std::optional<Tile::Index> topRightGridCoordOpt = extractResolvedGridCoord(tokens[1]);
+                        if (bottomLeftGridCoordOpt && topRightGridCoordOpt) {
+                            Tile::Index bottomLeftTileIndex = Tile::fromGridCoord(bottomLeftGridCoordOpt.value());
+                            Tile::Index topRightTileIndex = Tile::fromGridCoord(topRightGridCoordOpt.value());
+
+                            std::optional<QPointF> bottomLeftPointOpt = findBottomLeftPoint(bottomLeftTileIndex);
+                            std::optional<QPointF> topRightPointOpt = findTopRightPoint(topRightTileIndex);
+                            if (bottomLeftPointOpt && topRightPointOpt) {
+                                QPointF bottomLeftPoint = bottomLeftPointOpt.value() + 0.5*QPointF(-Tile::borderPx(), Tile::borderPx());
+                                QPointF topRightPoint = topRightPointOpt.value()     + 0.5*QPointF(Tile::borderPx(), -Tile::borderPx());
+
+                                RegionPtr region = std::make_shared<Region>(bottomLeftPoint);
+                                std::unordered_set<Tile::Index> tiles = findTiles(QRectF(bottomLeftPoint, topRightPoint));
+                                region->accept(topRightPoint, tiles, pins);
+                                m_regions[region->id()] = region;
+                            } else {
+                                qCritical() << "syntax error for regions" << QString::fromStdString(region) << "coudn't extract start and end points";
+                            }
+                        } else {
+                            qCritical() << "syntax error for regions" << QString::fromStdString(region) << "coudn't extract bottomLeft or topRight indexes";
+                        }
+                    } else {
+                        qCritical() << "syntax error for regions" << QString::fromStdString(region);
+                    }
+                }
+            }
+        }
+    }
+
+    if (!m_regions.empty()) {
+        update();
+    }
+}
+
 void DeviceWidget::paintEvent(QPaintEvent* event) 
 {
-  ScopedTimer st("DeviceWidget::paintEvent");
+  QElapsedTimer t;
+  t.start();
 
   Q_UNUSED(event);
 
   QPainter p(this);
   p.setRenderHint(QPainter::Antialiasing, true);
   p.setRenderHint(QPainter::TextAntialiasing, true);
-
-  p.save();
 
   p.translate(-m_panPixels);
   p.scale(m_scale, m_scale);
@@ -331,22 +526,15 @@ void DeviceWidget::paintEvent(QPaintEvent* event)
       height()    / m_scale
       );
 
-  // ---- Draw tile fills (optional) ----
-  // Only draw labels if tiles are large enough
-  // const bool drawText = (s >= 22.0);
-  const bool isDrawingText = true;
-
   drawTilesBatched(p);
   drawRegions(p);
 
-   p.restore();
+  const bool isDrawingText = true;
+  if (isDrawingText) {
+    drawTileLabels(p);
+  }
 
-  // if (isDrawingText) {
-  //      p.save();
-  //      p.scale(1/m_scale, 1/m_scale);
-  //      drawTileLabels(p, visibleIndexesArea);
-  //      p.restore();
-  // }
+  m_drawStat.setDrawTimeMs(t.elapsed());
 }
 
 void DeviceWidget::drawBackground(QPainter& p)
@@ -357,14 +545,6 @@ void DeviceWidget::drawBackground(QPainter& p)
 void DeviceWidget::drawTilesBatched(QPainter& p)
 {
     QVector<QRectF> clbRects, ioRects, bramRects, dspRects;
-    // todo: calc num properly based on available resources
-    // int num = m_device->columns * m_device->rows;
-    // clbRects.reserve(num);
-    // ioRects.reserve(num);
-    // bramRects.reserve(num);
-    // dspRects.reserve(num);
-    //
-
     for (const auto& [index, tile]: m_tiles) {
         if (!tile.isVisible(m_viewPort)) {
             continue;
@@ -378,7 +558,7 @@ void DeviceWidget::drawTilesBatched(QPainter& p)
         }
     }
 
-    qInfo() << "draw rectangles num" << clbRects.size() + ioRects.size() + bramRects.size() + dspRects.size();
+    m_drawStat.setDrawableTilesNum(clbRects.size() + ioRects.size() + bramRects.size() + dspRects.size());
     p.setPen(Qt::NoPen);
 
     p.setBrush(Tile::color(Tile::Type::Clb));  p.drawRects(clbRects);
@@ -436,12 +616,15 @@ void DeviceWidget::highLightTilesInRegion(QPainter& p, const Region& region) con
 void DeviceWidget::drawTileLabels(QPainter& p)
 {
     p.setPen(m_textColor);
+    QFont font;
+    font.setPointSize(4);
+    p.setFont(font);
 
     for (const auto& [index, tile]: m_tiles) {
         if (!tile.isVisible(m_viewPort)) {
             continue;
         }
-        p.drawText(tile.rect(), Qt::AlignCenter | Qt::AlignBottom, tile.label());
+        p.drawText(tile.rect(), Qt::AlignCenter | Qt::AlignCenter, tile.label());
     }
 }
 
@@ -453,15 +636,40 @@ QPointF DeviceWidget::toWorldCoord(const QPoint& screenCoord)
 void DeviceWidget::refreshRegion(const RegionPtr& region)
 {
     region->buildHandles();
+    region->setTiles(findTiles(region->rect()));
+}
 
+std::unordered_set<Tile::Index> DeviceWidget::findTiles(const QRectF& rect)
+{
     std::unordered_set<Tile::Index> indexes;
     for (const auto& [index, tile]: m_tiles) {
-        if (tile.isLocated(region->rect())) {
+        if (tile.isLocated(rect)) {
             indexes.insert(tile.index());
         }
     }
+    return indexes;
+}
 
-    region->setTiles(indexes);
+std::optional<QPointF> DeviceWidget::findBottomLeftPoint(const Tile::Index& idx) const
+{
+    auto it = m_tiles.find(idx);
+    if (it != m_tiles.end()) {
+        const Tile& t = it->second;
+        return t.rect().bottomLeft();
+    }
+
+    return std::nullopt;
+}
+
+std::optional<QPointF> DeviceWidget::findTopRightPoint(const Tile::Index& idx) const
+{
+    auto it = m_tiles.find(idx);
+    if (it != m_tiles.end()) {
+        const Tile& t = it->second;
+        return t.rect().topRight();
+    }
+
+    return std::nullopt;
 }
 
 } // namespace FOEDAG
