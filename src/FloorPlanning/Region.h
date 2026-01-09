@@ -92,7 +92,7 @@ public:
         const auto& large = (m_tiles.size() < rhs.m_tiles.size()) ? rhs.m_tiles : m_tiles;
 
         for (const auto& v: small) {
-            if (large.contains(v)) {
+            if (large.find(v) != large.end()) {
                 return true;
             }
         }
