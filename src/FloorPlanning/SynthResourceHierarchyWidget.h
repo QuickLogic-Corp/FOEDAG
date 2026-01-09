@@ -43,24 +43,27 @@ public:
 
     void loadPostSynthNetFile(const std::filesystem::path& path);
 
-    std::set<std::string> selectedItems() const;
-    void setSelectedItems(int id, const std::set<std::string>& items);
-    void clearSelection();
+    std::set<std::string> collectSelectedElements() const;
+    void setSelectedElements(int id, const std::set<std::string>& elements);
+    void clearSelectedElements();
 
 signals:
-    void selectionChanged(std::set<std::string>);
+    void selectedElementsChanged(std::set<std::string>);
 
 private:
+    QLineEdit* m_leSearch{nullptr};
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
 
-    QStandardItem* buildCategory(const QString& title,
-                                 const std::set<std::string>& items);
-    QStandardItem* findOrCreateChild(QStandardItem* parent,
-                                     const QString& text,
-                                     const Qt::ItemFlags flags);
     QStandardItem* findRegionItem(QStandardItem* parent, const QString& text);
-    void hideLeaves(QTreeView* view, QStandardItem* parentItem, const QModelIndex& parentIndex);
+
+    void focusItem(const QString&);
+
+    void addPath(const std::string&);
+    void onItemChanged(QStandardItem*);
+
+    void showOnlyCheckedItems();
+    void showAllItems();
 };
 
 }  // namespace FOEDAG

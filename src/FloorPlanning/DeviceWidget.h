@@ -83,11 +83,11 @@ public:
 
     void constructTiles(const DeviceDescriptorPtr& device);
 
-    void onSelectedPinsChanged(const std::set<std::string>& pins);
+    void onSelectedElementsChanged(const std::set<std::string>& pins);
 
 signals:
     void clearSelectionRequested();
-    void updatePinsSelectionRequested(int, std::set<std::string>);
+    void updateElementsSelectionRequested(int, std::set<std::string>);
 
 protected:
     QSize sizeHint() const override final;

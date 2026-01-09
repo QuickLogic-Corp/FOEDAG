@@ -59,13 +59,13 @@ public:
     }
 
     void setTiles(const std::unordered_set<Tile::Index>& tiles);
-    void setPins(const std::set<std::string>& pins) { m_pins = pins; }
+    void setPins(const std::set<std::string>& pins);
 
     void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles, const std::set<std::string>& pins) {
         m_stopPosOpt = point;
         m_rect = QRectF(startPos(), stopPos());
         setTiles(tiles);
-        m_pins = pins;
+        setPins(pins);
         buildHandles();
     }
     void reject() {

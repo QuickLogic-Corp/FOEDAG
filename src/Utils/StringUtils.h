@@ -147,6 +147,7 @@ class StringUtils final {
   static bool matchesWildcardPattern(const std::string& text, const std::string& pattern);
   static std::string extractWildcardSegment(const std::string& text, const std::string& pattern);
   static void removePrefix(std::string& str, const std::string& prefix);
+  static void removeSuffix(std::string& str, const std::string& suffix);
 
   static std::string toString(const std::unordered_set<std::string>& set, char delimiter = ',') {
     std::string result;

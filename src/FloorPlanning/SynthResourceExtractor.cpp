@@ -40,39 +40,36 @@ void SynthResourceExtractor::parseNetFileContent(const std::string& content)
         return;
     }
 
-    QDomNodeList blocks = doc.elementsByTagName("block");
-
-    for (int i=0; i<blocks.count(); ++i) {
-        const QDomElement element = blocks.at(i).toElement();
-        BlockType type = determineBlockType(element);
-        if (type != BlockType::UNKNOWN) {
-            QDomNodeList subBlocks = element.elementsByTagName("block");
-            for (int j=0; j<subBlocks.count(); ++j) {
-                const QDomElement subElement = subBlocks.at(j).toElement();
-                if (determineBlockType(subElement) == BlockType::FLE) {
-                    const std::string name = subElement.attribute("name").toStdString();
-                    if (!name.empty()) {
-                        m_resources.add(type, name);
-                    }
-                }
-            }
+    static std::function<void(const QDomElement&, std::vector<QDomElement>&)>
+        collectLeafAtomsRecursive = [](const QDomElement& block, std::vector<QDomElement>& out)
+    {
+        if (block.isNull() || (block.tagName() != "block")) {
+            return;
         }
-    }
-}
 
-BlockType SynthResourceExtractor::determineBlockType(const QDomElement& element) const
-{
-    const auto instance = element.attribute("instance");
-    if (instance.contains("fle")) {
-        return BlockType::FLE;
-    } else if (instance.contains("clb")) {
-        return BlockType::CLB;
-    } else if (instance.contains("bram")) {
-        return BlockType::BRAM;
-    } else if (instance.contains("dsp")) {
-        return BlockType::DSP;
+        // Check if this block has any child <block>
+        QDomElement child = block.firstChildElement("block");
+        if (child.isNull()) {
+            const QString name = block.attribute("name");
+            if (!name.isEmpty()) {
+                out.push_back(block);
+            }
+            return;
+        }
+
+        // Recurse into direct child blocks only
+        for (; !child.isNull(); child = child.nextSiblingElement("block")) {
+            collectLeafAtomsRecursive(child, out);
+        }
+    };
+
+    std::vector<QDomElement> atoms;
+    collectLeafAtomsRecursive(doc.documentElement(), atoms);
+
+    for (const QDomElement& a: atoms) {
+        const QString name = a.attribute("name");
+        m_resources.add(name.toStdString());
     }
-    return BlockType::UNKNOWN;
 }
 
 }  // namespace FOEDAG

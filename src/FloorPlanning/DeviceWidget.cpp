@@ -122,12 +122,12 @@ void DeviceWidget::constructTiles(const DeviceDescriptorPtr& device) {
     update();
 }
 
-void DeviceWidget::onSelectedPinsChanged(const std::set<std::string>& pins)
+void DeviceWidget::onSelectedElementsChanged(const std::set<std::string>& pins)
 {
     m_selectedPins = pins;
     if (m_regionToEdit) {
         m_regionToEdit->setPins(pins);
-        emit updatePinsSelectionRequested(m_regionToEdit->id(), m_regionToEdit->pins());
+        emit updateElementsSelectionRequested(m_regionToEdit->id(), m_regionToEdit->pins());
     }
 }
 
@@ -140,7 +140,7 @@ bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
     for (const auto& [id, region]: m_regions) {
         if (region->rect().contains(worldCoord)) {
             m_regionToEdit = region;
-            emit updatePinsSelectionRequested(region->id(), region->pins());
+            emit updateElementsSelectionRequested(region->id(), region->pins());
             update();
             return true;
         }
@@ -336,48 +336,51 @@ void DeviceWidget::saveQdc()
 {
     auto correctedPinName = [](const std::string& in)->std::string{
         std::string out{in};
-        constexpr std::string_view clbsPrefix = "CLBs.";
-        constexpr std::string_view bramsPrefix = "BRAMs.";
-        constexpr std::string_view dspsPrefix = "DSPs.";
-
-        if (out.starts_with(clbsPrefix)) {
-            out.erase(0, clbsPrefix.size());
-        } else if  (out.starts_with(bramsPrefix)) {
-            out.erase(0, bramsPrefix.size());
-        } else if (out.starts_with(dspsPrefix)) {
-            out.erase(0, dspsPrefix.size());
-        }
-
         out += ".*";
         return out;
     };
     constexpr std::string_view lineDelimeter = "\\\n";
 
-    std::string content;
+    // preprocess to unite regions by same pin list
+    std::map<std::string, std::string> data;
     for (const auto& [id, region]: m_regions) {
         if (region->pins().empty()) {
             continue;
         }
 
+        std::string pinsStr = "";
+        int counter = 0;
+        for (const std::string& pin: region->pins()) {
+            pinsStr += correctedPinName(pin);
+            counter++;
+            if (counter < region->pins().size()) {
+                pinsStr += ",";
+                pinsStr += lineDelimeter;
+            }
+        }
+
+        std::string regionStr = region->bottomLeftGridCoord().toClbString();
+        regionStr += ":";
+        regionStr += region->topRightGridCoord().toClbString();
+        if (data.find(pinsStr) != data.end()) {
+            data[pinsStr] += "," + regionStr;
+        } else {
+            data[pinsStr] = regionStr;
+        }
+    }
+    // end preprocess
+
+    std::string content;
+    for (const auto& [pinsStr, regionsStr]: data) {
         std::string line = "set_region ";
         line += lineDelimeter;
 
-        int counter = 0;
-        for (const std::string& pin: region->pins()) {
-            line += correctedPinName(pin);
-            counter++;
-            if (counter < region->pins().size()) {
-                line += ",";
-                line += lineDelimeter;
-            }
-        }
+        line += pinsStr;
 
         line += " ";
         line += lineDelimeter;
 
-        line += region->bottomLeftGridCoord().toClbString();
-        line += ":";
-        line += region->topRightGridCoord().toClbString();
+        line += regionsStr;
 
         line += "\n\n";
 
@@ -460,7 +463,7 @@ void DeviceWidget::loadQdc()
                 std::set<std::string> pins;
                 for (std::string pin: pinsDirty) {
                     StringUtils::removeSuffix(pin, ".*");
-                    pins.insert("CLBs."+pin);
+                    pins.insert(pin);
                 }
                 // extract regions
                 std::vector<std::string> regions = splitIgnoringParens(tokens[2], ',');

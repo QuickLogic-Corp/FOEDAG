@@ -323,9 +323,16 @@ std::string StringUtils::extractWildcardSegment(const std::string& text, const s
 
 void StringUtils::removePrefix(std::string& str, const std::string& prefix)
 {
-  if (str.compare(0, prefix.length(), prefix) == 0) {
-    str.erase(0, prefix.length());
-  }
+    if (startsWith(str, prefix)) {
+        str.erase(0, prefix.length());
+    }
+}
+
+void StringUtils::removeSuffix(std::string& str, const std::string& suffix)
+{
+    if (endsWith(str, suffix)) {
+        str.erase(str.size()-suffix.size(), suffix.size());
+    }
 }
 
 }  // namespace FOEDAG

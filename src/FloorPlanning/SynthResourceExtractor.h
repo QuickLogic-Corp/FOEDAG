@@ -35,34 +35,17 @@ enum BlockType {
 };
 
 struct SynthResources {
-  std::set<std::string> clbs;
-  std::set<std::string> brams;
-  std::set<std::string> dsps;
+  std::set<std::string> atoms;
 
-  void add(BlockType type, const std::string& name) {
-    switch(type) {
-      case BlockType::CLB: clbs.insert(name); break;
-      case BlockType::BRAM: brams.insert(name); break;
-      case BlockType::DSP: dsps.insert(name); break;
-      default: break;
-    }
+  void add(const std::string& name) {
+      atoms.insert(name);
   }
 
   // debug
   void print() const {
     qDebug() << "clbs:";
-    for (const std::string& clb: clbs) {
-      qDebug() << "  " << clb.c_str();
-    }
-
-    qDebug() << "brams:";
-    for (const std::string& bram: brams) {
-      qDebug() << "  " << bram.c_str();
-    }
-    
-    qDebug() << "dsps:";
-    for (const std::string& dsp: dsps) {
-      qDebug() << "  " << dsp.c_str();
+    for (const std::string& atom: atoms) {
+      qDebug() << "  " << atom.c_str();
     }
   }
   // debug
@@ -75,7 +58,6 @@ public:
 
 private:
   SynthResources m_resources;
-  BlockType determineBlockType(const QDomElement&) const;
 };
 
 }  // namespace FOEDAG

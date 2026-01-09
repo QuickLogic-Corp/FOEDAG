@@ -33,6 +33,16 @@ void Region::setTiles(const std::unordered_set<Tile::Index>& tiles)
     updateTileGridCoordBounds();
 }
 
+void Region::setPins(const std::set<std::string>& pins)
+{
+    qInfo() << "region" << id() << "got" << pins.size() << "pins:";
+    for (const std::string& pin: pins) {
+        qInfo() << "pin=" << pin.c_str();
+    }
+    qInfo() << "";
+    m_pins = pins;
+}
+
 void Region::updateTileGridCoordBounds()
 {
     if (m_tiles.empty()) {
