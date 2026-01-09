@@ -25,6 +25,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDomElement>
 #include <QDomNodeList>
 
+#include <Utils/FileUtils.h>
+
 namespace FOEDAG {
 
 void SynthResourceExtractor::parseNetFileContent(const std::string& content)
@@ -70,6 +72,14 @@ void SynthResourceExtractor::parseNetFileContent(const std::string& content)
         const QString name = a.attribute("name");
         m_resources.add(name.toStdString());
     }
+
+    // debug
+    QList<QString> lines;
+    for (const std::string& element: m_resources.atoms) {
+        lines.append(QString::fromStdString(element));
+    }
+    FileUtils::WriteToFile("aurora_floorplanning_netlist.txt", lines.join("\n").toStdString());
+    // debug
 }
 
 }  // namespace FOEDAG
