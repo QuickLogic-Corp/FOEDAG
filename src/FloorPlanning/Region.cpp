@@ -33,14 +33,12 @@ void Region::setTiles(const std::unordered_set<Tile::Index>& tiles)
     updateTileGridCoordBounds();
 }
 
-void Region::setPins(const std::set<std::string>& pins)
+void Region::setElements(const HierarhyElementsPtr& elemenets)
 {
-    qInfo() << "region" << id() << "got" << pins.size() << "pins:";
-    for (const std::string& pin: pins) {
-        qInfo() << "pin=" << pin.c_str();
+    if (elemenets) {
+        elemenets->print(QString("Region(%1)::setElements").arg(m_id).toStdString());
     }
-    qInfo() << "";
-    m_pins = pins;
+    m_elements = elemenets;
 }
 
 void Region::updateTileGridCoordBounds()
@@ -55,29 +53,31 @@ void Region::updateTileGridCoordBounds()
             return a.col < b.col;
         });
 
-    auto [minRow, maxRow] = std::minmax_element(
-        m_tiles.begin(), m_tiles.end(),
-        [](const Tile::Index& a, const Tile::Index& b) {
-            return a.row < b.row;
-        });
+    std::optional<int> bottomLeftRowOpt;
+    std::optional<int> topRightRowOpt;
 
-    Tile::Index bottomLeftIndex = Tile::Index(minCol->col, maxRow->row);
-    Tile::Index topRightIndex = Tile::Index(maxCol->col, minRow->row);
+    for (const Tile::Index& index: m_tiles) {
+        if (index.col == minCol->col) {
+            if (bottomLeftRowOpt) {
+                bottomLeftRowOpt = std::max(bottomLeftRowOpt.value(), index.row);
+            } else {
+                bottomLeftRowOpt = index.row;
+            }
+        }
+        if (index.col == maxCol->col) {
+            if (topRightRowOpt) {
+                topRightRowOpt = std::min(topRightRowOpt.value(), index.row);
+            } else {
+                topRightRowOpt = index.row;
+            }
+        }
+    }
 
-    m_bottomLeftGridCoord = Tile::toGridCoord(bottomLeftIndex);
-    m_topRightGridCoord   = Tile::toGridCoord(topRightIndex);
-
-    // test
-    Tile::Index bottomLeftIndexReversed = Tile::fromGridCoord(m_bottomLeftGridCoord);
-    Tile::Index topRightIndexReversed = Tile::fromGridCoord(m_topRightGridCoord);
-
-    assert(bottomLeftIndex.row == bottomLeftIndexReversed.row);
-    assert(bottomLeftIndex.col == bottomLeftIndexReversed.col);
-    assert(topRightIndex.row == topRightIndexReversed.row);
-    assert(topRightIndex.col == topRightIndexReversed.col);
-    //
+    if (bottomLeftRowOpt && topRightRowOpt) {
+        m_bottomLeftIndex = Tile::Index(minCol->col, bottomLeftRowOpt.value());
+        m_topRightIndex = Tile::Index(maxCol->col, topRightRowOpt.value());
+    }
 }
-
 
 
 } // namespace FOEDAG

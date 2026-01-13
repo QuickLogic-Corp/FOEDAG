@@ -57,6 +57,7 @@ set (SRC_H_LIST
   SynthResourceExtractor.h
   Tile.h
   Region.h
+  HierarhyElement.h
 )
 
 set (SRC_UI_LIST

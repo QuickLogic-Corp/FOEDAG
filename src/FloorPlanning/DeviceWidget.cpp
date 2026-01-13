@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "DeviceWidget.h"
+#include "HierarhyElement.h"
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
@@ -34,8 +35,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 /*
  * TODO:
- * - io tiles shoould be exluded from region based assignment
  * - check all cases when region may contains overllaped tiles
+ * - save/load qdc with mixed tiles types
+ * - search multihierarhy
+ * - fix selection
+ * - post load, resize region works with some issue
  */
 namespace FOEDAG {
 
@@ -73,6 +77,15 @@ QSize DeviceWidget::minimumSizeHint() const {
   return QSize(200, 200);
 }
 
+void DeviceWidget::constuctTile(Tile::Type type, int col, int row)
+{
+    Tile::Index coord = toGridCoordIndex(type, Tile::Index{col, row});
+    QSize size = m_device->elementSize(type);
+    std::string label = getTileLabel(type, coord);
+    label += "," + std::to_string(col) + ";" + std::to_string(row); // debug
+    m_tiles[Tile::Index{col, row}] = Tile{type, col, row, size.width(), size.height(), QString::fromStdString(label)};
+}
+
 void DeviceWidget::constructTiles(const DeviceDescriptorPtr& device) {
     m_device = device;
     m_tiles.clear();
@@ -81,37 +94,44 @@ void DeviceWidget::constructTiles(const DeviceDescriptorPtr& device) {
     bool step_on_dsp = false;
     int stepCounter = 0;
     m_tiles.reserve(device->columns * device->rows);
+    Tile::Index bottomLeftIndex;
     for (int col = 0; col < device->columns; ++col) {
         for (int row = 0; row < device->rows; ++row) {
-            if (row == 0 || row == device->rows -1 || col == 0 || col == device->columns - 1) {
-                m_tiles[Tile::Index{col, row}] = Tile{Tile::Type::Io, col, row, 1, 1};
-            } else if (device->bramColumns.find(col) != device->bramColumns.end()) {
+            if (row == 0 || (row == device->rows -1) || col == 0 || (col == device->columns - 1)) {
+                constuctTile(Tile::Type::Io, col, row);
+            } else if (device->isBramColumn(col)) {
                 if (!step_on_bram) {
-                    m_tiles[Tile::Index{col, row}] = Tile{Tile::Type::Bram, col, row, device->bramSize.width(), device->bramSize.height()};
+                    constuctTile(Tile::Type::Bram, col, row);
+                    bottomLeftIndex = Tile::Index(col, row);
                     step_on_bram = true;
                 }
                 if (step_on_bram) {
+                    m_placeHolders[Tile::Index(col, row)] = bottomLeftIndex;
                     stepCounter++;
                     if (stepCounter == device->bramSize.height()) {
+                        bottomLeftIndex.reset();
                         step_on_bram = false;
                         stepCounter= 0;
                     }
                 }
 
-            } else if (device->dspColumns.find(col) != device->dspColumns.end()) {
+            } else if (device->isDspColumn(col)) {
                 if (!step_on_dsp) {
-                    m_tiles[Tile::Index{col, row}] = Tile{Tile::Type::Dsp, col, row, device->dspSize.width(), device->dspSize.height()};
+                    bottomLeftIndex = Tile::Index(col, row);
+                    constuctTile(Tile::Type::Dsp, col, row);
                     step_on_dsp = true;
                 }
                 if (step_on_dsp) {
+                    m_placeHolders[Tile::Index(col, row)] = bottomLeftIndex;
                     stepCounter++;
                     if (stepCounter == device->dspSize.height()) {
+                        bottomLeftIndex.reset();
                         step_on_dsp = false;
                         stepCounter = 0;
                     }
                 }
             } else {
-                m_tiles[Tile::Index{col, row}] = Tile{Tile::Type::Clb, col, row, 1, 1};
+                constuctTile(Tile::Type::Clb, col, row);
             }
         }
     }
@@ -122,12 +142,12 @@ void DeviceWidget::constructTiles(const DeviceDescriptorPtr& device) {
     update();
 }
 
-void DeviceWidget::onSelectedElementsChanged(const std::set<std::string>& pins)
+void DeviceWidget::onSelectedElementsChanged(const HierarhyElementsPtr& elements)
 {
-    m_selectedPins = pins;
+    m_selectedElements = elements;
     if (m_regionToEdit) {
-        m_regionToEdit->setPins(pins);
-        emit updateElementsSelectionRequested(m_regionToEdit->id(), m_regionToEdit->pins());
+        m_regionToEdit->setElements(elements);
+        emit updateElementsSelectionRequested(m_regionToEdit->id(), m_regionToEdit->elements());
     }
 }
 
@@ -135,12 +155,13 @@ bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
 {
     if (m_regionToEdit) {
         resetEditRegion();
+        return false;
     }
 
     for (const auto& [id, region]: m_regions) {
         if (region->rect().contains(worldCoord)) {
             m_regionToEdit = region;
-            emit updateElementsSelectionRequested(region->id(), region->pins());
+            emit updateElementsSelectionRequested(region->id(), region->elements());
             update();
             return true;
         }
@@ -169,7 +190,7 @@ void DeviceWidget::stopRegion(const QPointF& worldCoord)
         return;
     }
 
-    m_currentRegion->accept(worldCoord, indexes, m_selectedPins);
+    m_currentRegion->accept(worldCoord, indexes, m_selectedElements);
 
     for (const auto& [id, region]: m_regions) {
         if (m_currentRegion->isOverllapedWith(*region)) {
@@ -181,7 +202,7 @@ void DeviceWidget::stopRegion(const QPointF& worldCoord)
     if (m_currentRegion->isValid()) {
         // selected pins are baked inside the m_currentRegion
         emit clearSelectionRequested();
-        m_selectedPins.clear();
+        m_selectedElements.reset();
         //
 
         m_regions[m_currentRegion->id()] = m_currentRegion;
@@ -334,9 +355,11 @@ void DeviceWidget::stopPanning()
 
 void DeviceWidget::saveQdc()
 {
-    auto correctedPinName = [](const std::string& in)->std::string{
-        std::string out{in};
-        out += ".*";
+    auto resolvedElementName = [](const HierarhyElement& in)->std::string{
+        std::string out{in.path};
+        if (!in.isLeaf) {
+            out += ".*";
+        }
         return out;
     };
     constexpr std::string_view lineDelimeter = "\\\n";
@@ -344,28 +367,41 @@ void DeviceWidget::saveQdc()
     // preprocess to unite regions by same pin list
     std::map<std::string, std::string> data;
     for (const auto& [id, region]: m_regions) {
-        if (region->pins().empty()) {
+        if (!region->elements()) {
+            continue;
+        } if(region->elements()->empty()) {
             continue;
         }
 
-        std::string pinsStr = "";
+        std::string elementsStr = "";
         int counter = 0;
-        for (const std::string& pin: region->pins()) {
-            pinsStr += correctedPinName(pin);
+        for (const HierarhyElement& element: *region->elements()) {
+            elementsStr += resolvedElementName(element);
             counter++;
-            if (counter < region->pins().size()) {
-                pinsStr += ",";
-                pinsStr += lineDelimeter;
+            if (counter < region->elements()->size()) {
+                elementsStr += ",";
+                elementsStr += lineDelimeter;
             }
         }
 
-        std::string regionStr = region->bottomLeftGridCoord().toClbString();
-        regionStr += ":";
-        regionStr += region->topRightGridCoord().toClbString();
-        if (data.find(pinsStr) != data.end()) {
-            data[pinsStr] += "," + regionStr;
+        Tile::Type bottomLeftType = tile(region->bottomLeftIndex()).type();
+        Tile::Type topRightType = tile(region->topRightIndex()).type();
+        Tile::Index bottomLeftIndexFixed = region->bottomLeftIndex();
+
+        qInfo() << "region->bottomLeftIndex()=" << region->bottomLeftIndex().col << region->bottomLeftIndex().row;
+
+        std::string bottomLeftStr = getTileLabel(bottomLeftType, toGridCoordIndex(bottomLeftType, bottomLeftIndexFixed));
+
+        std::string topRightStr = getTileLabel(topRightType, toGridCoordIndex(topRightType, region->topRightIndex()));
+        std::string regionStr{bottomLeftStr};
+        if (topRightStr != bottomLeftStr) {
+            regionStr += ":";
+            regionStr += topRightStr;
+        }
+        if (data.find(elementsStr) != data.end()) {
+            data[elementsStr] += "," + regionStr;
         } else {
-            data[pinsStr] = regionStr;
+            data[elementsStr] = regionStr;
         }
     }
     // end preprocess
@@ -403,24 +439,26 @@ void DeviceWidget::loadQdc()
     content = StringUtils::replaceAll(content, lineDelimeter, "");
     //qInfo() << QString::fromStdString(content);
 
-    auto extractGridCoord = [](const std::string& idxStr)->std::optional<Tile::Index> {
+    auto extractGridCoord = [](const std::string& idxStr, Tile::Type type)->std::optional<TileDescriptor> {
         std::vector<std::string> tokens = StringUtils::tokenize(idxStr, ",");
         if (tokens.size() == 2) {
             int col = std::stoi(tokens[0]);
             int row = std::stoi(tokens[1]);
-            return Tile::Index(col, row);
+            return TileDescriptor{Tile::Index(col, row), type};
         }
         return std::nullopt;
     };
 
-    auto extractResolvedGridCoord = [&extractGridCoord](const std::string& data)->std::optional<Tile::Index> {
+    auto extractResolvedGridCoord = [&extractGridCoord](const std::string& data)->std::optional<TileDescriptor> {
         if (StringUtils::startsWith(data, "clb")) {
             std::string idxStr = StringUtils::extractWildcardSegment(data, "clb(*)");
-            return extractGridCoord(idxStr);
+            return extractGridCoord(idxStr, Tile::Type::Clb);
         } else if (StringUtils::startsWith(data, "bram")) {
-            assert(false && "TODO");
+            std::string idxStr = StringUtils::extractWildcardSegment(data, "bram(*)");
+            return extractGridCoord(idxStr, Tile::Type::Bram);
         } else if (StringUtils::startsWith(data, "dsp")) {
-            assert(false && "TODO");
+            std::string idxStr = StringUtils::extractWildcardSegment(data, "dsp(*)");
+            return extractGridCoord(idxStr, Tile::Type::Dsp);
         }
         return std::nullopt;
     };
@@ -458,26 +496,45 @@ void DeviceWidget::loadQdc()
         if (StringUtils::startsWith(line, "set_region")) {
             std::vector<std::string> tokens = StringUtils::tokenize(line, " ");
             if (tokens.size() == 3) {
-                // extract pins
-                std::vector<std::string> pinsDirty = StringUtils::tokenize(tokens[1], ",");
-                std::set<std::string> pins;
-                for (std::string pin: pinsDirty) {
-                    StringUtils::removeSuffix(pin, ".*");
-                    pins.insert(pin);
+                // extract elements
+                std::vector<std::string> pathesDirty = StringUtils::tokenize(tokens[1], ",");
+                HierarhyElementsPtr elements = std::make_shared<HierarhyElements>();
+                for (std::string path: pathesDirty) {
+                    if (StringUtils::endsWith(path, ".*")) {
+                        StringUtils::removeSuffix(path, ".*");
+                        elements->insert(HierarhyElement{path, false});
+                    } else {
+                        elements->insert(HierarhyElement{path, true});
+                    }
                 }
                 // extract regions
                 std::vector<std::string> regions = splitIgnoringParens(tokens[2], ',');
                 for (const std::string& region: regions) {
                     std::vector<std::string> tokens = StringUtils::tokenize(region, ":");
                     if (tokens.size() == 1) {
-                        assert(false && "TODO");
                         // special case
+                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractResolvedGridCoord(tokens[0]);
+                        if (bottomLeftGridCoordTileDescriptorOpt) {
+                            Tile::Index bottomLeftTileIndex = fromGridCoordIndex(bottomLeftGridCoordTileDescriptorOpt.value().type, bottomLeftGridCoordTileDescriptorOpt.value().index);
+                            std::optional<QPointF> bottomLeftPointOpt = findBottomLeftPoint(bottomLeftTileIndex);
+                            std::optional<QPointF> topRightPointOpt = findTopRightPoint(bottomLeftTileIndex);
+                            if (bottomLeftPointOpt && topRightPointOpt) {
+                                QPointF bottomLeftPoint = bottomLeftPointOpt.value() + 0.5*QPointF(-Tile::borderPx(), Tile::borderPx());
+                                QPointF topRightPoint = topRightPointOpt.value()     + 0.5*QPointF(Tile::borderPx(), -Tile::borderPx());
+
+                                RegionPtr region = std::make_shared<Region>(bottomLeftPoint);
+                                std::unordered_set<Tile::Index> tiles = findTiles(QRectF(bottomLeftPoint, topRightPoint));
+                                region->accept(topRightPoint, tiles, elements);
+                                m_regions[region->id()] = region;
+                            }
+                        }
+
                     } else if (tokens.size() == 2) {
-                        std::optional<Tile::Index> bottomLeftGridCoordOpt = extractResolvedGridCoord(tokens[0]);
-                        std::optional<Tile::Index> topRightGridCoordOpt = extractResolvedGridCoord(tokens[1]);
-                        if (bottomLeftGridCoordOpt && topRightGridCoordOpt) {
-                            Tile::Index bottomLeftTileIndex = Tile::fromGridCoord(bottomLeftGridCoordOpt.value());
-                            Tile::Index topRightTileIndex = Tile::fromGridCoord(topRightGridCoordOpt.value());
+                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractResolvedGridCoord(tokens[0]);
+                        std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractResolvedGridCoord(tokens[1]);
+                        if (bottomLeftGridCoordTileDescriptorOpt && topRightGridCoordTileDescriptorOpt) {
+                            Tile::Index bottomLeftTileIndex = fromGridCoordIndex(bottomLeftGridCoordTileDescriptorOpt.value().type, bottomLeftGridCoordTileDescriptorOpt.value().index);
+                            Tile::Index topRightTileIndex = fromGridCoordIndex(topRightGridCoordTileDescriptorOpt.value().type, topRightGridCoordTileDescriptorOpt.value().index);
 
                             std::optional<QPointF> bottomLeftPointOpt = findBottomLeftPoint(bottomLeftTileIndex);
                             std::optional<QPointF> topRightPointOpt = findTopRightPoint(topRightTileIndex);
@@ -487,7 +544,7 @@ void DeviceWidget::loadQdc()
 
                                 RegionPtr region = std::make_shared<Region>(bottomLeftPoint);
                                 std::unordered_set<Tile::Index> tiles = findTiles(QRectF(bottomLeftPoint, topRightPoint));
-                                region->accept(topRightPoint, tiles, pins);
+                                region->accept(topRightPoint, tiles, elements);
                                 m_regions[region->id()] = region;
                             } else {
                                 qCritical() << "syntax error for regions" << QString::fromStdString(region) << "coudn't extract start and end points";
@@ -504,6 +561,7 @@ void DeviceWidget::loadQdc()
     }
 
     if (!m_regions.empty()) {
+        emit regionsLoaded(m_regions);
         update();
     }
 }
@@ -578,12 +636,14 @@ void DeviceWidget::drawRegions(QPainter& p)
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
 
+    // draw selection
     if (m_isSelectingNewRegion) {
         if (m_currentRegion->isClosed()) {
             p.drawRect(m_currentRegion->rect());
         }
     }
 
+    // draw regions
     for (const auto& [id, region]: m_regions) {
         if (m_regionToEdit && (region->id() == m_regionToEdit->id())) {
             continue;
@@ -592,6 +652,7 @@ void DeviceWidget::drawRegions(QPainter& p)
         highLightTilesInRegion(p, *region);
     }
 
+    // region for edit
     if (m_regionToEdit) {
         pen.setColor(m_editRegionColor);
         p.setPen(pen);
@@ -604,6 +665,17 @@ void DeviceWidget::drawRegions(QPainter& p)
             p.drawRect(rect);
         }
     }
+
+    // draw regions labels (id etc)
+    QFont font;
+    font.setPointSize(22);
+    p.setFont(font);
+    p.setPen(Qt::black);
+
+    for (const auto& [id, region]: m_regions) {
+        p.drawText(region->rect().center(), QString::number(region->id()));
+    }
+    //
 }
 
 void DeviceWidget::highLightTilesInRegion(QPainter& p, const Region& region) const {
@@ -642,10 +714,13 @@ void DeviceWidget::refreshRegion(const RegionPtr& region)
     region->setTiles(findTiles(region->rect()));
 }
 
-std::unordered_set<Tile::Index> DeviceWidget::findTiles(const QRectF& rect)
+std::unordered_set<Tile::Index> DeviceWidget::findTiles(const QRectF& rect, bool excludeIoTiles)
 {
     std::unordered_set<Tile::Index> indexes;
     for (const auto& [index, tile]: m_tiles) {
+        if (excludeIoTiles && (tile.type() == Tile::Type::Io)) {
+            continue;
+        }
         if (tile.isLocated(rect)) {
             indexes.insert(tile.index());
         }
@@ -674,5 +749,72 @@ std::optional<QPointF> DeviceWidget::findTopRightPoint(const Tile::Index& idx) c
 
     return std::nullopt;
 }
+
+std::string DeviceWidget::getTileLabel(Tile::Type type, const Tile::Index& index) const
+{
+    switch(type) {
+    case Tile::Type::Clb:  return QString("clb(%1,%2)").arg(index.col).arg(index.row).toStdString(); break;
+    case Tile::Type::Io:   return QString("io(%1,%2)").arg(index.col).arg(index.row).toStdString(); break;
+    case Tile::Type::Bram: return QString("bram(%1,%2)").arg(index.col).arg(index.row).toStdString(); break;
+    case Tile::Type::Dsp:  return QString("dsp(%1,%2)").arg(index.col).arg(index.row).toStdString(); break;
+    case Tile::Type::Empty: return "";
+    }
+    return "";
+}
+
+Tile::Index DeviceWidget::toGridCoordIndex(Tile::Type type, const Tile::Index& index) const
+{
+    int col = index.col + 1;
+    int row = m_device->rows - (index.row + tileUnitsHeight(type)) + 1;
+    return Tile::Index{col, row};
+}
+
+Tile::Index DeviceWidget::fromGridCoordIndex(Tile::Type type, const Tile::Index& index) const
+{
+    int col = index.col - 1;
+    int row = m_device->rows - (index.row + tileUnitsHeight(type)) + 1;
+    return Tile::Index{col, row};
+}
+
+int DeviceWidget::tileUnitsHeight(Tile::Type type) const
+{
+    switch(type) {
+    case Tile::Type::Io: return 1; break;
+    case Tile::Type::Clb: return 1; break;
+    case Tile::Type::Dsp: return m_device->dspSize.height(); break;
+    case Tile::Type::Bram: return m_device->bramSize.height(); break;
+    default: return 1;
+    }
+}
+
+const Tile& DeviceWidget::tile(const Tile::Index& index) const
+{
+    Tile::Index bottomLeftIdx{index};
+    if (auto it = m_placeHolders.find(index); it != m_placeHolders.end()) {
+        bottomLeftIdx = it->second;
+    }
+
+    if (auto it = m_tiles.find(bottomLeftIdx); it != m_tiles.end()) {
+        return it->second;
+    }
+
+    qCritical() << "tile wasn't found";
+    return m_nullTile;
+}
+
+// unitests
+// m_bottomLeftGridCoord = Tile::toGridCoord(bottomLeftIndex);
+// m_topRightGridCoord   = Tile::toGridCoord(topRightIndex);
+
+// // test
+// Tile::Index bottomLeftIndexReversed = Tile::fromGridCoord(m_bottomLeftGridCoord);
+// Tile::Index topRightIndexReversed = Tile::fromGridCoord(m_topRightGridCoord);
+
+// assert(bottomLeftIndex.row == bottomLeftIndexReversed.row);
+// assert(bottomLeftIndex.col == bottomLeftIndexReversed.col);
+// assert(topRightIndex.row == topRightIndexReversed.row);
+// assert(topRightIndex.col == topRightIndexReversed.col);
+// //
+//
 
 } // namespace FOEDAG

@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include "Tile.h"
+#include "HierarhyElement.h"
 
 #include <QPoint>
 #include <QRect>
@@ -30,7 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <memory>
 #include <optional>
 #include <unordered_set>
-#include <set>
 #include <map>
 
 namespace FOEDAG {
@@ -46,6 +46,7 @@ public:
         m_id = s_idGenerator++;
         m_startPos = point;
         m_stopPosOpt = std::nullopt;
+        m_elements = std::make_shared<HierarhyElements>();
     }
     int id() const { return m_id; }
 
@@ -59,13 +60,13 @@ public:
     }
 
     void setTiles(const std::unordered_set<Tile::Index>& tiles);
-    void setPins(const std::set<std::string>& pins);
+    void setElements(const HierarhyElementsPtr& elements);
 
-    void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles, const std::set<std::string>& pins) {
+    void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles, const HierarhyElementsPtr& elements) {
         m_stopPosOpt = point;
         m_rect = QRectF(startPos(), stopPos());
         setTiles(tiles);
-        setPins(pins);
+        setElements(elements);
         buildHandles();
     }
     void reject() {
@@ -82,10 +83,10 @@ public:
     bool isValid() const { return isClosed() && !m_tiles.empty(); }
 
     const std::unordered_set<Tile::Index>& tiles() const { return m_tiles; }
-    Tile::Index bottomLeftGridCoord() const { return m_bottomLeftGridCoord; }
-    Tile::Index topRightGridCoord() const { return m_topRightGridCoord; }
+    const Tile::Index& bottomLeftIndex() const { return m_bottomLeftIndex; }
+    const Tile::Index& topRightIndex() const { return m_topRightIndex; }
 
-    const std::set<std::string>& pins() const { return m_pins; }
+    const HierarhyElementsPtr& elements() const { return m_elements; }
 
     bool isOverllapedWith(const Region& rhs) {
         const auto& small = (m_tiles.size() < rhs.m_tiles.size()) ? m_tiles : rhs.m_tiles;
@@ -123,9 +124,9 @@ private:
     QPointF m_startPos;
     std::optional<QPointF> m_stopPosOpt;
     std::unordered_set<Tile::Index> m_tiles;
-    Tile::Index m_bottomLeftGridCoord;
-    Tile::Index m_topRightGridCoord;
-    std::set<std::string> m_pins;
+    Tile::Index m_bottomLeftIndex;
+    Tile::Index m_topRightIndex;
+    HierarhyElementsPtr m_elements;
     QRectF m_rect;
 
     const QPointF& startPos() const { return m_startPos; }

@@ -31,16 +31,15 @@ QColor Tile::s_emptyColor = QColor{0, 0, 0, 0};
 
 float Tile::s_unitPx{32.0};
 float Tile::s_borderPx{10.0};
-int Tile::s_deviceRowsNum{-1};
 
-Tile::Tile(Type type, int x, int y, int w, int h)
+Tile::Tile(Type type, int x, int y, int w, int h, const QString& label)
     : m_type(type),
     m_index(x, y),
     m_w(w),
-    m_h(h)
+    m_h(h),
+    m_label(label)
 {
     buildRect();
-    buildLabel();
 }
 
 const QColor& Tile::color() const { return Tile::color(m_type); }
@@ -64,35 +63,6 @@ const QColor& Tile::color(Type type) {
     case Type::Dsp:   return s_dspColor;
     case Type::Empty: default: return s_emptyColor;
     }
-}
-
-void Tile::buildLabel() {
-    Tile::Index coord = toGridCoord(m_index, m_h);
-    switch(m_type) {
-    case Type::Clb:  m_label = QString("clb(%1,%2)").arg(coord.col).arg(coord.row); break;
-    case Type::Io:   m_label = QString("io(%1,%2)").arg(coord.col).arg(coord.row); break;
-    case Type::Bram: m_label = QString("bram(%1,%2)").arg(coord.col).arg(coord.row); break;
-    case Type::Dsp:  m_label = QString("dsp(%1,%2)").arg(coord.col).arg(coord.row); break;
-    case Type::Empty: break;
-    }
-}
-
-Tile::Index Tile::toGridCoord(const Tile::Index& index, int heightUnits)
-{
-    assert(s_deviceRowsNum != -1);
-    int col = index.col + 1;
-    int row = s_deviceRowsNum - (index.row + heightUnits) + 1;
-    return Tile::Index{col, row};
-}
-
-Tile::Index Tile::fromGridCoord(const Tile::Index& index, int heightUnits)
-{
-    assert(s_deviceRowsNum != -1);
-
-    int col = index.col - 1;
-    int row = s_deviceRowsNum - index.row - heightUnits + 1;
-
-    return Tile::Index{col, row};
 }
 
 bool Tile::isVisible(const QRectF& visibleArea) const

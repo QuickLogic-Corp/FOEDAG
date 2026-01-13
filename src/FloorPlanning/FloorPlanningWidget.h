@@ -35,7 +35,7 @@ class DeviceWidget;
 class FloorPlanningWidget : public QWidget {
 public:
     explicit FloorPlanningWidget(QWidget* parent = nullptr);
-    void setPostSynthNetFile(const std::filesystem::path& path);
+    void loadPostSynthNetFile(const std::filesystem::path& postSynthNetFilePath);
     void setDeviceDescriptor(const DeviceDescriptorPtr& deviceDescriptor);
 
 private:

@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Tile.h"
 #include "Region.h"
+#include "HierarhyElement.h"
 
 #include <QWidget>
 #include <QPoint>
@@ -44,8 +45,28 @@ struct DeviceDescriptor {
     std::set<int> bramColumns;
     QSize dspSize;
     QSize bramSize;
+
+    bool isDspColumn(int column) const { return dspColumns.find(column) != dspColumns.end(); }
+    bool isBramColumn(int column) const { return bramColumns.find(column) != bramColumns.end(); }
+
+    QSize elementSize(Tile::Type type) const {
+        QSize size(1,1);
+        switch(type) {
+        case Tile::Type::Io: return QSize(1,1);
+        case Tile::Type::Clb: return QSize(1,1);
+        case Tile::Type::Bram: return bramSize;
+        case Tile::Type::Dsp: return dspSize;
+        default: return QSize(1,1);
+        }
+        return size;
+    }
 };
 using DeviceDescriptorPtr = std::shared_ptr<DeviceDescriptor>;
+
+struct TileDescriptor {
+    Tile::Index index;
+    Tile::Type type;
+};
 
 class DeviceWidget final : public QWidget {
     Q_OBJECT
@@ -83,11 +104,12 @@ public:
 
     void constructTiles(const DeviceDescriptorPtr& device);
 
-    void onSelectedElementsChanged(const std::set<std::string>& pins);
+    void onSelectedElementsChanged(const HierarhyElementsPtr& elemenets);
 
 signals:
     void clearSelectionRequested();
-    void updateElementsSelectionRequested(int, std::set<std::string>);
+    void updateElementsSelectionRequested(int, HierarhyElementsPtr);
+    void regionsLoaded(std::unordered_map<int, RegionPtr>);
 
 protected:
     QSize sizeHint() const override final;
@@ -103,7 +125,7 @@ protected:
     void loadQdc();
 
 private:
-    std::set<std::string> m_selectedPins;
+    HierarhyElementsPtr m_selectedElements;
     QColor m_backgroundColor{25, 25, 28};
     QColor m_transparentColor{0, 0, 0, 0};
     QColor m_textColor{30, 30, 35};
@@ -119,6 +141,7 @@ private:
 
     QRectF m_viewPort;
     std::unordered_map<Tile::Index, Tile> m_tiles;
+    std::unordered_map<Tile::Index, Tile::Index> m_placeHolders;
     DeviceDescriptorPtr m_device;
 
     void drawBackground(QPainter& p);
@@ -168,9 +191,17 @@ private:
     void refreshRegion(const RegionPtr&);
     void removeRegion(const RegionPtr&);
 
-    std::unordered_set<Tile::Index> findTiles(const QRectF&);
+    std::unordered_set<Tile::Index> findTiles(const QRectF&, bool excludeIo = true);
     std::optional<QPointF> findBottomLeftPoint(const Tile::Index&) const;
     std::optional<QPointF> findTopRightPoint(const Tile::Index&) const;
+
+    Tile m_nullTile;
+    const Tile& tile(const Tile::Index&) const;
+    void constuctTile(Tile::Type type, int col, int row);
+    std::string getTileLabel(Tile::Type, const Tile::Index& index) const;
+    Tile::Index toGridCoordIndex(Tile::Type, const Tile::Index&) const;
+    Tile::Index fromGridCoordIndex(Tile::Type, const Tile::Index& index) const;
+    int tileUnitsHeight(Tile::Type) const;
 };
 
 }  // namespace FOEDAG

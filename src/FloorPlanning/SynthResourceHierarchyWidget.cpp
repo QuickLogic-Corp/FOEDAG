@@ -20,9 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "SynthResourceHierarchyWidget.h"
-#include "SynthResourceExtractor.h"
-
-#include "Utils/FileUtils.h"
+#include "HierarhyElement.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -31,7 +29,33 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QHeaderView>
 #include <QCheckBox>
 
+#include <QDebug>
+
 namespace FOEDAG {
+
+namespace {
+
+void uncheckAllRecursive(QStandardItem* item, int col) {
+    if (!item) {
+        return;
+    }
+
+    const int rows = item->rowCount();
+    for (int row = 0; row < rows; ++row) {
+        QStandardItem* child = item->child(row, col);
+        if (!child) {
+            continue;
+        }
+
+        if (child->checkState() != Qt::Unchecked) {
+            child->setCheckState(Qt::Unchecked);
+        }
+
+        uncheckAllRecursive(child, col);
+    }
+};
+
+}
 
 SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(QWidget* parent)
     : QWidget(parent),
@@ -82,17 +106,13 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(QWidget* parent)
     m_view->setAlternatingRowColors(true);
     m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    connect(m_model, &QStandardItemModel::itemChanged,
-            this, &SynthResourceHierarchyWidget::onItemChanged);
+    connect(m_model, &QStandardItemModel::itemChanged, this, [this](QStandardItem* item) {
+        onItemChanged(item, /*reportChanges*/true);
+    });
 }
 
-void SynthResourceHierarchyWidget::loadPostSynthNetFile(const std::filesystem::path& post_synth_net_filepath)
+void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
 {
-    SynthResourceExtractor resourceExtractor;
-    resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
-    const SynthResources& resources = resourceExtractor.resources();
-    //resources.print();
-
     m_model->clear();
     m_model->setHorizontalHeaderLabels(QList<QString>() << "Resource" << "Region");
 
@@ -101,18 +121,64 @@ void SynthResourceHierarchyWidget::loadPostSynthNetFile(const std::filesystem::p
     header->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     header->setSectionResizeMode(1, QHeaderView::Stretch);
 
-    QStandardItem* root = m_model->invisibleRootItem();
-
-    {
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
-    for (const std::string& atom: resources.atoms) {
+    for (const std::string& atom: elements) {
         addPath(atom);
     }
+    blocker.unblock();
 
-    }
     m_view->viewport()->update();
 
     m_view->expandAll();
+}
+
+void SynthResourceHierarchyWidget::onRegionsChanged(std::unordered_map<int, RegionPtr> regions)
+{
+    // Block model signals to avoid massive itemChanged cascades
+    QSignalBlocker blockModel(m_model);
+
+    // intermediate data be captured in lambda
+    std::map<std::string, int> data;
+    for (const auto& [id, region]: regions) {
+        for (const HierarhyElement& element: *region->elements()) {
+            data[element.path] = id;
+        }
+    }
+
+    std::function<void(QStandardItem*, const std::string&)> setRegionRecursive =
+        [&data, &setRegionRecursive](QStandardItem* item, const std::string& prefix)
+    {
+        if (!item) {
+            return;
+        }
+
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
+            if (!child) {
+                continue;
+            }
+
+            const std::string name = child->text().toStdString();
+            const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
+
+            QStandardItem* regionItem = item->child(row, COLUMN::REGION);
+            if (regionItem) {
+                if (auto it = data.find(fullPath); it != data.end()) {
+                    regionItem->setText(QString::number(it->second));
+                } else {
+                    regionItem->setText(QString());
+                }
+            }
+
+            setRegionRecursive(child, fullPath);
+        }
+    };
+
+    setRegionRecursive(m_model->invisibleRootItem(), "");
+    blockModel.unblock();
+
+    m_view->viewport()->update();
 }
 
 void SynthResourceHierarchyWidget::focusItem(const QString& text)
@@ -145,131 +211,78 @@ void SynthResourceHierarchyWidget::focusItem(const QString& text)
 
 void SynthResourceHierarchyWidget::clearSelectedElements()
 {
-    {
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
-
-    std::function<void(QStandardItem*)> visit = [&](QStandardItem* item) {
-        if (!item) {
-            return;
-        }
-
-        if (item->isCheckable() && item->checkState() != Qt::Unchecked) {
-            item->setCheckState(Qt::Unchecked);
-        }
-
-        for (int r = 0; r < item->rowCount(); ++r) {
-            visit(item->child(r, 0));
-        }
-    };
-
-    visit(m_model->invisibleRootItem());
-    }
+    uncheckAllRecursive(m_model->invisibleRootItem(), COLUMN::NETLIST);
+    blocker.unblock();
 
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::setSelectedElements(int id, const std::set<std::string>& pins)
+void SynthResourceHierarchyWidget::setSelectedElements(int id, const HierarhyElementsPtr& elements)
 {
-    if (pins.empty()) {
-        qInfo() << "pins are empty";
+    if (!elements) {
+        qInfo() << "elements are nullptr";
         return;
     }
 
-    qInfo() << "ensure pins are checked";
-    for (const std::string& e: pins) {
-        qInfo() << QString::fromStdString(e);
+    if (elements->empty()) {
+        qInfo() << "elements are empty";
+        return;
     }
-    qInfo() << "!!!";
+
+    elements->print("SynthResourceHierarchyWidget::setSelectedElements ensure pins are checked");
+
 
     // Block model signals to avoid massive itemChanged cascades
     QSignalBlocker blockModel(m_model);
 
-    // Uncheck everything (and optionally clear region labels)
-    std::function<void(QStandardItem*)> uncheckAll = [&](QStandardItem* parent) {
-        if (!parent) {
-            return;
-        }
+    uncheckAllRecursive(m_model->invisibleRootItem(), COLUMN::NETLIST);
 
-        const int rows = parent->rowCount();
-        for (int row = 0; row < rows; ++row) {
-            QStandardItem* netItem = parent->child(row, COLUMN::NETLIST);
-            if (!netItem) continue;
-
-            if (netItem->checkState() != Qt::Unchecked) {
-                netItem->setCheckState(Qt::Unchecked);
-            }
-
-            // clear region column when resetting
-            QStandardItem* regionItem = parent->child(row, COLUMN::REGION);
-            if (regionItem) {
-                regionItem->setText(QString());
-            }
-
-            if (netItem->hasChildren()) {
-                uncheckAll(netItem);
-            }
-        }
-    };
-
-    uncheckAll(m_model->invisibleRootItem());
-
-    // Check only requested pins + set region label
-    std::function<void(QStandardItem*, const std::string&)> visit =
-        [&](QStandardItem* parent, const std::string& prefix)
+    // check only requested elements + set region label
+    std::function<void(QStandardItem*, const std::string&)> checkAndRegionRecursive =
+        [&](QStandardItem* item, const std::string& prefix)
     {
-        if (!parent) {
+        if (!item) {
             return;
         }
 
-        const int rows = parent->rowCount();
+        const int rows = item->rowCount();
         for (int row = 0; row < rows; ++row) {
-            QStandardItem* item = parent->child(row, COLUMN::NETLIST);
-            if (!item) {
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
+            if (!child) {
                 continue;
             }
 
-            const std::string name = item->text().toStdString();
+            const std::string name = child->text().toStdString();
             const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
 
-            if (pins.find(fullPath) != pins.end()) {
-                item->setCheckState(Qt::Checked);
+            if (elements->contains(fullPath)) {
+                child->setCheckState(Qt::Checked);
+                onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
 
-                QStandardItem* regionItem = parent->child(row, COLUMN::REGION);
+                QStandardItem* regionItem = item->child(row, COLUMN::REGION);
                 if (regionItem) {
-                    regionItem->setText("region " + QString::number(id));
+                    regionItem->setText(QString::number(id));
                 }
 
                 // ensure it's visible
-                m_view->expand(item->index());
+                m_view->expand(child->index());
             }
 
-            if (item->hasChildren()) {
-                visit(item, fullPath);
-            }
+            checkAndRegionRecursive(child, fullPath);
         }
     };
 
-    visit(m_model->invisibleRootItem(), "");
+    checkAndRegionRecursive(m_model->invisibleRootItem(), "");
+    blockModel.unblock();
 
     m_view->viewport()->update();
 }
 
-QStandardItem* SynthResourceHierarchyWidget::findRegionItem(QStandardItem* parent, const QString& text)
+HierarhyElementsPtr SynthResourceHierarchyWidget::collectSelectedElements() const
 {
-    const int rows = parent->rowCount();
-    for (int row = 0; row < rows; ++row) {
-        QStandardItem* child = parent->child(row, COLUMN::NETLIST);
-        if (child && child->text() == text) {
-            return parent->child(row, COLUMN::REGION);
-        }
-    }
-    return nullptr;
-}
-
-std::set<std::string> SynthResourceHierarchyWidget::collectSelectedElements() const
-{
-    static std::function<void(QStandardItem*, const std::string&, std::set<std::string>&)> collectSelectedElementsRecursive =
-        [](QStandardItem* item, const std::string& prefix, std::set<std::string>& out)
+    static std::function<void(QStandardItem*, const std::string&, HierarhyElements&)> collectSelectedElementsRecursive =
+        [](QStandardItem* item, const std::string& prefix, HierarhyElements& out)
     {
         if (!item) {
             return;
@@ -285,7 +298,7 @@ std::set<std::string> SynthResourceHierarchyWidget::collectSelectedElements() co
 
         if (isLeaf) {
             if (st == Qt::Checked) {
-                out.insert(path);
+                out.insert(HierarhyElement{path, true});
             }
         } else {
             if (st == Qt::Checked) {
@@ -293,7 +306,7 @@ std::set<std::string> SynthResourceHierarchyWidget::collectSelectedElements() co
                 bool allChildrenChecked = true;
 
                 for (int row = 0; row < rows; ++row) {
-                    QStandardItem* child = item->child(row, 0);
+                    QStandardItem* child = item->child(row, COLUMN::NETLIST);
                     if (child && child->isCheckable()) {
                         if (child->checkState() != Qt::Checked) {
                             allChildrenChecked = false;
@@ -304,28 +317,30 @@ std::set<std::string> SynthResourceHierarchyWidget::collectSelectedElements() co
 
                 if (allChildrenChecked) {
                     // collapse to parent path with wildcard
-                    out.insert(path + ".*");
+                    out.insert(HierarhyElement{path, false});
                 } else {
                     // not all children checked -> collect deeper
                     for (int row = 0; row < rows; ++row) {
-                        collectSelectedElementsRecursive(item->child(row, 0), path, out);
+                        collectSelectedElementsRecursive(item->child(row, COLUMN::NETLIST), path, out);
                     }
                 }
             } else {
                 // collect deeper
                 for (int row = 0; row < rows; ++row) {
-                    collectSelectedElementsRecursive(item->child(row, 0), path, out);
+                    collectSelectedElementsRecursive(item->child(row, COLUMN::NETLIST), path, out);
                 }
             }
         }
     };
 
-    std::set<std::string> selectedElements;
+    HierarhyElementsPtr selectedElements = std::make_shared<HierarhyElements>();
     QStandardItem* root = m_model->invisibleRootItem();
     int rows = root->rowCount();
     for (int row=0; row<rows; ++row) {
-        QStandardItem* child = root->child(row, 0);
-        collectSelectedElementsRecursive(child, "", selectedElements);
+        QStandardItem* child = root->child(row, COLUMN::NETLIST);
+        if (child) {
+            collectSelectedElementsRecursive(child, "", *selectedElements);
+        }
     }
 
     return selectedElements;
@@ -349,7 +364,7 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
         };
 
         for (int row = 0; row < parent->rowCount(); ++row) {
-            QStandardItem* child = parent->child(row, 0);
+            QStandardItem* child = parent->child(row, COLUMN::NETLIST);
             if (child && (child->text() == text)) {
                 applyFlags(child);
                 return child;
@@ -358,7 +373,8 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 
         QStandardItem* item = new QStandardItem(text);
         applyFlags(item);
-        parent->appendRow(item);
+        QStandardItem* regionItem = new QStandardItem("");
+        parent->appendRow({item, regionItem});
         return item;
     };
 
@@ -375,7 +391,7 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
     }
 }
 
-void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item)
+void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool reportChanges)
 {
     static std::function<Qt::CheckState(QStandardItem*)>
         computeParentState = [](QStandardItem* item)
@@ -388,7 +404,7 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item)
         bool anyChildUnchecked = false;
 
         for (int row = 0; row < item->rowCount(); ++row) {
-            QStandardItem* child = item->child(row, 0);
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
             if (!child || !child->isCheckable()) {
                 continue;
             }
@@ -416,16 +432,18 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item)
     };
 
     static std::function<void(QStandardItem*, Qt::CheckState)>
-        setChildrenStateRecursive = [](QStandardItem* parent, Qt::CheckState st)
+        setChildrenStateRecursive = [](QStandardItem* item, Qt::CheckState st)
     {
-        if (!parent) return;
+        if (!item) {
+            return;
+        }
 
-        for (int r = 0; r < parent->rowCount(); ++r) {
-            QStandardItem* child = parent->child(r, 0);
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
             if (!child) {
                 continue;
             }
-
             if (child->isCheckable()) {
                 child->setCheckState(st);
             }
@@ -438,34 +456,31 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item)
     }
 
     QSignalBlocker blocker(m_model);
-    {
 
-        const bool isParent = (item->rowCount() > 0);
-        const Qt::CheckState st = item->checkState();
+    const bool isParent = (item->rowCount() > 0);
+    const Qt::CheckState st = item->checkState();
 
-        // if user clicked a parent checkbox -> force all descendants
-        if (isParent && st != Qt::PartiallyChecked) {
-            setChildrenStateRecursive(item, st);
-        }
-
-        // walk upward and update parent partial/checked state
-        for (QStandardItem* parent = item->parent(); parent; parent = parent->parent()) {
-            if (!parent->isCheckable()) {
-                continue;
-            }
-            parent->setCheckState(computeParentState(parent));
-        }
+    // if user clicked a parent checkbox -> force all descendants
+    if (isParent && st != Qt::PartiallyChecked) {
+        setChildrenStateRecursive(item, st);
     }
+
+    // walk upward and update parent partial/checked state
+    for (QStandardItem* parent = item->parent(); parent; parent = parent->parent()) {
+        if (!parent->isCheckable()) {
+            continue;
+        }
+        parent->setCheckState(computeParentState(parent));
+    }
+    blocker.unblock();
 
     m_view->viewport()->update();
 
-    std::set<std::string> elements = collectSelectedElements();
-    qInfo() << "~~~";
-    for (const std::string& element: elements) {
-        qInfo() << QString::fromStdString(element);
+    if (reportChanges) {
+        HierarhyElementsPtr elements = collectSelectedElements();
+        elements->print("SynthResourceHierarchyWidget::onItemChanged");
+        emit selectedElementsChanged(elements);
     }
-    qInfo() << "###";
-    emit selectedElementsChanged(elements);
 }
 
 void SynthResourceHierarchyWidget::showAllItems()
@@ -481,7 +496,7 @@ void SynthResourceHierarchyWidget::showAllItems()
         for (int row = 0; row < rows; ++row) {
             view->setRowHidden(row, parentIdx, false);
 
-            QStandardItem* child = item->child(row, 0);
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
             if (!child) {
                 continue;
             }
@@ -518,7 +533,7 @@ void SynthResourceHierarchyWidget::showOnlyCheckedItems()
 
         const int rows = item->rowCount();
         for (int row = 0; row < rows; ++row) {
-            QStandardItem* child = item->child(row, 0);
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
             if (!child) {
                 continue;
             }

@@ -23,6 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "SynthResourceHierarchyWidget.h"
 #include "DeviceWidget.h"
+#include "SynthResourceExtractor.h"
+#include "Utils/FileUtils.h"
 
 #include <QHBoxLayout>
 #include <filesystem>
@@ -47,6 +49,9 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     QObject::connect(m_deviceWidget, &DeviceWidget::clearSelectionRequested,
                      m_synthResourcesWidget, &SynthResourceHierarchyWidget::clearSelectedElements);
 
+    QObject::connect(m_deviceWidget, &DeviceWidget::regionsLoaded,
+                     m_synthResourcesWidget, &SynthResourceHierarchyWidget::onRegionsChanged);
+
     QHBoxLayout* layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
@@ -54,8 +59,26 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     layout->addWidget(m_deviceWidget);
 }
 
-void FloorPlanningWidget::setPostSynthNetFile(const std::filesystem::path& path) {
-    m_synthResourcesWidget->loadPostSynthNetFile(path);
+void FloorPlanningWidget::loadPostSynthNetFile(const std::filesystem::path& postSynthNetFilePath) {
+    if (postSynthNetFilePath.empty()) {
+        std::set<std::string> elements = {"dut.prism.el00.sub001",
+                                          "dut.prism.el00.sub002",
+                                          "dut.prism.el01",
+                                          "dut.prism.el02",
+                                          "dut.tri.el0.sub2",
+                                          "dut.tri.el1",
+                                          "dut.tri.el2",
+                                          "top"};
+
+        m_synthResourcesWidget->build(elements);
+    } else {
+        SynthResourceExtractor resourceExtractor;
+        resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(postSynthNetFilePath));
+        const SynthResources& resources = resourceExtractor.resources();
+        //resources.print();
+
+        m_synthResourcesWidget->build(resources.atoms);
+    }
 }
 
 void FloorPlanningWidget::setDeviceDescriptor(const DeviceDescriptorPtr& deviceDescriptor)

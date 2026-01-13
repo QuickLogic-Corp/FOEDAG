@@ -21,13 +21,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #pragma once
 
+#include "HierarhyElement.h"
+#include "Region.h"
+
 #include <QWidget>
 #include <QTreeView>
 #include <QStandardItemModel>
 
 #include <set>
 #include <string>
-#include <filesystem>
 
 namespace FOEDAG {
 
@@ -41,29 +43,29 @@ class SynthResourceHierarchyWidget : public QWidget {
 public:
     explicit SynthResourceHierarchyWidget(QWidget* parent = nullptr);
 
-    void loadPostSynthNetFile(const std::filesystem::path& path);
+    void build(const std::set<std::string>& elements);
 
-    std::set<std::string> collectSelectedElements() const;
-    void setSelectedElements(int id, const std::set<std::string>& elements);
+    void onRegionsChanged(std::unordered_map<int, RegionPtr> regions);
+    void setSelectedElements(int id, const HierarhyElementsPtr& elements);
     void clearSelectedElements();
 
 signals:
-    void selectedElementsChanged(std::set<std::string>);
+    void selectedElementsChanged(HierarhyElementsPtr);
 
 private:
     QLineEdit* m_leSearch{nullptr};
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
 
-    QStandardItem* findRegionItem(QStandardItem* parent, const QString& text);
-
     void focusItem(const QString&);
 
     void addPath(const std::string&);
-    void onItemChanged(QStandardItem*);
+    void onItemChanged(QStandardItem*, bool reportChanges);
 
     void showOnlyCheckedItems();
     void showAllItems();
+
+    HierarhyElementsPtr collectSelectedElements() const;
 };
 
 }  // namespace FOEDAG

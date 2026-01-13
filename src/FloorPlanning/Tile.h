@@ -36,24 +36,19 @@ public:
         bool operator==(const Index& rhs) const {
             return col == rhs.col && row == rhs.row;
         }
+
+        void reset() {
+            col = -1;
+            row = -1;
+        }
+
         int col;
         int row;
-
-        std::string toClbString() const {
-            std::string result = "clb(";
-            result += std::to_string(col);
-            result += ",";
-            result += std::to_string(row);
-            result += ")";
-            return result;
-        }
     };
 
     enum class Type { Empty, Clb, Io, Bram, Dsp };
-    Tile(Type type, int x, int y, int w, int h);
+    Tile(Type type, int x, int y, int w, int h, const QString& label);
     Tile(): m_index(-1, -1) {} // required for std::unordered_map
-
-    static void setDeviceRowsNum(int deviceRowsNum) { s_deviceRowsNum = deviceRowsNum; }
 
     Type type() const { return m_type; }
     const QColor& color() const;
@@ -63,9 +58,6 @@ public:
     static float borderPx() { return s_borderPx; }
 
     const Index& index() const { return m_index; }
-
-    static Index toGridCoord(const Index& index, int height = 1);
-    static Index fromGridCoord(const Index& index, int height = 1);
 
     const QString& label() const { return m_label; }
     const QRectF& rect() const { return m_rect; }
@@ -79,7 +71,6 @@ private:
 
     static float s_unitPx;
     static float s_borderPx;
-    static int s_deviceRowsNum;
 
     Index m_index;
     int m_w{1};
@@ -92,7 +83,6 @@ private:
     static QColor s_emptyColor;
 
     void buildRect();
-    void buildLabel();
 };
 
 }  // namespace FOEDAG
