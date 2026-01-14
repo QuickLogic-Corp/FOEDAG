@@ -11,6 +11,8 @@ QColor Tile::s_emptyColor = QColor{0, 0, 0, 0};
 float Tile::s_unitPx{32.0};
 float Tile::s_borderPx{10.0};
 
+int Tile::s_deviceRowsNum = 0;
+
 Tile::Tile(Type type, int col, int row, int w, int h, const QString& name)
     : m_type(type),
     m_index(col, row),
@@ -29,7 +31,7 @@ QRectF Tile::buildRect(const Tile::Index& index, int w, int h)
 
     const double x = index.col * pitch;
     // flip vertically
-    const double y = (DEVICE_SIZE - (index.row + h - 1)) * pitch;
+    const double y = (s_deviceRowsNum - (index.row + h - 1)) * pitch;
 
     double tileWidth = w * s_unitPx + (w - 1) * s_borderPx;
     double tileHeight = h * s_unitPx + (h - 1) * s_borderPx;

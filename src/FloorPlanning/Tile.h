@@ -8,6 +8,7 @@
 namespace fp {
 
 class Tile {
+    static int s_deviceRowsNum; // needed to align Qt and VPR coordinate systems (Y axis up)
 public:
     struct Index {
         Index(): col(-1), row(-1) {}
@@ -28,6 +29,8 @@ public:
     enum class Type { Empty, Clb, Io, Bram, Dsp };
     Tile(Type type, int x, int y, int w, int h, const QString& label);
     Tile(): m_index(-1, -1) {} // required for std::unordered_map
+
+    static void setDeviceRowsNum(int deviceRowsNum) { s_deviceRowsNum = deviceRowsNum; }
 
     Type type() const { return m_type; }
     const QColor& color() const;

@@ -2233,27 +2233,26 @@ void MainWindow::floorPlanningActionTriggered()
     std::filesystem::path post_synth_net_filepath = static_cast<CompilerOpenFPGA_ql*>(m_compiler)->getPostSynthNetFilePath();
     if (FileUtils::FileExists(post_synth_net_filepath)) {
       if (!m_floorPlanningWidget) {
-        m_floorPlanningWidget = new FloorPlanningWidget;
+        m_floorPlanningWidget = new fp::FloorPlanningWidget;
       }
       
       // device sensetive data
-      FOEDAG::DeviceDescriptorPtr device = std::make_shared<FOEDAG::DeviceDescriptor>();
-      device->columns = QLMetricsManager::getDoubleValue("routing", "device_size_x");
-      device->rows = QLMetricsManager::getDoubleValue("routing", "device_size_y");
-      // device->dspColumns = {6, 19};
-      // device->bramColumns = {12, 25};
-      device->dspColumns = {}; // TODO: calc properly
-      device->bramColumns = {}; // TODO: calc properly
+      int columns = QLMetricsManager::getDoubleValue("routing", "device_size_x");
+      int rows = QLMetricsManager::getDoubleValue("routing", "device_size_y");
+      std::set<int> dspColumns{}; // TODO: calc properly
+      std::set<int> bramColumns{}; // TODO: calc properly
 
-      device->dspSize = {1, 3}; // TODO: read properly
-      device->bramSize = {1, 6}; // TODO: read properly
+      QSize dspSize{1, 3}; // TODO: read properly
+      QSize bramSize{1, 6}; // TODO: read properly
+      fp::DeviceDescriptorPtr descriptor = std::make_shared<fp::DeviceDescriptor>(columns, rows,
+                                                                                      dspColumns, bramColumns,
+                                                                                      dspSize, bramSize);
 
-      FOEDAG::Tile::setDeviceRowsNum(device->rows);
-      m_floorPlanningWidget->setDeviceDescriptor(device);
+      m_floorPlanningWidget->setDeviceDescriptor(descriptor);
       // device sensetive data
 
 
-      m_floorPlanningWidget->setPostSynthNetFile(post_synth_net_filepath);
+      m_floorPlanningWidget->loadPostSynthNetFile(post_synth_net_filepath);
       m_floorPlanningWidget->resize(800, 600);
       m_floorPlanningWidget->show();
     } else {

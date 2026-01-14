@@ -19,7 +19,9 @@ public:
         , m_bramColumns(bramColumns)
         , m_dspSize(dspSize)
         , m_bramSize(bramSize)
-    {}
+    {
+        Tile::setDeviceRowsNum(m_rows);
+    }
 
     int columns() const { return m_columns; }
     int rows() const { return m_rows; }

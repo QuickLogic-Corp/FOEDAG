@@ -36,12 +36,14 @@ class QLabel;
 class QProgressBar;
 class QStackedWidget;
 
+namespace fp {
+  class FloorPlanningWidget;
+}
 namespace FOEDAG {
 #ifndef UPSTREAM_PINPLANNER
 class PinAssignmentCreator;
 class DockWidget;
 #endif
-class FloorPlanningWidget;
 class Session;
 class TclInterpreter;
 class ProjectFileLoader;
@@ -225,7 +227,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   QAction* pinPlannerPinNameAction = nullptr;
   QAction* floorPlanningAction = nullptr;
 
-  FloorPlanningWidget* m_floorPlanningWidget{nullptr};
+  fp::FloorPlanningWidget* m_floorPlanningWidget{nullptr};
   std::vector<std::pair<QAction*, QString>> m_recentProjectsActions;
   newProjectDialog* newProjdialog = nullptr;
   /* Tool bar objects */
