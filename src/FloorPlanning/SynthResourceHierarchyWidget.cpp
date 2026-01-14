@@ -1,37 +1,19 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include "SynthResourceHierarchyWidget.h"
 #include "HierarhyElement.h"
+#include "Utils/StringUtils.h"
 
+#include <QStringListModel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QHeaderView>
 #include <QCheckBox>
+#include <QCompleter>
 
 #include <QDebug>
 
-namespace FOEDAG {
+namespace fp {
 
 namespace {
 
@@ -77,21 +59,27 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(QWidget* parent)
         }
     });
 
-    m_leSearch = new QLineEdit;
+    m_leFilter = new QLineEdit;
 
-    QPushButton* bnSearch = new QPushButton("Search");
+    m_bnFilter = new QCheckBox("Filter");
 
     QHBoxLayout* toolbarLayout = new QHBoxLayout;
     toolbarLayout->setContentsMargins(ls,ls,ls,ls);
     layout->addLayout(toolbarLayout);
     toolbarLayout->addWidget(chShowChecked);
-    toolbarLayout->addWidget(m_leSearch);
-    toolbarLayout->addWidget(bnSearch);
+    toolbarLayout->addWidget(m_leFilter);
+    toolbarLayout->addWidget(m_bnFilter);
 
-    QObject::connect(bnSearch, &QPushButton::clicked, this, [this](){
-        QString text = m_leSearch->text();
-        if (!text.isEmpty()) {
-            focusItem(text);
+    QObject::connect(m_leFilter, &QLineEdit::textChanged, this, [this](const QString& pattern) {
+        if (m_bnFilter->isChecked()) {
+            showFilteredItems(pattern.toStdString());
+        }
+    });
+    QObject::connect(m_bnFilter, &QCheckBox::stateChanged, this, [this](int state){
+        if (state == Qt::Checked) {
+            showFilteredItems(m_leFilter->text().toStdString());
+        } else {
+            showAllItems();
         }
     });
     //
@@ -114,7 +102,7 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(QWidget* parent)
 void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
 {
     m_model->clear();
-    m_model->setHorizontalHeaderLabels(QList<QString>() << "Resource" << "Region");
+    m_model->setHorizontalHeaderLabels(QList<QString>() << "Resource" << "Regions");
 
     QHeaderView* header = m_view->header();
     header->setStretchLastSection(true);
@@ -127,21 +115,39 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
     }
     blocker.unblock();
 
+    // completer
+    QList<QString> qtElements;
+    for (const std::string& atom: elements) {
+        qtElements.append(QString::fromStdString(atom));
+    }
+    QStringListModel* model = new QStringListModel(qtElements, m_leFilter);
+
+    QCompleter* completer = new QCompleter(model, m_leFilter);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+    completer->setFilterMode(Qt::MatchContains);      // or Qt::MatchStartsWith
+    completer->setCompletionMode(QCompleter::PopupCompletion);
+    m_leFilter->setCompleter(completer);
+    //
+
     m_view->viewport()->update();
 
     m_view->expandAll();
 }
 
-void SynthResourceHierarchyWidget::onRegionsChanged(std::unordered_map<int, RegionPtr> regions)
+void SynthResourceHierarchyWidget::onRegionsChanged(const std::map<int, RegionPtr>& regions)
 {
-    // Block model signals to avoid massive itemChanged cascades
-    QSignalBlocker blockModel(m_model);
-
     // intermediate data be captured in lambda
-    std::map<std::string, int> data;
+    std::map<std::string, std::string> data;
     for (const auto& [id, region]: regions) {
+        if (!region->elements()) {
+            continue;
+        }
         for (const HierarhyElement& element: *region->elements()) {
-            data[element.path] = id;
+            if (data.find(element.path) == data.end()) {
+                data[element.path] = std::to_string(id);
+            } else {
+                data[element.path] += "," + std::to_string(id);
+            }
         }
     }
 
@@ -165,7 +171,7 @@ void SynthResourceHierarchyWidget::onRegionsChanged(std::unordered_map<int, Regi
             QStandardItem* regionItem = item->child(row, COLUMN::REGION);
             if (regionItem) {
                 if (auto it = data.find(fullPath); it != data.end()) {
-                    regionItem->setText(QString::number(it->second));
+                    regionItem->setText(QString::fromStdString(it->second));
                 } else {
                     regionItem->setText(QString());
                 }
@@ -175,39 +181,13 @@ void SynthResourceHierarchyWidget::onRegionsChanged(std::unordered_map<int, Regi
         }
     };
 
+    QSignalBlocker blockModel(m_model);     // Block model signals to avoid massive itemChanged cascades
     setRegionRecursive(m_model->invisibleRootItem(), "");
     blockModel.unblock();
 
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::focusItem(const QString& text)
-{
-    QModelIndex index = m_model->match(
-                                 m_model->index(0, 0),
-                                 Qt::DisplayRole,
-                                 text,
-                                 1,
-                                 Qt::MatchRecursive
-                                 ).value(0);
-
-    if (!index.isValid()) {
-        return;
-    }
-
-    // expand parents
-    QModelIndex p = index.parent();
-    while (p.isValid()) {
-        m_view->expand(p);
-        p = p.parent();
-    }
-
-    // scroll to item
-    m_view->scrollTo(index, QAbstractItemView::PositionAtCenter);
-
-    // set current
-    m_view->setCurrentIndex(index);
-}
 
 void SynthResourceHierarchyWidget::clearSelectedElements()
 {
@@ -218,25 +198,19 @@ void SynthResourceHierarchyWidget::clearSelectedElements()
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::setSelectedElements(int id, const HierarhyElementsPtr& elements)
+void SynthResourceHierarchyWidget::onRegionSelected(const RegionPtr& region)
 {
-    if (!elements) {
+    if (!region->elements()) {
         qInfo() << "elements are nullptr";
         return;
     }
 
-    if (elements->empty()) {
+    if (region->elements()->empty()) {
         qInfo() << "elements are empty";
         return;
     }
 
-    elements->print("SynthResourceHierarchyWidget::setSelectedElements ensure pins are checked");
-
-
-    // Block model signals to avoid massive itemChanged cascades
-    QSignalBlocker blockModel(m_model);
-
-    uncheckAllRecursive(m_model->invisibleRootItem(), COLUMN::NETLIST);
+    region->elements()->print("SynthResourceHierarchyWidget::setSelectedElements ensure elements are checked");
 
     // check only requested elements + set region label
     std::function<void(QStandardItem*, const std::string&)> checkAndRegionRecursive =
@@ -256,14 +230,9 @@ void SynthResourceHierarchyWidget::setSelectedElements(int id, const HierarhyEle
             const std::string name = child->text().toStdString();
             const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
 
-            if (elements->contains(fullPath)) {
+            if (region->elements()->contains(fullPath)) {
                 child->setCheckState(Qt::Checked);
                 onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
-
-                QStandardItem* regionItem = item->child(row, COLUMN::REGION);
-                if (regionItem) {
-                    regionItem->setText(QString::number(id));
-                }
 
                 // ensure it's visible
                 m_view->expand(child->index());
@@ -273,6 +242,9 @@ void SynthResourceHierarchyWidget::setSelectedElements(int id, const HierarhyEle
         }
     };
 
+    // Block model signals to avoid massive itemChanged cascades
+    QSignalBlocker blockModel(m_model);
+    uncheckAllRecursive(m_model->invisibleRootItem(), COLUMN::NETLIST);
     checkAndRegionRecursive(m_model->invisibleRootItem(), "");
     blockModel.unblock();
 
@@ -389,6 +361,8 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
     for (int i = 0; i < parts.size(); ++i) {
         parent = findOrCreateChild(parent, parts[i]);
     }
+
+    m_rawElements.insert(dottedPath);
 }
 
 void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool reportChanges)
@@ -455,11 +429,10 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool repor
         return;
     }
 
-    QSignalBlocker blocker(m_model);
-
     const bool isParent = (item->rowCount() > 0);
     const Qt::CheckState st = item->checkState();
 
+    QSignalBlocker blocker(m_model);
     // if user clicked a parent checkbox -> force all descendants
     if (isParent && st != Qt::PartiallyChecked) {
         setChildrenStateRecursive(item, st);
@@ -556,5 +529,58 @@ void SynthResourceHierarchyWidget::showOnlyCheckedItems()
     m_view->expandAll();
 }
 
+void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
+{
+    std::unordered_set<std::string> matches;
+    for (const std::string& element: m_rawElements) {
+        if (FOEDAG::StringUtils::matchesWildcardPattern(element, pattern)) {
+            matches.insert(element);
+        }
+    }
 
-} // namespace FOEDAG
+    // returns true if anything under parentItem should remain visible
+    std::function<bool(QStandardItem*, const std::string&)> updateVisibility =
+        [&](QStandardItem* item, const std::string& prefix) -> bool
+    {
+        if (!item) {
+            return false;
+        }
+
+        const bool isRoot = (item == m_model->invisibleRootItem());
+        const std::string name = item->text().toStdString();
+        const std::string itemPath = prefix.empty() ? name : (prefix + "." + name);
+
+        bool anyChildVisible = false;
+
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, COLUMN::NETLIST);
+            if (!child) {
+                continue;
+            }
+
+            // child full path
+            const std::string childName = child->text().toStdString();
+            const std::string childPath = itemPath.empty() ? childName : (itemPath + "." + childName);
+
+            const bool childDescVisible = updateVisibility(child, itemPath);
+            const bool childSelfVisible = matches.contains(childPath);
+            const bool childVisible = childSelfVisible || childDescVisible;
+
+            m_view->setRowHidden(row, isRoot? QModelIndex() : item->index(), !childVisible);
+
+            anyChildVisible |= childVisible;
+        }
+
+        const bool selfVisible = (!itemPath.empty() && matches.contains(itemPath));
+        return selfVisible || anyChildVisible;
+    };
+
+    QSignalBlocker blockModel(m_view);
+    updateVisibility(m_model->invisibleRootItem(), "");
+    blockModel.unblock();
+
+    m_view->viewport()->update();
+}
+
+} // namespace fp

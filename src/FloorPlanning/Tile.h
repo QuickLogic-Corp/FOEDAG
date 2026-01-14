@@ -1,24 +1,3 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #pragma once
 
 #include <QRect>
@@ -26,7 +5,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <cstdint>
 
-namespace FOEDAG {
+namespace fp {
 
 class Tile {
 public:
@@ -54,20 +33,26 @@ public:
     const QColor& color() const;
     static const QColor& color(Type);
 
+    void setVisible(bool isVisible) { m_isVisible = isVisible; }
+
     static float unitPx() { return s_unitPx; }
     static float borderPx() { return s_borderPx; }
 
     const Index& index() const { return m_index; }
 
-    const QString& label() const { return m_label; }
+    const QString& name() const { return m_name; }
     const QRectF& rect() const { return m_rect; }
-    bool isVisible(const QRectF& screen) const;
+
+    bool isVisible() const { return m_isVisible; }
     bool isLocated(const QRectF& area) const;
 
+    static QRectF buildRect(const Tile::Index&, int w=1, int h=1);
+
 private:
+    bool m_isVisible = true;
     Type m_type;
     QRectF m_rect;
-    QString m_label;
+    QString m_name;
 
     static float s_unitPx;
     static float s_borderPx;
@@ -85,13 +70,13 @@ private:
     void buildRect();
 };
 
-}  // namespace FOEDAG
+}  // namespace fp
 
 // required to use Tile::Index in std::unordered_set
 namespace std {
 template<>
-struct hash<FOEDAG::Tile::Index> {
-    size_t operator()(const FOEDAG::Tile::Index& i) const noexcept {
+struct hash<fp::Tile::Index> {
+    size_t operator()(const fp::Tile::Index& i) const noexcept {
         std::uint64_t key =
             (std::uint64_t(std::uint32_t(i.row)) << 32) ^
             std::uint64_t(std::uint32_t(i.col));

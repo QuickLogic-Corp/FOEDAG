@@ -1,26 +1,6 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #pragma once
 
+#include "Device.h"
 #include "Tile.h"
 #include "Region.h"
 #include "HierarhyElement.h"
@@ -30,43 +10,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QLabel>
 
 #include <unordered_map>
-#include <set>
 #include <filesystem>
-#include <memory>
 
 class QPaintEvent;
 
-namespace FOEDAG {
-
-struct DeviceDescriptor {
-    int columns;
-    int rows;
-    std::set<int> dspColumns;
-    std::set<int> bramColumns;
-    QSize dspSize;
-    QSize bramSize;
-
-    bool isDspColumn(int column) const { return dspColumns.find(column) != dspColumns.end(); }
-    bool isBramColumn(int column) const { return bramColumns.find(column) != bramColumns.end(); }
-
-    QSize elementSize(Tile::Type type) const {
-        QSize size(1,1);
-        switch(type) {
-        case Tile::Type::Io: return QSize(1,1);
-        case Tile::Type::Clb: return QSize(1,1);
-        case Tile::Type::Bram: return bramSize;
-        case Tile::Type::Dsp: return dspSize;
-        default: return QSize(1,1);
-        }
-        return size;
-    }
-};
-using DeviceDescriptorPtr = std::shared_ptr<DeviceDescriptor>;
-
-struct TileDescriptor {
-    Tile::Index index;
-    Tile::Type type;
-};
+namespace fp {
 
 class DeviceWidget final : public QWidget {
     Q_OBJECT
@@ -102,14 +50,13 @@ public:
     explicit DeviceWidget(QWidget* parent = nullptr);
     virtual ~DeviceWidget()=default;
 
-    void constructTiles(const DeviceDescriptorPtr& device);
-
+    void constructTiles(const DeviceDescriptorPtr& descriptor);
     void onSelectedElementsChanged(const HierarhyElementsPtr& elemenets);
 
 signals:
     void clearSelectionRequested();
-    void updateElementsSelectionRequested(int, HierarhyElementsPtr);
-    void regionsLoaded(std::unordered_map<int, RegionPtr>);
+    void regionSelected(const RegionPtr&);
+    void regionsChanged(const std::map<int, RegionPtr>&);
 
 protected:
     QSize sizeHint() const override final;
@@ -125,7 +72,10 @@ protected:
     void loadQdc();
 
 private:
+    Device m_device;
+
     HierarhyElementsPtr m_selectedElements;
+
     QColor m_backgroundColor{25, 25, 28};
     QColor m_transparentColor{0, 0, 0, 0};
     QColor m_textColor{30, 30, 35};
@@ -140,9 +90,6 @@ private:
     DrawStat m_drawStat;
 
     QRectF m_viewPort;
-    std::unordered_map<Tile::Index, Tile> m_tiles;
-    std::unordered_map<Tile::Index, Tile::Index> m_placeHolders;
-    DeviceDescriptorPtr m_device;
 
     void drawBackground(QPainter& p);
     void drawTilesBatched(QPainter& p);
@@ -167,20 +114,19 @@ private:
     std::optional<Region::HandlerRole> m_editRoleOpt;
     bool trySelectRegionToEdit(const QPointF& worldCoord);
 
-    std::unordered_map<int, RegionPtr> m_regions;
-
-    std::filesystem::path m_qdcFilepath = "floorplanning.qdc";
-
     void clearRegions() {
-        m_regions.clear();
+        m_device.clearRegions();
         m_currentRegion.reset();
-        resetEditRegion();
+        exitRegionEdit();
         update();
     }
-    void resetEditRegion() {
+    void exitRegionEdit() {
         emit clearSelectionRequested();
+        emit regionsChanged(m_device.regions());
+        m_selectedElements.reset();
         m_regionToEdit.reset();
         m_editRoleOpt.reset();
+        update();
     }
     void startNewRegion(const QPointF& worldCoord);
     void stopRegion(const QPointF& selection);
@@ -188,20 +134,6 @@ private:
     // selection
 
     QPointF toWorldCoord(const QPoint&);
-    void refreshRegion(const RegionPtr&);
-    void removeRegion(const RegionPtr&);
-
-    std::unordered_set<Tile::Index> findTiles(const QRectF&, bool excludeIo = true);
-    std::optional<QPointF> findBottomLeftPoint(const Tile::Index&) const;
-    std::optional<QPointF> findTopRightPoint(const Tile::Index&) const;
-
-    Tile m_nullTile;
-    const Tile& tile(const Tile::Index&) const;
-    void constuctTile(Tile::Type type, int col, int row);
-    std::string getTileLabel(Tile::Type, const Tile::Index& index) const;
-    Tile::Index toGridCoordIndex(Tile::Type, const Tile::Index&) const;
-    Tile::Index fromGridCoordIndex(Tile::Type, const Tile::Index& index) const;
-    int tileUnitsHeight(Tile::Type) const;
 };
 
-}  // namespace FOEDAG
+}  // namespace fp

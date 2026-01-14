@@ -1,36 +1,15 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include "Region.h"
 
 #include <QDebug>
 
-namespace FOEDAG {
+namespace fp {
 
 int Region::s_idGenerator = 0;
 
 void Region::setTiles(const std::unordered_set<Tile::Index>& tiles)
 {
     m_tiles = tiles;
-    updateTileGridCoordBounds();
+    updateTileCoordBounds();
 }
 
 void Region::setElements(const HierarhyElementsPtr& elemenets)
@@ -41,7 +20,7 @@ void Region::setElements(const HierarhyElementsPtr& elemenets)
     m_elements = elemenets;
 }
 
-void Region::updateTileGridCoordBounds()
+void Region::updateTileCoordBounds()
 {
     if (m_tiles.empty()) {
         return;
@@ -53,31 +32,17 @@ void Region::updateTileGridCoordBounds()
             return a.col < b.col;
         });
 
-    std::optional<int> bottomLeftRowOpt;
-    std::optional<int> topRightRowOpt;
+    auto [minRow, maxRow] = std::minmax_element(
+        m_tiles.begin(), m_tiles.end(),
+        [](const Tile::Index& a, const Tile::Index& b) {
+            return a.row < b.row;
+        });
 
-    for (const Tile::Index& index: m_tiles) {
-        if (index.col == minCol->col) {
-            if (bottomLeftRowOpt) {
-                bottomLeftRowOpt = std::max(bottomLeftRowOpt.value(), index.row);
-            } else {
-                bottomLeftRowOpt = index.row;
-            }
-        }
-        if (index.col == maxCol->col) {
-            if (topRightRowOpt) {
-                topRightRowOpt = std::min(topRightRowOpt.value(), index.row);
-            } else {
-                topRightRowOpt = index.row;
-            }
-        }
-    }
-
-    if (bottomLeftRowOpt && topRightRowOpt) {
-        m_bottomLeftIndex = Tile::Index(minCol->col, bottomLeftRowOpt.value());
-        m_topRightIndex = Tile::Index(maxCol->col, topRightRowOpt.value());
-    }
+    m_bottomLeftIndex = Tile::Index(minCol->col, minRow->row);
+    m_topRightIndex = Tile::Index(maxCol->col, maxRow->row);
+    qInfo() << "~~~ regionBound m_bottomLeftIndex=" << m_bottomLeftIndex.col << m_bottomLeftIndex.row;
+    qInfo() << "~~~ regionBound m_topRightIndex=" << m_topRightIndex.col << m_topRightIndex.row;
+    qInfo() << "";
 }
 
-
-} // namespace FOEDAG
+} // namespace fp

@@ -1,24 +1,3 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #pragma once
 
 #include "Tile.h"
@@ -33,7 +12,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <unordered_set>
 #include <map>
 
-namespace FOEDAG {
+namespace fp {
 
 class Region {
     static int s_idGenerator;
@@ -42,12 +21,46 @@ public:
         TL, TR, BL, BR, MOVE, REMOVE
     };
 
+    static void resetIdGenerator() { s_idGenerator = 0; }
+
     Region(const QPointF& point) {
         m_id = s_idGenerator++;
         m_startPos = point;
         m_stopPosOpt = std::nullopt;
-        m_elements = std::make_shared<HierarhyElements>();
     }
+    Region(const QPointF& startPos, const QPointF& stopPos)
+    {
+        m_id = s_idGenerator++;
+        m_startPos = startPos;
+        setStopPos(stopPos);
+    }
+
+#ifdef USE_TESTS
+    bool operator==(const Region& rhs) const {
+        if (id() != rhs.id()) {
+            return false;
+        }
+        if (bottomLeftIndex() != rhs.bottomLeftIndex()) {
+            return false;
+        }
+        if (topRightIndex() != rhs.topRightIndex()) {
+            return false;
+        }
+        // the rects could be slightly different, better to test comparison based on included tiles indexes
+        // qInfo() << rect() << rhs.rect();
+        // if (rect() != rhs.rect()) {
+        //  return false;
+        //}
+        if (*elements() != *rhs.elements()) {
+            return false;
+        }
+        if (tiles() != rhs.tiles()) {
+            return false;
+        }
+        return true;
+    }
+#endif // USE_TESTS
+
     int id() const { return m_id; }
 
     std::optional<HandlerRole> checkHandlerClick(const QPointF& point) {
@@ -62,9 +75,11 @@ public:
     void setTiles(const std::unordered_set<Tile::Index>& tiles);
     void setElements(const HierarhyElementsPtr& elements);
 
+    bool contains(const Tile::Index& index) const { return m_tiles.find(index) != m_tiles.end(); }
+
     void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles, const HierarhyElementsPtr& elements) {
         m_stopPosOpt = point;
-        m_rect = QRectF(startPos(), stopPos());
+        updateRect();
         setTiles(tiles);
         setElements(elements);
         buildHandles();
@@ -77,7 +92,7 @@ public:
 
     void setStopPos(const QPointF& point) {
         m_stopPosOpt = point;
-        m_rect = QRectF(startPos(), stopPos());
+        updateRect();
     }
     bool isClosed() const { return m_stopPosOpt.has_value(); }
     bool isValid() const { return isClosed() && !m_tiles.empty(); }
@@ -137,8 +152,11 @@ private:
         return QRectF(c.x() - h, c.y() - h, size, size);
     }
 
-    void updateTileGridCoordBounds();
+    void updateRect() {
+        m_rect = QRectF(startPos(), stopPos()).normalized(); // normalized here is to swap corner to avoid negative height
+    }
+    void updateTileCoordBounds();
 };
 using RegionPtr = std::shared_ptr<Region>;
 
-}  // namespace FOEDAG
+}  // namespace fp

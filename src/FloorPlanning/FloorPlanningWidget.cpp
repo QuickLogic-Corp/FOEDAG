@@ -1,24 +1,3 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #include "FloorPlanningWidget.h"
 
 #include "SynthResourceHierarchyWidget.h"
@@ -29,7 +8,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QHBoxLayout>
 #include <filesystem>
 
-namespace FOEDAG {
+namespace fp {
 	
 FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     : QWidget(parent)
@@ -43,13 +22,13 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     QObject::connect(m_synthResourcesWidget, &SynthResourceHierarchyWidget::selectedElementsChanged,
                      m_deviceWidget, &DeviceWidget::onSelectedElementsChanged);
 
-    QObject::connect(m_deviceWidget, &DeviceWidget::updateElementsSelectionRequested,
-                     m_synthResourcesWidget, &SynthResourceHierarchyWidget::setSelectedElements);
+    QObject::connect(m_deviceWidget, &DeviceWidget::regionSelected,
+                     m_synthResourcesWidget, &SynthResourceHierarchyWidget::onRegionSelected);
 
     QObject::connect(m_deviceWidget, &DeviceWidget::clearSelectionRequested,
                      m_synthResourcesWidget, &SynthResourceHierarchyWidget::clearSelectedElements);
 
-    QObject::connect(m_deviceWidget, &DeviceWidget::regionsLoaded,
+    QObject::connect(m_deviceWidget, &DeviceWidget::regionsChanged,
                      m_synthResourcesWidget, &SynthResourceHierarchyWidget::onRegionsChanged);
 
     QHBoxLayout* layout = new QHBoxLayout(this);
@@ -73,9 +52,8 @@ void FloorPlanningWidget::loadPostSynthNetFile(const std::filesystem::path& post
         m_synthResourcesWidget->build(elements);
     } else {
         SynthResourceExtractor resourceExtractor;
-        resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(postSynthNetFilePath));
+        resourceExtractor.parseNetFileContent(FOEDAG::FileUtils::GetFileContent(postSynthNetFilePath));
         const SynthResources& resources = resourceExtractor.resources();
-        //resources.print();
 
         m_synthResourcesWidget->build(resources.atoms);
     }
@@ -86,4 +64,4 @@ void FloorPlanningWidget::setDeviceDescriptor(const DeviceDescriptorPtr& deviceD
     m_deviceWidget->constructTiles(deviceDescriptor);
 }
 
-} // namespace FOEDAG
+} // namespace fp

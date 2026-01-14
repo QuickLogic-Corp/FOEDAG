@@ -1,24 +1,3 @@
-/*
-Copyright 2022 The Foedag team
-
-GPL License
-
-Copyright (c) 2022 The Open-Source FPGA Foundation
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
 #pragma once
 
 #include <string>
@@ -27,13 +6,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QDebug>
 
-namespace FOEDAG {
+namespace fp {
 
 class HierarhyElement {
 public:
     HierarhyElement(const std::string& path): path(path) {}
     HierarhyElement(const std::string& path, bool isLeaf): path(path), isLeaf(isLeaf) {}
 
+#ifdef USE_TESTS
+    bool operator==(const HierarhyElement& rhs) const {
+        return ((path == rhs.path) && (isLeaf == rhs.isLeaf));
+    }
+#endif // USE_TESTS
     std::string path;
     bool isLeaf = true;
 
@@ -42,6 +26,29 @@ public:
 
 class HierarhyElements {
 public:
+#ifdef USE_TESTS
+    bool operator==(const HierarhyElements& rhs) const {
+        if (size() != rhs.size()) {
+            return false;
+        }
+        return m_elements == rhs.m_elements;
+    }
+
+    std::string toString() const {
+        std::string result;
+        for (const auto& element: m_elements) {
+            if (!result.empty()) {
+                result += ",";
+            }
+            result += element.path;
+            if (!element.isLeaf) {
+                result += ".*";
+            }
+        }
+        return result;
+    }
+#endif // USE_TESTS
+
     bool empty() const { return m_elements.empty(); }
 
     std::size_t size() const { return m_elements.size(); }
@@ -53,8 +60,11 @@ public:
     std::set<HierarhyElement>::const_iterator begin() const { return m_elements.begin(); }
     std::set<HierarhyElement>::const_iterator end()   const { return m_elements.end(); }
 
-    void insert(const HierarhyElement& elemenet) {
-        m_elements.insert(elemenet);
+    void insert(const std::set<HierarhyElement>& elements) {
+        m_elements.insert(elements.begin(), elements.end());
+    }
+    void insert(const HierarhyElement& element) {
+        m_elements.insert(element);
     }
     void print(const std::string& label) {
         qInfo() << "~~~" << QString::fromStdString(label);
@@ -70,4 +80,4 @@ private:
 using HierarhyElementsPtr = std::shared_ptr<HierarhyElements>;
 
 
-}  // namespace FOEDAG
+}  // namespace fp
