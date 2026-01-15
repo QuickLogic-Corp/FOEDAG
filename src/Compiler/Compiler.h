@@ -75,6 +75,10 @@ class Compiler {
     SimulatePNR,
     SimulateBitstream
   };
+  static constexpr Action next(Action a) {
+    return static_cast<Action>(
+        static_cast<int>(a) + 1);
+  }
   enum class State {
     None,
     IPGenerated,

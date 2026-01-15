@@ -578,6 +578,11 @@ void MainWindow::openProject(const QString& project, bool delayedOpen,
 
   if (run) startProject(false);
   setStatusAndProgressText(QString{});
+
+  // attempt to restore metrics
+  if (QLMetricsManager::getInstance()->isEmpty()) {
+    QLMetricsManager::getInstance()->parseAll();
+  }
 }
 
 bool MainWindow::isRunning() const {
