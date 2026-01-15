@@ -2251,6 +2251,11 @@ void MainWindow::floorPlanningActionTriggered()
 
       if (!m_floorPlanningWidget) {
         m_floorPlanningWidget = new fp::FloorPlanningWidget;
+        m_floorPlanningWidget->setAttribute(Qt::WA_DeleteOnClose);
+        connect(m_floorPlanningWidget, &QObject::destroyed, this, [&]{
+          QSignalBlocker b(floorPlanningAction);
+          floorPlanningAction->setChecked(false);
+        });
       }
       
       VprArchitectureFileProfider archFileProvider(compiler);

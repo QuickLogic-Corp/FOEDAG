@@ -6768,35 +6768,13 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const int IO_COLUMNS = 2;
   const int device_clb_rows = device_size_y - EMPTY_ROWS - IO_ROWS;
 
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /// fetching data from vpr.xml, probably will be replaced with simplier solution, see https://github.com/QL-Proprietary/aurora2/issues/1465
-  std::filesystem::path architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
-  if(architectureFile.empty()) {
-    ErrorMessage("Cannot proceed without VPR Architecture file.");
+  VprArchitectureFileProfider archFileProvider(this);
+  if (archFileProvider.get().empty()) {
     return "";
   }
-
-  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(architectureFile)) {
-
-    std::filesystem::path vpr_xml_en_path = architectureFile;
-    architectureFile = GenerateTempFilePath();
-
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      return "";
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
-      ErrorMessage("decryption failed!");
-      return "";
-    }
-  }
-  TilesCfgResult tiles_cfg_result = parseTilesCfg(architectureFile);
+  TilesCfgResult tiles_cfg_result = parseTilesCfg(archFileProvider.get());
+  archFileProvider.clean()
+  ;
   if (!tiles_cfg_result.error.empty()) {
     ErrorMessage(tiles_cfg_result.error);
     return "";
@@ -6804,8 +6782,6 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
   const int bram_size_y = tiles_cfg_result.contains("bram") ? tiles_cfg_result.tiles_cfg["bram"].second: 0;
   const int dsp_size_y = tiles_cfg_result.contains("dsp") ? tiles_cfg_result.tiles_cfg["dsp"].second: 0;
-  /// fetching data from vpr.xml
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   const int clb_rows_without_io = device_size_y - 2;
   const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
@@ -9379,7 +9355,6 @@ const std::filesystem::path& VprArchitectureFileProfider::get()
 
       std::filesystem::path vpr_xml_en_path = m_architectureFile;
       m_architectureFile = m_compiler->GenerateTempFilePath(true);
-      std::cout << "create m_architectureFile" << m_architectureFile << std::endl;
       m_isFileTemporary = true;
 
       std::filesystem::path cryptdbPath = 
@@ -9414,7 +9389,6 @@ VprArchitectureFileProfider::~VprArchitectureFileProfider()
 void VprArchitectureFileProfider::clean()
 {
   if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
-    std::cout << "~~~ remove m_architectureFile" << m_architectureFile << std::endl;
     std::filesystem::remove(m_architectureFile);
   }
 }
