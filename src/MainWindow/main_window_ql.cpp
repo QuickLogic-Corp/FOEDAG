@@ -80,6 +80,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/QLSettingsManager.h"
 
 #include "FloorPlanning/FloorPlanningWidget.h"
+#include "FloorPlanning/SynthResourceExtractor.h"
 
 using namespace FOEDAG;
 extern const char* foedag_version_number;
@@ -2237,6 +2238,15 @@ void MainWindow::floorPlanningActionTriggered()
   if (floorPlanningAction->isChecked()) {
     std::filesystem::path post_synth_net_filepath = static_cast<CompilerOpenFPGA_ql*>(m_compiler)->getPostSynthNetFilePath();
     if (FileUtils::FileExists(post_synth_net_filepath)) {
+      fp::SynthResourceExtractor resourceExtractor;
+      resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
+      if (resourceExtractor.resources().atoms.empty()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elemenets are empty. Somthing wrong with %1?").arg(QString::fromStdString(post_synth_net_filepath.string())));
+        QSignalBlocker b(floorPlanningAction);
+        floorPlanningAction->setChecked(false);
+        return;
+      }
+
       if (!m_floorPlanningWidget) {
         m_floorPlanningWidget = new fp::FloorPlanningWidget;
       }
@@ -2253,15 +2263,15 @@ void MainWindow::floorPlanningActionTriggered()
                                                                                           dspColumns, bramColumns,
                                                                                           dspSize, bramSize);
 
-      m_floorPlanningWidget->setDeviceDescriptor(descriptor);
+      m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
       // device sensetive data
 
-
-      m_floorPlanningWidget->loadPostSynthNetFile(post_synth_net_filepath);
+      m_floorPlanningWidget->loadNetList(resourceExtractor.resources().atoms);
       m_floorPlanningWidget->resize(800, 600);
       m_floorPlanningWidget->show();
     } else {
-      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("%1 file is missing.\nPlease run SYNTHESIS task and then activate Floor Planning again.").arg(post_synth_net_filepath.string().c_str()));
+      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("%1 file is missing.\nPlease run SYNTHESIS task and then activate Floor Planning again.").arg(QString::fromStdString(post_synth_net_filepath.string())));
+      QSignalBlocker b(floorPlanningAction);
       floorPlanningAction->setChecked(false);
     }
   } else {
