@@ -32,10 +32,13 @@ struct SynthResources {
 
 class SynthResourceExtractor {
 public:
+  bool parseNetFileContent(const std::string&);
+  QString error() const { return m_error; }
+
   const SynthResources& resources() const { return m_resources; }
-  void parseNetFileContent(const std::string&);
 
 private:
+  QString m_error;
   SynthResources m_resources;
 };
 

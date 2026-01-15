@@ -4,12 +4,16 @@
 #include <QDomElement>
 #include <QDomNodeList>
 
+#ifdef DEBUG_NETLIST
 #include <Utils/FileUtils.h>
+#endif
 
 namespace fp {
 
-void SynthResourceExtractor::parseNetFileContent(const std::string& content)
+bool SynthResourceExtractor::parseNetFileContent(const std::string& content)
 {
+    m_error.clear();
+
     QDomDocument doc;
 
     QString errMsg; 
@@ -17,8 +21,8 @@ void SynthResourceExtractor::parseNetFileContent(const std::string& content)
     int errCol = 0;
 
     if (!doc.setContent(QByteArray::fromStdString(content), &errMsg, &errLine, &errCol)) {
-        qWarning() << "XML parse error at" << errLine << ":" << errCol << "-" << errMsg;
-        return;
+        m_error = "XML parse error at" + QString::number(errLine) + ":" + QString::number(errCol) + "-" + errMsg;
+        return false;
     }
 
     static std::function<void(const QDomElement&, std::vector<QDomElement>&)>
@@ -59,6 +63,8 @@ void SynthResourceExtractor::parseNetFileContent(const std::string& content)
     }
     FOEDAG::FileUtils::WriteToFile("aurora_floorplanning_netlist.txt", lines.join("\n").toStdString());
 #endif
+
+    return true;
 }
 
 }  // namespace fp

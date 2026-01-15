@@ -67,11 +67,11 @@ public:
         m_elements.insert(element);
     }
     void print(const std::string& label) {
-        qInfo() << "~~~" << QString::fromStdString(label);
+        qDebug() << "~~~" << QString::fromStdString(label);
         for (const HierarhyElement& element: m_elements) {
-            qInfo() << QString::fromStdString(element.path) << element.isLeaf;
+            qDebug() << QString::fromStdString(element.path) << element.isLeaf;
         }
-        qInfo() << "\n";
+        qDebug() << "\n";
     }
 
 private:

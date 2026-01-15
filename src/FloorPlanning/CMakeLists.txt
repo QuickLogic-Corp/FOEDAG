@@ -24,6 +24,7 @@ set (SRC_LIST
   DeviceGridWidget.cpp
   SynthResourceHierarchyWidget.cpp
   # widgets
+  DeviceGridDescriptor.cpp
   SynthResourceExtractor.cpp
   QdcSerializer.cpp
   DeviceGrid.cpp

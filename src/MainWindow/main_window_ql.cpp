@@ -2236,7 +2236,9 @@ void MainWindow::ipConfiguratorActionTriggered() {
 void MainWindow::floorPlanningActionTriggered()
 {
   if (floorPlanningAction->isChecked()) {
-    std::filesystem::path post_synth_net_filepath = static_cast<CompilerOpenFPGA_ql*>(m_compiler)->getPostSynthNetFilePath();
+    CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+    std::filesystem::path post_synth_net_filepath = compiler->getPostSynthNetFilePath();
     if (FileUtils::FileExists(post_synth_net_filepath)) {
       fp::SynthResourceExtractor resourceExtractor;
       resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
@@ -2251,20 +2253,25 @@ void MainWindow::floorPlanningActionTriggered()
         m_floorPlanningWidget = new fp::FloorPlanningWidget;
       }
       
-      // device sensetive data
-      int columns = QLMetricsManager::getDoubleValue("routing", "device_size_x");
-      int rows = QLMetricsManager::getDoubleValue("routing", "device_size_y");
-      std::set<int> dspColumns{}; // TODO: calc properly
-      std::set<int> bramColumns{}; // TODO: calc properly
+      VprArchitectureFileProfider archFileProvider(compiler);
+      if(archFileProvider.get().empty()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", "Cannot proceed without VPR Architecture file.");
+        QSignalBlocker b(floorPlanningAction);
+        floorPlanningAction->setChecked(false);
+        return;
+      }
 
-      QSize dspSize{1, 3}; // TODO: read properly
-      QSize bramSize{1, 6}; // TODO: read properly
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(columns, rows,
-                                                                                          dspColumns, bramColumns,
-                                                                                          dspSize, bramSize);
+      const std::string layoutName = QLSettingsManager::getStringValue("general", "device", "layout");
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(archFileProvider.get(), layoutName);
+      archFileProvider.clean();
 
+      if (descriptor->hasError()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
+        QSignalBlocker b(floorPlanningAction);
+        floorPlanningAction->setChecked(false);
+        return;
+      }
       m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
-      // device sensetive data
 
       m_floorPlanningWidget->loadNetList(resourceExtractor.resources().atoms);
       m_floorPlanningWidget->resize(800, 600);

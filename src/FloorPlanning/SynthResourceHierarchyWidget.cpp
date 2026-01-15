@@ -201,12 +201,12 @@ void SynthResourceHierarchyWidget::clearSelectedElements()
 void SynthResourceHierarchyWidget::onRegionSelected(const RegionPtr& region)
 {
     if (!region->elements()) {
-        qInfo() << "elements are nullptr";
+        qDebug() << "elements are nullptr";
         return;
     }
 
     if (region->elements()->empty()) {
-        qInfo() << "elements are empty";
+        qDebug() << "elements are empty";
         return;
     }
 

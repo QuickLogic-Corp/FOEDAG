@@ -9365,3 +9365,56 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 // clang-format on
+
+const std::filesystem::path& VprArchitectureFileProfider::get()
+{
+  if (m_architectureFile.empty()) {
+    QLDeviceTarget device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    m_architectureFile = QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
+    if(!std::filesystem::exists(m_architectureFile)) {
+      return error("VPR Architecture file is not available.");
+    }
+
+    if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+
+      std::filesystem::path vpr_xml_en_path = m_architectureFile;
+      m_architectureFile = m_compiler->GenerateTempFilePath(true);
+      std::cout << "create m_architectureFile" << m_architectureFile << std::endl;
+      m_isFileTemporary = true;
+
+      std::filesystem::path cryptdbPath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
+                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
+
+      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
+        return error("load cryptdb failed!");
+      }
+
+      if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+        return error("decryption failed!");
+      }
+    }
+  }  
+    
+  return m_architectureFile;
+}
+
+const std::filesystem::path& VprArchitectureFileProfider::error(const std::string& msg)
+{
+  m_compiler->ErrorMessage(msg);
+  m_architectureFile = "";
+  return m_architectureFile;
+}
+
+VprArchitectureFileProfider::~VprArchitectureFileProfider()
+{
+  clean();
+}
+
+void VprArchitectureFileProfider::clean()
+{
+  if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
+    std::cout << "~~~ remove m_architectureFile" << m_architectureFile << std::endl;
+    std::filesystem::remove(m_architectureFile);
+  }
+}

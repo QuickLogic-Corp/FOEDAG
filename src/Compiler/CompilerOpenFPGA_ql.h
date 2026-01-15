@@ -281,6 +281,22 @@ private:
   };
 };
 
+class VprArchitectureFileProfider {
+public:
+  VprArchitectureFileProfider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
+  ~VprArchitectureFileProfider();
+
+  const std::filesystem::path& get();
+  void clean();
+
+private:
+  CompilerOpenFPGA_ql* m_compiler = nullptr;
+  std::filesystem::path m_architectureFile;
+  bool m_isFileTemporary = false;
+
+  const std::filesystem::path& error(const std::string& msg);
+};
+
 }  // namespace FOEDAG
 
 #endif

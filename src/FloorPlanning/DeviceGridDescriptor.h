@@ -3,14 +3,18 @@
 #include "Tile.h"
 
 #include <QSize>
+#include <QDomDocument>
 
 #include <set>
 #include <memory>
+#include <filesystem>
+#include <optional>
 
 namespace fp {
 
 class DeviceGridDescriptor {
 public:
+    DeviceGridDescriptor(const std::filesystem::path& architectureFile, const std::string& layoutName);
     DeviceGridDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
         :
         m_columns(columns)
@@ -21,7 +25,11 @@ public:
         , m_bramSize(bramSize)
     {
         Tile::setDeviceRowsNum(m_rows);
+        validateFit();
     }
+
+    bool hasError() const { return !m_error.isEmpty(); }
+    const QString& error() const { return m_error; }
 
     int columns() const { return m_columns; }
     int rows() const { return m_rows; }
@@ -44,13 +52,22 @@ public:
         return minSize;
     }
 
+    bool validateFit();
+
 private:
+    QString m_error;
     int m_columns = -1;
     int m_rows = -1;
     std::set<int> m_dspColumns;
     std::set<int> m_bramColumns;
     QSize m_dspSize;
     QSize m_bramSize;
+
+    bool parse(const std::filesystem::path& architectureFile, const std::string& targetLayoutName);
+    bool parseLayout(const QDomDocument&, const std::string& targetLayoutName);
+    bool parseTileSizes(const QDomDocument&);
+
+    std::optional<QSize> parseSize(const QString&, const QString&);
 };
 using DeviceGridDescriptorPtr = std::shared_ptr<DeviceGridDescriptor>;
 

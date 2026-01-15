@@ -74,9 +74,6 @@ void DeviceGrid::constructTiles(const DeviceGridDescriptorPtr& device) {
             }
         }
     }
-
-    assert(!step_on_bram);
-    assert(!step_on_dsp);
 }
 
 void DeviceGrid::markVisibleTiles(const QRectF& visibleArea)
