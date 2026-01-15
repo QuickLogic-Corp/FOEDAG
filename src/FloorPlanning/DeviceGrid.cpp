@@ -1,15 +1,15 @@
-#include "Device.h"
+#include "DeviceGrid.h"
 
 #include <QDebug>
 
 namespace fp {
 
-Device::Device(const DeviceDescriptorPtr& device)
+DeviceGrid::DeviceGrid(const DeviceGridDescriptorPtr& device)
 {
     constructTiles(device);
 }
 
-void Device::constructTile(Tile::Type type, int col, int row)
+void DeviceGrid::constructTile(Tile::Type type, int col, int row)
 {
     Tile::Index index{col, row};
     QSize size = m_descriptor->elementSize(type);
@@ -17,15 +17,15 @@ void Device::constructTile(Tile::Type type, int col, int row)
     m_tiles[index] = Tile{type, col, row, size.width(), size.height(), QString::fromStdString(label)};
 }
 
-void Device::constructTileFragment(int col, int row, const Tile::Index& bottomLeftTileIndex)
+void DeviceGrid::constructTileFragment(int col, int row, const Tile::Index& bottomLeftTileIndex)
 {
     if ((col != bottomLeftTileIndex.col) || (row != bottomLeftTileIndex.row)) {
         m_tileFragments[Tile::Index{col, row}] = bottomLeftTileIndex;
-        qInfo() << "~~~ tile fragment=" << col << row <<  "point to" << bottomLeftTileIndex.col << bottomLeftTileIndex.row;
+        //qDebug() << "~~~ tile fragment=" << col << row <<  "point to" << bottomLeftTileIndex.col << bottomLeftTileIndex.row;
     }
 }
 
-void Device::constructTiles(const DeviceDescriptorPtr& device) {
+void DeviceGrid::constructTiles(const DeviceGridDescriptorPtr& device) {
     m_descriptor = device;
     m_tiles.clear();
 
@@ -79,14 +79,14 @@ void Device::constructTiles(const DeviceDescriptorPtr& device) {
     assert(!step_on_dsp);
 }
 
-void Device::markVisibleTiles(const QRectF& visibleArea)
+void DeviceGrid::markVisibleTiles(const QRectF& visibleArea)
 {
     for (auto& [idx, tile]: m_tiles) {
         tile.setVisible(tile.rect().intersects(visibleArea));
     }
 }
 
-RegionPtr Device::findRegion(const QPointF& worldCoord) const
+RegionPtr DeviceGrid::findRegion(const QPointF& worldCoord) const
 {
     for (const auto& [id, region]: m_regions) {
         if (region->rect().contains(worldCoord)) {
@@ -96,23 +96,23 @@ RegionPtr Device::findRegion(const QPointF& worldCoord) const
     return nullptr;
 }
 
-void Device::removeRegion(const RegionPtr& region)
+void DeviceGrid::removeRegion(const RegionPtr& region)
 {
     m_regions.erase(m_regions.find(region->id()));
 }
 
-void Device::addRegion(const RegionPtr& region)
+void DeviceGrid::addRegion(const RegionPtr& region)
 {
     m_regions[region->id()] = region;
 }
 
-void Device::refreshRegion(const RegionPtr& region)
+void DeviceGrid::refreshRegion(const RegionPtr& region)
 {
-    region->buildHandles();
+    region->rebuildHandles();
     region->setTiles(findTiles(region->rect()));
 }
 
-std::unordered_set<Tile::Index> Device::findTiles(const QRectF& rect, bool excludeIoTiles)
+std::unordered_set<Tile::Index> DeviceGrid::findTiles(const QRectF& rect, bool excludeIoTiles)
 {
     std::unordered_set<Tile::Index> indexes;
     for (const auto& [index, tile]: m_tiles) {
@@ -126,17 +126,17 @@ std::unordered_set<Tile::Index> Device::findTiles(const QRectF& rect, bool exclu
     return indexes;
 }
 
-QPointF Device::bottomLeftPoint(const Tile::Index& idx) const
+QPointF DeviceGrid::bottomLeftPoint(const Tile::Index& idx) const
 {
     return Tile::buildRect(idx, 1, 1).bottomLeft();
 }
 
-QPointF Device::topRightPoint(const Tile::Index& idx) const
+QPointF DeviceGrid::topRightPoint(const Tile::Index& idx) const
 {
     return Tile::buildRect(idx, 1, 1).topRight();
 }
 
-std::optional<QPointF> Device::findBottomLeftPoint(const Tile::Index& idx) const
+std::optional<QPointF> DeviceGrid::findBottomLeftPoint(const Tile::Index& idx) const
 {
     if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
         const Tile& tile = it->second;
@@ -149,7 +149,7 @@ std::optional<QPointF> Device::findBottomLeftPoint(const Tile::Index& idx) const
     return std::nullopt;
 }
 
-std::optional<QPointF> Device::findTopRightPoint(const Tile::Index& idx) const
+std::optional<QPointF> DeviceGrid::findTopRightPoint(const Tile::Index& idx) const
 {
     if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
         const Tile& tile = it->second;
@@ -162,7 +162,7 @@ std::optional<QPointF> Device::findTopRightPoint(const Tile::Index& idx) const
     return std::nullopt;
 }
 
-std::string Device::buildTileSymbolicName(Tile::Type type, const Tile::Index& index, bool isTileFullyIncluded) const
+std::string DeviceGrid::buildTileSymbolicName(Tile::Type type, const Tile::Index& index, bool isTileFullyIncluded) const
 {
     int row = index.row;
     if (!isTileFullyIncluded) {
@@ -179,7 +179,7 @@ std::string Device::buildTileSymbolicName(Tile::Type type, const Tile::Index& in
     return "";
 }
 
-const Tile& Device::tile(const Tile::Index& index) const
+const Tile& DeviceGrid::tile(const Tile::Index& index) const
 {
     Tile::Index bottomLeftTileIndex{index};
     if (auto it = m_tileFragments.find(index); it != m_tileFragments.end()) {

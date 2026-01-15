@@ -2,7 +2,7 @@
 
 #include "Tile.h"
 #include "Region.h"
-#include "DeviceDescriptor.h"
+#include "DeviceGridDescriptor.h"
 
 #include <QPoint>
 
@@ -12,13 +12,13 @@
 
 namespace fp {
 
-class Device {
+class DeviceGrid {
 public:
-    Device()=default;
-    Device(const DeviceDescriptorPtr& device);
-    ~Device()=default;
+    DeviceGrid()=default;
+    DeviceGrid(const DeviceGridDescriptorPtr& device);
+    ~DeviceGrid()=default;
 
-    void constructTiles(const DeviceDescriptorPtr& device);
+    void constructTiles(const DeviceGridDescriptorPtr& device);
     void clearRegions() {
         m_regions.clear();
     }
@@ -42,7 +42,7 @@ public:
     std::optional<QPointF> findTopRightPoint(const Tile::Index&) const;
 
 private:
-    DeviceDescriptorPtr m_descriptor;
+    DeviceGridDescriptorPtr m_descriptor;
 
     std::unordered_map<Tile::Index, Tile> m_tiles;
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;

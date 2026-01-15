@@ -2249,9 +2249,9 @@ void MainWindow::floorPlanningActionTriggered()
 
       QSize dspSize{1, 3}; // TODO: read properly
       QSize bramSize{1, 6}; // TODO: read properly
-      fp::DeviceDescriptorPtr descriptor = std::make_shared<fp::DeviceDescriptor>(columns, rows,
-                                                                                      dspColumns, bramColumns,
-                                                                                      dspSize, bramSize);
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(columns, rows,
+                                                                                          dspColumns, bramColumns,
+                                                                                          dspSize, bramSize);
 
       m_floorPlanningWidget->setDeviceDescriptor(descriptor);
       // device sensetive data

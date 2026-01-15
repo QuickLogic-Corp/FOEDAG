@@ -21,12 +21,12 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../lib)
 set (SRC_LIST
   # widgets
   FloorPlanningWidget.cpp
-  DeviceWidget.cpp
+  DeviceGridWidget.cpp
   SynthResourceHierarchyWidget.cpp
   # widgets
   SynthResourceExtractor.cpp
   QdcSerializer.cpp
-  Device.cpp
+  DeviceGrid.cpp
   Tile.cpp
   Region.cpp
 )
@@ -34,14 +34,14 @@ set (SRC_LIST
 set (HDR_LIST
   # widgets
   FloorPlanningWidget.h
-  DeviceWidget.h
+  DeviceGridWidget.h
   SynthResourceHierarchyWidget.h
   # widgets
-  DeviceDescriptor.h
+  DeviceGridDescriptor.h
   TileDescriptor.h
   SynthResourceExtractor.h
   QdcSerializer.h
-  Device.h
+  DeviceGrid.h
   Tile.h
   Region.h
   HierarhyElement.h

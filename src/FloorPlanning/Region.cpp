@@ -40,9 +40,9 @@ void Region::updateTileCoordBounds()
 
     m_bottomLeftIndex = Tile::Index(minCol->col, minRow->row);
     m_topRightIndex = Tile::Index(maxCol->col, maxRow->row);
-    qInfo() << "~~~ regionBound m_bottomLeftIndex=" << m_bottomLeftIndex.col << m_bottomLeftIndex.row;
-    qInfo() << "~~~ regionBound m_topRightIndex=" << m_topRightIndex.col << m_topRightIndex.row;
-    qInfo() << "";
+    // qDebug() << "~~~ regionBound m_bottomLeftIndex=" << m_bottomLeftIndex.col << m_bottomLeftIndex.row;
+    // qDebug() << "~~~ regionBound m_topRightIndex=" << m_topRightIndex.col << m_topRightIndex.row;
+    // qDebug() << "";
 }
 
 } // namespace fp

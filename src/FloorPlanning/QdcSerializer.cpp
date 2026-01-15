@@ -1,5 +1,5 @@
 #include "QdcSerializer.h"
-#include "Device.h"
+#include "DeviceGrid.h"
 #include "HierarhyElement.h"
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
@@ -8,12 +8,12 @@
 
 namespace fp {
 
-void QdcSerializer::save(const Device& device, const std::filesystem::path& filePath)
+void QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& filePath)
 {
     FOEDAG::FileUtils::WriteToFile(filePath, serialize(device));
 }
 
-std::string QdcSerializer::serialize(const Device& device)
+std::string QdcSerializer::serialize(const DeviceGrid& device)
 {
     // preprocess to unite regions by same elements list
     std::map<std::string, std::string> data;
@@ -92,13 +92,13 @@ std::string QdcSerializer::serialize(const Device& device)
     return content;
 }
 
-void QdcSerializer::load(Device& device, const std::filesystem::path& filePath)
+void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& filePath)
 {
     std::vector<std::string> lines = readLines(filePath);
     load(device, lines);
 }
 
-void QdcSerializer::load(Device& device, const std::vector<std::string>& lines)
+void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lines)
 {
     auto splitRegionsIgnoringParens = [](const std::string& s, char delimiter)->std::vector<std::string> {
         std::vector<std::string> result;

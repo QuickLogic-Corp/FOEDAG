@@ -9,9 +9,9 @@
 
 namespace fp {
 
-class DeviceDescriptor {
+class DeviceGridDescriptor {
 public:
-    DeviceDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
+    DeviceGridDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
         :
         m_columns(columns)
         , m_rows(rows)
@@ -52,6 +52,6 @@ private:
     QSize m_dspSize;
     QSize m_bramSize;
 };
-using DeviceDescriptorPtr = std::shared_ptr<DeviceDescriptor>;
+using DeviceGridDescriptorPtr = std::shared_ptr<DeviceGridDescriptor>;
 
 }  // namespace fp

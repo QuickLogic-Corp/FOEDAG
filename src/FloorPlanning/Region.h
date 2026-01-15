@@ -64,7 +64,7 @@ public:
     int id() const { return m_id; }
 
     std::optional<HandlerRole> checkHandlerClick(const QPointF& point) {
-        for (const auto& [role, rect]: handlers) {
+        for (const auto& [role, rect]: handles) {
             if (rect.contains(point)) {
                 return role;
             }
@@ -82,7 +82,7 @@ public:
         updateRect();
         setTiles(tiles);
         setElements(elements);
-        buildHandles();
+        rebuildHandles();
     }
     void reject() {
         m_stopPosOpt = std::nullopt;
@@ -115,23 +115,23 @@ public:
         return false;
     }
 
-    std::map<HandlerRole, QRectF> handlers;
+    std::map<HandlerRole, QRectF> handles;
 
-    void buildHandles() {
-        const double handleSize = 0.5 * Tile::unitPx();
+    void rebuildHandles(double scaleFactor = 1.0) {
+        const double handleSize = 0.5 * Tile::unitPx() * scaleFactor;
 
         QRectF r = m_rect.normalized();
 
-        handlers[HandlerRole::TL] = QRectF(r.left(),                 r.top(),                  handleSize, handleSize);
-        handlers[HandlerRole::TR] = QRectF(r.right() - handleSize,   r.top(),                  handleSize, handleSize);
-        handlers[HandlerRole::BL] = QRectF(r.left(),                 r.bottom() - handleSize,  handleSize, handleSize);
-        handlers[HandlerRole::BR] = QRectF(r.right() - handleSize,   r.bottom() - handleSize,  handleSize, handleSize);
+        handles[HandlerRole::TL] = QRectF(r.left(),                 r.top(),                  handleSize, handleSize);
+        handles[HandlerRole::TR] = QRectF(r.right() - handleSize,   r.top(),                  handleSize, handleSize);
+        handles[HandlerRole::BL] = QRectF(r.left(),                 r.bottom() - handleSize,  handleSize, handleSize);
+        handles[HandlerRole::BR] = QRectF(r.right() - handleSize,   r.bottom() - handleSize,  handleSize, handleSize);
 
         const QPointF moveCenter(r.center().x(), r.center().y());
-        handlers[HandlerRole::MOVE] = centeredSquare(moveCenter, handleSize);
+        handles[HandlerRole::MOVE] = centeredSquare(moveCenter, handleSize);
 
         const QPointF removeCenter(r.center().x(), r.top());
-        handlers[HandlerRole::REMOVE] = centeredSquare(removeCenter, handleSize);
+        handles[HandlerRole::REMOVE] = centeredSquare(removeCenter, handleSize);
     }
 
 private:

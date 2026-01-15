@@ -1,4 +1,4 @@
-#include "DeviceWidget.h"
+#include "DeviceGridWidget.h"
 #include "HierarhyElement.h"
 #include "QdcSerializer.h"
 
@@ -13,7 +13,7 @@
 
 namespace fp {
 
-DeviceWidget::DeviceWidget(QWidget* parent)
+DeviceGridWidget::DeviceGridWidget(QWidget* parent)
     : QWidget(parent)
 {
   setAutoFillBackground(false);
@@ -25,13 +25,13 @@ DeviceWidget::DeviceWidget(QWidget* parent)
 
   QPushButton* bnClearSelections = new QPushButton("x");
   bnClearSelections->setFixedSize(20,20);
-  QObject::connect(bnClearSelections, &QPushButton::clicked, this, &DeviceWidget::clearRegions);
+  QObject::connect(bnClearSelections, &QPushButton::clicked, this, &DeviceGridWidget::clearRegions);
 
   QPushButton* bnSaveQdc = new QPushButton("save qdc");
-  QObject::connect(bnSaveQdc, &QPushButton::clicked, this, &DeviceWidget::saveQdc);
+  QObject::connect(bnSaveQdc, &QPushButton::clicked, this, &DeviceGridWidget::saveQdc);
 
   QPushButton* bnLoadQdc = new QPushButton("load qdc");
-  QObject::connect(bnLoadQdc, &QPushButton::clicked, this, &DeviceWidget::loadQdc);
+  QObject::connect(bnLoadQdc, &QPushButton::clicked, this, &DeviceGridWidget::loadQdc);
 
   layout->addWidget(bnClearSelections);
   layout->addWidget(bnSaveQdc);
@@ -39,21 +39,21 @@ DeviceWidget::DeviceWidget(QWidget* parent)
   layout->addWidget(m_drawStat.label());
 }
 
-QSize DeviceWidget::sizeHint() const {
+QSize DeviceGridWidget::sizeHint() const {
   return QSize(800, 600);
 }
 
-QSize DeviceWidget::minimumSizeHint() const {
+QSize DeviceGridWidget::minimumSizeHint() const {
   return QSize(200, 200);
 }
 
-void DeviceWidget::constructTiles(const DeviceDescriptorPtr& descriptor)
+void DeviceGridWidget::constructTiles(const DeviceGridDescriptorPtr& descriptor)
 {
     m_device.constructTiles(descriptor);
     update();
 }
 
-void DeviceWidget::onSelectedElementsChanged(const HierarhyElementsPtr& elements)
+void DeviceGridWidget::onSelectedElementsChanged(const HierarhyElementsPtr& elements)
 {
     m_selectedElements = elements;
     if (m_regionToEdit) {
@@ -62,7 +62,7 @@ void DeviceWidget::onSelectedElementsChanged(const HierarhyElementsPtr& elements
     }
 }
 
-bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
+bool DeviceGridWidget::trySelectRegionToEdit(const QPointF& worldCoord)
 {
     if (m_regionToEdit) {
         exitRegionEdit();
@@ -79,14 +79,14 @@ bool DeviceWidget::trySelectRegionToEdit(const QPointF& worldCoord)
     }
 }
 
-void DeviceWidget::startNewRegion(const QPointF& worldCoord)
+void DeviceGridWidget::startNewRegion(const QPointF& worldCoord)
 {
     m_isSelectingNewRegion = true;
     m_currentRegion = std::make_shared<Region>(worldCoord);
     update();
 }
 
-void DeviceWidget::stopRegion(const QPointF& worldCoord)
+void DeviceGridWidget::stopRegion(const QPointF& worldCoord)
 {
     m_isSelectingNewRegion = false;
 
@@ -123,7 +123,7 @@ void DeviceWidget::stopRegion(const QPointF& worldCoord)
     }
 }
 
-void DeviceWidget::cancelRegion(const QString& msg)
+void DeviceGridWidget::cancelRegion(const QString& msg)
 {
     if (!m_currentRegion) {
         return;
@@ -138,12 +138,12 @@ void DeviceWidget::cancelRegion(const QString& msg)
     update();
 }
 
-void DeviceWidget::keyPressEvent(QKeyEvent* event)
+void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
 {
     qInfo() << "todo: DeviceWidget::keyPressEvent";
 }
 
-void DeviceWidget::mousePressEvent(QMouseEvent* event)
+void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 {
     m_isMousePressed = true;
 
@@ -174,7 +174,7 @@ void DeviceWidget::mousePressEvent(QMouseEvent* event)
     }
 }
 
-void DeviceWidget::mouseReleaseEvent(QMouseEvent* event) {
+void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     m_isMousePressed = false;
 
     const QPointF worldCoord{toWorldCoord(event->pos())};
@@ -200,7 +200,7 @@ void DeviceWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
 }
 
-void DeviceWidget::mouseMoveEvent(QMouseEvent* event)
+void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 {
     const QPointF worldCoord = toWorldCoord(event->pos());
 
@@ -232,7 +232,7 @@ void DeviceWidget::mouseMoveEvent(QMouseEvent* event)
     }
 }
 
-void DeviceWidget::wheelEvent(QWheelEvent* event)
+void DeviceGridWidget::wheelEvent(QWheelEvent* event)
 {
     const double factor = (event->angleDelta().y() > 0) ? 1.15 : 1.0 / 1.15;
 
@@ -247,26 +247,26 @@ void DeviceWidget::wheelEvent(QWheelEvent* event)
     update();
 }
 
-void DeviceWidget::startPanning(const QPoint& pos)
+void DeviceGridWidget::startPanning(const QPoint& pos)
 {
     m_isPanning = true;
     m_lastMousePos = pos;
     setCursor(Qt::ClosedHandCursor);
 }
 
-void DeviceWidget::stopPanning()
+void DeviceGridWidget::stopPanning()
 {
     m_isPanning = false;
     unsetCursor();
 }
 
-void DeviceWidget::saveQdc()
+void DeviceGridWidget::saveQdc()
 {
     QdcSerializer qdc;
     qdc.save(m_device);
 }
 
-void DeviceWidget::loadQdc()
+void DeviceGridWidget::loadQdc()
 {
     exitRegionEdit();
     QdcSerializer qdc;
@@ -275,7 +275,7 @@ void DeviceWidget::loadQdc()
     update();
 }
 
-void DeviceWidget::paintEvent(QPaintEvent* event) 
+void DeviceGridWidget::paintEvent(QPaintEvent* event)
 {
   QElapsedTimer t;
   t.start();
@@ -309,12 +309,12 @@ void DeviceWidget::paintEvent(QPaintEvent* event)
   m_drawStat.setDrawTimeMs(t.elapsed());
 }
 
-void DeviceWidget::drawBackground(QPainter& p)
+void DeviceGridWidget::drawBackground(QPainter& p)
 {
   p.fillRect(rect(), m_backgroundColor);
 }
 
-void DeviceWidget::drawTilesBatched(QPainter& p)
+void DeviceGridWidget::drawTilesBatched(QPainter& p)
 {
     QVector<QRectF> clbRects, ioRects, bramRects, dspRects;
     for (const auto& [index, tile]: m_device.tiles()) {
@@ -339,7 +339,7 @@ void DeviceWidget::drawTilesBatched(QPainter& p)
     p.setBrush(Tile::color(Tile::Type::Dsp));  p.drawRects(dspRects);
 }
 
-void DeviceWidget::drawRegions(QPainter& p)
+void DeviceGridWidget::drawRegions(QPainter& p)
 {
     QPen pen(m_regionColor);
     pen.setCosmetic(true);
@@ -365,6 +365,7 @@ void DeviceWidget::drawRegions(QPainter& p)
 
     // region for edit
     if (m_regionToEdit) {
+        m_regionToEdit->rebuildHandles(1.0/m_scale);
         pen.setColor(m_editRegionColor);
         p.setPen(pen);
         p.drawRect(m_regionToEdit->rect());
@@ -372,7 +373,7 @@ void DeviceWidget::drawRegions(QPainter& p)
 
         p.setPen(Qt::NoPen);
         p.setBrush(m_editRegionTransparentColor);
-        for (const auto& [role, rect]: m_regionToEdit->handlers) {
+        for (const auto& [role, rect]: m_regionToEdit->handles) {
             p.drawRect(rect);
         }
     }
@@ -389,7 +390,7 @@ void DeviceWidget::drawRegions(QPainter& p)
     //
 }
 
-void DeviceWidget::highLightTilesInRegion(QPainter& p, const Region& region) const {
+void DeviceGridWidget::highLightTilesInRegion(QPainter& p, const Region& region) const {
     if (!region.isValid()) {
         return;
     }
@@ -399,7 +400,7 @@ void DeviceWidget::highLightTilesInRegion(QPainter& p, const Region& region) con
     }
 }
 
-void DeviceWidget::drawTileLabels(QPainter& p)
+void DeviceGridWidget::drawTileLabels(QPainter& p)
 {
     p.setPen(m_textColor);
     QFont font;
@@ -414,7 +415,7 @@ void DeviceWidget::drawTileLabels(QPainter& p)
     }
 }
 
-QPointF DeviceWidget::toWorldCoord(const QPoint& screenCoord)
+QPointF DeviceGridWidget::toWorldCoord(const QPoint& screenCoord)
 {
     return (QPointF(screenCoord) + m_panPixels) / m_scale;
 }

@@ -2,24 +2,22 @@
 
 #include <QWidget>
 
-#include "DeviceWidget.h" // needed for DeviceDescriptorPtr
-
-#include <filesystem>
+#include "DeviceGridDescriptor.h"
 
 namespace fp {
 
 class SynthResourceHierarchyWidget;
-class DeviceWidget;
+class DeviceGridWidget;
 
 class FloorPlanningWidget : public QWidget {
 public:
     explicit FloorPlanningWidget(QWidget* parent = nullptr);
-    void loadPostSynthNetFile(const std::filesystem::path& postSynthNetFilePath);
-    void setDeviceDescriptor(const DeviceDescriptorPtr& deviceDescriptor);
+    void loadNetList(const std::set<std::string>& elements);
+    void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
 
 private:
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
-    DeviceWidget* m_deviceWidget{nullptr};
+    DeviceGridWidget* m_deviceWidget{nullptr};
 };
 
 }  // namespace fp

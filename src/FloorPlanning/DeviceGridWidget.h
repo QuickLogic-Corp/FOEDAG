@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Device.h"
+#include "DeviceGrid.h"
 #include "Tile.h"
 #include "Region.h"
 #include "HierarhyElement.h"
@@ -9,14 +9,11 @@
 #include <QPoint>
 #include <QLabel>
 
-#include <unordered_map>
-#include <filesystem>
-
 class QPaintEvent;
 
 namespace fp {
 
-class DeviceWidget final : public QWidget {
+class DeviceGridWidget final : public QWidget {
     Q_OBJECT
 
     struct DrawStat {
@@ -47,10 +44,10 @@ class DeviceWidget final : public QWidget {
         }
     };
 public:
-    explicit DeviceWidget(QWidget* parent = nullptr);
-    virtual ~DeviceWidget()=default;
+    explicit DeviceGridWidget(QWidget* parent = nullptr);
+    virtual ~DeviceGridWidget()=default;
 
-    void constructTiles(const DeviceDescriptorPtr& descriptor);
+    void constructTiles(const DeviceGridDescriptorPtr& descriptor);
     void onSelectedElementsChanged(const HierarhyElementsPtr& elemenets);
 
 signals:
@@ -72,7 +69,7 @@ protected:
     void loadQdc();
 
 private:
-    Device m_device;
+    DeviceGrid m_device;
 
     HierarhyElementsPtr m_selectedElements;
 
