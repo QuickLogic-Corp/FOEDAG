@@ -301,8 +301,8 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   drawTilesBatched(p);
   drawRegions(p);
 
-  const bool isDrawingText = true;
-  if (isDrawingText) {
+  const bool isDrawingTilesText = m_scale > 0.5;
+  if (isDrawingTilesText) {
     drawTileLabels(p);
   }
 
@@ -380,12 +380,13 @@ void DeviceGridWidget::drawRegions(QPainter& p)
 
     // draw regions labels (id etc)
     QFont font;
-    font.setPointSize(22);
+    font.setPointSize(18/m_scale);
     p.setFont(font);
     p.setPen(Qt::black);
 
     for (const auto& [id, region]: m_device.regions()) {
-        p.drawText(region->rect().center(), QString::number(region->id()));
+        QString text(QString::number(region->id()));
+        p.drawText(region->rect(), Qt::AlignCenter, text);
     }
     //
 }
