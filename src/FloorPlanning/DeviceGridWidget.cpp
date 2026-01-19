@@ -6,15 +6,19 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QMessageBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QDebug>
 
+#include <cmath>
+
 namespace fp {
 
 DeviceGridWidget::DeviceGridWidget(QWidget* parent)
-    : QWidget(parent)
+    : QWidget(parent),
+    m_moveAnimation(this)
 {
   setAutoFillBackground(false);
   setMouseTracking(true);
@@ -25,18 +29,46 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
 
   QPushButton* bnClearSelections = new QPushButton("x");
   bnClearSelections->setFixedSize(20,20);
-  QObject::connect(bnClearSelections, &QPushButton::clicked, this, &DeviceGridWidget::clearRegions);
+  connect(bnClearSelections, &QPushButton::clicked, this, &DeviceGridWidget::clearRegions);
 
   QPushButton* bnSaveQdc = new QPushButton("save qdc");
-  QObject::connect(bnSaveQdc, &QPushButton::clicked, this, &DeviceGridWidget::saveQdc);
+  connect(bnSaveQdc, &QPushButton::clicked, this, &DeviceGridWidget::saveQdc);
 
   QPushButton* bnLoadQdc = new QPushButton("load qdc");
-  QObject::connect(bnLoadQdc, &QPushButton::clicked, this, &DeviceGridWidget::loadQdc);
+  connect(bnLoadQdc, &QPushButton::clicked, this, &DeviceGridWidget::loadQdc);
+
+  QCheckBox* bnScrollRegion = new QCheckBox("scroll to region");
+  connect(bnScrollRegion, &QCheckBox::stateChanged, this, [this](int state) {
+      m_isScrollToRegionWhenSelected = state;
+  });
+
+  connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
 
   layout->addWidget(bnClearSelections);
   layout->addWidget(bnSaveQdc);
   layout->addWidget(bnLoadQdc);
   layout->addWidget(m_drawStat.label());
+  layout->addWidget(bnScrollRegion);
+}
+
+void DeviceGridWidget::onRegionSelected(QString regionId)
+{
+    RegionPtr region = m_device.findRegion(regionId);
+    if (region) {
+        startEditRegion(region);
+        if (m_isScrollToRegionWhenSelected) {
+            scrollToRegion(region);
+        }
+        update();
+    }
+}
+
+void DeviceGridWidget::scrollToRegion(const RegionPtr& region)
+{
+    if (region) {
+        m_moveAnimation.start(currentWorldCenter(), region->rect().center());
+        update();
+    }
 }
 
 QSize DeviceGridWidget::sizeHint() const {
@@ -55,10 +87,11 @@ void DeviceGridWidget::constructTiles(const DeviceGridDescriptorPtr& descriptor)
 
 void DeviceGridWidget::onSelectedElementsChanged(const HierarhyElementsPtr& elements)
 {
-    m_selectedElements = elements;
     if (m_regionToEdit) {
         m_regionToEdit->setElements(elements);
         emit regionSelected(m_regionToEdit);
+    } else {
+        m_selectedElements = elements;
     }
 }
 
@@ -66,12 +99,10 @@ bool DeviceGridWidget::trySelectRegionToEdit(const QPointF& worldCoord)
 {
     if (m_regionToEdit) {
         exitRegionEdit();
-        return false;
     }
 
     if (RegionPtr region = m_device.findRegion(worldCoord); region) {
-        m_regionToEdit = region;
-        emit regionSelected(region);
+        startEditRegion(region);
         update();
         return true;
     } else {
@@ -118,9 +149,19 @@ void DeviceGridWidget::stopRegion(const QPointF& worldCoord)
         m_device.addRegion(m_currentRegion);
         emit regionsChanged(m_device.regions());
 
+        startEditRegion(m_currentRegion);
         m_currentRegion.reset();
         update();
     }
+}
+
+void DeviceGridWidget::startEditRegion(RegionPtr region)
+{
+    if (m_regionToEdit && (m_regionToEdit->id() == region->id())) {
+        return;
+    }
+    m_regionToEdit = region;
+    emit regionSelected(region);
 }
 
 void DeviceGridWidget::cancelRegion(const QString& msg)
@@ -140,14 +181,14 @@ void DeviceGridWidget::cancelRegion(const QString& msg)
 
 void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
 {
-    qInfo() << "todo: DeviceWidget::keyPressEvent";
+    QWidget::keyPressEvent(event);
 }
 
 void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 {
     m_isMousePressed = true;
 
-    const QPointF worldCoord{toWorldCoord(event->pos())};
+    const QPointF worldCoord{screenToWorldCoord(event->pos())};
     switch(event->button()) {
     case Qt::LeftButton: {
         if (m_regionToEdit) {
@@ -177,7 +218,7 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     m_isMousePressed = false;
 
-    const QPointF worldCoord{toWorldCoord(event->pos())};
+    const QPointF worldCoord{screenToWorldCoord(event->pos())};
     switch(event->button()) {
     case Qt::LeftButton: {
         stopRegion(worldCoord);
@@ -202,7 +243,7 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    const QPointF worldCoord = toWorldCoord(event->pos());
+    const QPointF worldCoord = screenToWorldCoord(event->pos());
 
     if (m_isPanning) {
         QPointF delta = event->pos() - m_lastMousePos;
@@ -234,12 +275,24 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 
 void DeviceGridWidget::wheelEvent(QWheelEvent* event)
 {
-    const double factor = (event->angleDelta().y() > 0) ? 1.15 : 1.0 / 1.15;
+    double delta = 0.0;
+
+    if (!event->angleDelta().isNull()) {
+        delta = event->angleDelta().y() / 120.0;
+    } else if (!event->pixelDelta().isNull()) {
+        delta = event->pixelDelta().y() / 100.0;
+    }
+
+    if (delta == 0.0) {
+        return;
+    }
+
+    const double zoomFactor = std::pow(1.15, delta);
 
     QPointF mouse = event->pos();
     QPointF before = (mouse + m_panPixels) / m_scale;
 
-    m_scale = qBound(0.2, m_scale * factor, 10.0);
+    m_scale = qBound(scaleMin, m_scale * zoomFactor, scaleMax);
 
     QPointF after = before * m_scale;
     m_panPixels = after - mouse;
@@ -416,9 +469,27 @@ void DeviceGridWidget::drawTileLabels(QPainter& p)
     }
 }
 
-QPointF DeviceGridWidget::toWorldCoord(const QPoint& screenCoord)
+QPointF DeviceGridWidget::screenToWorldCoord(const QPoint& screenCoord) const
 {
     return (QPointF(screenCoord) + m_panPixels) / m_scale;
+}
+
+QPointF DeviceGridWidget::worldToScreenCoord(const QPointF& worldCoord) const
+{
+    return worldCoord * m_scale - m_panPixels;
+}
+
+QPointF DeviceGridWidget::currentWorldCenter() const
+{
+    const QPointF screenCenter(0.5 * width(), 0.5 * height());
+    return (screenCenter + m_panPixels) / m_scale;
+}
+
+void DeviceGridWidget::setWorldCenter(const QPointF& worldCenter)
+{
+    const QPointF screenCenter(0.5 * width(), 0.5 * height());
+    m_panPixels = worldCenter * m_scale - screenCenter;
+    update();
 }
 
 } // namespace fp

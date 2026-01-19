@@ -4,6 +4,7 @@
 #include "Tile.h"
 #include "Region.h"
 #include "HierarhyElement.h"
+#include "PointAnimation.h"
 
 #include <QWidget>
 #include <QPoint>
@@ -15,6 +16,8 @@ namespace fp {
 
 class DeviceGridWidget final : public QWidget {
     Q_OBJECT
+    const double scaleMin = 0.2;
+    const double scaleMax = 10.0;
 
     struct DrawStat {
     public:
@@ -49,6 +52,9 @@ public:
 
     void constructTiles(const DeviceGridDescriptorPtr& descriptor);
     void onSelectedElementsChanged(const HierarhyElementsPtr& elemenets);
+    void onRegionSelected(QString);
+
+    void setScrollToRegionWhenSelected(bool flag) { m_isScrollToRegionWhenSelected = flag; }
 
 signals:
     void clearSelectionRequested();
@@ -73,6 +79,8 @@ private:
 
     HierarhyElementsPtr m_selectedElements;
 
+    bool m_isScrollToRegionWhenSelected = false;
+
     QColor m_backgroundColor{25, 25, 28};
     QColor m_transparentColor{0, 0, 0, 0};
     QColor m_textColor{30, 30, 35};
@@ -95,6 +103,7 @@ private:
     void highLightTilesInRegion(QPainter& p, const Region& area) const;
 
     // panning
+    PointAnimation m_moveAnimation;
     bool m_isPanning{false};
     QPointF m_lastMousePos;
     QPointF m_panPixels{0.0, 0.0};
@@ -128,9 +137,15 @@ private:
     void startNewRegion(const QPointF& worldCoord);
     void stopRegion(const QPointF& selection);
     void cancelRegion(const QString& msg = "");
+    void startEditRegion(RegionPtr region);
     // selection
 
-    QPointF toWorldCoord(const QPoint&);
+    QPointF screenToWorldCoord(const QPoint&) const;
+    QPointF worldToScreenCoord(const QPointF&) const;
+    void scrollToRegion(const RegionPtr&);
+    void startMoveAnimation(const QPointF&);
+    QPointF currentWorldCenter() const;
+    void setWorldCenter(const QPointF&);
 };
 
 }  // namespace fp

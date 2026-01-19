@@ -66,6 +66,7 @@ public:
     void insert(const HierarhyElement& element) {
         m_elements.insert(element);
     }
+#ifdef DEBUG_SELECTION_ELEMENTS
     void print(const std::string& label) {
         qDebug() << "~~~" << QString::fromStdString(label);
         for (const HierarhyElement& element: m_elements) {
@@ -73,6 +74,7 @@ public:
         }
         qDebug() << "\n";
     }
+#endif // DEBUG_SELECTION_ELEMENTS
 
 private:
     std::set<HierarhyElement> m_elements;

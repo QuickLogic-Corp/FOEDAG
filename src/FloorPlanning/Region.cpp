@@ -14,9 +14,11 @@ void Region::setTiles(const std::unordered_set<Tile::Index>& tiles)
 
 void Region::setElements(const HierarhyElementsPtr& elemenets)
 {
+#ifdef DEBUG_SELECTION_ELEMENTS
     if (elemenets) {
         elemenets->print(QString("Region(%1)::setElements").arg(m_id).toStdString());
     }
+#endif // DEBUG_SELECTION_ELEMENTS
     m_elements = elemenets;
 }
 

@@ -93,6 +93,15 @@ RegionPtr DeviceGrid::findRegion(const QPointF& worldCoord) const
     return nullptr;
 }
 
+RegionPtr DeviceGrid::findRegion(const QString& regionId) const
+{
+    auto it = m_regions.find(regionId.toInt());
+    if (it != m_regions.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
 void DeviceGrid::removeRegion(const RegionPtr& region)
 {
     m_regions.erase(m_regions.find(region->id()));

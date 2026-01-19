@@ -8,8 +8,11 @@ namespace fp {
 
 class SynthResourceHierarchyWidget;
 class DeviceGridWidget;
+class RegionsListWidget;
 
 class FloorPlanningWidget : public QWidget {
+    Q_OBJECT
+
 public:
     explicit FloorPlanningWidget(QWidget* parent = nullptr);
     void loadNetList(const std::set<std::string>& elements);
@@ -17,7 +20,9 @@ public:
 
 private:
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
+    SynthResourceHierarchyWidget* m_regionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};
+    RegionsListWidget* m_regionsList{nullptr};
 };
 
 }  // namespace fp

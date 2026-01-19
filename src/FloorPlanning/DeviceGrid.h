@@ -26,6 +26,7 @@ public:
     void addRegion(const RegionPtr& region);
     void removeRegion(const RegionPtr&);
     RegionPtr findRegion(const QPointF& worldCoord) const;
+    RegionPtr findRegion(const QString& regionId) const;
     void refreshRegion(const RegionPtr&);
 
     const std::map<int, RegionPtr>& regions() const { return m_regions; }

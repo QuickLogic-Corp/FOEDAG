@@ -23,6 +23,7 @@ set (SRC_LIST
   FloorPlanningWidget.cpp
   DeviceGridWidget.cpp
   SynthResourceHierarchyWidget.cpp
+  RegionsListWidget.cpp
   # widgets
   DeviceGridDescriptor.cpp
   SynthResourceExtractor.cpp
@@ -30,6 +31,7 @@ set (SRC_LIST
   DeviceGrid.cpp
   Tile.cpp
   Region.cpp
+  PointAnimation.cpp
 )
 
 set (HDR_LIST
@@ -37,6 +39,7 @@ set (HDR_LIST
   FloorPlanningWidget.h
   DeviceGridWidget.h
   SynthResourceHierarchyWidget.h
+  RegionsListWidget.h
   # widgets
   DeviceGridDescriptor.h
   TileDescriptor.h
@@ -46,6 +49,7 @@ set (HDR_LIST
   Tile.h
   Region.h
   HierarhyElement.h
+  PointAnimation.h
 )
 
 add_library(floorplanning STATIC
