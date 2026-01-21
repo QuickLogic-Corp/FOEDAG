@@ -1,7 +1,7 @@
 #pragma once
 
 #include "HierarhyElement.h"
-#include "Region.h"
+#include "Partition.h"
 
 #include <QWidget>
 #include <QTreeView>
@@ -20,12 +20,12 @@ class SynthResourceHierarchyWidget : public QWidget {
 
     enum Column {
       Netlist = 0,
-      Regions
+      Partitions
     };
 public:
     enum Flag {
         None                 = 0,
-        HideRegionsColumn    = 1 << 0,
+        HidePartitionsColumn    = 1 << 0,
         ShowOnlyCheckedItems = 1 << 1
     };
 
@@ -33,8 +33,8 @@ public:
 
     void build(const std::set<std::string>& elements);
 
-    void onRegionsChanged(const std::map<int, RegionPtr>& regions);
-    void onRegionSelected(const RegionPtr&);
+    void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
+    void onPartitionSelected(const PartitionPtr&);
     void clearSelectedElements();
 
 signals:
@@ -43,7 +43,6 @@ signals:
 private:
     int m_flags = Flag::None;
     QLineEdit* m_leFilter{nullptr};
-    QCheckBox* m_bnFilter{nullptr};
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
 
@@ -61,7 +60,7 @@ private:
     HierarhyElementsPtr collectSelectedElements() const;
 
     bool isShowOnlyCheckedItems() const { return m_flags & Flag::ShowOnlyCheckedItems; }
-    bool isRegionsColumnHidden() const { return m_flags & Flag::HideRegionsColumn; }
+    bool isPartitionsColumnHidden() const { return m_flags & Flag::HidePartitionsColumn; }
 };
 
 }  // namespace fp

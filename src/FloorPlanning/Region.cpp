@@ -12,16 +12,6 @@ void Region::setTiles(const std::unordered_set<Tile::Index>& tiles)
     updateTileCoordBounds();
 }
 
-void Region::setElements(const HierarhyElementsPtr& elemenets)
-{
-#ifdef DEBUG_SELECTION_ELEMENTS
-    if (elemenets) {
-        elemenets->print(QString("Region(%1)::setElements").arg(m_id).toStdString());
-    }
-#endif // DEBUG_SELECTION_ELEMENTS
-    m_elements = elemenets;
-}
-
 void Region::updateTileCoordBounds()
 {
     if (m_tiles.empty()) {
@@ -46,5 +36,28 @@ void Region::updateTileCoordBounds()
     // qDebug() << "~~~ regionBound m_topRightIndex=" << m_topRightIndex.col << m_topRightIndex.row;
     // qDebug() << "";
 }
+
+std::unordered_set<Tile::Index> Region::collectOverlappedIndexes(const Region& rhs) const
+{
+    std::unordered_set<Tile::Index> result;
+    for (const Tile::Index& index: rhs.tiles()) {
+        if (m_tiles.find(index) != m_tiles.end()) {
+            result.insert(index);
+        }
+    }
+    return result;
+}
+
+// bool Region::isOverllapedWith(const Region& rhs) {
+//     const auto& small = (m_tiles.size() < rhs.m_tiles.size()) ? m_tiles : rhs.m_tiles;
+//     const auto& large = (m_tiles.size() < rhs.m_tiles.size()) ? rhs.m_tiles : m_tiles;
+
+//     for (const auto& v: small) {
+//         if (large.find(v) != large.end()) {
+//             return true;
+//         }
+//     }
+//     return false;
+// }
 
 } // namespace fp

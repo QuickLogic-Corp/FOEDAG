@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Tile.h"
-#include "Region.h"
+#include "Partition.h"
 #include "DeviceGridDescriptor.h"
 
 #include <QPoint>
@@ -19,20 +19,26 @@ public:
     ~DeviceGrid()=default;
 
     void constructTiles(const DeviceGridDescriptorPtr& device);
-    void clearRegions() {
-        m_regions.clear();
+    void clearPartitions() {
+        m_partitions.clear();
     }
 
-    void addRegion(const RegionPtr& region);
-    void removeRegion(const RegionPtr&);
-    RegionPtr findRegion(const QPointF& worldCoord) const;
-    RegionPtr findRegion(const QString& regionId) const;
-    void refreshRegion(const RegionPtr&);
+    void addPartition(const PartitionPtr& partition);
+    void removePartition(const PartitionPtr&);
+    PartitionPtr findPartition(int partitionId) const;
+    void refreshPartition(const PartitionPtr&);
 
-    const std::map<int, RegionPtr>& regions() const { return m_regions; }
+    const std::map<int, PartitionPtr>& partitions() const { return m_partitions; }
     const std::unordered_map<Tile::Index, Tile>& tiles() const { return m_tiles; }
+    const std::unordered_set<Tile::Index>& overlappedIndexes() const { return m_overlappedIndexes; }
 
-    std::unordered_set<Tile::Index> findTiles(const QRectF&, bool excludeIo = true);
+    void alignRegions();
+    void alignRegion(const RegionPtr&);
+    bool restoreRegion(const PartitionPtr& partition,
+                       const Tile::Index& bottomLeftTileIndex,
+                       const Tile::Index& topRightTileIndex,
+                       bool excludeIoTiles = true);
+    std::unordered_set<Tile::Index> findTiles(const QRectF&, bool excludeIoTiles = true);
     const Tile& tile(const Tile::Index&) const;
 
     void markVisibleTiles(const QRectF& visibleArea);
@@ -42,13 +48,17 @@ public:
     std::optional<QPointF> findBottomLeftPoint(const Tile::Index&) const;
     std::optional<QPointF> findTopRightPoint(const Tile::Index&) const;
 
+    std::unordered_set<std::string> collectErrors();
+
 private:
     DeviceGridDescriptorPtr m_descriptor;
 
     std::unordered_map<Tile::Index, Tile> m_tiles;
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;
 
-    std::map<int, RegionPtr> m_regions;
+    std::map<int, PartitionPtr> m_partitions;
+
+    std::unordered_set<Tile::Index> m_overlappedIndexes;
 
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;

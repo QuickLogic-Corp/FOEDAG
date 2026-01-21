@@ -7,8 +7,9 @@
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QHeaderView>
 #include <QCheckBox>
+#include <QHeaderView>
+#include <QLabel>
 #include <QCompleter>
 
 #include <QDebug>
@@ -47,7 +48,7 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
       m_view(new QTreeView(this)),
       m_model(new QStandardItemModel(this))
 {
-    int ls = 1;
+    int ls = 0;
 
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(ls,ls,ls,ls);
@@ -66,8 +67,6 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         });
 #endif // DISABLE_SHOW_ONLY_CHECKED_ITEMS_UI
         m_leFilter = new QLineEdit;
-
-        m_bnFilter = new QCheckBox("Filter");
     }
 
     QHBoxLayout* toolbarLayout = new QHBoxLayout;
@@ -77,19 +76,14 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         toolbarLayout->addWidget(chShowChecked);
     }
     if (m_leFilter) {
+        toolbarLayout->addWidget(new QLabel("Filter"));
         toolbarLayout->addWidget(m_leFilter);
-        toolbarLayout->addWidget(m_bnFilter);
 
         QObject::connect(m_leFilter, &QLineEdit::textChanged, this, [this](const QString& pattern) {
-            if (m_bnFilter->isChecked()) {
-                showFilteredItems(pattern.toStdString());
-            }
-        });
-        QObject::connect(m_bnFilter, &QCheckBox::stateChanged, this, [this](int state){
-            if (state == Qt::Checked) {
-                showFilteredItems(m_leFilter->text().toStdString());
-            } else {
+            if (pattern.isEmpty()) {
                 showAllItems();
+            } else {
+                showFilteredItems(pattern.toStdString());
             }
         });
     }
@@ -112,17 +106,17 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
 void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
 {
     m_model->clear();
-    if (!isRegionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Netlist" << "Regions");
+    if (!isPartitionsColumnHidden()) {
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Netlist" << "Partitions");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Region netlist");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition netlist");
     }
 
     QHeaderView* header = m_view->header();
     header->setStretchLastSection(true);
     header->setSectionResizeMode(Column::Netlist, QHeaderView::ResizeToContents);
-    if (!isRegionsColumnHidden()) {
-        header->setSectionResizeMode(Column::Regions, QHeaderView::Stretch);
+    if (!isPartitionsColumnHidden()) {
+        header->setSectionResizeMode(Column::Partitions, QHeaderView::Stretch);
     }
 
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
@@ -155,26 +149,27 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
     m_view->expandAll();
 }
 
-void SynthResourceHierarchyWidget::onRegionsChanged(const std::map<int, RegionPtr>& regions)
+void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
 {
     // intermediate data be captured in lambda
     std::map<std::string, std::string> data;
-    for (const auto& [id, region]: regions) {
-        if (!region->elements()) {
+    for (const auto& [id, partition]: partitions) {
+        if (!partition->elements()) {
             continue;
         }
-        for (const HierarhyElement& element: *region->elements()) {
+        const std::string partitionName{partition->name()};
+        for (const HierarhyElement& element: *partition->elements()) {
             if (data.find(element.path) == data.end()) {
-                data[element.path] = std::to_string(id);
+                data[element.path] = partitionName;
             } else {
-                data[element.path] += "," + std::to_string(id);
+                data[element.path] += "," + partitionName;
             }
         }
     }
 
-    const bool isRegionsColumnVisible = !isRegionsColumnHidden();
-    std::function<void(QStandardItem*, const std::string&)> setRegionRecursive =
-        [&data, &setRegionRecursive, isRegionsColumnVisible](QStandardItem* item, const std::string& prefix)
+    const bool isPartitionsColumnVisible = !isPartitionsColumnHidden();
+    std::function<void(QStandardItem*, const std::string&)> setPartitionRecursive =
+        [&data, &setPartitionRecursive, isPartitionsColumnVisible](QStandardItem* item, const std::string& prefix)
     {
         if (!item) {
             return;
@@ -190,23 +185,23 @@ void SynthResourceHierarchyWidget::onRegionsChanged(const std::map<int, RegionPt
             const std::string name = child->text().toStdString();
             const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
 
-            if (isRegionsColumnVisible) {
-                QStandardItem* regionItem = item->child(row, Column::Regions);
-                if (regionItem) {
+            if (isPartitionsColumnVisible) {
+                QStandardItem* partitionItem = item->child(row, Column::Partitions);
+                if (partitionItem) {
                     if (auto it = data.find(fullPath); it != data.end()) {
-                        regionItem->setText(QString::fromStdString(it->second));
+                        partitionItem->setText(QString::fromStdString(it->second));
                     } else {
-                        regionItem->setText(QString());
+                        partitionItem->setText(QString());
                     }
                 }
             }
 
-            setRegionRecursive(child, fullPath);
+            setPartitionRecursive(child, fullPath);
         }
     };
 
     QSignalBlocker blockModel(m_model);     // Block model signals to avoid massive itemChanged cascades
-    setRegionRecursive(m_model->invisibleRootItem(), "");
+    setPartitionRecursive(m_model->invisibleRootItem(), "");
     blockModel.unblock();
 
     m_view->viewport()->update();
@@ -227,9 +222,9 @@ void SynthResourceHierarchyWidget::clearSelectedElements()
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::onRegionSelected(const RegionPtr& region)
+void SynthResourceHierarchyWidget::onPartitionSelected(const PartitionPtr& partition)
 {
-    if (!region->elements()) {
+    if (!partition->elements()) {
 #ifdef DEBUG_SELECTION_ELEMENTS
         qDebug() << "elements are nullptr";
 #endif
@@ -237,11 +232,11 @@ void SynthResourceHierarchyWidget::onRegionSelected(const RegionPtr& region)
     }
 
 #ifdef DEBUG_SELECTION_ELEMENTS
-    region->elements()->print("SynthResourceHierarchyWidget::setSelectedElements ensure elements are checked");
+    partition->elements()->print("SynthResourceHierarchyWidget::setSelectedElements ensure elements are checked");
 #endif // DEBUG_SELECTION_ELEMENTS
 
-    // check only requested elements + set region label
-    std::function<void(QStandardItem*, const std::string&)> checkAndRegionRecursive =
+    // check only requested elements + set partition label
+    std::function<void(QStandardItem*, const std::string&)> checkAndPartitionRecursive =
         [&](QStandardItem* item, const std::string& prefix)
     {
         if (!item) {
@@ -258,7 +253,7 @@ void SynthResourceHierarchyWidget::onRegionSelected(const RegionPtr& region)
             const std::string name = child->text().toStdString();
             const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
 
-            if (region->elements()->contains(fullPath)) {
+            if (partition->elements()->contains(fullPath)) {
                 child->setCheckState(Qt::Checked);
                 onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
 
@@ -266,14 +261,14 @@ void SynthResourceHierarchyWidget::onRegionSelected(const RegionPtr& region)
                 m_view->expand(child->index());
             }
 
-            checkAndRegionRecursive(child, fullPath);
+            checkAndPartitionRecursive(child, fullPath);
         }
     };
 
     // Block model signals to avoid massive itemChanged cascades
     QSignalBlocker blockModel(m_model);
     uncheckAllRecursive(m_model->invisibleRootItem(), Column::Netlist);
-    checkAndRegionRecursive(m_model->invisibleRootItem(), "");
+    checkAndPartitionRecursive(m_model->invisibleRootItem(), "");
 
     if (isShowOnlyCheckedItems()) {
         showOnlyCheckedItems();
@@ -353,9 +348,9 @@ HierarhyElementsPtr SynthResourceHierarchyWidget::collectSelectedElements() cons
 
 void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 {
-    const bool isRegionColumnVisible = !isRegionsColumnHidden();
+    const bool isPartitionColumnVisible = !isPartitionsColumnHidden();
     std::function<QStandardItem*(QStandardItem*, const QString&)>
-        findOrCreateChild = [isRegionColumnVisible](QStandardItem* parent, const QString& text)
+        findOrCreateChild = [isPartitionColumnVisible](QStandardItem* parent, const QString& text)
     {
         auto applyFlags = [](QStandardItem* item) {
             Qt::ItemFlags flags = item->flags()
@@ -379,9 +374,9 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 
         QStandardItem* item = new QStandardItem(text);
         applyFlags(item);
-        if (isRegionColumnVisible) {
-            QStandardItem* regionItem = new QStandardItem("");
-            parent->appendRow({item, regionItem});
+        if (isPartitionColumnVisible) {
+            QStandardItem* partitionItem = new QStandardItem("");
+            parent->appendRow({item, partitionItem});
         } else {
             parent->appendRow(item);
         }

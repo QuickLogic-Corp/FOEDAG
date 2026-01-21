@@ -2,7 +2,7 @@
 
 #include "DeviceGrid.h"
 #include "Tile.h"
-#include "Region.h"
+#include "Partition.h"
 #include "HierarhyElement.h"
 #include "PointAnimation.h"
 
@@ -19,6 +19,7 @@ class DeviceGridWidget final : public QWidget {
     const double scaleMin = 0.2;
     const double scaleMax = 10.0;
 
+#ifdef SHOW_DRAWING_STAT
     struct DrawStat {
     public:
         DrawStat() {
@@ -46,20 +47,33 @@ class DeviceGridWidget final : public QWidget {
             m_label->setText(QString("visible %1 tiles, took %2 ms").arg(m_drawableTilesNum).arg(m_drawTimeMs));
         }
     };
+#endif // SHOW_DRAWING_STAT
 public:
     explicit DeviceGridWidget(QWidget* parent = nullptr);
     virtual ~DeviceGridWidget()=default;
 
     void constructTiles(const DeviceGridDescriptorPtr& descriptor);
     void onSelectedElementsChanged(const HierarhyElementsPtr& elemenets);
-    void onRegionSelected(QString);
+    void onPartitionSelected(int);
+    void onPartitionRenamed(int partitionId, QString newName);
 
-    void setScrollToRegionWhenSelected(bool flag) { m_isScrollToRegionWhenSelected = flag; }
+    void setScrollToPartitionWhenSelected(bool flag) { m_isScrollToPartitionWhenSelected = flag; }
+
+    void clearPartitions();
+    void createNewPartition(const std::string& partitionName = "");
+    void removeSelectedPartition();
+    std::unordered_set<std::string> existedPartitionNames() const;
+
+    void saveQdc();
+    void loadQdc();
 
 signals:
+    void checkErrorsFinished(std::unordered_set<std::string> errors);
+    void createFirstPartitionRequested();
     void clearSelectionRequested();
-    void regionSelected(const RegionPtr&);
-    void regionsChanged(const std::map<int, RegionPtr>&);
+    void partitionSelected(const PartitionPtr&);
+    void partitionsChanged(const std::map<int, PartitionPtr>&);
+    void notify(QString, QString);
 
 protected:
     QSize sizeHint() const override final;
@@ -71,36 +85,39 @@ protected:
     void wheelEvent(QWheelEvent* event) override final;
     void paintEvent(QPaintEvent*) override final;
 
-    void saveQdc();
-    void loadQdc();
-
 private:
     DeviceGrid m_device;
 
     HierarhyElementsPtr m_selectedElements;
 
-    bool m_isScrollToRegionWhenSelected = false;
+    bool m_isScrollToPartitionWhenSelected = false;
 
-    QColor m_backgroundColor{25, 25, 28};
-    QColor m_transparentColor{0, 0, 0, 0};
-    QColor m_textColor{30, 30, 35};
-    QColor m_regionColor{50, 160, 50}; // green
-    QColor m_editRegionColor{50, 50, 160}; // blue
-    QColor m_editRegionTransparentColor{50, 50, 160, 150}; // blue
+    const QColor m_backgroundColor{25, 25, 28};
+    const QColor m_transparentColor{0, 0, 0, 0};
+    const QColor m_textColor{30, 30, 35};
+    const QColor m_partitionColor{50, 160, 50}; // green
+    const QColor m_partitionTransparentColor{50, 160, 50, 150}; // transparent-green
+    const QColor m_editPartitionColor{50, 50, 160}; // blue
+    const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
+    const QColor m_removeHandlerColor{160, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedTileColor{160, 50, 50, 150}; // transparent-red
+    const int m_tileLineWidth = 3;
 
     double m_scale = 1.0f;
 
     bool m_isMousePressed = false;
 
+#ifdef SHOW_DRAWING_STAT
     DrawStat m_drawStat;
+#endif
 
     QRectF m_viewPort;
 
     void drawBackground(QPainter& p);
     void drawTilesBatched(QPainter& p);
-    void drawRegions(QPainter& p);
+    void drawPartitions(QPainter& p);
     void drawTileLabels(QPainter& p);
-    void highLightTilesInRegion(QPainter& p, const Region& area) const;
+    void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
     // panning
     PointAnimation m_moveAnimation;
@@ -113,39 +130,28 @@ private:
     // panning
 
     // selection
-    bool m_isSelectingNewRegion{false};
-    RegionPtr m_currentRegion;
+    RegionPtr m_newRegion;
+    RegionPtr m_selectedRegion;
 
-    RegionPtr m_regionToEdit;
-    std::optional<Region::HandlerRole> m_editRoleOpt;
-    bool trySelectRegionToEdit(const QPointF& worldCoord);
+    PartitionPtr m_selectedPartition;
+    std::optional<Region::HandlerRole> m_regionEditRoleOpt;
+    bool trySelect(const QPointF& worldCoord);
 
-    void clearRegions() {
-        m_device.clearRegions();
-        m_currentRegion.reset();
-        exitRegionEdit();
-        update();
-    }
-    void exitRegionEdit() {
-        emit clearSelectionRequested();
-        emit regionsChanged(m_device.regions());
-        m_selectedElements.reset();
-        m_regionToEdit.reset();
-        m_editRoleOpt.reset();
-        update();
-    }
-    void startNewRegion(const QPointF& worldCoord);
-    void stopRegion(const QPointF& selection);
-    void cancelRegion(const QString& msg = "");
-    void startEditRegion(RegionPtr region);
+    void exitPartitionSelect();
+    void startNewRegionSelection(const QPointF& worldCoord);
+    void stopRegionSelection(const QPointF& worldCoord);
+    void cancelRegionCreation(const QString& msg = "");
+    void selectPartition(PartitionPtr partition);
     // selection
 
     QPointF screenToWorldCoord(const QPoint&) const;
     QPointF worldToScreenCoord(const QPointF&) const;
-    void scrollToRegion(const RegionPtr&);
+    void scrollToPartition(const PartitionPtr&);
     void startMoveAnimation(const QPointF&);
     QPointF currentWorldCenter() const;
     void setWorldCenter(const QPointF&);
+
+    void checkErrors();
 };
 
 }  // namespace fp

@@ -83,39 +83,73 @@ void DeviceGrid::markVisibleTiles(const QRectF& visibleArea)
     }
 }
 
-RegionPtr DeviceGrid::findRegion(const QPointF& worldCoord) const
+PartitionPtr DeviceGrid::findPartition(int partitionId) const
 {
-    for (const auto& [id, region]: m_regions) {
-        if (region->rect().contains(worldCoord)) {
-            return region;
-        }
-    }
-    return nullptr;
-}
-
-RegionPtr DeviceGrid::findRegion(const QString& regionId) const
-{
-    auto it = m_regions.find(regionId.toInt());
-    if (it != m_regions.end()) {
+    auto it = m_partitions.find(partitionId);
+    if (it != m_partitions.end()) {
         return it->second;
     }
     return nullptr;
 }
 
-void DeviceGrid::removeRegion(const RegionPtr& region)
+void DeviceGrid::removePartition(const PartitionPtr& partition)
 {
-    m_regions.erase(m_regions.find(region->id()));
+    m_partitions.erase(m_partitions.find(partition->id()));
 }
 
-void DeviceGrid::addRegion(const RegionPtr& region)
+void DeviceGrid::addPartition(const PartitionPtr& partition)
 {
-    m_regions[region->id()] = region;
+    m_partitions[partition->id()] = partition;
 }
 
-void DeviceGrid::refreshRegion(const RegionPtr& region)
+void DeviceGrid::refreshPartition(const PartitionPtr& partition)
 {
-    region->rebuildHandles();
-    region->setTiles(findTiles(region->rect()));
+    for (const auto& [id, region]: partition->regions()) {
+        region->rebuildHandles();
+        region->setTiles(findTiles(region->rect()));
+    }
+}
+
+void DeviceGrid::alignRegions()
+{
+    for (const auto& [partitionId, partition]: m_partitions) {
+        for (const auto& [regionId, region]: partition->regions()) {
+            alignRegion(region);
+        }
+    }
+}
+
+void DeviceGrid::alignRegion(const RegionPtr& region)
+{
+    std::optional<QPointF> bottomLeftPointOpt = findBottomLeftPoint(region->bottomLeftIndex());
+    std::optional<QPointF> topRightPointOpt = findTopRightPoint(region->topRightIndex());
+
+    if (bottomLeftPointOpt && topRightPointOpt) {
+        QPointF bottomLeftPoint = bottomLeftPointOpt.value() + 0.5*QPointF(-Tile::borderPx(), Tile::borderPx());
+        QPointF topRightPoint = topRightPointOpt.value()     + 0.5*QPointF(Tile::borderPx(), -Tile::borderPx());
+        region->setPoints(bottomLeftPoint, topRightPoint);
+    }
+}
+
+bool DeviceGrid::restoreRegion(const PartitionPtr& partition, const Tile::Index& bottomLeftTileIndex, const Tile::Index& topRightTileIndex, bool excludeIoTiles)
+{
+    std::optional<QPointF> bottomLeftPointOpt = findBottomLeftPoint(bottomLeftTileIndex);
+    std::optional<QPointF> topRightPointOpt = findTopRightPoint(topRightTileIndex);
+
+    if (bottomLeftPointOpt && topRightPointOpt) {
+        QPointF bottomLeftPoint = bottomLeftPointOpt.value() + 0.5*QPointF(-Tile::borderPx(), Tile::borderPx());
+        QPointF topRightPoint = topRightPointOpt.value()     + 0.5*QPointF(Tile::borderPx(), -Tile::borderPx());
+        QRectF rect = QRectF(bottomLeftPoint, topRightPoint);
+        rect = rect.normalized();
+        std::unordered_set<Tile::Index> tiles = findTiles(rect, excludeIoTiles);
+
+        RegionPtr region = std::make_shared<Region>(bottomLeftPoint, topRightPoint);
+        region->setTiles(tiles);
+        partition->addRegion(region);
+        return true;
+    }
+
+    return false;
 }
 
 std::unordered_set<Tile::Index> DeviceGrid::findTiles(const QRectF& rect, bool excludeIoTiles)
@@ -198,6 +232,89 @@ const Tile& DeviceGrid::tile(const Tile::Index& index) const
 
     qCritical() << "tile on index" << index.col << index.row << "resolved index=" << bottomLeftTileIndex.col << bottomLeftTileIndex.row << "wasn't found";
     return m_nullTile;
+}
+
+std::unordered_set<std::string> DeviceGrid::collectErrors()
+{
+    std::unordered_set<std::string> errors;
+    for (const auto& [partitionId, partition]: m_partitions) {
+        // element presence
+        if (!partition->elements() || (partition->elements() && partition->elements()->empty())) {
+            errors.insert("partition " + partition->name() + " has no elements assigned to it");
+        }
+        // region presence
+        if (partition->regions().empty()) {
+            errors.insert("partition " + partition->name() + " has no any region");
+        }
+        // tiles presence in region
+        for (const auto& [regionId, region]: partition->regions()) {
+            if (region->tiles().empty()) {
+                errors.insert("partition " + partition->name() + " has region with no any tiles");
+            }
+        }
+    }
+
+    // tiles overlapping between different partitions
+    m_overlappedIndexes.clear();
+    for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {
+        for (auto pit2 = std::next(pit1); pit2 != m_partitions.end(); ++pit2) {
+            const PartitionPtr& p1 = pit1->second;
+            const PartitionPtr& p2 = pit2->second;
+
+            // this doesn't work, it could be due to partition rect is not calculated yet
+            // if (!p1->rect().intersects(p2->rect())) {
+            //     continue;
+            // }
+
+            const auto& regs1 = p1->regions();
+            const auto& regs2 = p2->regions();
+
+            for (const auto& [r1id, r1]: regs1) {
+                for (const auto& [r2id, r2]: regs2) {
+                    if (r1->rect().intersects(r2->rect())) {
+                        std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
+                        for (const Tile::Index& index: indexes) {
+                            errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: ["+p1->name()+"] and ["+p2->name()+"]");
+                        }
+                        m_overlappedIndexes.insert(indexes.begin(), indexes.end());
+                    }
+                }
+            }
+        }
+    }
+
+    // tiles overlapping within partition
+    for (auto& [pid, part] : m_partitions) {
+        auto& regs = part->regions();
+
+        for (auto rit1 = regs.begin(); rit1 != regs.end(); ++rit1) {
+            for (auto rit2 = std::next(rit1); rit2 != regs.end(); ++rit2) {
+                const RegionPtr& r1 = rit1->second;
+                const RegionPtr& r2 = rit2->second;
+                if (r1->rect().intersects(r2->rect())) {
+                    std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
+                    for (const Tile::Index& index: indexes) {
+                        errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partition ["+part->name()+"]");
+                    }
+                    m_overlappedIndexes.insert(indexes.begin(), indexes.end());
+                }
+            }
+        }
+    }
+
+    // elements overlapping
+    for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {
+        for (auto pit2 = std::next(pit1); pit2 != m_partitions.end(); ++pit2) {
+            const PartitionPtr& p1 = pit1->second;
+            const PartitionPtr& p2 = pit2->second;
+
+            std::unordered_set<std::string> elements = p1->collectOverlppedElements(*p2);
+            for (const std::string& element: elements) {
+                errors.insert("Overlapping element ["+element+") in partitions: ["+p1->name()+"] and ["+p2->name()+"]");
+            }
+        }
+    }
+    return errors;
 }
 
 } // namespace fp

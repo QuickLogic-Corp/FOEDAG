@@ -10,71 +10,79 @@ namespace fp {
 
 void QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& filePath)
 {
-    FOEDAG::FileUtils::WriteToFile(filePath, serialize(device));
+    std::string content = serialize(device);
+    if (!content.empty()) {
+        FOEDAG::FileUtils::WriteToFile(filePath, content);
+    }
 }
 
 std::string QdcSerializer::serialize(const DeviceGrid& device)
 {
-    // preprocess to unite regions by same elements list
-    std::map<std::string, std::string> data;
-    for (const auto& [id, region]: device.regions()) {
-        if (!region->elements()) {
+    std::string content;
+    for (const auto& [id, partition]: device.partitions()) {
+        if (!partition->elements()) {
             continue;
-        } if(region->elements()->empty()) {
+        } if(partition->elements()->empty()) {
             continue;
         }
 
+        // collect netlist elements
         std::string elementsStr = "";
-        int counter = 0;
-        for (const HierarhyElement& element: *region->elements()) {
+        int elementsCounter = 0;
+        for (const HierarhyElement& element: *partition->elements()) {
             if (element.isLeaf) {
                 elementsStr += element.path;
             } else {
                 elementsStr += element.path + ".*";
             }
-            counter++;
-            if (counter < region->elements()->size()) {
+            elementsCounter++;
+            if (elementsCounter < partition->elements()->size()) {
                 elementsStr += ",";
                 elementsStr += lineDelimiter();
             }
         }
 
-        const Tile& blTile = device.tile(region->bottomLeftIndex());
-        const Tile& trTile = device.tile(region->topRightIndex());
+        // collect regions
+        std::string regionsStr;
+        int regionCounter = 0;
+        for (const auto& [id, region]: partition->regions()) {
+            const Tile& blTile = device.tile(region->bottomLeftIndex());
+            const Tile& trTile = device.tile(region->topRightIndex());
 
-        const bool isBottomLeftTileFullyIncluded = region->contains(blTile.index());
-        const bool isTopRightTileFullyIncluded = region->contains(trTile.index());
+            const bool isBottomLeftTileFullyIncluded = region->contains(blTile.index());
+            const bool isTopRightTileFullyIncluded = region->contains(trTile.index());
 
-        std::string bottomLeftStr;
-        if (isBottomLeftTileFullyIncluded) {
-            bottomLeftStr = blTile.name().toStdString();
-        } else {
-            bottomLeftStr = device.buildTileSymbolicName(Tile::Type::Clb, region->bottomLeftIndex());
+            std::string bottomLeftStr;
+            if (isBottomLeftTileFullyIncluded) {
+                bottomLeftStr = blTile.name().toStdString();
+            } else {
+                bottomLeftStr = device.buildTileSymbolicName(Tile::Type::Clb, region->bottomLeftIndex());
+            }
+
+            std::string topRightStr;
+            if (isTopRightTileFullyIncluded) {
+                topRightStr = trTile.name().toStdString();
+            } else {
+                topRightStr = device.buildTileSymbolicName(Tile::Type::Clb, region->topRightIndex());
+            }
+
+            std::string regionStr{bottomLeftStr};
+            if (topRightStr != bottomLeftStr) {
+                regionStr += ":";
+                regionStr += topRightStr;
+            }
+
+            regionsStr += regionStr;
+
+            regionCounter++;
+            if (regionCounter < partition->regions().size()) {
+                regionsStr += ",";
+                regionsStr += lineDelimiter();
+            }
         }
 
-        std::string topRightStr;
-        if (isTopRightTileFullyIncluded) {
-            topRightStr = trTile.name().toStdString();
-        } else {
-            topRightStr = device.buildTileSymbolicName(Tile::Type::Clb, region->topRightIndex());
-        }
-
-        std::string regionStr{bottomLeftStr};
-        if (topRightStr != bottomLeftStr) {
-            regionStr += ":";
-            regionStr += topRightStr;
-        }
-        if (data.find(elementsStr) != data.end()) {
-            data[elementsStr] += "," + regionStr;
-        } else {
-            data[elementsStr] = regionStr;
-        }
-    }
-    // end preprocess
-
-    std::string content;
-    for (const auto& [elementsStr, regionsStr]: data) {
-        std::string line = "set_region ";
+        // aggregate line
+        std::string line = "set_partition ";
         line += lineDelimiter();
 
         line += elementsStr;
@@ -84,8 +92,14 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
 
         line += regionsStr;
 
+        line += " ";
+        line += lineDelimiter();
+
+        line += partition->name();
+
         line += "\n\n";
 
+        // add line to context
         content += line;
     }
 
@@ -95,7 +109,9 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
 void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& filePath)
 {
     std::vector<std::string> lines = readLines(filePath);
-    load(device, lines);
+    if (!lines.empty()) {
+        load(device, lines);
+    }
 }
 
 void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lines)
@@ -128,17 +144,27 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
         return result;
     };
 
-    device.clearRegions();
+    device.clearPartitions();
+    Partition::resetIdGenerator();
     Region::resetIdGenerator();
 
     for (const std::string& line: lines) {
-        if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
-            std::vector<std::string> tokens = FOEDAG::StringUtils::tokenize(line, " ");
-            if (tokens.size() == 3) {
+        if (FOEDAG::StringUtils::startsWith(line, "set_region") || FOEDAG::StringUtils::startsWith(line, "set_partition")) {
+            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(line, " ");
+            // extract partition name [optionally]
+            std::string partitionName = "";
+            if (cmdTokens.size() == 4) {
+                partitionName = cmdTokens[3];
+            }
+
+            PartitionPtr partition = std::make_shared<Partition>(partitionName);
+            device.addPartition(partition);
+
+            if (cmdTokens.size() >= 3) {
                 // extract elements
-                std::vector<std::string> pathesDirty = FOEDAG::StringUtils::tokenize(tokens[1], ",");
+                std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
                 HierarhyElementsPtr elements = std::make_shared<HierarhyElements>();
-                for (std::string path: pathesDirty) {
+                for (std::string path: pathesDirtyTokens) {
                     if (FOEDAG::StringUtils::endsWith(path, ".*")) {
                         FOEDAG::StringUtils::removeSuffix(path, ".*");
                         elements->insert(HierarhyElement{path, false});
@@ -146,52 +172,37 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                         elements->insert(HierarhyElement{path, true});
                     }
                 }
+                partition->setElements(elements);
+
                 // extract regions
-                std::vector<std::string> regions = splitRegionsIgnoringParens(tokens[2], ',');
-                for (const std::string& region: regions) {
-                    std::vector<std::string> tokens = FOEDAG::StringUtils::tokenize(region, ":");
-                    if (tokens.size() == 1) {
+                std::vector<std::string> regionsStr = splitRegionsIgnoringParens(cmdTokens[2], ',');
+                for (const std::string& regionStr: regionsStr) {
+                    std::vector<std::string> regionTokens = FOEDAG::StringUtils::tokenize(regionStr, ":");
+                    if (regionTokens.size() == 1) {
                         // special case
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(tokens[0]);
+                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
                         if (bottomLeftGridCoordTileDescriptorOpt) {
                             Tile::Index bottomLeftTileIndex = bottomLeftGridCoordTileDescriptorOpt.value().index;
-                            std::optional<QPointF> bottomLeftPointOpt = device.findBottomLeftPoint(bottomLeftTileIndex);
-                            std::optional<QPointF> topRightPointOpt = device.findTopRightPoint(bottomLeftTileIndex);
-                            if (bottomLeftPointOpt && topRightPointOpt) {
-                                QPointF bottomLeftPoint = bottomLeftPointOpt.value() + 0.5*QPointF(-Tile::borderPx(), Tile::borderPx());
-                                QPointF topRightPoint = topRightPointOpt.value()     + 0.5*QPointF(Tile::borderPx(), -Tile::borderPx());
-
-                                RegionPtr region = std::make_shared<Region>(bottomLeftPoint);
-                                std::unordered_set<Tile::Index> tiles = device.findTiles(QRectF(bottomLeftPoint, topRightPoint));
-                                region->accept(topRightPoint, tiles, elements);
-                                device.addRegion(region);
+                            Tile::Index topRightTileIndex = bottomLeftTileIndex;
+                            if (!device.restoreRegion(partition, bottomLeftTileIndex, topRightTileIndex)) {
+                                qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract start and end points";
                             }
                         }
-                    } else if (tokens.size() == 2) {
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(tokens[0]);
-                        std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractGridCoord(tokens[1]);
+                    } else if (regionTokens.size() == 2) {
+                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
+                        std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[1]);
+
                         if (bottomLeftGridCoordTileDescriptorOpt && topRightGridCoordTileDescriptorOpt) {
                             Tile::Index bottomLeftTileIndex = bottomLeftGridCoordTileDescriptorOpt.value().index;
                             Tile::Index topRightTileIndex = topRightGridCoordTileDescriptorOpt.value().index;
-
-                            std::optional<QPointF> bottomLeftPointOpt = device.findBottomLeftPoint(bottomLeftTileIndex);
-                            std::optional<QPointF> topRightPointOpt = device.findTopRightPoint(topRightTileIndex);
-                            if (bottomLeftPointOpt && topRightPointOpt) {
-                                QPointF bottomLeftPoint = bottomLeftPointOpt.value() + 0.5*QPointF(-Tile::borderPx(), Tile::borderPx());
-                                QPointF topRightPoint = topRightPointOpt.value()     + 0.5*QPointF(Tile::borderPx(), -Tile::borderPx());
-
-                                RegionPtr region = std::make_shared<Region>(bottomLeftPoint);
-                                std::unordered_set<Tile::Index> tiles = device.findTiles(QRectF(bottomLeftPoint, topRightPoint));
-                                region->accept(topRightPoint, tiles, elements);
-                                device.addRegion(region);
-                            } else {
-                                qCritical() << "syntax error for regions" << QString::fromStdString(region) << "coudn't extract start and end points";
+                            if (!device.restoreRegion(partition, bottomLeftTileIndex, topRightTileIndex)) {
+                                qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract start and end points";
                             }
                         } else {
-                            qCritical() << "syntax error for regions" << QString::fromStdString(region) << "coudn't extract bottomLeft or topRight indexes";
+                            qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract bottomLeft or topRight indexes";
                         }
                     } else {
-                        qCritical() << "syntax error for regions" << QString::fromStdString(region);
+                        qCritical() << "syntax error for regions" << QString::fromStdString(regionStr);
                     }
                 }
             }

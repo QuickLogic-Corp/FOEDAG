@@ -23,13 +23,16 @@ set (SRC_LIST
   FloorPlanningWidget.cpp
   DeviceGridWidget.cpp
   SynthResourceHierarchyWidget.cpp
-  RegionsListWidget.cpp
+  PartitionsListWidget.cpp
+  NewUniqueNameDialog.cpp
+  ErrorsListWidget.cpp
   # widgets
   DeviceGridDescriptor.cpp
   SynthResourceExtractor.cpp
   QdcSerializer.cpp
   DeviceGrid.cpp
   Tile.cpp
+  Partition.cpp
   Region.cpp
   PointAnimation.cpp
 )
@@ -39,7 +42,9 @@ set (HDR_LIST
   FloorPlanningWidget.h
   DeviceGridWidget.h
   SynthResourceHierarchyWidget.h
-  RegionsListWidget.h
+  PartitionsListWidget.h
+  NewUniqueNameDialog.h
+  ErrorsListWidget.h
   # widgets
   DeviceGridDescriptor.h
   TileDescriptor.h
@@ -47,6 +52,7 @@ set (HDR_LIST
   QdcSerializer.h
   DeviceGrid.h
   Tile.h
+  Partition.h
   Region.h
   HierarhyElement.h
   PointAnimation.h

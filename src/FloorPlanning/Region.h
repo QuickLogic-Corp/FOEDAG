@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Tile.h"
-#include "HierarhyElement.h"
 
 #include <QPoint>
 #include <QRect>
@@ -17,29 +16,28 @@ namespace fp {
 class Region {
     static int s_idGenerator;
 public:
+    static void resetIdGenerator() { s_idGenerator = 0; }
+
     enum HandlerRole {
         TL, TR, BL, BR, MOVE, REMOVE
     };
 
-    static void resetIdGenerator() { s_idGenerator = 0; }
-
     Region(const QPointF& point) {
-        m_id = s_idGenerator++;
         m_startPos = point;
         m_stopPosOpt = std::nullopt;
+
+        m_id = s_idGenerator++;
     }
     Region(const QPointF& startPos, const QPointF& stopPos)
     {
-        m_id = s_idGenerator++;
         m_startPos = startPos;
         setStopPos(stopPos);
+
+        m_id = s_idGenerator++;
     }
 
 #ifdef USE_TESTS
-    bool operator==(const Region& rhs) const {
-        if (id() != rhs.id()) {
-            return false;
-        }
+    bool operator==(const Partition& rhs) const {
         if (bottomLeftIndex() != rhs.bottomLeftIndex()) {
             return false;
         }
@@ -51,9 +49,6 @@ public:
         // if (rect() != rhs.rect()) {
         //  return false;
         //}
-        if (*elements() != *rhs.elements()) {
-            return false;
-        }
         if (tiles() != rhs.tiles()) {
             return false;
         }
@@ -73,20 +68,16 @@ public:
     }
 
     void setTiles(const std::unordered_set<Tile::Index>& tiles);
-    void setElements(const HierarhyElementsPtr& elements);
 
     bool contains(const Tile::Index& index) const { return m_tiles.find(index) != m_tiles.end(); }
 
-    void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles, const HierarhyElementsPtr& elements) {
+    void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles) {
         m_stopPosOpt = point;
         updateRect();
         setTiles(tiles);
-        setElements(elements);
         rebuildHandles();
     }
-    void reject() {
-        m_stopPosOpt = std::nullopt;
-    }
+
     const QRectF& rect() const { return m_rect; }
     QRectF& rect() { return m_rect; }
 
@@ -101,19 +92,13 @@ public:
     const Tile::Index& bottomLeftIndex() const { return m_bottomLeftIndex; }
     const Tile::Index& topRightIndex() const { return m_topRightIndex; }
 
-    const HierarhyElementsPtr& elements() const { return m_elements; }
-
-    bool isOverllapedWith(const Region& rhs) {
-        const auto& small = (m_tiles.size() < rhs.m_tiles.size()) ? m_tiles : rhs.m_tiles;
-        const auto& large = (m_tiles.size() < rhs.m_tiles.size()) ? rhs.m_tiles : m_tiles;
-
-        for (const auto& v: small) {
-            if (large.find(v) != large.end()) {
-                return true;
-            }
-        }
-        return false;
+    void setPoints(const QPointF& bottomLeft, const QPointF& topRight) {
+        m_startPos = bottomLeft;
+        m_stopPosOpt = topRight;
+        updateRect();
     }
+
+    std::unordered_set<Tile::Index> collectOverlappedIndexes(const Region& rhs) const;
 
     std::map<HandlerRole, QRectF> handles;
 
@@ -130,19 +115,20 @@ public:
         const QPointF moveCenter(r.center().x(), r.center().y());
         handles[HandlerRole::MOVE] = centeredSquare(moveCenter, handleSize);
 
-        const QPointF removeCenter(r.center().x(), r.top());
+        const QPointF removeCenter(r.center().x(), r.top()+0.5*handleSize);
         handles[HandlerRole::REMOVE] = centeredSquare(removeCenter, handleSize);
     }
 
 private:
     int m_id = -1;
+
     QPointF m_startPos;
     std::optional<QPointF> m_stopPosOpt;
-    std::unordered_set<Tile::Index> m_tiles;
     Tile::Index m_bottomLeftIndex;
     Tile::Index m_topRightIndex;
-    HierarhyElementsPtr m_elements;
     QRectF m_rect;
+
+    std::unordered_set<Tile::Index> m_tiles;
 
     const QPointF& startPos() const { return m_startPos; }
     QPointF stopPos() const { return m_stopPosOpt.value(); }
