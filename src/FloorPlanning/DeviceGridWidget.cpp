@@ -157,14 +157,6 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
     m_selectedPartition->setElements(m_selectedElements);
     m_newRegion->accept(worldCoord, indexes);
 
-    qCritical() << "overlap check bypassed!!!!!!!!";
-    // for (const auto& [id, partition]: m_device.partitions()) {
-    //     if (m_newRegion->isOverllapedWith(*partition)) {
-    //         cancelPartition("Overllaped with other partition");
-    //         return;
-    //     }
-    // }
-
     if (m_newRegion->isValid()) {
         // selected elements are baked inside the m_currentPartition
         emit clearSelectionRequested();
