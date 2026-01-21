@@ -6,6 +6,7 @@
 #include "Partition.h"
 
 #include <map>
+#include <set>
 
 class QLabel;
 class QPushButton;

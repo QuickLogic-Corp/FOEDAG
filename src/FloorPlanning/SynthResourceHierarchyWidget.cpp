@@ -120,16 +120,16 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
     }
 
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
-    for (const std::string& atom: elements) {
-        addPath(atom);
+    for (const std::string& element: elements) {
+        addPath(element);
     }
     blocker.unblock();
 
     // completer
     if (!isShowOnlyCheckedItems()) {
         QList<QString> qtElements;
-        for (const std::string& atom: elements) {
-            qtElements.append(QString::fromStdString(atom));
+        for (const std::string& element: elements) {
+            qtElements.append(QString::fromStdString(element));
         }
         QStringListModel* model = new QStringListModel(qtElements, m_leFilter);
 
