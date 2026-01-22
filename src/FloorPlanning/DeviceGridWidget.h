@@ -5,6 +5,7 @@
 #include "Partition.h"
 #include "HierarhyElement.h"
 #include "PointAnimation.h"
+#include "QdcSerializer.h"
 
 #include <QWidget>
 #include <QPoint>
@@ -53,7 +54,7 @@ public:
     virtual ~DeviceGridWidget()=default;
 
     void constructTiles(const DeviceGridDescriptorPtr& descriptor);
-    void onSelectedElementsChanged(const HierarhyElementsPtr& elemenets);
+    void onPartitionSelectedElementsChanged(PartitionPtr partition);
     void onPartitionSelected(int);
     void onPartitionRenamed(int partitionId, QString newName);
 
@@ -87,8 +88,7 @@ protected:
 
 private:
     DeviceGrid m_device;
-
-    HierarhyElementsPtr m_selectedElements;
+    QdcSerializer m_qdcSerializer;
 
     bool m_isScrollToPartitionWhenSelected = false;
 

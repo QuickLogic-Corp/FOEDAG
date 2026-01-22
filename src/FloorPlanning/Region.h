@@ -8,8 +8,9 @@
 
 #include <memory>
 #include <optional>
-#include <unordered_set>
 #include <map>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace fp {
 
@@ -35,13 +36,24 @@ public:
 
         m_id = s_idGenerator++;
     }
+    Region(const QRectF& rect)
+    {
+        setRect(rect);
 
+        m_id = s_idGenerator++;
+    }
 #ifdef USE_TESTS
-    bool operator==(const Partition& rhs) const {
-        if (bottomLeftIndex() != rhs.bottomLeftIndex()) {
+    bool operator==(const Region& rhs) const {
+        if (id() != rhs.id()) {
             return false;
         }
-        if (topRightIndex() != rhs.topRightIndex()) {
+        if (bottomLeftGridIndex() != rhs.bottomLeftGridIndex()) {
+            return false;
+        }
+        if (bottomLeftTileIndex() != rhs.bottomLeftTileIndex()) {
+            return false;
+        }
+        if (topRightGridIndex() != rhs.topRightGridIndex()) {
             return false;
         }
         // the rects could be slightly different, better to test comparison based on included tiles indexes
@@ -67,35 +79,74 @@ public:
         return std::nullopt;
     }
 
-    void setTiles(const std::unordered_set<Tile::Index>& tiles);
+    void setTiles(const std::unordered_map<Tile::Index, TilePtr>& tiles);
 
     bool contains(const Tile::Index& index) const { return m_tiles.find(index) != m_tiles.end(); }
 
-    void accept(const QPointF& point, const std::unordered_set<Tile::Index>& tiles) {
+    void accept(const QPointF& point, const std::unordered_map<Tile::Index, TilePtr>& tiles) {
         m_stopPosOpt = point;
-        updateRect();
+        updateRectFromPositions();
         setTiles(tiles);
         rebuildHandles();
     }
 
     const QRectF& rect() const { return m_rect; }
-    QRectF& rect() { return m_rect; }
+
+    void setBottomLeft(const QPointF& p) {
+        m_rect.setBottomLeft(p);
+        updatePositionsFromRect();
+        updateGridCoordBounds();
+    }
+
+    void setBottomRight(const QPointF& p) {
+        m_rect.setBottomRight(p);
+        updatePositionsFromRect();
+        updateGridCoordBounds();
+    }
+
+    void setTopRight(const QPointF& p) {
+        m_rect.setTopRight(p);
+        updatePositionsFromRect();
+        updateGridCoordBounds();
+    }
+
+    void setTopLeft(const QPointF& p) {
+        m_rect.setTopLeft(p);
+        updatePositionsFromRect();
+        updateGridCoordBounds();
+    }
+
+    void moveCenter(const QPointF& p) {
+        m_rect.moveCenter(p);
+        updatePositionsFromRect();
+        updateGridCoordBounds();
+    }
 
     void setStopPos(const QPointF& point) {
         m_stopPosOpt = point;
-        updateRect();
+        updateRectFromPositions();
     }
     bool isClosed() const { return m_stopPosOpt.has_value(); }
     bool isValid() const { return isClosed() && !m_tiles.empty(); }
 
-    const std::unordered_set<Tile::Index>& tiles() const { return m_tiles; }
-    const Tile::Index& bottomLeftIndex() const { return m_bottomLeftIndex; }
-    const Tile::Index& topRightIndex() const { return m_topRightIndex; }
+    const std::unordered_map<Tile::Index, TilePtr>& tiles() const { return m_tiles; }
+
+    const Tile::Index& bottomLeftTileIndex() const { return m_bottomLeftTileIndex; }
+    const Tile::Index& topRightTileIndex() const { return m_topRightTileIndex; }
+
+    const Tile::Index& bottomLeftGridIndex() const { return m_bottomLeftGridIndex; }
+    const Tile::Index& topRightGridIndex() const { return m_topRightGridIndex; }
 
     void setPoints(const QPointF& bottomLeft, const QPointF& topRight) {
         m_startPos = bottomLeft;
         m_stopPosOpt = topRight;
-        updateRect();
+        updateRectFromPositions();
+    }
+
+    void setRect(const QRectF& rect) {
+        m_startPos = rect.bottomLeft();
+        m_stopPosOpt = rect.topRight();
+        updateRectFromPositions();
     }
 
     std::unordered_set<Tile::Index> collectOverlappedIndexes(const Region& rhs) const;
@@ -124,11 +175,16 @@ private:
 
     QPointF m_startPos;
     std::optional<QPointF> m_stopPosOpt;
-    Tile::Index m_bottomLeftIndex;
-    Tile::Index m_topRightIndex;
+
+    Tile::Index m_bottomLeftTileIndex;
+    Tile::Index m_topRightTileIndex;
+
+    Tile::Index m_bottomLeftGridIndex;
+    Tile::Index m_topRightGridIndex;
+
     QRectF m_rect;
 
-    std::unordered_set<Tile::Index> m_tiles;
+    std::unordered_map<Tile::Index, TilePtr> m_tiles;
 
     const QPointF& startPos() const { return m_startPos; }
     QPointF stopPos() const { return m_stopPosOpt.value(); }
@@ -138,10 +194,19 @@ private:
         return QRectF(c.x() - h, c.y() - h, size, size);
     }
 
-    void updateRect() {
+    void updateRectFromPositions() {
         m_rect = QRectF(startPos(), stopPos()).normalized(); // normalized here is to swap corner to avoid negative height
+        updateGridCoordBounds();
     }
+
+    void updatePositionsFromRect()
+    {
+        m_startPos = m_rect.bottomLeft();
+        m_stopPosOpt = m_rect.topRight();
+    }
+
     void updateTileCoordBounds();
+    void updateGridCoordBounds();
 };
 using RegionPtr = std::shared_ptr<Region>;
 

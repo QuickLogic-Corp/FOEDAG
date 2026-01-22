@@ -2,7 +2,6 @@
 
 #include <string>
 #include <set>
-#include <memory>
 
 #include <QDebug>
 
@@ -53,6 +52,8 @@ public:
 
     std::size_t size() const { return m_elements.size(); }
 
+    void clear() { m_elements.clear(); }
+
     bool contains(const std::string& path) const {
         return m_elements.find(HierarhyElement{path}) != m_elements.end();
     }
@@ -79,7 +80,5 @@ public:
 private:
     std::set<HierarhyElement> m_elements;
 };
-using HierarhyElementsPtr = std::shared_ptr<HierarhyElements>;
-
 
 }  // namespace fp

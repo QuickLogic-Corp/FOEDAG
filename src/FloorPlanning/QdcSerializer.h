@@ -18,6 +18,9 @@ public:
     constexpr std::string_view lineDelimiter() const { return "\\\n"; }
 
     static std::optional<TileDescriptor> extractGridCoord(const std::string& data);
+
+private:
+    std::string m_reservedContent;
 };
 
 }  // namespace fp

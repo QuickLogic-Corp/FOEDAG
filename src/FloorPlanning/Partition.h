@@ -28,16 +28,37 @@ public:
 
 #ifdef USE_TESTS
     bool operator==(const Partition& rhs) const {
+        static auto regionsEqualByValue = [](const std::map<int, RegionPtr>& a,
+                                             const std::map<int, RegionPtr>& b)->bool
+        {
+            if (a.size() != b.size()) {
+                return false;
+            }
+
+            for (const auto& [keya, regiona]: a) {
+                auto itb = b.find(keya);
+                if (itb == b.end()) {
+                    return false;
+                }
+
+                const RegionPtr& regionb = itb->second;
+                if (*regiona != *regionb) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
         if (id() != rhs.id()) {
             return false;
         }
         if (name() != rhs.name()) {
             return false;
         }
-        if (*elements() != *rhs.elements()) {
+        if (elements() != rhs.elements()) {
             return false;
         }
-        if (*regions() != rhs.regions()) {
+        if (!regionsEqualByValue(regions(), rhs.regions())) {
             return false;
         }
         return true;
@@ -51,12 +72,13 @@ public:
     void addRegion(const RegionPtr& region);
     bool removeRegion(const RegionPtr& region);
 
-    void setElements(const HierarhyElementsPtr& elements);
+    void clearElemenets() { m_elements.clear(); }
+    void addElement(const HierarhyElement& element) { m_elements.insert(element); }
 
-    const HierarhyElementsPtr& elements() const { return m_elements; }
+    const HierarhyElements& elements() const { return m_elements; }
     const std::map<int, RegionPtr> regions() const { return m_regions; }
 
-    std::unordered_set<std::string> collectOverlppedElements(const Partition&) const;
+    std::unordered_set<std::string> collectOverlappedElements(const Partition&) const;
 
     const QRectF& rect() const { return m_rect; }
 
@@ -66,7 +88,7 @@ private:
 
     QRectF m_rect;
 
-    HierarhyElementsPtr m_elements;
+    HierarhyElements m_elements;
     std::map<int, RegionPtr> m_regions;
 
     void updateRect();

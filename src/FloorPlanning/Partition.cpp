@@ -6,29 +6,16 @@ namespace fp {
 
 int Partition::s_idGenerator = 0;
 
-void Partition::setElements(const HierarhyElementsPtr& elemenets)
+std::unordered_set<std::string> Partition::collectOverlappedElements(const Partition& partition) const
 {
-#ifdef DEBUG_SELECTION_ELEMENTS
-    if (elemenets) {
-        elemenets->print(QString("Partition(%1)::setElements").arg(m_id).toStdString());
-    }
-#endif // DEBUG_SELECTION_ELEMENTS
-    m_elements = elemenets;
-}
-
-std::unordered_set<std::string> Partition::collectOverlppedElements(const Partition& partition) const
-{
-    if (!partition.elements() || !m_elements) {
-        return {};
-    }
     std::unordered_set<std::string> elements;
-    for (const HierarhyElement& element: *partition.elements()) {
-        if (m_elements->contains(element.path)) {
+    for (const HierarhyElement& element: partition.elements()) {
+        if (m_elements.contains(element.path)) {
             elements.insert(element.path);
         }
     }
-    for (const HierarhyElement& element: *m_elements) {
-        if (partition.elements()->contains(element.path)) {
+    for (const HierarhyElement& element: m_elements) {
+        if (partition.elements().contains(element.path)) {
             elements.insert(element.path);
         }
     }

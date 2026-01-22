@@ -1,6 +1,5 @@
 #include "DeviceGridWidget.h"
 #include "HierarhyElement.h"
-#include "QdcSerializer.h"
 
 #include <QElapsedTimer>
 #include <QPainter>
@@ -59,8 +58,10 @@ void DeviceGridWidget::onPartitionRenamed(int partitionId, QString newName)
 void DeviceGridWidget::scrollToPartition(const PartitionPtr& partition)
 {
     if (partition) {
-        m_moveAnimation.start(currentWorldCenter(), partition->rect().center());
-        update();
+        if (!partition->regions().empty()) {
+            m_moveAnimation.start(currentWorldCenter(), partition->rect().center());
+            update();
+        }
     }
 }
 
@@ -78,15 +79,13 @@ void DeviceGridWidget::constructTiles(const DeviceGridDescriptorPtr& descriptor)
     update();
 }
 
-void DeviceGridWidget::onSelectedElementsChanged(const HierarhyElementsPtr& elements)
+void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition)
 {
     if (m_selectedPartition) {
-        m_selectedPartition->setElements(elements);
-        checkErrors();
         emit partitionSelected(m_selectedPartition); // needs to update partition netlist widget
         emit partitionsChanged(m_device.partitions());
     } else {
-        m_selectedElements = elements;
+        qCritical() << "cannot apply elemenets, because partition is not selected";
     }
 
     checkErrors();
@@ -148,21 +147,15 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
         return;
     }
 
-    std::unordered_set<Tile::Index> indexes = m_device.findTiles(m_newRegion->rect());
-    if (indexes.empty()) {
+    std::unordered_map<Tile::Index, TilePtr> tiles = m_device.findTiles(m_newRegion->rect());
+    if (tiles.empty()) {
         cancelRegionCreation();
         return;
     }
 
-    m_selectedPartition->setElements(m_selectedElements);
-    m_newRegion->accept(worldCoord, indexes);
+    m_newRegion->accept(worldCoord, tiles);
 
     if (m_newRegion->isValid()) {
-        // selected elements are baked inside the m_currentPartition
-        emit clearSelectionRequested();
-        m_selectedElements.reset();
-        //
-
         m_device.alignRegion(m_newRegion);
         m_selectedPartition->addRegion(m_newRegion);
         checkErrors();
@@ -175,9 +168,11 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
 
 void DeviceGridWidget::selectPartition(PartitionPtr partition)
 {
-    m_selectedPartition = partition;
-    emit partitionSelected(partition);
-    update();
+    if (m_selectedPartition != partition) {
+        m_selectedPartition = partition;
+        emit partitionSelected(partition);
+        update();
+    }
 }
 
 void DeviceGridWidget::cancelRegionCreation(const QString& msg)
@@ -279,11 +274,11 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
     }
     if (m_isMousePressed && m_selectedPartition && m_selectedRegion && m_regionEditRoleOpt) {
         switch (m_regionEditRoleOpt.value()) {
-        case Region::HandlerRole::BL: m_selectedRegion->rect().setBottomLeft(worldCoord); break;
-        case Region::HandlerRole::BR: m_selectedRegion->rect().setBottomRight(worldCoord); break;
-        case Region::HandlerRole::TR: m_selectedRegion->rect().setTopRight(worldCoord); break;
-        case Region::HandlerRole::TL: m_selectedRegion->rect().setTopLeft(worldCoord); break;
-        case Region::HandlerRole::MOVE: m_selectedRegion->rect().moveCenter(worldCoord); break;
+        case Region::HandlerRole::BL: m_selectedRegion->setBottomLeft(worldCoord); break;
+        case Region::HandlerRole::BR: m_selectedRegion->setBottomRight(worldCoord); break;
+        case Region::HandlerRole::TR: m_selectedRegion->setTopRight(worldCoord); break;
+        case Region::HandlerRole::TL: m_selectedRegion->setTopLeft(worldCoord); break;
+        case Region::HandlerRole::MOVE: m_selectedRegion->moveCenter(worldCoord); break;
         default: break;
         }
 
@@ -343,15 +338,13 @@ std::unordered_set<std::string> DeviceGridWidget::existedPartitionNames() const
 
 void DeviceGridWidget::saveQdc()
 {
-    QdcSerializer qdc;
-    qdc.save(m_device);
+    m_qdcSerializer.save(m_device);
 }
 
 void DeviceGridWidget::loadQdc()
 {
     exitPartitionSelect();
-    QdcSerializer qdc;
-    qdc.load(m_device);
+    m_qdcSerializer.load(m_device);
     checkErrors();
     emit partitionsChanged(m_device.partitions());
     update();
@@ -402,14 +395,14 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
 {
     QVector<QRectF> clbRects, ioRects, bramRects, dspRects;
     for (const auto& [index, tile]: m_device.tiles()) {
-        if (!tile.isVisible()) {
+        if (!tile->isVisible()) {
             continue;
         }
-        switch (tile.type()) {
-        case Tile::Type::Clb:  clbRects.append(tile.rect()); break;
-        case Tile::Type::Io:   ioRects.append(tile.rect()); break;
-        case Tile::Type::Bram: bramRects.append(tile.rect()); break;
-        case Tile::Type::Dsp:  dspRects.append(tile.rect()); break;
+        switch (tile->type()) {
+        case Tile::Type::Clb:  clbRects.append(tile->rect()); break;
+        case Tile::Type::Io:   ioRects.append(tile->rect()); break;
+        case Tile::Type::Bram: bramRects.append(tile->rect()); break;
+        case Tile::Type::Dsp:  dspRects.append(tile->rect()); break;
         default: break;
         }
     }
@@ -429,8 +422,8 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
         QVector<QRectF> rects;
         rects.reserve(m_device.overlappedIndexes().size());
         for (const Tile::Index& index: m_device.overlappedIndexes()) {
-            const Tile& tile = m_device.tile(index);
-            rects.append(tile.rect());
+            const TilePtr& tile = m_device.tile(index);
+            rects.append(tile->rect());
         }
 
         p.setBrush(m_overlappedTileColor);  p.drawRects(rects);
@@ -546,8 +539,8 @@ void DeviceGridWidget::highLightTilesInRegion(QPainter& p, const Region& region)
         return;
     }
 
-    for (const Tile::Index& index: region.tiles()) {
-        p.drawRect(m_device.tile(index).rect());
+    for (const auto& [index, tile]: region.tiles()) {
+        p.drawRect(tile->rect());
     }
 }
 
@@ -559,10 +552,10 @@ void DeviceGridWidget::drawTileLabels(QPainter& p)
     p.setFont(font);
 
     for (const auto& [index, tile]: m_device.tiles()) {
-        if (!tile.isVisible()) {
+        if (!tile->isVisible()) {
             continue;
         }
-        p.drawText(tile.rect(), Qt::AlignCenter | Qt::AlignCenter, tile.name());
+        p.drawText(tile->rect(), Qt::AlignCenter | Qt::AlignCenter, tile->name());
     }
 }
 
@@ -595,7 +588,7 @@ void DeviceGridWidget::createNewPartition(const std::string& partitionName)
     m_device.addPartition(partition);
     checkErrors();
     emit partitionsChanged(m_device.partitions());
-    selectPartition(partition);
+    selectPartition(partition); // automatically select
 }
 
 void DeviceGridWidget::removeSelectedPartition()
@@ -619,7 +612,6 @@ void DeviceGridWidget::clearPartitions() {
 }
 
 void DeviceGridWidget::exitPartitionSelect() {
-    m_selectedElements.reset();
     m_selectedPartition.reset();
     m_regionEditRoleOpt.reset();
     emit clearSelectionRequested();

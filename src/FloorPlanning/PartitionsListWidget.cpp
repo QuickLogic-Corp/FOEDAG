@@ -17,7 +17,9 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
                 QList<QListWidgetItem*> items = selectedItems();
                 if (!items.isEmpty()) {
                     QListWidgetItem* item = items.first();
-                    emit selectionChanged(getId(item->text()));
+                    const int id = getId(item->text());
+                    m_selectedIdBackupOpt = id;
+                    emit selectionChanged(id);
                 }
             });
 
@@ -29,7 +31,7 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
                 if (oldText != candidate) {
                     if (isPartitionNameUnique(candidate)) {
                         item->setData(Qt::UserRole, candidate);
-                        int id = getId(oldText);
+                        const int id = getId(oldText);
                         m_selectedIdBackupOpt = id;
                         emit partitionRenamed(id, candidate);
                     } else {
@@ -63,7 +65,6 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         m_names2ids[name] = id;
         if (m_selectedIdBackupOpt && (id == m_selectedIdBackupOpt.value())) {
             autoSelectedItem = item;
-            m_selectedIdBackupOpt.reset();
         }
     }
 
@@ -74,6 +75,7 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
 
 void PartitionsListWidget::onPartitionSelectedOutside(const PartitionPtr& partition)
 {
+    m_selectedIdBackupOpt = partition->id();
     QList<QListWidgetItem*> items = findItems(QString::fromStdString(partition->name()), Qt::MatchExactly);
     if (!items.isEmpty()) {
         QListWidgetItem* item = items.first();

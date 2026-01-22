@@ -13,11 +13,11 @@ float Tile::s_borderPx{10.0};
 
 int Tile::s_deviceRowsNum = 0;
 
-Tile::Tile(Type type, int col, int row, int w, int h, const QString& name)
+Tile::Tile(Type type, int col, int row, int cols, int rows, const QString& name)
     : m_type(type),
     m_index(col, row),
-    m_w(w),
-    m_h(h),
+    m_cols(cols),
+    m_rows(rows),
     m_name(name)
 {
     buildRect();
@@ -25,22 +25,22 @@ Tile::Tile(Type type, int col, int row, int w, int h, const QString& name)
 
 const QColor& Tile::color() const { return Tile::color(m_type); }
 
-QRectF Tile::buildRect(const Tile::Index& index, int w, int h)
+QRectF Tile::buildRect(const Tile::Index& index, int cols, int rows)
 {
     const double pitch = s_unitPx + s_borderPx;   // distance between cell origins
 
     const double x = index.col * pitch;
     // flip vertically
-    const double y = (s_deviceRowsNum - (index.row + h - 1)) * pitch;
+    const double y = (s_deviceRowsNum - (index.row + rows - 1)) * pitch;
 
-    double tileWidth = w * s_unitPx + (w - 1) * s_borderPx;
-    double tileHeight = h * s_unitPx + (h - 1) * s_borderPx;
+    double tileWidth = cols * s_unitPx + (cols - 1) * s_borderPx;
+    double tileHeight = rows * s_unitPx + (rows - 1) * s_borderPx;
     return QRectF(x, y, tileWidth, tileHeight).normalized();
 }
 
 void Tile::buildRect()
 {
-    m_rect = buildRect(m_index, m_w, m_h);
+    m_rect = buildRect(m_index, m_cols, m_rows);
 }
 
 const QColor& Tile::color(Type type) {
@@ -53,7 +53,7 @@ const QColor& Tile::color(Type type) {
     }
 }
 
-bool Tile::isLocated(const QRectF& area) const
+bool Tile::isInArea(const QRectF& area) const
 {
     QRectF outer = area.normalized();
     QRectF inner = m_rect.normalized();

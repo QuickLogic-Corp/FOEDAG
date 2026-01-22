@@ -101,6 +101,8 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     connect(m_model, &QStandardItemModel::itemChanged, this, [this](QStandardItem* item) {
         onItemChanged(item, /*reportChanges*/true);
     });
+
+    setEnabled(false);
 }
 
 void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
@@ -154,11 +156,8 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
     // intermediate data be captured in lambda
     std::map<std::string, std::string> data;
     for (const auto& [id, partition]: partitions) {
-        if (!partition->elements()) {
-            continue;
-        }
         const std::string partitionName{partition->name()};
-        for (const HierarhyElement& element: *partition->elements()) {
+        for (const HierarhyElement& element: partition->elements()) {
             if (data.find(element.path) == data.end()) {
                 data[element.path] = partitionName;
             } else {
@@ -208,8 +207,11 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
 }
 
 
-void SynthResourceHierarchyWidget::clearSelectedElements()
+void SynthResourceHierarchyWidget::unbindPartition()
 {
+    m_selectedPartition.reset();
+    setEnabled(false);
+
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
     uncheckAllRecursive(m_model->invisibleRootItem(), Column::Netlist);
 
@@ -222,18 +224,10 @@ void SynthResourceHierarchyWidget::clearSelectedElements()
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::onPartitionSelected(const PartitionPtr& partition)
+void SynthResourceHierarchyWidget::bindPartition(const PartitionPtr& partition)
 {
-    if (!partition->elements()) {
-#ifdef DEBUG_SELECTION_ELEMENTS
-        qDebug() << "elements are nullptr";
-#endif
-        return;
-    }
-
-#ifdef DEBUG_SELECTION_ELEMENTS
-    partition->elements()->print("SynthResourceHierarchyWidget::setSelectedElements ensure elements are checked");
-#endif // DEBUG_SELECTION_ELEMENTS
+    setEnabled(true);
+    m_selectedPartition = partition;
 
     // check only requested elements + set partition label
     std::function<void(QStandardItem*, const std::string&)> checkAndPartitionRecursive =
@@ -253,7 +247,7 @@ void SynthResourceHierarchyWidget::onPartitionSelected(const PartitionPtr& parti
             const std::string name = child->text().toStdString();
             const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
 
-            if (partition->elements()->contains(fullPath)) {
+            if (partition->elements().contains(fullPath)) {
                 child->setCheckState(Qt::Checked);
                 onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
 
@@ -279,10 +273,10 @@ void SynthResourceHierarchyWidget::onPartitionSelected(const PartitionPtr& parti
     m_view->viewport()->update();
 }
 
-HierarhyElementsPtr SynthResourceHierarchyWidget::collectSelectedElements() const
+void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const PartitionPtr& partition) const
 {
-    static std::function<void(QStandardItem*, const std::string&, HierarhyElements&)> collectSelectedElementsRecursive =
-        [](QStandardItem* item, const std::string& prefix, HierarhyElements& out)
+    static std::function<void(QStandardItem*, const std::string&, const PartitionPtr&)> fillPartitionSelectedElementsRecursive =
+        [](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
     {
         if (!item) {
             return;
@@ -298,7 +292,7 @@ HierarhyElementsPtr SynthResourceHierarchyWidget::collectSelectedElements() cons
 
         if (isLeaf) {
             if (st == Qt::Checked) {
-                out.insert(HierarhyElement{path, true});
+                partition->addElement(HierarhyElement{path, true});
             }
         } else {
             if (st == Qt::Checked) {
@@ -317,33 +311,31 @@ HierarhyElementsPtr SynthResourceHierarchyWidget::collectSelectedElements() cons
 
                 if (allChildrenChecked) {
                     // collapse to parent path with wildcard
-                    out.insert(HierarhyElement{path, false});
+                    partition->addElement(HierarhyElement{path, false});
                 } else {
                     // not all children checked -> collect deeper
                     for (int row = 0; row < rows; ++row) {
-                        collectSelectedElementsRecursive(item->child(row, Column::Netlist), path, out);
+                        fillPartitionSelectedElementsRecursive(item->child(row, Column::Netlist), path, partition);
                     }
                 }
             } else {
                 // collect deeper
                 for (int row = 0; row < rows; ++row) {
-                    collectSelectedElementsRecursive(item->child(row, Column::Netlist), path, out);
+                    fillPartitionSelectedElementsRecursive(item->child(row, Column::Netlist), path, partition);
                 }
             }
         }
     };
 
-    HierarhyElementsPtr selectedElements = std::make_shared<HierarhyElements>();
+    partition->clearElemenets();
     QStandardItem* root = m_model->invisibleRootItem();
     int rows = root->rowCount();
     for (int row=0; row<rows; ++row) {
         QStandardItem* child = root->child(row, Column::Netlist);
         if (child) {
-            collectSelectedElementsRecursive(child, "", *selectedElements);
+            fillPartitionSelectedElementsRecursive(child, "", partition);
         }
     }
-
-    return selectedElements;
 }
 
 void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
@@ -487,12 +479,9 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool repor
 
     m_view->viewport()->update();
 
-    if (reportChanges) {
-        HierarhyElementsPtr elements = collectSelectedElements();
-#ifdef DEBUG_SELECTION_ELEMENTS
-        elements->print("SynthResourceHierarchyWidget::onItemChanged");
-#endif // DEBUG_SELECTION_ELEMENTS
-        emit selectedElementsChanged(elements);
+    if (m_selectedPartition && reportChanges) {
+        fillPartitionWithSelectedElements(m_selectedPartition);
+        emit partitionElementsChanged(m_selectedPartition);
     }
 }
 

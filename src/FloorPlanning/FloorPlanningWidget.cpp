@@ -45,25 +45,25 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
 
     // m_synthResourcesWidget
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
-            m_synthResourcesWidget, &SynthResourceHierarchyWidget::onPartitionSelected);
+            m_synthResourcesWidget, &SynthResourceHierarchyWidget::bindPartition);
 
     connect(m_deviceWidget, &DeviceGridWidget::clearSelectionRequested,
-            m_synthResourcesWidget, &SynthResourceHierarchyWidget::clearSelectedElements);
+            m_synthResourcesWidget, &SynthResourceHierarchyWidget::unbindPartition);
 
     // m_partitionResourcesWidget
     connect(m_deviceWidget, &DeviceGridWidget::clearSelectionRequested,
-            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::clearSelectedElements);
+            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::unbindPartition);
 
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
-            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::onPartitionSelected);
+            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::bindPartition);
 
     // to FloorPlanningWidget hub
     connect(m_deviceWidget, &DeviceGridWidget::partitionsChanged,
             this, &FloorPlanningWidget::onPartitionsChanged);
-    connect(m_synthResourcesWidget, &SynthResourceHierarchyWidget::selectedElementsChanged,
-            m_deviceWidget, &DeviceGridWidget::onSelectedElementsChanged);
-    connect(m_partitionResourcesWidget, &SynthResourceHierarchyWidget::selectedElementsChanged,
-            m_deviceWidget, &DeviceGridWidget::onSelectedElementsChanged);
+    connect(m_synthResourcesWidget, &SynthResourceHierarchyWidget::partitionElementsChanged,
+            m_deviceWidget, &DeviceGridWidget::onPartitionSelectedElementsChanged);
+    connect(m_partitionResourcesWidget, &SynthResourceHierarchyWidget::partitionElementsChanged,
+            m_deviceWidget, &DeviceGridWidget::onPartitionSelectedElementsChanged);
 
     // m_partitionsList
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,

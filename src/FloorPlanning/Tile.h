@@ -4,6 +4,7 @@
 #include <QColor>
 
 #include <cstdint>
+#include <memory>
 
 namespace fp {
 
@@ -31,6 +32,7 @@ public:
     Tile(): m_index(-1, -1) {} // required for std::unordered_map
 
     static void setDeviceRowsNum(int deviceRowsNum) { s_deviceRowsNum = deviceRowsNum; }
+    static int deviceRowsNum() { return s_deviceRowsNum; }
 
     Type type() const { return m_type; }
     const QColor& color() const;
@@ -47,7 +49,7 @@ public:
     const QRectF& rect() const { return m_rect; }
 
     bool isVisible() const { return m_isVisible; }
-    bool isLocated(const QRectF& area) const;
+    bool isInArea(const QRectF& area) const;
 
     static QRectF buildRect(const Tile::Index&, int w=1, int h=1);
 
@@ -61,8 +63,8 @@ private:
     static float s_borderPx;
 
     Index m_index;
-    int m_w{1};
-    int m_h{1};
+    int m_cols{1};
+    int m_rows{1};
 
     static QColor s_clbColor;
     static QColor s_ioColor;
@@ -72,6 +74,7 @@ private:
 
     void buildRect();
 };
+using TilePtr = std::shared_ptr<Tile>;
 
 }  // namespace fp
 

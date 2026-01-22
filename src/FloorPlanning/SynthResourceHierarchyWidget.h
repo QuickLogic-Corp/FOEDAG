@@ -1,6 +1,5 @@
 #pragma once
 
-#include "HierarhyElement.h"
 #include "Partition.h"
 
 #include <QWidget>
@@ -25,7 +24,7 @@ class SynthResourceHierarchyWidget : public QWidget {
 public:
     enum Flag {
         None                 = 0,
-        HidePartitionsColumn    = 1 << 0,
+        HidePartitionsColumn = 1 << 0,
         ShowOnlyCheckedItems = 1 << 1
     };
 
@@ -34,11 +33,11 @@ public:
     void build(const std::set<std::string>& elements);
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
-    void onPartitionSelected(const PartitionPtr&);
-    void clearSelectedElements();
+    void bindPartition(const PartitionPtr&);
+    void unbindPartition();
 
-signals:
-    void selectedElementsChanged(HierarhyElementsPtr);
+ signals:
+     void partitionElementsChanged(PartitionPtr);
 
 private:
     int m_flags = Flag::None;
@@ -46,9 +45,11 @@ private:
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
 
+    PartitionPtr m_selectedPartition;
     std::set<std::string> m_rawElements;
 
     void filterRawElemenets(const std::string& pattern);
+    void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
 
     void addPath(const std::string&);
     void onItemChanged(QStandardItem*, bool reportChanges);
@@ -56,8 +57,6 @@ private:
     void showFilteredItems(const std::string& pattern);
     void showOnlyCheckedItems();
     void showAllItems();
-
-    HierarhyElementsPtr collectSelectedElements() const;
 
     bool isShowOnlyCheckedItems() const { return m_flags & Flag::ShowOnlyCheckedItems; }
     bool isPartitionsColumnHidden() const { return m_flags & Flag::HidePartitionsColumn; }
