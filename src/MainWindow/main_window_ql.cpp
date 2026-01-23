@@ -2242,7 +2242,7 @@ void MainWindow::floorPlanningActionTriggered()
     if (FileUtils::FileExists(post_synth_net_filepath)) {
       fp::SynthResourceExtractor resourceExtractor;
       resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
-      if (resourceExtractor.resources().atoms.empty()) {
+      if (resourceExtractor.elements().empty()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elemenets are empty. Somthing wrong with %1?").arg(QString::fromStdString(post_synth_net_filepath.string())));
         QSignalBlocker b(floorPlanningAction);
         floorPlanningAction->setChecked(false);
@@ -2278,7 +2278,7 @@ void MainWindow::floorPlanningActionTriggered()
       }
       m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
-      m_floorPlanningWidget->loadNetList(resourceExtractor.resources().atoms);
+      m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
       m_floorPlanningWidget->resize(800, 600);
       m_floorPlanningWidget->show();
     } else {

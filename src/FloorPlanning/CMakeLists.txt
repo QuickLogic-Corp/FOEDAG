@@ -70,6 +70,8 @@ add_library(floorplanning STATIC
 
 target_link_libraries(floorplanning PUBLIC Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
 
+target_compile_definitions(floorplanning PRIVATE FP_MARGIN=0)
+
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanning>
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag)
