@@ -2246,12 +2246,12 @@ void MainWindow::floorPlanningActionTriggered()
 
   if (floorPlanningAction->isChecked()) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
-    std::filesystem::path post_synth_net_filepath = compiler->getPostSynthNetFilePath();
-    if (FileUtils::FileExists(post_synth_net_filepath)) {
+    std::filesystem::path postSynthNetFilePath = compiler->getPostSynthNetFilePath();
+    if (FileUtils::FileExists(postSynthNetFilePath)) {
       fp::SynthResourceExtractor resourceExtractor;
-      resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(post_synth_net_filepath));
+      resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(postSynthNetFilePath));
       if (resourceExtractor.elements().empty()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elemenets are empty. Somthing wrong with %1?").arg(QString::fromStdString(post_synth_net_filepath.string())));
+        QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elemenets are empty. Somthing wrong with %1?").arg(QString::fromStdString(postSynthNetFilePath.string())));
         cleanFloorPlanning();
         return;
       }
@@ -2281,12 +2281,13 @@ void MainWindow::floorPlanningActionTriggered()
       m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
       m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
-      qInfo() << "QLSettingsManager::getInstance()->getQDCFilePath()" << QLSettingsManager::getInstance()->getQDCFilePath().c_str();
-      std::filesystem::path qdcFilePath = QLSettingsManager::getInstance()->getQDCFilePath();
-      m_floorPlanningWidget->setQdcFilePath(QLSettingsManager::getInstance()->getQDCFilePath(), /*load*/true);
+      // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
+      // so we construct path based on json settings location file.
+      std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc"); 
+      m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
       m_floorPlanningWidget->show();
     } else {
-      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("%1 file is missing.\nPlease run SYNTHESIS, PACKING tasks and then activate Floor Planning again.").arg(QString::fromStdString(post_synth_net_filepath.string())));
+      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("%1 file is missing.\nPlease run SYNTHESIS, PACKING tasks and then activate Floor Planning again.").arg(QString::fromStdString(postSynthNetFilePath.string())));
       cleanFloorPlanning();
     }
   } else {
