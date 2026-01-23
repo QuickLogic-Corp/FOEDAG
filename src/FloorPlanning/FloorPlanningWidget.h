@@ -23,6 +23,8 @@ class FloorPlanningWidget : public QWidget {
 
 public:
     explicit FloorPlanningWidget(QWidget* parent = nullptr);
+    ~FloorPlanningWidget();
+
     void loadNetList(const std::set<std::string>& elements);
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
@@ -30,6 +32,15 @@ public:
 private slots:
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void onCheckErrorsFinished(std::unordered_set<std::string> errors);
+
+signals:
+    void closed();
+
+protected:
+    void closeEvent(QCloseEvent* event) override {
+        emit closed();
+        QWidget::closeEvent(event);
+    }
 
 private:
     QPushButton* m_bnSaveQdc{nullptr};

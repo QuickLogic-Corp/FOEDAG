@@ -160,6 +160,11 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     mainLayout->addLayout(bodyLayout);
 }
 
+FloorPlanningWidget::~FloorPlanningWidget()
+{
+    //qDebug() << "~FloorPlanningWidget";
+}
+
 void FloorPlanningWidget::setQdcFilePath(const std::filesystem::path& path, bool load)
 {
     m_deviceWidget->setQdcFilePath(path);
