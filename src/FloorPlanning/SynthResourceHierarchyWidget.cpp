@@ -45,13 +45,15 @@ void uncheckAllRecursive(QStandardItem* item, int col) {
 SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* parent)
     : QWidget(parent),
       m_flags(flags),
+      m_lbView(new QLabel),
       m_view(new QTreeView(this)),
       m_model(new QStandardItemModel(this))
 {
-    int ls = 0;
+    const int m = FP_MARGIN;
 
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(ls,ls,ls,ls);
+    layout->setContentsMargins(m,m,m,m);
+    layout->setSpacing(m);
 
     // tool bar
     QCheckBox* chShowChecked{nullptr};
@@ -70,7 +72,8 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     }
 
     QHBoxLayout* toolbarLayout = new QHBoxLayout;
-    toolbarLayout->setContentsMargins(ls,ls,ls,ls);
+    toolbarLayout->setContentsMargins(m,m,m,m);
+    toolbarLayout->setSpacing(m);
     layout->addLayout(toolbarLayout);
     if (chShowChecked) {
         toolbarLayout->addWidget(chShowChecked);
@@ -89,14 +92,11 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     }
     //
 
+    layout->addWidget(m_lbView);
     layout->addWidget(m_view);
+    m_lbView->setVisible(false); // optionally activated by method
 
     m_view->setModel(m_model);
-
-    // UX polish
-    m_view->setUniformRowHeights(true);
-    m_view->setAlternatingRowColors(true);
-    m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     connect(m_model, &QStandardItemModel::itemChanged, this, [this](QStandardItem* item) {
         onItemChanged(item, /*reportChanges*/true);
@@ -112,6 +112,7 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
         m_model->setHorizontalHeaderLabels(QList<QString>() << "Netlist" << "Partitions");
     } else {
         m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition netlist");
+        m_view->header()->setVisible(false);
     }
 
     QHeaderView* header = m_view->header();
@@ -209,8 +210,9 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
 
 void SynthResourceHierarchyWidget::unbindPartition()
 {
-    m_selectedPartition.reset();
     setEnabled(false);
+
+    m_selectedPartition.reset();
 
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
     uncheckAllRecursive(m_model->invisibleRootItem(), Column::Netlist);
@@ -221,13 +223,15 @@ void SynthResourceHierarchyWidget::unbindPartition()
 
     blocker.unblock();
 
+    updateViewLabel();
     m_view->viewport()->update();
 }
 
 void SynthResourceHierarchyWidget::bindPartition(const PartitionPtr& partition)
 {
-    setEnabled(true);
     m_selectedPartition = partition;
+
+    setEnabled(true);
 
     // check only requested elements + set partition label
     std::function<void(QStandardItem*, const std::string&)> checkAndPartitionRecursive =
@@ -270,6 +274,7 @@ void SynthResourceHierarchyWidget::bindPartition(const PartitionPtr& partition)
 
     blockModel.unblock();
 
+    updateViewLabel();
     m_view->viewport()->update();
 }
 
@@ -560,10 +565,12 @@ void SynthResourceHierarchyWidget::showOnlyCheckedItems()
 
 void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
 {
-    std::unordered_set<std::string> matches;
-    for (const std::string& element: m_rawElements) {
-        if (FOEDAG::StringUtils::matchesWildcardPattern(element, pattern)) {
-            matches.insert(element);
+    std::unordered_set<std::string_view> matches;
+    matches.reserve(m_rawElements.size());
+
+    for (const auto& s : m_rawElements) {
+        if (s.find(pattern) != std::string::npos) {
+            matches.emplace(s);
         }
     }
 
@@ -610,6 +617,16 @@ void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
     blockModel.unblock();
 
     m_view->viewport()->update();
+}
+
+void SynthResourceHierarchyWidget::updateViewLabel() {
+    if (!m_viewLabelTemplate.isEmpty()) {
+        if (m_selectedPartition) {
+            m_lbView->setText(m_viewLabelTemplate.replace("'%1'", QString::fromStdString(m_selectedPartition->name())));
+        } else {
+            m_lbView->setText(m_viewLabelTemplate.replace("'%1'", ""));
+        }
+    }
 }
 
 } // namespace fp

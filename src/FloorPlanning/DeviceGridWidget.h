@@ -65,13 +65,14 @@ public:
     void removeSelectedPartition();
     std::unordered_set<std::string> existedPartitionNames() const;
 
+    void setQdcFilePath(const std::filesystem::path& path);
     void saveQdc();
     void loadQdc();
 
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
     void createFirstPartitionRequested();
-    void clearSelectionRequested();
+    void clearPartitionSelectionRequested();
     void partitionSelected(const PartitionPtr&);
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);

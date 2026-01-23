@@ -10,13 +10,14 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QSplitter>
 
 namespace fp {
 	
 FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     : QWidget(parent)
 {
-    // m_lbStatus = new QLabel;
+    const int m = FP_MARGIN;
 
     m_synthResourcesWidget = new SynthResourceHierarchyWidget;
     m_synthResourcesWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -25,18 +26,20 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     m_deviceWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     // right pane
-    QVBoxLayout* rightPaneLayout = new QVBoxLayout;
-    rightPaneLayout->setContentsMargins(0,0,0,0);
-
-    rightPaneLayout->addWidget(new QLabel("Partitions:"));
+    QWidget* wRightPane = new QWidget;
+    QVBoxLayout* rightPaneLayout = new QVBoxLayout(wRightPane);
+    rightPaneLayout->setContentsMargins(m,m,m,m);
+    rightPaneLayout->setSpacing(m);
 
     m_partitionsListWidget = new PartitionsListWidget;
     rightPaneLayout->addWidget(m_partitionsListWidget);
     connect(m_partitionsListWidget, &PartitionsListWidget::selectionChanged, m_deviceWidget, &DeviceGridWidget::onPartitionSelected);
+    m_partitionsListWidget->setEnabled(false);
 
     int flags = SynthResourceHierarchyWidget::Flag::ShowOnlyCheckedItems | SynthResourceHierarchyWidget::Flag::HidePartitionsColumn;
     m_partitionResourcesWidget = new SynthResourceHierarchyWidget(flags);
     m_partitionResourcesWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_partitionResourcesWidget->setViewLabelTemplate(tr("Partition '%1' netlist:"));
     rightPaneLayout->addWidget(m_partitionResourcesWidget);
 
     m_errorsListWidget = new ErrorsListWidget;
@@ -47,11 +50,11 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
             m_synthResourcesWidget, &SynthResourceHierarchyWidget::bindPartition);
 
-    connect(m_deviceWidget, &DeviceGridWidget::clearSelectionRequested,
+    connect(m_deviceWidget, &DeviceGridWidget::clearPartitionSelectionRequested,
             m_synthResourcesWidget, &SynthResourceHierarchyWidget::unbindPartition);
 
     // m_partitionResourcesWidget
-    connect(m_deviceWidget, &DeviceGridWidget::clearSelectionRequested,
+    connect(m_deviceWidget, &DeviceGridWidget::clearPartitionSelectionRequested,
             m_partitionResourcesWidget, &SynthResourceHierarchyWidget::unbindPartition);
 
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
@@ -82,28 +85,31 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
 
     // toolBar
     QVBoxLayout* toolBarLayout = new QVBoxLayout;
-    toolBarLayout->setContentsMargins(0,0,0,0);
-    toolBarLayout->setSpacing(0);
-
-    m_bnSaveQdc = new QPushButton(QIcon(":/images/save-action.png"), "");
-    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::saveQdc);
-    m_bnSaveQdc->setToolTip(tr("Save QDC"));
+    toolBarLayout->setContentsMargins(m,m,m,m);
+    toolBarLayout->setSpacing(m);
 
     QPushButton* bnLoadQdc = new QPushButton(QIcon(":/images/load-action.png"), "");
     connect(bnLoadQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::loadQdc);
     bnLoadQdc->setToolTip(tr("Load QDC"));
 
-    QPushButton* bnDeletePartitions = new QPushButton(QIcon(":/images/erase.png"), "");
-    connect(bnDeletePartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
-    bnDeletePartitions->setToolTip(tr("Delete all partitions"));
+    m_bnSaveQdc = new QPushButton(QIcon(":/images/save-action.png"), "");
+    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::saveQdc);
+    m_bnSaveQdc->setToolTip(tr("Save QDC"));
+    m_bnSaveQdc->setEnabled(false);
+
+    m_bnDeletePartitions = new QPushButton(QIcon(":/images/erase.png"), "");
+    connect(m_bnDeletePartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
+    m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
+    m_bnDeletePartitions->setEnabled(false);
 
     QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/images/add.png"), "");
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
 
-    QPushButton* bnRemovePartition = new QPushButton(QIcon(":/images/minus.png"), "");
-    connect(bnRemovePartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
-    bnRemovePartition->setToolTip(tr("Remove selected partition"));
+    m_bnRemovePartition = new QPushButton(QIcon(":/images/minus.png"), "");
+    connect(m_bnRemovePartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
+    m_bnRemovePartition->setToolTip(tr("Remove selected partition"));
+    m_bnRemovePartition->setEnabled(false);
 
     connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested, this, &FloorPlanningWidget::createNewPartition);
 
@@ -112,13 +118,13 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     bnScrollPartition->setVisible(false);
 
     const int spacing = 20;
-    toolBarLayout->addWidget(m_bnSaveQdc);
     toolBarLayout->addWidget(bnLoadQdc);
+    toolBarLayout->addWidget(m_bnSaveQdc);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(bnDeletePartitions);
+    toolBarLayout->addWidget(m_bnDeletePartitions);
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(bnCreateNewPartition);
-    toolBarLayout->addWidget(bnRemovePartition);
+    toolBarLayout->addWidget(m_bnRemovePartition);
     if (bnScrollPartition->isVisible()) {
         toolBarLayout->addWidget(bnScrollPartition);
     }
@@ -129,20 +135,37 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
 
     // body layout
     QHBoxLayout* bodyLayout = new QHBoxLayout;
-    bodyLayout->setContentsMargins(0,0,0,0);
-    bodyLayout->setSpacing(0);
+    bodyLayout->setContentsMargins(m,m,m,m);
+    bodyLayout->setSpacing(m);
 
     bodyLayout->addLayout(toolBarLayout);
-    bodyLayout->addWidget(m_synthResourcesWidget);
-    bodyLayout->addWidget(m_deviceWidget, 1);
-    bodyLayout->addLayout(rightPaneLayout);
+
+    QSplitter* splitter = new QSplitter(Qt::Horizontal);
+    splitter->setChildrenCollapsible(false); // don't let panes disappear
+    splitter->setHandleWidth(6);
+
+    splitter->addWidget(m_synthResourcesWidget);
+    splitter->addWidget(m_deviceWidget);
+    splitter->addWidget(wRightPane);
+
+    splitter->setSizes({1, 2, 1});    // initial proportions (relative)
+
+    bodyLayout->addWidget(splitter);
 
     // main layout
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(0,0,0,0);
+    mainLayout->setContentsMargins(m,m,m,m);
+    mainLayout->setSpacing(m);
 
     mainLayout->addLayout(bodyLayout);
-    // mainLayout->addWidget(m_lbStatus);
+}
+
+void FloorPlanningWidget::setQdcFilePath(const std::filesystem::path& path, bool load)
+{
+    m_deviceWidget->setQdcFilePath(path);
+    if (load) {
+        m_deviceWidget->loadQdc();
+    }
 }
 
 void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
@@ -150,6 +173,14 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
     m_synthResourcesWidget->onPartitionsChanged(partitions);
     m_partitionResourcesWidget->onPartitionsChanged(partitions);
     m_partitionsListWidget->onPartitionsChanged(partitions);
+
+    const bool partitionsNotEmpty = !partitions.empty();
+    m_partitionsListWidget->setEnabled(partitionsNotEmpty);
+    m_bnRemovePartition->setEnabled(partitionsNotEmpty);
+    m_bnDeletePartitions->setEnabled(partitionsNotEmpty);
+    if (!partitionsNotEmpty) {
+        m_bnSaveQdc->setEnabled(false);
+    }
 }
 
 void FloorPlanningWidget::onCheckErrorsFinished(std::unordered_set<std::string> errors)

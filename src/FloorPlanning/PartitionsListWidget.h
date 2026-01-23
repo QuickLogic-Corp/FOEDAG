@@ -9,7 +9,7 @@
 
 namespace fp {
 
-class PartitionsListWidget final : public QListWidget {
+class PartitionsListWidget final : public QWidget {
     Q_OBJECT
 public:
     PartitionsListWidget(QWidget* parent = nullptr);
@@ -24,6 +24,8 @@ public slots:
     void onPartitionSelectedOutside(const PartitionPtr& partition);
 
 private:
+    QListWidget* m_list{nullptr};
+
     std::optional<int> m_selectedIdBackupOpt;
     int getId(const QString& name);
 

@@ -5,8 +5,10 @@
 #include <QWidget>
 #include <QTreeView>
 #include <QStandardItemModel>
+#include <QLabel>
 
 #include <set>
+#include <unordered_set>
 #include <string>
 
 class QLineEdit;
@@ -30,6 +32,11 @@ public:
 
     explicit SynthResourceHierarchyWidget(int flags = Flag::None, QWidget* parent = nullptr);
 
+    void setViewLabelTemplate(const QString& label) {
+        m_viewLabelTemplate = label;
+        m_lbView->setVisible(true);
+        updateViewLabel();
+    }
     void build(const std::set<std::string>& elements);
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
@@ -42,11 +49,13 @@ public:
 private:
     int m_flags = Flag::None;
     QLineEdit* m_leFilter{nullptr};
+    QString m_viewLabelTemplate;
+    QLabel* m_lbView{nullptr};
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
 
     PartitionPtr m_selectedPartition;
-    std::set<std::string> m_rawElements;
+    std::unordered_set<std::string> m_rawElements;
 
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
@@ -60,6 +69,8 @@ private:
 
     bool isShowOnlyCheckedItems() const { return m_flags & Flag::ShowOnlyCheckedItems; }
     bool isPartitionsColumnHidden() const { return m_flags & Flag::HidePartitionsColumn; }
+
+    void updateViewLabel();
 };
 
 }  // namespace fp

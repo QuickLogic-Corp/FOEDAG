@@ -8,7 +8,6 @@
 #include <map>
 #include <set>
 
-class QLabel;
 class QPushButton;
 
 namespace fp {
@@ -26,14 +25,16 @@ public:
     explicit FloorPlanningWidget(QWidget* parent = nullptr);
     void loadNetList(const std::set<std::string>& elements);
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
+    void setQdcFilePath(const std::filesystem::path&, bool load = true);
 
 private slots:
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void onCheckErrorsFinished(std::unordered_set<std::string> errors);
 
 private:
-    // QLabel* m_lbStatus{nullptr};
     QPushButton* m_bnSaveQdc{nullptr};
+    QPushButton* m_bnRemovePartition{nullptr};
+    QPushButton* m_bnDeletePartitions{nullptr};
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
     SynthResourceHierarchyWidget* m_partitionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};

@@ -8,8 +8,9 @@
 
 namespace fp {
 
-void QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& filePath)
+void QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
+    const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
     std::string content = serialize(device);
     if (!content.empty()) {
         if (!m_reservedContent.empty()) {
@@ -107,8 +108,9 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
     return content;
 }
 
-void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& filePath)
+void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
+    const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
     std::vector<std::string> lines = readLines(filePath);
     if (!lines.empty()) {
         load(device, lines);
@@ -210,8 +212,9 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
     }
 }
 
-std::vector<std::string> QdcSerializer::readLines(const std::filesystem::path& filePath) const
+std::vector<std::string> QdcSerializer::readLines(const std::filesystem::path& overrideFilePath) const
 {
+    const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
     std::string content = FOEDAG::FileUtils::GetFileContent(filePath);
     FOEDAG::StringUtils::replaceAllInPlace(content, "  ", " ");
     FOEDAG::StringUtils::replaceAllInPlace(content, lineDelimiter(), "");

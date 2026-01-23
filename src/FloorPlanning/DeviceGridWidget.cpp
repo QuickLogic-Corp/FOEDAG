@@ -336,6 +336,11 @@ std::unordered_set<std::string> DeviceGridWidget::existedPartitionNames() const
     return names;
 }
 
+void DeviceGridWidget::setQdcFilePath(const std::filesystem::path& path)
+{
+    m_qdcSerializer.setFilePath(path);
+}
+
 void DeviceGridWidget::saveQdc()
 {
     m_qdcSerializer.save(m_device);
@@ -614,7 +619,7 @@ void DeviceGridWidget::clearPartitions() {
 void DeviceGridWidget::exitPartitionSelect() {
     m_selectedPartition.reset();
     m_regionEditRoleOpt.reset();
-    emit clearSelectionRequested();
+    emit clearPartitionSelectionRequested();
     update();
 }
 
