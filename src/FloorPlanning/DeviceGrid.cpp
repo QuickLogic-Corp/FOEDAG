@@ -1,4 +1,5 @@
 #include "DeviceGrid.h"
+#include "TileDescriptor.h"
 
 #include <QDebug>
 
@@ -175,30 +176,57 @@ QPointF DeviceGrid::topRightPoint(const Tile::Index& idx) const
     return Tile::buildRect(idx, 1, 1).topRight();
 }
 
-std::optional<QPointF> DeviceGrid::findBottomLeftTilePoint(const Tile::Index& idx) const
+#ifdef USE_TESTS
+QPointF DeviceGrid::findBottomLeftTilePoint(const Tile::Index& idx) const
 {
     if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
         const TilePtr& tile = it->second;
         return tile->rect().bottomLeft();
     }
     if (auto it = m_tileFragments.find(idx); it != m_tileFragments.end()) {
-        return bottomLeftPoint(idx);
+        Tile::Index tileIdx = it->second;
+        if (auto itf = m_tiles.find(tileIdx); itf != m_tiles.end()) {
+            const TilePtr& tile = itf->second;
+            return tile->rect().bottomLeft();
+        }
     }
 
-    return std::nullopt;
+    return bottomLeftPoint(idx);
 }
 
-std::optional<QPointF> DeviceGrid::findTopRightTilePoint(const Tile::Index& idx) const
+QPointF DeviceGrid::findTopRightTilePoint(const Tile::Index& idx) const
 {
     if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
         const TilePtr& tile = it->second;
         return tile->rect().topRight();
     }
     if (auto it = m_tileFragments.find(idx); it != m_tileFragments.end()) {
-        return topRightPoint(idx);
+        Tile::Index tileIdx = it->second;
+        if (auto itf = m_tiles.find(tileIdx); itf != m_tiles.end()) {
+            const TilePtr& tile = itf->second;
+            return tile->rect().topRight();
+        }
     }
 
-    return std::nullopt;
+    return topRightPoint(idx);
+}
+#endif // USE_TESTS
+
+Tile::Index DeviceGrid::toBottomLeftClbIndex(const TileDescriptor& tileDescriptor) const
+{
+    return tileDescriptor.index;
+}
+
+Tile::Index DeviceGrid::toTopRightClbIndex(const TileDescriptor& tileDescriptor) const
+{
+    Tile::Index result = tileDescriptor.index;
+    switch(tileDescriptor.type) {
+    case Tile::Type::Dsp: result.row += m_descriptor->dspSize().height() - 1; break;
+    case Tile::Type::Bram: result.row += m_descriptor->bramSize().height() - 1; break;
+    default: break;
+    }
+
+    return result;
 }
 
 std::string DeviceGrid::buildTileSymbolicName(Tile::Type type, const Tile::Index& index, bool isTileFullyIncluded) const

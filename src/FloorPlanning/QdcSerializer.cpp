@@ -187,9 +187,9 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                         // special case
                         std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
                         if (bottomLeftGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftTileIndex = bottomLeftGridCoordTileDescriptorOpt.value().index;
-                            Tile::Index topRightTileIndex = bottomLeftTileIndex;
-                            device.restoreRegion(partition, bottomLeftTileIndex, topRightTileIndex);
+                            Tile::Index bottomLeftIndex = device.toBottomLeftClbIndex(bottomLeftGridCoordTileDescriptorOpt.value());
+                            Tile::Index topRightIndex = device.toTopRightClbIndex(bottomLeftGridCoordTileDescriptorOpt.value());
+                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
                         } else {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract start and end points";
                         }
@@ -198,9 +198,9 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                         std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[1]);
 
                         if (bottomLeftGridCoordTileDescriptorOpt && topRightGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftTileIndex = bottomLeftGridCoordTileDescriptorOpt.value().index;
-                            Tile::Index topRightTileIndex = topRightGridCoordTileDescriptorOpt.value().index;
-                            device.restoreRegion(partition, bottomLeftTileIndex, topRightTileIndex);
+                            Tile::Index bottomLeftIndex = device.toBottomLeftClbIndex(bottomLeftGridCoordTileDescriptorOpt.value());
+                            Tile::Index topRightIndex = device.toTopRightClbIndex(topRightGridCoordTileDescriptorOpt.value());
+                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
                         } else {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract bottomLeft or topRight indexes";
                         }

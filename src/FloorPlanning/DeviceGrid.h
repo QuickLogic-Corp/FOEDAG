@@ -8,9 +8,10 @@
 
 #include <unordered_map>
 #include <map>
-#include <optional>
 
 namespace fp {
+
+class TileDescriptor;
 
 class DeviceGrid {
 public:
@@ -45,8 +46,13 @@ public:
 
     std::string buildTileSymbolicName(Tile::Type, const Tile::Index& index, bool isTileFullyIncluded = true) const;
 
-    std::optional<QPointF> findBottomLeftTilePoint(const Tile::Index&) const;
-    std::optional<QPointF> findTopRightTilePoint(const Tile::Index&) const;
+#ifdef USE_TESTS
+    QPointF findBottomLeftTilePoint(const Tile::Index&) const;
+    QPointF findTopRightTilePoint(const Tile::Index&) const;
+#endif
+
+    Tile::Index toBottomLeftClbIndex(const TileDescriptor&) const;
+    Tile::Index toTopRightClbIndex(const TileDescriptor&) const;
 
     std::unordered_set<std::string> collectErrors();
 
