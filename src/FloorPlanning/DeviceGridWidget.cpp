@@ -192,21 +192,38 @@ void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
 {
     const double speed = 50.0;
     switch (event->key()) {
-    case Qt::Key_Up:
+    case Qt::Key_Up: {
         m_panPixels += QPointF(0, -speed);
         break;
-    case Qt::Key_Down:
+    }
+    case Qt::Key_Down: {
         m_panPixels += QPointF(0, speed);
         break;
-    case Qt::Key_Left:
+    }
+    case Qt::Key_Left: {
         m_panPixels += QPointF(-speed, 0);
         break;
-    case Qt::Key_Right:
+    }
+    case Qt::Key_Right: {
         m_panPixels += QPointF(speed, 0);
         break;
-    default:
+    }
+    case Qt::Key_Delete: {
+        if (m_selectedPartition) {
+            removeSelectedPartition();
+        }
+        break;
+    }
+    case Qt::Key_Escape: {
+        if (m_selectedPartition) {
+            exitPartitionSelect();
+        }
+        break;
+    }
+    default: {
         QWidget::keyPressEvent(event);
         return;
+    }
     }
 
     update();
