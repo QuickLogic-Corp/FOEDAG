@@ -8,7 +8,7 @@
 
 namespace fp {
 
-void QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
+bool QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
     const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
     std::string content = serialize(device);
@@ -17,6 +17,9 @@ void QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& 
             content = m_reservedContent + content;
         }
         FOEDAG::FileUtils::WriteToFile(filePath, content);
+        return true;
+    } else {
+        return false;
     }
 }
 
@@ -84,7 +87,7 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         }
 
         // aggregate line
-        std::string line = "set_partition ";
+        std::string line = "set_region ";
         line += lineDelimiter();
 
         line += elementsStr;

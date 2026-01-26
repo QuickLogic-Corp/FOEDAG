@@ -93,7 +93,14 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     bnLoadQdc->setToolTip(tr("Load QDC"));
 
     m_bnSaveQdc = new QPushButton(QIcon(":/images/save-action.png"), "");
-    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::saveQdc);
+    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, [this]() {
+        if (m_deviceWidget->saveQdc()) {
+            m_bnSaveQdc->setEnabled(false);
+            emit qdcFileSaved();
+        } else {
+            onNotify("Fail to save QDC", "");
+        }
+    });
     m_bnSaveQdc->setToolTip(tr("Save QDC"));
     m_bnSaveQdc->setEnabled(false);
 

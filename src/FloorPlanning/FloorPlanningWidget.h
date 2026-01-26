@@ -35,6 +35,7 @@ private slots:
 
 signals:
     void closed();
+    void qdcFileSaved();
 
 protected:
     void closeEvent(QCloseEvent* event) override {

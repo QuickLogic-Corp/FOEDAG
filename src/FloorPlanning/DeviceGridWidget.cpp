@@ -358,9 +358,9 @@ void DeviceGridWidget::setQdcFilePath(const std::filesystem::path& path)
     m_qdcSerializer.setFilePath(path);
 }
 
-void DeviceGridWidget::saveQdc()
+bool DeviceGridWidget::saveQdc()
 {
-    m_qdcSerializer.save(m_device);
+    return m_qdcSerializer.save(m_device);
 }
 
 void DeviceGridWidget::loadQdc()

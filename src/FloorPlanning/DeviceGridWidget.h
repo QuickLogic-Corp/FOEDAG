@@ -66,7 +66,7 @@ public:
     std::unordered_set<std::string> existedPartitionNames() const;
 
     void setQdcFilePath(const std::filesystem::path& path);
-    void saveQdc();
+    bool saveQdc();
     void loadQdc();
 
 signals:

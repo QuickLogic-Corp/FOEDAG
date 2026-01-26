@@ -10,7 +10,7 @@ namespace fp {
 class QdcSerializer {
 public:
     void setFilePath(const std::filesystem::path& path) { m_path = path; }
-    void save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath = "");
+    bool save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath = "");
     std::string serialize(const DeviceGrid& device);
     void load(DeviceGrid& device, const std::filesystem::path& overrideFilePath = "");
     void load(DeviceGrid& device, const std::vector<std::string>& lines);
