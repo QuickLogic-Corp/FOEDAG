@@ -460,7 +460,7 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
 {
     QPen pen(m_partitionColor);
     pen.setCosmetic(true);
-    pen.setWidth(m_tileLineWidth);
+    pen.setWidthF(adaptiveTileLineWidthF());
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
 

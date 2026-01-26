@@ -3,7 +3,6 @@
 #include "DeviceGrid.h"
 #include "Tile.h"
 #include "Partition.h"
-#include "HierarhyElement.h"
 #include "PointAnimation.h"
 #include "QdcSerializer.h"
 
@@ -11,14 +10,32 @@
 #include <QPoint>
 #include <QLabel>
 
+#include <algorithm>
+
 class QPaintEvent;
 
 namespace fp {
 
 class DeviceGridWidget final : public QWidget {
     Q_OBJECT
-    const double scaleMin = 0.2;
+
+    const double scaleMin = 0.05;
     const double scaleMax = 10.0;
+
+    const QColor m_backgroundColor{25, 25, 28};
+    const QColor m_transparentColor{0, 0, 0, 0};
+    const QColor m_textColor{30, 30, 35};
+    const QColor m_partitionColor{50, 160, 50}; // green
+    const QColor m_partitionTransparentColor{50, 160, 50, 150}; // transparent-green
+    const QColor m_editPartitionColor{50, 50, 160}; // blue
+    const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
+    const QColor m_removeHandlerColor{160, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedTileColor{160, 50, 50, 150}; // transparent-red
+    const int m_tileLineBaseWidth = 3;
+
+    double adaptiveTileLineWidthF() const {
+        return std::clamp(m_tileLineBaseWidth * m_scale, 0.5, double(2*m_tileLineBaseWidth));
+    }
 
 #ifdef SHOW_DRAWING_STAT
     struct DrawStat {
@@ -92,17 +109,6 @@ private:
     QdcSerializer m_qdcSerializer;
 
     bool m_isScrollToPartitionWhenSelected = false;
-
-    const QColor m_backgroundColor{25, 25, 28};
-    const QColor m_transparentColor{0, 0, 0, 0};
-    const QColor m_textColor{30, 30, 35};
-    const QColor m_partitionColor{50, 160, 50}; // green
-    const QColor m_partitionTransparentColor{50, 160, 50, 150}; // transparent-green
-    const QColor m_editPartitionColor{50, 50, 160}; // blue
-    const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
-    const QColor m_removeHandlerColor{160, 50, 50, 150}; // transparent-red
-    const QColor m_overlappedTileColor{160, 50, 50, 150}; // transparent-red
-    const int m_tileLineWidth = 3;
 
     double m_scale = 1.0f;
 
