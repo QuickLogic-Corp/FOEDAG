@@ -155,6 +155,13 @@ class CompilerOpenFPGA_ql : public Compiler {
   QLDeviceTarget getDeviceByStaProfile(const std::string staProfile) const;
   std::string uniqueStaVprOptions() const;
   
+  void onQdcFileSaved() {
+    // incr compilation itself didn't track qdc file, so we must re-generate xml 
+    // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+    GenerateIOFloorPlanConstraints(/*overrideExisted*/true);
+    invalidateTaskStatuses();
+  }
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -169,7 +176,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
-  bool GenerateIOFloorPlanConstraints();
+  bool GenerateIOFloorPlanConstraints(bool overrideExisted = false);
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,

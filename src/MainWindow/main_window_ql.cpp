@@ -2235,7 +2235,7 @@ void MainWindow::ipConfiguratorActionTriggered() {
 
 void MainWindow::floorPlanningActionTriggered()
 {
-  auto cleanFloorPlanning = [this]() {
+  auto cleanFloorPlanningUI = [this]() {
       if (m_floorPlanningWidget) {
         m_floorPlanningWidget->deleteLater();
         m_floorPlanningWidget = nullptr;
@@ -2252,20 +2252,23 @@ void MainWindow::floorPlanningActionTriggered()
       resourceExtractor.parseNetFileContent(FileUtils::GetFileContent(postSynthNetFilePath));
       if (resourceExtractor.elements().empty()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elemenets are empty. Somthing wrong with %1?").arg(QString::fromStdString(postSynthNetFilePath.string())));
-        cleanFloorPlanning();
+        cleanFloorPlanningUI();
         return;
       }
       if (!m_floorPlanningWidget) {
         m_floorPlanningWidget = new fp::FloorPlanningWidget;
-        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanning]{
-          cleanFloorPlanning();
+        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
+          cleanFloorPlanningUI();
+        });
+        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::qdcFileSaved, this, [compiler](){
+          compiler->onQdcFileSaved(); 
         });
       }
       
       VprArchitectureFileProfider archFileProvider(compiler);
       if(archFileProvider.get().empty()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", "Cannot proceed without VPR Architecture file.");
-        cleanFloorPlanning();
+        cleanFloorPlanningUI();
         return;
       }
 
@@ -2275,7 +2278,7 @@ void MainWindow::floorPlanningActionTriggered()
 
       if (descriptor->hasError()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
-        cleanFloorPlanning();
+        cleanFloorPlanningUI();
         return;
       }
       m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
@@ -2288,11 +2291,11 @@ void MainWindow::floorPlanningActionTriggered()
       m_floorPlanningWidget->show();
     } else {
       QMessageBox::critical(this, "Floor Planning cannot be started.", QString("%1 file is missing.\nPlease run SYNTHESIS, PACKING tasks and then activate Floor Planning again.").arg(QString::fromStdString(postSynthNetFilePath.string())));
-      cleanFloorPlanning();
+      cleanFloorPlanningUI();
     }
   } else {
     if (m_floorPlanningWidget) {
-      cleanFloorPlanning();
+      cleanFloorPlanningUI();
     }
   }
 }

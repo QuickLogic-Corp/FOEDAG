@@ -6189,11 +6189,11 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
 }
 
-bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
+bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool overrideExisted) {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
-  if (fs::exists(io_floor_planningpath)){
+  if (!overrideExisted && fs::exists(io_floor_planningpath)){
     Message(ProjManager()->projectName() + "_constraints.xml" + 
             " Already Exists. Using the Existing Constraint File.");
     return true;
