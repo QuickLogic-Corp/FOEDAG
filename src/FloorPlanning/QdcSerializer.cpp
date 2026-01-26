@@ -153,7 +153,7 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
     Region::resetIdGenerator();
 
     for (const std::string& line: lines) {
-        if (FOEDAG::StringUtils::startsWith(line, "set_region") || FOEDAG::StringUtils::startsWith(line, "set_partition")) {
+        if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
             std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(line, " ");
             // extract partition name [optionally]
             std::string partitionName = "";
