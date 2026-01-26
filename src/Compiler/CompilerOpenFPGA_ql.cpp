@@ -6189,11 +6189,11 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
 }
 
-bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool overrideExisted) {
+bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
-  if (!overrideExisted && fs::exists(io_floor_planningpath)){
+  if (!forceOverwrite && fs::exists(io_floor_planningpath)){
     Message(ProjManager()->projectName() + "_constraints.xml" + 
             " Already Exists. Using the Existing Constraint File.");
     return true;
@@ -6322,7 +6322,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool overrideExisted) {
 
       if (hasPartition) {
         StringUtils::toLower(partition);
-        std::string partitionKey = hasPartitionName ? partition : partitionName + "=" + partition;
+        std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
         if (partitionMap.find(partitionKey) == partitionMap.end()) {
           partitionMap[partitionKey] = {};
         }

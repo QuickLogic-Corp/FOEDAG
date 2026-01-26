@@ -158,7 +158,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   void onQdcFileSaved() {
     // incr compilation itself didn't track qdc file, so we must re-generate xml 
     // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
-    GenerateIOFloorPlanConstraints(/*overrideExisted*/true);
+    GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
     invalidateTaskStatuses();
   }
 
@@ -176,7 +176,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
-  bool GenerateIOFloorPlanConstraints(bool overrideExisted = false);
+  bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
