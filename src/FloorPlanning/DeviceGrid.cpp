@@ -177,47 +177,39 @@ QPointF DeviceGrid::topRightPoint(const Tile::Index& idx) const
 }
 
 #ifdef USE_TESTS
-QPointF DeviceGrid::findBottomLeftTilePoint(const Tile::Index& idx) const
+std::optional<QPointF> DeviceGrid::findBottomLeftTilePoint(const Tile::Index& idx) const
 {
     if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
         const TilePtr& tile = it->second;
         return tile->rect().bottomLeft();
     }
     if (auto it = m_tileFragments.find(idx); it != m_tileFragments.end()) {
-        Tile::Index tileIdx = it->second;
-        if (auto itf = m_tiles.find(tileIdx); itf != m_tiles.end()) {
-            const TilePtr& tile = itf->second;
-            return tile->rect().bottomLeft();
-        }
+        return bottomLeftPoint(idx);
     }
 
-    return bottomLeftPoint(idx);
+    return std::nullopt;
 }
 
-QPointF DeviceGrid::findTopRightTilePoint(const Tile::Index& idx) const
+std::optional<QPointF> DeviceGrid::findTopRightTilePoint(const Tile::Index& idx) const
 {
     if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
         const TilePtr& tile = it->second;
         return tile->rect().topRight();
     }
     if (auto it = m_tileFragments.find(idx); it != m_tileFragments.end()) {
-        Tile::Index tileIdx = it->second;
-        if (auto itf = m_tiles.find(tileIdx); itf != m_tiles.end()) {
-            const TilePtr& tile = itf->second;
-            return tile->rect().topRight();
-        }
+        return topRightPoint(idx);
     }
 
-    return topRightPoint(idx);
+    return std::nullopt;
 }
 #endif // USE_TESTS
 
-Tile::Index DeviceGrid::toBottomLeftClbIndex(const TileDescriptor& tileDescriptor) const
+Tile::Index DeviceGrid::toBottomLeftGridIndex(const TileDescriptor& tileDescriptor) const
 {
     return tileDescriptor.index;
 }
 
-Tile::Index DeviceGrid::toTopRightClbIndex(const TileDescriptor& tileDescriptor) const
+Tile::Index DeviceGrid::toTopRightGridIndex(const TileDescriptor& tileDescriptor) const
 {
     Tile::Index result = tileDescriptor.index;
     switch(tileDescriptor.type) {

@@ -61,7 +61,17 @@ public:
         // if (rect() != rhs.rect()) {
         //  return false;
         //}
-        if (tiles() != rhs.tiles()) {
+
+        const std::unordered_map<Tile::Index, TilePtr>& mapA = tiles();
+        const std::unordered_map<Tile::Index, TilePtr>& mapB = rhs.tiles();
+        bool isTilesIndexesSame =
+            mapA.size() == mapB.size() &&
+            std::equal(mapA.begin(), mapA.end(),
+                       mapB.begin(),
+                       [](auto& a, auto& b) {
+                           return a.first == b.first;
+                       });
+        if (!isTilesIndexesSame) {
             return false;
         }
         return true;

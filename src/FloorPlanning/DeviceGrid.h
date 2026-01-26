@@ -8,6 +8,9 @@
 
 #include <unordered_map>
 #include <map>
+#ifdef USE_TESTS
+#include <optional>
+#endif
 
 namespace fp {
 
@@ -47,12 +50,12 @@ public:
     std::string buildTileSymbolicName(Tile::Type, const Tile::Index& index, bool isTileFullyIncluded = true) const;
 
 #ifdef USE_TESTS
-    QPointF findBottomLeftTilePoint(const Tile::Index&) const;
-    QPointF findTopRightTilePoint(const Tile::Index&) const;
+    std::optional<QPointF> findBottomLeftTilePoint(const Tile::Index&) const;
+    std::optional<QPointF> findTopRightTilePoint(const Tile::Index&) const;
 #endif
 
-    Tile::Index toBottomLeftClbIndex(const TileDescriptor&) const;
-    Tile::Index toTopRightClbIndex(const TileDescriptor&) const;
+    Tile::Index toBottomLeftGridIndex(const TileDescriptor&) const;
+    Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
     std::unordered_set<std::string> collectErrors();
 
