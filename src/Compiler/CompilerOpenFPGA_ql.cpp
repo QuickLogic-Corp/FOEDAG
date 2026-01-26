@@ -76,6 +76,7 @@
 #include "QLDeviceManager.h"
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
+#include "FloorPlanning/QdcSerializer.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -6250,8 +6251,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     return true;
   }
 
-  std::string line;
-  std::ifstream infile(floor_planning_constraint_filepath);
   std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
   std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
     {"left", &leftSet},
@@ -6260,9 +6259,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     {"bottom", &bottomSet}
   };
 
-  std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
+  std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
 
-  while (std::getline(infile, line)) {
+  std::string qdcContent = FileUtils::GetFileContent(floor_planning_constraint_filepath);
+  StringUtils::replaceAllInPlace(qdcContent, fp::QdcSerializer::lineDelimiter(), ""); // remove syntax sugar added by better human readability
+  std::vector<std::string_view> lines = StringUtils::splitLines(qdcContent);
+  for (std::string_view lineView: lines) {
+    std::string line{lineView};
     line = StringUtils::trim(line);
 
     // drop comment part
@@ -6271,7 +6274,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     }
 
     if (line.empty()){
-      Message("Empty line found in QDC file. Skipping...\n");
       continue; // Skip empty line
     }
 
@@ -6295,6 +6297,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
             it->second->insert(signalName); // insert avoids duplicates
         }
       }
+      signalName.clear();
     } else if (token == "set_region") {
       iss >> signalName;
       std::vector<std::string> elements;
@@ -6309,16 +6312,26 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
         }
       }
 
-      std::string region;
-      while (iss >> region) {
-        StringUtils::toLower(region);
-        if (regionMap.find(region) == regionMap.end()) {
-          regionMap[region] = {};
+      std::string partition;
+      iss >> partition;
+      bool hasPartition = !iss.fail();
+
+      std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
+      iss >> partitionName;
+      bool hasPartitionName = !iss.fail();
+
+      if (hasPartition) {
+        StringUtils::toLower(partition);
+        std::string partitionKey = hasPartitionName ? partition : partitionName + "=" + partition;
+        if (partitionMap.find(partitionKey) == partitionMap.end()) {
+          partitionMap[partitionKey] = {};
         }
         for (const std::string& element: elements) {
-          regionMap[region].insert(element);
+          partitionMap[partitionKey].insert(element);
         }
       }
+
+      signalName.clear();
     }
   }
 
@@ -6327,9 +6340,9 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string topStr    = StringUtils::toString(topSet);
   std::string bottomStr = StringUtils::toString(bottomSet);
 
-  std::string regionStr;
-  for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
+  std::string partitionStr;
+  for (const auto& [partition, patternsSet]: partitionMap) {
+    partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
   }
 
   // Output results
@@ -6342,7 +6355,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   if (!bottomStr.empty())
     bottomStr = std::string("bottom:" + bottomStr + ";");
 
-  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
+  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
     ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
     return false;
   }
@@ -6380,7 +6393,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
                         std::string("--blif_file ") + netlistFile + " " + 
                         std::string("--arch_file ") + architectureFile + " " +
                         std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
-                        std::string("--region_groups ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " +
+                        std::string("--groups ") + leftStr + rightStr + topStr + bottomStr + partitionStr + " " +
                         std::string("--output_path ") + output_path); 
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();

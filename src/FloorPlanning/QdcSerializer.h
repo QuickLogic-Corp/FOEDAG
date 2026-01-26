@@ -1,6 +1,6 @@
 #pragma once
 
-#include <DeviceGrid.h>
+#include "DeviceGrid.h"
 #include "TileDescriptor.h"
 
 #include <filesystem>
@@ -16,7 +16,7 @@ public:
     void load(DeviceGrid& device, const std::vector<std::string>& lines);
 
     std::vector<std::string> readLines(const std::filesystem::path& overrideFilePath = "") const;
-    constexpr std::string_view lineDelimiter() const { return "\\\n"; }
+    static constexpr std::string_view lineDelimiter() { return "\\\n"; }
 
     static std::optional<TileDescriptor> extractGridCoord(const std::string& data);
 
