@@ -108,7 +108,10 @@ bool FileUtils::GetFullPath(const std::filesystem::path& path,
   return found;
 }
 
-std::string FileUtils::GetFileContent(const std::filesystem::path& filename) {
+std::string FileUtils::GetFileContent(const std::filesystem::path& filename, bool* ok) {
+  if (ok) {
+    *ok = false;
+  }
   std::ifstream in(filename, std::ios::in | std::ios::binary);
   std::string result;
 
@@ -122,8 +125,9 @@ std::string FileUtils::GetFileContent(const std::filesystem::path& filename) {
       in.read(buffer, sizeof(buffer));
       result.append(buffer, in.gcount());
     }
-  } else {
-    result = "FAILED_TO_LOAD_CONTENT";
+    if (ok) {
+      *ok = in.eof() && !in.bad();
+    }
   }
   return result;
 }
