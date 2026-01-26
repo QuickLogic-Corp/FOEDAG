@@ -434,10 +434,14 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
 #endif
     p.setPen(Qt::NoPen);
 
-    p.setBrush(Tile::color(Tile::Type::Clb));  p.drawRects(clbRects);
-    p.setBrush(Tile::color(Tile::Type::Io));   p.drawRects(ioRects);
-    p.setBrush(Tile::color(Tile::Type::Bram)); p.drawRects(bramRects);
-    p.setBrush(Tile::color(Tile::Type::Dsp));  p.drawRects(dspRects);
+    p.setBrush(Tile::color(Tile::Type::Clb));
+    p.drawRects(clbRects);
+    p.setBrush(Tile::color(Tile::Type::Io));
+    p.drawRects(ioRects);
+    p.setBrush(Tile::color(Tile::Type::Bram));
+    p.drawRects(bramRects);
+    p.setBrush(Tile::color(Tile::Type::Dsp));
+    p.drawRects(dspRects);
 
     // draw overlapped tiles
     if (!m_device.overlappedIndexes().empty()) {
@@ -447,8 +451,8 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
             const TilePtr& tile = m_device.tile(index);
             rects.append(tile->rect());
         }
-
-        p.setBrush(m_overlappedTileColor);  p.drawRects(rects);
+        p.setBrush(m_overlappedTileColor);
+        p.drawRects(rects);
     }
 }
 

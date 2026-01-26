@@ -94,7 +94,13 @@ PartitionPtr DeviceGrid::findPartition(int partitionId) const
 
 void DeviceGrid::removePartition(const PartitionPtr& partition)
 {
-    m_partitions.erase(m_partitions.find(partition->id()));
+    auto it = m_partitions.find(partition->id());
+    if (it != m_partitions.end()) {
+        m_partitions.erase(it);
+    } else {
+        // normally shouldn't go here
+        qCritical() << "unable to find partition id for partition name" << QString::fromStdString(partition->name());
+    }
 }
 
 void DeviceGrid::addPartition(const PartitionPtr& partition)
