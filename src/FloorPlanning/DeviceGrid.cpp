@@ -293,6 +293,8 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
         }
     }
 
+// seems VPR currently support same element be a part of multiple partitions, so deactivate this check case for now
+#ifdef ENABLE_ELEMENTS_OVERLAPPING_CHECK
     // elements overlapping
     for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {
         for (auto pit2 = std::next(pit1); pit2 != m_partitions.end(); ++pit2) {
@@ -305,6 +307,7 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
             }
         }
     }
+#endif
     return errors;
 }
 
