@@ -7,6 +7,11 @@ FloorPlanning UI Tool Usage Tips:
 - make sure at least two stages are completed (SYNTHESIS and PACKING)
 - navigate to the menu "View" where "IP Configurator" and "Pin Planner" are located and run third item "Floorplanning"
 
+################################
+### PARTITIONS LIST CONTROLS ###
+################################
+- Double Left Mouse Button Click - enter to partition renaming
+
 ############################
 ### DEVICE GRID CONTROLS ###
 ############################
