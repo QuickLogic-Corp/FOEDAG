@@ -42,41 +42,6 @@ public:
 
         m_id = s_idGenerator++;
     }
-#ifdef USE_TESTS
-    bool operator==(const Region& rhs) const {
-        if (id() != rhs.id()) {
-            return false;
-        }
-        if (bottomLeftGridIndex() != rhs.bottomLeftGridIndex()) {
-            return false;
-        }
-        if (bottomLeftTileIndex() != rhs.bottomLeftTileIndex()) {
-            return false;
-        }
-        if (topRightGridIndex() != rhs.topRightGridIndex()) {
-            return false;
-        }
-        // the rects could be slightly different, better to test comparison based on included tiles indexes
-        // qInfo() << rect() << rhs.rect();
-        // if (rect() != rhs.rect()) {
-        //  return false;
-        //}
-
-        const std::unordered_map<Tile::Index, TilePtr>& mapA = tiles();
-        const std::unordered_map<Tile::Index, TilePtr>& mapB = rhs.tiles();
-        bool isTilesIndexesSame =
-            mapA.size() == mapB.size() &&
-            std::equal(mapA.begin(), mapA.end(),
-                       mapB.begin(),
-                       [](auto& a, auto& b) {
-                           return a.first == b.first;
-                       });
-        if (!isTilesIndexesSame) {
-            return false;
-        }
-        return true;
-    }
-#endif // USE_TESTS
 
     int id() const { return m_id; }
 

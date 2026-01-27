@@ -89,7 +89,7 @@ public:
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
     void createFirstPartitionRequested();
-    void clearPartitionSelectionRequested();
+    void unselectPartitionRequested();
     void partitionSelected(const PartitionPtr&);
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
@@ -144,7 +144,7 @@ private:
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
 
-    void exitPartitionSelect();
+    void unselectPartition();
     void startNewRegionSelection(const QPointF& worldCoord);
     void stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");

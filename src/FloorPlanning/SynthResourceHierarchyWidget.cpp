@@ -49,7 +49,7 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
       m_view(new QTreeView(this)),
       m_model(new QStandardItemModel(this))
 {
-    const int m = FP_MARGIN;
+    const int m = FP_UI_MARGIN;
 
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(m,m,m,m);
@@ -208,7 +208,7 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
 }
 
 
-void SynthResourceHierarchyWidget::unbindPartition()
+void SynthResourceHierarchyWidget::unselectPartition()
 {
     setEnabled(false);
 
@@ -227,7 +227,7 @@ void SynthResourceHierarchyWidget::unbindPartition()
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::bindPartition(const PartitionPtr& partition)
+void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition)
 {
     m_selectedPartition = partition;
 

@@ -22,9 +22,10 @@ signals:
 public slots:
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void onPartitionSelectedOutside(const PartitionPtr& partition);
+    void unselectPartition();
 
 private:
-    QListWidget* m_list{nullptr};
+    QListWidget* m_listWidget{nullptr};
 
     std::optional<int> m_selectedIdBackupOpt;
     int getId(const QString& name);

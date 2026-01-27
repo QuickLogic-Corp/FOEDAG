@@ -7,25 +7,25 @@ namespace fp {
 
 PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     : QWidget(parent),
-    m_list(new QListWidget)
+    m_listWidget(new QListWidget)
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
-    const int m = FP_MARGIN;
+    const int m = FP_UI_MARGIN;
     layout->setContentsMargins(m,m,m,m);
     layout->setSpacing(m);
     layout->addWidget(new QLabel(tr("Partitions:")));
-    layout->addWidget(m_list);
+    layout->addWidget(m_listWidget);
 
-    m_list->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_listWidget->setSelectionMode(QAbstractItemView::SingleSelection);
 
-    m_list->setEditTriggers(
+    m_listWidget->setEditTriggers(
         QAbstractItemView::DoubleClicked |
         QAbstractItemView::EditKeyPressed
         );
 
-    connect(m_list, &QListWidget::itemSelectionChanged,
+    connect(m_listWidget, &QListWidget::itemSelectionChanged,
             this, [this]{
-                QList<QListWidgetItem*> items = m_list->selectedItems();
+                QList<QListWidgetItem*> items = m_listWidget->selectedItems();
                 if (!items.isEmpty()) {
                     QListWidgetItem* item = items.first();
                     const int id = getId(item->text());
@@ -34,7 +34,7 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
                 }
             });
 
-    connect(m_list, &QListWidget::itemChanged,
+    connect(m_listWidget, &QListWidget::itemChanged,
             this, [this](QListWidgetItem* item) {
                 QString oldText = item->data(Qt::UserRole).toString();
                 QString candidate = item->text();
@@ -60,9 +60,15 @@ bool PartitionsListWidget::isPartitionNameUnique(const QString& candidate) const
     return it == m_names2ids.end();
 }
 
+void PartitionsListWidget::unselectPartition()
+{
+    m_selectedIdBackupOpt.reset();
+    m_listWidget->clearSelection();
+}
+
 void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
 {
-    m_list->clear();
+    m_listWidget->clear();
     m_names2ids.clear();
 
     QListWidgetItem* autoSelectedItem{nullptr};
@@ -71,7 +77,7 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(name));
         item->setFlags(item->flags() | Qt::ItemIsEditable);
         item->setData(Qt::UserRole, QString::fromStdString(name));
-        m_list->addItem(item);
+        m_listWidget->addItem(item);
 
         m_names2ids[name] = id;
         if (m_selectedIdBackupOpt && (id == m_selectedIdBackupOpt.value())) {
@@ -87,18 +93,18 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
 void PartitionsListWidget::onPartitionSelectedOutside(const PartitionPtr& partition)
 {
     m_selectedIdBackupOpt = partition->id();
-    QList<QListWidgetItem*> items = m_list->findItems(QString::fromStdString(partition->name()), Qt::MatchExactly);
+    QList<QListWidgetItem*> items = m_listWidget->findItems(QString::fromStdString(partition->name()), Qt::MatchExactly);
     if (!items.isEmpty()) {
         QListWidgetItem* item = items.first();
         setSelectedItemSilently(item);
-        m_list->scrollToItem(item);
+        m_listWidget->scrollToItem(item);
     }
 }
 
 void PartitionsListWidget::setSelectedItemSilently(QListWidgetItem* item)
 {
     blockSignals(true);
-    m_list->setCurrentItem(item);
+    m_listWidget->setCurrentItem(item);
     item->setSelected(true);
     blockSignals(false);
 }

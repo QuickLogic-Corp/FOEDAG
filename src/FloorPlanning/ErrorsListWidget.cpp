@@ -11,7 +11,7 @@ ErrorsListWidget::ErrorsListWidget(QWidget* parent)
     : QWidget(parent)
 {
     QVBoxLayout* layout = new QVBoxLayout;
-    const int m = FP_MARGIN;
+    const int m = FP_UI_MARGIN;
     layout->setContentsMargins(m,m,m,m);
     layout->setSpacing(m);
     setLayout(layout);

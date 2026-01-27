@@ -26,45 +26,6 @@ public:
 
     void setName(const std::string& name) { m_name = name; }
 
-#ifdef USE_TESTS
-    bool operator==(const Partition& rhs) const {
-        static auto regionsEqualByValue = [](const std::map<int, RegionPtr>& a,
-                                             const std::map<int, RegionPtr>& b)->bool
-        {
-            if (a.size() != b.size()) {
-                return false;
-            }
-
-            for (const auto& [keya, regiona]: a) {
-                auto itb = b.find(keya);
-                if (itb == b.end()) {
-                    return false;
-                }
-
-                const RegionPtr& regionb = itb->second;
-                if (*regiona != *regionb) {
-                    return false;
-                }
-            }
-            return true;
-        };
-
-        if (id() != rhs.id()) {
-            return false;
-        }
-        if (name() != rhs.name()) {
-            return false;
-        }
-        if (elements() != rhs.elements()) {
-            return false;
-        }
-        if (!regionsEqualByValue(regions(), rhs.regions())) {
-            return false;
-        }
-        return true;
-    }
-#endif // USE_TESTS
-
     const std::string name() const { return m_name; }
 
     int id() const { return m_id; }

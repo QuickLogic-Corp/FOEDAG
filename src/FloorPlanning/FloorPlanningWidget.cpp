@@ -17,7 +17,7 @@ namespace fp {
 FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     : QWidget(parent)
 {
-    const int m = FP_MARGIN;
+    const int m = FP_UI_MARGIN;
 
     m_synthResourcesWidget = new SynthResourceHierarchyWidget;
     m_synthResourcesWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -48,17 +48,17 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
 
     // m_synthResourcesWidget
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
-            m_synthResourcesWidget, &SynthResourceHierarchyWidget::bindPartition);
+            m_synthResourcesWidget, &SynthResourceHierarchyWidget::selectPartition);
 
-    connect(m_deviceWidget, &DeviceGridWidget::clearPartitionSelectionRequested,
-            m_synthResourcesWidget, &SynthResourceHierarchyWidget::unbindPartition);
+    connect(m_deviceWidget, &DeviceGridWidget::unselectPartitionRequested,
+            m_synthResourcesWidget, &SynthResourceHierarchyWidget::unselectPartition);
 
     // m_partitionResourcesWidget
-    connect(m_deviceWidget, &DeviceGridWidget::clearPartitionSelectionRequested,
-            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::unbindPartition);
+    connect(m_deviceWidget, &DeviceGridWidget::unselectPartitionRequested,
+            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::unselectPartition);
 
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
-            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::bindPartition);
+            m_partitionResourcesWidget, &SynthResourceHierarchyWidget::selectPartition);
 
     // to FloorPlanningWidget hub
     connect(m_deviceWidget, &DeviceGridWidget::partitionsChanged,
@@ -75,6 +75,8 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
             m_deviceWidget, &DeviceGridWidget::onPartitionRenamed);
     connect(m_partitionsListWidget, &PartitionsListWidget::notify,
             this, &FloorPlanningWidget::onNotify);
+    connect(m_deviceWidget, &DeviceGridWidget::unselectPartitionRequested,
+            m_partitionsListWidget, &PartitionsListWidget::unselectPartition);
 
     // m_deviceWidget
     connect(m_deviceWidget, &DeviceGridWidget::notify,

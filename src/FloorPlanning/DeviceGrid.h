@@ -8,9 +8,6 @@
 
 #include <unordered_map>
 #include <map>
-#ifdef USE_TESTS
-#include <optional>
-#endif
 
 namespace fp {
 
@@ -35,6 +32,7 @@ public:
     const std::map<int, PartitionPtr>& partitions() const { return m_partitions; }
     const std::unordered_map<Tile::Index, TilePtr>& tiles() const { return m_tiles; }
     const std::unordered_set<Tile::Index>& overlappedIndexes() const { return m_overlappedIndexes; }
+    const std::unordered_map<Tile::Index, Tile::Index>& tileFragments() const { return m_tileFragments; }
 
     void alignRegions();
     void alignRegion(const RegionPtr&);
@@ -49,15 +47,13 @@ public:
 
     std::string buildTileSymbolicName(Tile::Type, const Tile::Index& index, bool isTileFullyIncluded = true) const;
 
-#ifdef USE_TESTS
-    std::optional<QPointF> findBottomLeftTilePoint(const Tile::Index&) const;
-    std::optional<QPointF> findTopRightTilePoint(const Tile::Index&) const;
-#endif
-
     Tile::Index toBottomLeftGridIndex(const TileDescriptor&) const;
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
     std::unordered_set<std::string> collectErrors();
+
+    QPointF bottomLeftPoint(const Tile::Index&) const;
+    QPointF topRightPoint(const Tile::Index&) const;
 
 private:
     DeviceGridDescriptorPtr m_descriptor;
@@ -68,9 +64,6 @@ private:
     std::map<int, PartitionPtr> m_partitions;
 
     std::unordered_set<Tile::Index> m_overlappedIndexes;
-
-    QPointF bottomLeftPoint(const Tile::Index&) const;
-    QPointF topRightPoint(const Tile::Index&) const;
 
     TilePtr m_nullPtrTile;
 

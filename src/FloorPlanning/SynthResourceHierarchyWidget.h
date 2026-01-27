@@ -40,8 +40,8 @@ public:
     void build(const std::set<std::string>& elements);
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
-    void bindPartition(const PartitionPtr&);
-    void unbindPartition();
+    void selectPartition(const PartitionPtr&);
+    void unselectPartition();
 
  signals:
      void partitionElementsChanged(PartitionPtr);

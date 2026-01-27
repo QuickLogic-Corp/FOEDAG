@@ -216,7 +216,7 @@ void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
     }
     case Qt::Key_Escape: {
         if (m_selectedPartition) {
-            exitPartitionSelect();
+            unselectPartition();
         }
         break;
     }
@@ -365,9 +365,10 @@ bool DeviceGridWidget::saveQdc()
 
 void DeviceGridWidget::loadQdc()
 {
-    exitPartitionSelect();
+    unselectPartition();
     m_qdcSerializer.load(m_device);
     checkErrors();
+    emit unselectPartitionRequested();
     emit partitionsChanged(m_device.partitions());
     update();
 }
@@ -621,7 +622,7 @@ void DeviceGridWidget::removeSelectedPartition()
 {
     if (m_selectedPartition) {
         m_device.removePartition(m_selectedPartition);
-        exitPartitionSelect();
+        unselectPartition();
         checkErrors();
         emit partitionsChanged(m_device.partitions());
     }
@@ -631,16 +632,16 @@ void DeviceGridWidget::clearPartitions() {
     m_device.clearPartitions();
     m_selectedRegion.reset();
     m_newRegion.reset();
-    exitPartitionSelect();
+    unselectPartition();
     checkErrors();
     emit partitionsChanged(m_device.partitions());
     update();
 }
 
-void DeviceGridWidget::exitPartitionSelect() {
+void DeviceGridWidget::unselectPartition() {
     m_selectedPartition.reset();
     m_regionEditRoleOpt.reset();
-    emit clearPartitionSelectionRequested();
+    emit unselectPartitionRequested();
     update();
 }
 

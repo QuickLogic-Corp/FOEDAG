@@ -12,11 +12,10 @@ public:
     HierarhyElement(const std::string& path): path(path) {}
     HierarhyElement(const std::string& path, bool isLeaf): path(path), isLeaf(isLeaf) {}
 
-#ifdef USE_TESTS
     bool operator==(const HierarhyElement& rhs) const {
         return ((path == rhs.path) && (isLeaf == rhs.isLeaf));
     }
-#endif // USE_TESTS
+
     std::string path;
     bool isLeaf = true;
 
@@ -25,7 +24,7 @@ public:
 
 class HierarhyElements {
 public:
-#ifdef USE_TESTS
+    bool empty() const { return m_elements.empty(); }
     bool operator==(const HierarhyElements& rhs) const {
         if (size() != rhs.size()) {
             return false;
@@ -33,22 +32,7 @@ public:
         return m_elements == rhs.m_elements;
     }
 
-    std::string toString() const {
-        std::string result;
-        for (const auto& element: m_elements) {
-            if (!result.empty()) {
-                result += ",";
-            }
-            result += element.path;
-            if (!element.isLeaf) {
-                result += ".*";
-            }
-        }
-        return result;
-    }
-#endif // USE_TESTS
-
-    bool empty() const { return m_elements.empty(); }
+    const std::set<HierarhyElement>& data() const { return m_elements; }
 
     std::size_t size() const { return m_elements.size(); }
 
@@ -67,15 +51,6 @@ public:
     void insert(const HierarhyElement& element) {
         m_elements.insert(element);
     }
-#ifdef DEBUG_SELECTION_ELEMENTS
-    void print(const std::string& label) {
-        qDebug() << "~~~" << QString::fromStdString(label);
-        for (const HierarhyElement& element: m_elements) {
-            qDebug() << QString::fromStdString(element.path) << element.isLeaf;
-        }
-        qDebug() << "\n";
-    }
-#endif // DEBUG_SELECTION_ELEMENTS
 
 private:
     std::set<HierarhyElement> m_elements;

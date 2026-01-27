@@ -176,34 +176,6 @@ QPointF DeviceGrid::topRightPoint(const Tile::Index& idx) const
     return Tile::buildRect(idx, 1, 1).topRight();
 }
 
-#ifdef USE_TESTS
-std::optional<QPointF> DeviceGrid::findBottomLeftTilePoint(const Tile::Index& idx) const
-{
-    if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
-        const TilePtr& tile = it->second;
-        return tile->rect().bottomLeft();
-    }
-    if (auto it = m_tileFragments.find(idx); it != m_tileFragments.end()) {
-        return bottomLeftPoint(idx);
-    }
-
-    return std::nullopt;
-}
-
-std::optional<QPointF> DeviceGrid::findTopRightTilePoint(const Tile::Index& idx) const
-{
-    if (auto it = m_tiles.find(idx); it != m_tiles.end()) {
-        const TilePtr& tile = it->second;
-        return tile->rect().topRight();
-    }
-    if (auto it = m_tileFragments.find(idx); it != m_tileFragments.end()) {
-        return topRightPoint(idx);
-    }
-
-    return std::nullopt;
-}
-#endif // USE_TESTS
-
 Tile::Index DeviceGrid::toBottomLeftGridIndex(const TileDescriptor& tileDescriptor) const
 {
     return tileDescriptor.index;
