@@ -292,6 +292,9 @@ void MainWindow::ProgressVisible(bool visible) {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (confirmExitProgram()) {
+    if (m_floorPlanningWidget) {
+      m_floorPlanningWidget->close();
+    }
     forceStopCompilation();
     event->accept();
   } else {
