@@ -6,6 +6,13 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(STANDALONE_FP_APP TRUE)
+else()
+    set(STANDALONE_FP_APP FALSE)
+endif()
+
 if (MSVC)
 else()
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Werror")
@@ -63,14 +70,9 @@ add_library(floorplanning STATIC
   ${HDR_LIST}
 )
 
-#find_package(Qt5 COMPONENTS Network REQUIRED)
-#if (NOT Qt5Network_FOUND)
-#    message(FATAL_ERROR "Failed to find Qt5Network")
-#endif()
-
 target_link_libraries(floorplanning PUBLIC Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
 
-target_compile_definitions(floorplanning PRIVATE FP_MARGIN=0)
+target_compile_definitions(floorplanning PRIVATE FP_UI_MARGIN=0)
 
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanning>
@@ -84,3 +86,23 @@ endforeach()
 install(
  FILES ${HEADER_INSTALL_LIST}
  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/foedag/FloorPlanning)
+
+
+if (STANDALONE_FP_APP)
+    set(CMAKE_AUTORCC ON)
+    set(QRC
+        ../MainWindow/main_window_resource.qrc
+        )
+
+    add_executable(floorplanning_bin
+        Test/FloorPlanning_main.cpp
+        ../Utils/StringUtils.cpp
+        ../Utils/FileUtils.cpp
+        ../Utils/StringUtils.h
+        ../Utils/FileUtils.h
+        ${QRC}
+    )
+    target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
+
+    target_compile_definitions(floorplanning_bin PRIVATE FP_UI_MARGIN=0)
+endif()
