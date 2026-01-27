@@ -70,7 +70,7 @@ private:
     bool isShowOnlyCheckedItems() const { return m_flags & Flag::ShowOnlyCheckedItems; }
     bool isPartitionsColumnHidden() const { return m_flags & Flag::HidePartitionsColumn; }
 
-    void updateViewLabel();
+    void updateViewLabel() const;
 };
 
 }  // namespace fp

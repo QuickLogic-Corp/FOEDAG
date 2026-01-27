@@ -619,12 +619,13 @@ void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
     m_view->viewport()->update();
 }
 
-void SynthResourceHierarchyWidget::updateViewLabel() {
+void SynthResourceHierarchyWidget::updateViewLabel() const {
     if (!m_viewLabelTemplate.isEmpty()) {
+      QString label{m_viewLabelTemplate};
         if (m_selectedPartition) {
-            m_lbView->setText(m_viewLabelTemplate.replace("'%1'", QString::fromStdString(m_selectedPartition->name())));
+            m_lbView->setText(label.replace("%1", QString::fromStdString(m_selectedPartition->name())));
         } else {
-            m_lbView->setText(m_viewLabelTemplate.replace("'%1'", ""));
+            m_lbView->setText(label.replace("'%1'", ""));
         }
     }
 }
