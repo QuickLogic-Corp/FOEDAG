@@ -235,13 +235,9 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     setFocus(); // needed for keyPressEvent
     m_isMousePressed = true;
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    QPointF pos = event->position();
-#else
-    QPointF pos = QPointF(event->pos());
-#endif
+    const QPointF mousePos = QPointF(event->pos());
     
-    const QPointF worldCoord{screenToWorldCoord(pos)};
+    const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
         if (!trySelect(worldCoord)) {
@@ -251,7 +247,7 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     }
     case Qt::MiddleButton:
     case Qt::RightButton: {
-        startPanning(pos);
+        startPanning(mousePos);
         break;
     }
     default: break;
@@ -260,13 +256,9 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 
 void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     m_isMousePressed = false;
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    QPointF pos = event->position();
-#else
-    QPointF pos = QPointF(event->pos());
-#endif
+    QPointF mousePos = QPointF(event->pos());
 
-    const QPointF worldCoord{screenToWorldCoord(pos)};
+    const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
         stopRegionSelection(worldCoord);
@@ -286,17 +278,13 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    QPointF pos = event->position();
-#else
-    QPointF pos = QPointF(event->pos());
-#endif
+    const QPointF mousePos = QPointF(event->pos());
 
-    const QPointF worldCoord = screenToWorldCoord(pos);
+    const QPointF worldCoord = screenToWorldCoord(mousePos);
 
     if (m_isPanning) {
-        QPointF delta = pos - m_lastMousePos;
-        m_lastMousePos = pos;
+        QPointF delta = mousePos - m_lastMousePos;
+        m_lastMousePos = mousePos;
 
         m_panPixels -= delta;
         update();
