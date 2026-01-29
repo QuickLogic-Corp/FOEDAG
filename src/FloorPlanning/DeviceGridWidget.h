@@ -132,7 +132,7 @@ private:
     QPointF m_lastMousePos;
     QPointF m_panPixels{0.0, 0.0};
 
-    void startPanning(const QPoint& pos);
+    void startPanning(const QPointF& pos);
     void stopPanning();
     // panning
 
@@ -151,7 +151,7 @@ private:
     void selectPartition(PartitionPtr partition);
     // selection
 
-    QPointF screenToWorldCoord(const QPoint&) const;
+    QPointF screenToWorldCoord(const QPointF&) const;
     QPointF worldToScreenCoord(const QPointF&) const;
     void scrollToPartition(const PartitionPtr&);
     void startMoveAnimation(const QPointF&);
