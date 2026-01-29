@@ -32,10 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <sys/stat.h>
 #include <sys/types.h>
 
-//debug
 #include <QThread>
-//debug
-
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
