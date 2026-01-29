@@ -256,6 +256,12 @@ Task *TaskManager::currentTask() const {
   return nullptr;
 }
 
+void TaskManager::StopAll()
+{
+  stopCurrentTask();
+  m_runStack.clear();
+}
+
 void TaskManager::stopCurrentTask() {
   for (auto task = m_tasks.begin(); task != m_tasks.end(); task++) {
     if ((*task)->status() == TaskStatus::InProgress)

@@ -28,7 +28,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <psapi.h>
 #else
 #include <fstream>
+#include <signal.h>
+#include <unistd.h>
 #endif
+
+#include <cstdint>
 
 namespace FOEDAG {
 
@@ -93,6 +97,31 @@ void ProcessUtils::Stop() {
 void ProcessUtils::cleanup() {
   delete m_thread;
   m_thread = nullptr;
+}
+
+bool killProcessByPid(int64_t pid)
+{
+  if (pid <= 0) {
+      return false;
+  }
+
+#if defined(_WIN32)
+
+  HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(pid));
+  if (!h) {
+    return false;
+  }
+
+  bool ok = TerminateProcess(h, 1);
+  CloseHandle(h);
+  return ok;
+
+#else // POSIX (Linux, macOS)
+
+  // SIGKILL = immediate, non-catchable
+  return (::kill(static_cast<pid_t>(pid), SIGKILL) == 0);
+
+#endif
 }
 
 }  // namespace FOEDAG

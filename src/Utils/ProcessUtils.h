@@ -53,4 +53,6 @@ class ProcessUtils {
   double m_vm{0};
 };
 
+bool killProcessByPid(int64_t pid);
+
 }  // namespace FOEDAG

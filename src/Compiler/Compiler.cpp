@@ -32,10 +32,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <sys/stat.h>
 #include <sys/types.h>
 
+//debug
+#include <QThread>
+//debug
+
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QProcess>
+#include <QElapsedTimer>
 #include <charconv>
 #include <chrono>
 #include <ctime>
@@ -2099,8 +2104,29 @@ void Compiler::Stop() {
 #if UPSTREAM_UNUSED
   ErrorMessage("Compilation was interrupted by user");
 #endif // #if UPSTREAM_UNUSED
-  Message("Compilation was stopped by user"); // KK: TODO, look why we end up here when everything is done in GUI mode?
-  if (m_process) m_process->terminate();
+  Message("Compilation was stopped by user");
+  //if (m_process) m_process->terminate(); 
+  /* 
+  NOTE: QProcess API must be executed in the thread the QProcess instance lives in, otherwise behavior is undefined.
+  
+  NOTE2: We tried to push terminate() call into the owning thread using QMetaObject::invokeMethod(),
+  but this seems is not reliable in our situation because the owning thread can be blocked by QProcess::waitForFinished(-1).
+
+  So more reliable way would be to keep active process Ids and kill each by it's Id.
+  */
+
+  killActiveProcessesByPids();
+  if (m_taskManager) {
+    m_taskManager->StopAll();
+  }
+}
+
+void Compiler::killActiveProcessesByPids()
+{
+  QMutexLocker lock(&m_processIdsMutex);
+  for (qint64 pid: m_processPids) {
+    killProcessByPid(pid);
+  }
 }
 
 bool Compiler::Analyze() {
@@ -2632,7 +2658,9 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
   m_environmentVariableMap["PWD"] = m_projManager->projectPath(); // fix "PWD environment variable doesn't match current directory; pwd = ..." warning
   // new QProcess must be created here to avoid issues related to creating
   // QObjects in different threads
-  m_process = new QProcess;
+  QProcess* process = new QProcess;
+
+  // qDebug() << "ExecuteAndMonitorSystemCommand create new process" << process << ", thread=" << QThread::currentThread();
   QStringList env = QProcess::systemEnvironment();
   if (!m_environmentVariableMap.empty()) {
     for (std::map<std::string, std::string>::iterator itr =
@@ -2641,22 +2669,22 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
       env << strdup(((*itr).first + "=" + (*itr).second).c_str());
     }
   }
-  m_process->setEnvironment(env);
+  process->setEnvironment(env);
   std::ofstream ofs;
   if (!logFile.empty()) {
     std::ios_base::openmode openMode{std::ios_base::out};
     if (appendLog) openMode = std::ios_base::out | std::ios_base::app;
     ofs.open(logFile, openMode);
-    QObject::connect(m_process, &QProcess::readyReadStandardOutput,
-                     [this, &ofs]() {
-                       qint64 bytes = m_process->bytesAvailable();
-                       QByteArray bufout = m_process->readAllStandardOutput();
+    QObject::connect(process, &QProcess::readyReadStandardOutput,
+                     [this, &ofs, process]() {
+                       qint64 bytes = process->bytesAvailable();
+                       QByteArray bufout = process->readAllStandardOutput();
                        ofs.write(bufout, bytes);
                        m_out->write(bufout, bytes);
                      });
-    QObject::connect(m_process, &QProcess::readyReadStandardError,
-                     [this, &ofs]() {
-                       QByteArray data = m_process->readAllStandardError();
+    QObject::connect(process, &QProcess::readyReadStandardError,
+                     [this, &ofs, process]() {
+                       QByteArray data = process->readAllStandardError();
                        QString errorstring{QString::fromUtf8(data)};
                        if (errorstring.contains("gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed")) {
                          // we skip reporting this specific error because it is not under our control,
@@ -2674,12 +2702,12 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                        }
                      });
   } else {
-    QObject::connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
-      m_out->write(m_process->readAllStandardOutput(),
-                   m_process->bytesAvailable());
+    QObject::connect(process, &QProcess::readyReadStandardOutput, [this, process]() {
+      m_out->write(process->readAllStandardOutput(),
+                   process->bytesAvailable());
     });
-    QObject::connect(m_process, &QProcess::readyReadStandardError, [this]() {
-      QByteArray data = m_process->readAllStandardError();
+    QObject::connect(process, &QProcess::readyReadStandardError, [this, process]() {
+      QByteArray data = process->readAllStandardError();
       QString errorstring{QString::fromUtf8(data)};
       if (errorstring.contains("gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed")) {
         // we skip reporting this specific error because it is not under our control,
@@ -2697,23 +2725,34 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
     });
   }
   ProcessUtils utils;
-  QObject::connect(m_process, &QProcess::started,
-                   [&utils, this]() { utils.Start(m_process->processId()); });
+  QObject::connect(process, &QProcess::started,
+                   [&utils, process]() { utils.Start(process->processId()); });
 
   QString cmd{command.c_str()};
   QStringList args = cmd.split(" ");
   QString program = args.first();
   args.pop_front();  // remove program
-  m_process->start(program, args);
+  process->start(program, args);
+  process->waitForStarted();
+  {
+  QMutexLocker lock(&m_processIdsMutex);
+  m_processPids.insert(process->processId());
+  }
   std::filesystem::current_path(path);
-  m_process->waitForFinished(-1);
+  process->waitForFinished(-1);
+
+  {
+  QMutexLocker lock(&m_processIdsMutex);
+  m_processPids.erase(process->processId());
+  }
+
   utils.Stop();
   // DEBUG: (*m_out) << "Changed path to: " << (path).string() << std::endl;
   uint max_utiliation{utils.Utilization()};
-  auto status = m_process->exitStatus();
-  auto exitCode = m_process->exitCode();
-  delete m_process;
-  m_process = nullptr;
+  auto status = process->exitStatus();
+  auto exitCode = process->exitCode();
+  //qDebug() << "Compiler::ExecuteAndMonitorSystemCommand delete process" << process << ", thread=" << QThread::currentThread();
+  delete process;
   if (!logFile.empty()) {
     ofs.close();
   }

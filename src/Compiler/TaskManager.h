@@ -59,6 +59,10 @@ class TaskManager : public QObject {
    */
   Task *currentTask() const;
   /*!
+   * \brief Stops chain of all tasks.
+   */
+  void StopAll();
+  /*!
    * \brief stopCurrentTask. Stop all tasks that are in progress.
    */
   void stopCurrentTask();

@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <map>
 #include <string>
 #include <vector>
+#include <set>
 
 #include "Command/Command.h"
 #include "Command/CommandStack.h"
@@ -34,6 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Main/CommandLine.h"
 #include "Simulation/Simulator.h"
 #include "Tcl/TclInterpreter.h"
+
+#include <QMutex>
 
 class QProcess;
 
@@ -353,7 +356,9 @@ class Compiler {
   uint32_t m_lut_size = 6;
   bool m_bitstreamEnabled = true;
   bool m_pin_constraintEnabled = true;
-  class QProcess* m_process = nullptr;
+
+  QMutex m_processIdsMutex;
+  std::set<qint64> m_processPids;
 
   // Sub engines
   IPGenerator* m_IPGenerator = nullptr;
@@ -371,6 +376,8 @@ class Compiler {
 
   // GTKWave
   QProcess* m_gtkwave_process = nullptr;
+
+  void killActiveProcessesByPids();
 };
 
 }  // namespace FOEDAG
