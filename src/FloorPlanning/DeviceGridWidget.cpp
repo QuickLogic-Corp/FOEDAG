@@ -235,7 +235,7 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     setFocus(); // needed for keyPressEvent
     m_isMousePressed = true;
 
-    const QPointF worldCoord{screenToWorldCoord(event->pos())};
+    const QPointF worldCoord{screenToWorldCoord(event->position())};
     switch(event->button()) {
     case Qt::LeftButton: {
         if (!trySelect(worldCoord)) {
@@ -245,7 +245,7 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     }
     case Qt::MiddleButton:
     case Qt::RightButton: {
-        startPanning(event->pos());
+        startPanning(event->position());
         break;
     }
     default: break;
@@ -254,7 +254,7 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 
 void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     m_isMousePressed = false;
-    const QPointF worldCoord{screenToWorldCoord(event->pos())};
+    const QPointF worldCoord{screenToWorldCoord(event->position())};
     switch(event->button()) {
     case Qt::LeftButton: {
         stopRegionSelection(worldCoord);
@@ -274,11 +274,11 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    const QPointF worldCoord = screenToWorldCoord(event->pos());
+    const QPointF worldCoord = screenToWorldCoord(event->position());
 
     if (m_isPanning) {
-        QPointF delta = event->pos() - m_lastMousePos;
-        m_lastMousePos = event->pos();
+        QPointF delta = event->position() - m_lastMousePos;
+        m_lastMousePos = event->position();
 
         m_panPixels -= delta;
         update();
@@ -320,7 +320,7 @@ void DeviceGridWidget::wheelEvent(QWheelEvent* event)
 
     const double zoomFactor = std::pow(1.15, delta);
 
-    QPointF mouse = event->pos();
+    QPointF mouse = event->position();
     QPointF before = (mouse + m_panPixels) / m_scale;
 
     m_scale = std::clamp(m_scale * zoomFactor, scaleMin, scaleMax);
