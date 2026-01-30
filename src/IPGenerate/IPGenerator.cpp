@@ -651,7 +651,7 @@ bool IPGenerator::Generate() {
           jsonF << "   \"" << param.Name() << "\": " << value << ","
                 << std::endl;
         }
-        jsonF << "   \"build_dir\": \"" << inst->OutputLocation().string() << "\","
+        jsonF << "   \"build_dir\": \"" << FileUtils::resolvePathStr(inst->OutputLocation().string()) << "\","
               << std::endl;
         jsonF << "   \"build_name\": \"" << inst->ModuleName() << "\","
               << std::endl;
