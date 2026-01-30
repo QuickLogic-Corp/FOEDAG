@@ -282,13 +282,6 @@ class Compiler {
       const std::string& command, const std::string logFile = std::string{},
       bool appendLog = false);
 
-  /* This function mirrors ExecuteAndMonitorSystemCommand, 
-     but uses a locally created QProcess, so processes can run independently of Compiler::m_process.
-     Safe solution for https://github.com/QL-Proprietary/aurora2/issues/1614
-  */
-  virtual int ExecuteAndMonitorSystemCommandSafe(
-      const std::string& command, const std::string logFile = std::string{},
-      bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(

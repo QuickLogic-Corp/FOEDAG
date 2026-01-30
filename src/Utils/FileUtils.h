@@ -34,6 +34,7 @@ namespace FOEDAG {
 struct Return {
   int code{};
   std::string message{};
+  int realCode;
 };
 
 class FileUtils final {

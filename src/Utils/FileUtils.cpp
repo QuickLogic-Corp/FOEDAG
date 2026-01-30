@@ -382,9 +382,16 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
                      });
   }
 
+  std::string commandStr{command};
+
   QString program = QString::fromStdString(command);
   QStringList args_{};
-  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  for (const auto& ar : args) {
+    args_ << QString::fromStdString(ar);
+    commandStr += " " + ar;
+  }
+  (*out) << "Command: " << commandStr << std::endl;
+
   if (startDetached) {
     auto success = process.startDetached(program, args_);
     return {success ? 0 : -1,
@@ -409,7 +416,7 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   int returnStatus =
       finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
 
-  return {returnStatus, {message}};
+  return {returnStatus, {message}, exitCode};
 }
 
 Return FileUtils::ExecuteSystemCommand(const std::string& command,
@@ -475,7 +482,7 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   int returnStatus =
       finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
 
-  return {returnStatus, {message}};
+  return {returnStatus, {message}, exitCode};
 }
 
 bool FileUtils::IsUptoDate(const std::string& sourceFile,

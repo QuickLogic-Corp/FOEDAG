@@ -6367,9 +6367,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  std::string output_path = ProjManager()->projectName() + "_constraints.xml";
-  std::string architectureFile = m_architectureFile.string();
+  std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
   #else // _WIN32
@@ -6388,20 +6387,27 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
 
-  std::string command = std::string(python_exec.string() + " " +
-                        generate_floorplanning_script_path.string() + " " +
-                        std::string("--blif_file ") + netlistFile + " " + 
-                        std::string("--arch_file ") + architectureFile + " " +
-                        std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
-                        std::string("--groups ") + leftStr + rightStr + topStr + bottomStr + partitionStr + " " +
-                        std::string("--output_path ") + output_path); 
+  std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(generate_floorplanning_script_path.string());
+  args.push_back("--blif_file");
+  args.push_back(netlistFile.string());
+  args.push_back("--arch_file");
+  args.push_back(m_architectureFile.string());
+  args.push_back("--fpga_layout");
+  args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
+  args.push_back("--groups");
+  args.push_back(leftStr + rightStr + topStr + bottomStr + partitionStr);
+  args.push_back("--output_path");
+  args.push_back(output_path.string());
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
   if (fs::exists(floor_planning_constraint_filepath)) {
-    command += std::string(" --pcf_file ") + pin_constraint_filepath.string();
+    args.push_back("--pcf_file");
+    args.push_back(pin_constraint_filepath.string());
   }
 
-  int status = ExecuteAndMonitorSystemCommandSafe(command);
+  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
 
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
