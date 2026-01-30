@@ -2243,15 +2243,6 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
                    QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail");
   }
 
-  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
-      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
-      // until Synplify side is fixed to resolve the root cause of the error.
-      vpr_options += std::string(" --skip_sync_clustering_and_routing_results on");
-    }
-  }
-
   // custom vpr command-line options for *all* stages
   // it is upto the user to ensure that the options are passed in correctly.
   if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
@@ -2602,15 +2593,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   if( !QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail").empty() ) {
     command->append("--timing_report_detail", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail"));
-  }
-
-  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
-      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
-      // until Synplify side is fixed to resolve the root cause of the error.
-      command->append("--skip_sync_clustering_and_routing_results", "on");
-    }
   }
 
   // custom vpr command-line options for *all* stages
