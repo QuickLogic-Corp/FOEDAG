@@ -6401,7 +6401,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     command += std::string(" --pcf_file ") + pin_constraint_filepath.string();
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = ExecuteAndMonitorSystemCommandSafe(command);
 
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
