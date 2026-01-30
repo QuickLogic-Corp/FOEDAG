@@ -217,6 +217,12 @@ void Compiler::Help(std::ostream* out) {
 
 void Compiler::CustomSimulatorSetup(Simulator::SimulationType action) {}
 
+Compiler::Compiler()
+{
+  IPCatalog* catalog = new IPCatalog();
+  SetIPGenerator(new IPGenerator(catalog, this));
+}
+
 Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
                    TclInterpreterHandler* tclInterpreterHandler)
     : m_interp(interp),

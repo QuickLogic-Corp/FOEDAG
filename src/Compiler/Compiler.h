@@ -103,7 +103,7 @@ class Compiler {
   enum class STAEngineOpt { Tatum, Opensta };
 
   // Most common use case, create the compiler in your main
-  Compiler() = default;
+  Compiler();
   Compiler(TclInterpreter* interp, std::ostream* out,
            TclInterpreterHandler* tclInterpreterHandler = nullptr);
   void SetInterpreter(TclInterpreter* interp) { m_interp = interp; }
