@@ -145,10 +145,14 @@ QString NCriticalPathToolsWidget::vprBaseCommand() {
       }
 #else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
       if (m_profile.isEmpty()) {
-        return QString::fromStdString(openFpgaCompiler->BaseVprCommandLEGACY());
+        std::tuple<std::string, std::string> baseVPRCommandTuple = openFpgaCompiler->BaseVprCommandLEGACY();
+        std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+        return QString::fromStdString(base_vpr_command);
       } else {
         auto sta_device = openFpgaCompiler->getDeviceByStaProfile(m_profile.toStdString());
-        std::string cmd = openFpgaCompiler->BaseVprCommandLEGACY(sta_device);
+        std::tuple<std::string, std::string> baseVPRCommandTuple = openFpgaCompiler->BaseVprCommandLEGACY(sta_device);
+        std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+        std::string cmd = base_vpr_command;
         cmd += openFpgaCompiler->uniqueStaVprOptions();
         return QString::fromStdString(cmd);
       }

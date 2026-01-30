@@ -1987,7 +1987,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
+std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -1997,7 +1997,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
   // if device_target is explicitly specified (STA does this):
@@ -2022,11 +2022,12 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
 
   std::string vpr_options;
+  std::string device_layout_name;
 
   // parse vpr general options
 #if UPSTREAM_UNUSED
@@ -2037,24 +2038,18 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 #endif // #if UPSTREAM_UNUSED
  if(m_autoLayoutGenerationMode) {
     Message("Base VPR Command running with Auto Layout Generated Device!\n");
-    vpr_options += std::string(" --device") + 
-                   std::string(" ") + 
-                   m_autoLayoutGeneratedLayoutName;
+    device_layout_name = m_autoLayoutGeneratedLayoutName;
   } 
   else {
     if (!m_deviceSize.empty()) {
-      vpr_options += std::string(" --device") + 
-                      std::string(" ") + 
-                      m_deviceSize;
+      device_layout_name = m_deviceSize;
     }
     else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
-      vpr_options += std::string(" --device") + 
-                      std::string(" ") + 
-                      QLSettingsManager::getStringValue("general", "device", "layout");
+      device_layout_name = QLSettingsManager::getStringValue("general", "device", "layout");
     }
     else {
         std::cout << "Should never be here, we should have a layout specified!" << std::endl;
-        return std::string("");
+        return std::make_tuple(std::string(""), std::string(""));
     }
   }
 
@@ -2098,7 +2093,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
         ErrorMessage("Could not find " + 
           QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
-        return "";
+        return std::make_tuple(std::string(""), std::string(""));
       }
     vpr_options += std::string(" --net_file") + 
                    std::string(" ") + 
@@ -2114,7 +2109,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
                 ErrorMessage("Could not find " + 
           QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
-        return "";
+        return std::make_tuple(std::string(""), std::string(""));
       }
     vpr_options += std::string(" --place_file") + 
                    std::string(" ") + 
@@ -2131,7 +2126,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
       ErrorMessage("Could not find " + 
           QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
-        return "";
+      return std::make_tuple(std::string(""), std::string(""));
       }
     vpr_options += std::string(" --route_file") + 
                    std::string(" ") + 
@@ -2316,7 +2311,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
   if(m_architectureFile.empty()) {
 
     ErrorMessage("Cannot proceed without VPR Architecture file.");
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
   if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
@@ -2331,13 +2326,13 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
       // empty string returned on error.
-      return std::string("");
+      return std::make_tuple(std::string(""), std::string(""));
     }
 
     if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
       ErrorMessage("decryption failed!");
       // empty string returned on error.
-      return std::string("");
+      return std::make_tuple(std::string(""), std::string(""));
     }
   }
 
@@ -2369,20 +2364,24 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     }
   }
   else { //IO floorplanning generation failed, must stop the flow
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
   vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:load_rr_indexed_data_T_values:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
-  //
 
+
+  // construct vpr base command with mandatory args + options:
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
-      std::string(netlistFile) + // NOTE: don't add a " " here as vpr options start with a " "
+      std::string(netlistFile) + std::string(" ") +
+      std::string("--device") + std::string(" ") + device_layout_name +// NOTE: don't add a " " here as vpr options start with a " "
       vpr_options;
-  
-  return base_vpr_command;
+
+
+  // return tuple of full vpr command, as well as just the options for use by clients
+  return std::make_tuple(base_vpr_command, vpr_options);
 }
 
 CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target, const VprStageCfg& cfg) {
@@ -4570,9 +4569,13 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    std::string taCommand = BaseVprCommandLEGACY() + " --route --analysis --disp on";
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    std::string taCommand = base_vpr_command + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::string taCommand = BaseVprCommandLEGACY(current_device_sta) + " --analysis --disp on";
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    std::string taCommand = base_vpr_command + " --analysis --disp on";
 #endif // #ifdef _WIN32
 
     if(!profile.empty()){
@@ -4604,7 +4607,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    std::string command = BaseVprCommandLEGACY() + " --gen_post_synthesis_netlist on";
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    std::string command = base_vpr_command + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
     int status = ExecuteAndMonitorSystemCommand(command);
@@ -4653,7 +4658,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     std::string vpr_options;
 
-    taCommand = BaseVprCommandLEGACY(current_device_sta);
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    taCommand = base_vpr_command;
     if(taCommand.empty()) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
@@ -5295,6 +5302,37 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::error_code ec;
 
 
+  m_architectureFile = 
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
+  if(m_architectureFile.empty()) {
+
+    ErrorMessage("Cannot proceed without VPR Architecture file.");
+    return std::string("");
+  }
+
+  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+    
+    std::filesystem::path vpr_xml_en_path = m_architectureFile;
+    m_architectureFile = GenerateTempFilePath();
+
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
+
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      Message("load cryptdb failed!");
+      // empty string returned on error.
+      return std::string("");
+    }
+
+    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+      ErrorMessage("decryption failed!");
+      // empty string returned on error.
+      return std::string("");
+    }
+  }
+
+
   // [required] openfpga architecture file
   m_OpenFpgaArchitectureFile = 
       QLDeviceManager::getInstance()->deviceOpenFPGAArchitectureFile();
@@ -5489,12 +5527,17 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // call vpr to execute analysis
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
 
-  std::string vpr_analysis_command = BaseVprCommandLEGACY();
+  std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
+  std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+  std::string base_vpr_options = std::get<1>(baseVPRCommandTuple);
+  std::string vpr_analysis_command = base_vpr_command;
   if(vpr_analysis_command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     // empty string returned on error.
     return std::string("");
   }
+  Message("kkkk");
+  Message(base_vpr_options);
   vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
@@ -5506,6 +5549,20 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
                           std::string("--analysis");
 
   result = ReplaceAll(result, "${VPR_ANALYSIS_COMMAND}", vpr_analysis_command);
+
+
+  // with silicon repo adopted format, use only the vpr standard options:
+  base_vpr_options +=
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+                          std::string(" ") + 
+                          std::string("--route") +
+#endif // #ifdef _WIN32
+                          std::string(" ") + 
+                          std::string("--analysis");
+  result = ReplaceAll(result, "${VPR_STANDARD_OPTS}", base_vpr_options);
+  result = ReplaceAll(result, "${VPR_OPTS}", std::string(""));
 
   //std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
 
@@ -5594,13 +5651,18 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     Message("OpenFPGA script running with Auto Layout Generated Device!\n");
     result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
                         " --device " + m_autoLayoutGeneratedLayoutName);
+    result = ReplaceAll(result, "${LAYOUT}",
+                        m_autoLayoutGeneratedLayoutName);
   } 
   else { 
     if (m_deviceSize.size()) {
       result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
                           " --device " + m_deviceSize);
+      result = ReplaceAll(result, "${LAYOUT}",
+                          " --device " + m_deviceSize);
     } else {
-      result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}", "");
+      result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}", device_target.device_variant_layout.name);
+      result = ReplaceAll(result, "${LAYOUT}", device_target.device_variant_layout.name);
     }
   }
 
@@ -5622,6 +5684,11 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     read_openfpga_bitstream_setting_command = 
         std::string("read_openfpga_bitstream_setting -f ") + 
         m_OpenFpgaBitstreamSettingFile.string();
+    result = ReplaceAll(result, "${BITSTREAM_ANNOTATION_XML}",
+          m_OpenFpgaBitstreamSettingFile.string());
+  }
+  else {
+    Message("<warning> BITSTREAM_ANNOTATION_XML is not found in the device.\n");
   }
   result = ReplaceAll(result, "${READ_OPENFPGA_BITSTREAM_SETTING_COMMAND}",
                       read_openfpga_bitstream_setting_command);
@@ -5639,6 +5706,11 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   if(!m_OpenFpgaRepackConstraintsFile.empty()) {
     openfpga_repack_constraints_command += 
         " --design_constraints " + m_OpenFpgaRepackConstraintsFile.string();
+    result = ReplaceAll(result, "${REPACK_DESIGN_CONSTRAINT_XML}",
+                      m_OpenFpgaRepackConstraintsFile.string());
+  }
+  else {
+    Message("<warning> REPACK_DESIGN_CONSTRAINT_XML is not found in the device.\n");
   }
   std::string generated_repack_design_constraint_filename =
       "repack_design_constraint_generated.xml";
@@ -5650,32 +5722,31 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // fabric_key is optional
   if (m_OpenFpgaFabricKeyFile.empty()) {
     result = ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}", "");
+    Message("<warning> EXTERNAL_FABRIC_KEY_FILE is not found in the device.\n");
   } else {
     result =
         ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}",
                    "--load_fabric_key " + m_OpenFpgaFabricKeyFile.string());
+    result = ReplaceAll(result, "${EXTERNAL_FABRIC_KEY_FILE}",
+                      m_OpenFpgaFabricKeyFile.string());
   }
 
   // bitstream_remapping is optional. and if it exists:
   // build_reordered_fabric_bitstream --reorder_map bitstream_remapping.xml --file reordered_bitstream.bin
-  // write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit
-  // write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml
   if (m_OpenFpgaBitstreamRemappingFile.empty()) {
     result = ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}", std::string("#skipped"));
-    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}",
-                                std::string("write_fabric_bitstream --format plain_text --file fabric_bitstream.bit"));
-    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}",
-                                std::string("write_fabric_bitstream --format xml --file fabric_bitstream.xml"));
   } else {
     result =
         ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}",
                    std::string("build_reordered_fabric_bitstream --reorder_map ") + m_OpenFpgaBitstreamRemappingFile.string() +
-                   std::string(" --file reordered_bitstream.bin"));
-        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}", 
-                                    std::string("write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit"));
-        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}", 
-                                    std::string("write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml"));
+                   std::string(" --file reordered_bitstream.txt"));
+        result = ReplaceAll(result, "${BITSTREAM_REMAPPING}",
+                    m_OpenFpgaBitstreamRemappingFile.string());
   }
+  result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}",
+    std::string("write_fabric_bitstream --format plain_text --file fabric_bitstream.bit"));
+  result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}",
+    std::string("write_fabric_bitstream --format xml --file fabric_bitstream.xml"));
 
 
   // call openfpga to output the fpga_io_map XML file *always*
