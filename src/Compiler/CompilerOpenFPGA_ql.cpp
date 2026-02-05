@@ -6269,6 +6269,10 @@ int status = ExecuteAndMonitorSystemCommand(command);
   std::vector<std::string> lines = StringUtils::tokenize(script, "\n", false);
   for (std::string line: lines) {
     line = StringUtils::trim(line);
+    if (("exit" == line) || ("# Finish and exit OpenFPGA" == line)) {
+      // we avoid exiting aurora
+      continue;
+    }
     if (line.empty()) {
       processedScript += line + "\n";
       continue;
@@ -6280,7 +6284,7 @@ int status = ExecuteAndMonitorSystemCommand(command);
     std::string wrappedLine = "puts [$openfpga_sh run_command \"" + line + "\"]";
     processedScript += wrappedLine + "\n";
   }
-
+  
   const std::filesystem::path scriptFilePath = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_bitstream.openfpga.tcl");
   std::ofstream ofs(scriptFilePath.string());
@@ -6288,9 +6292,14 @@ int status = ExecuteAndMonitorSystemCommand(command);
   ofs.close();
 
   Message("bypass LEGACY bitstream command execution " + scriptFilePath.string() + " will be used instead");
+  std::string out;
+
   assert(TclInterp());
-  std::string out = TclInterp()->evalFile(scriptFilePath.string());
-  Message(out);
+  out = TclInterp()->evalFile(scriptFilePath.string());
+
+  if (!out.empty()) {
+    Message(out);
+  }
   int status = false;
 #endif 
   CleanTempFiles();
