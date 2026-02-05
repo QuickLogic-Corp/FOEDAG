@@ -2647,16 +2647,44 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
-  // use rr_graph and router_lookahead files, if available in the device data:
-  std::filesystem::path rr_graph_file_path = 
-      QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
+  // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
+  std::filesystem::path sb_maps_file_path = 
+      QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
+      std::string("aurora") /
+      std::string("SB_MAPS.yml");
 
-  std::filesystem::path router_lookahead_file_path = 
-      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
+  std::filesystem::path sb_templates_dir_path = 
+      QLDeviceManager::getInstance()->deviceVariantDirPath(device_target) /
+      std::string("CSV");
 
-  if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
-    command->appendFile("--read_rr_graph", rr_graph_file_path);
-    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+  if(std::filesystem::is_regular_file(sb_maps_file_path) && 
+     std::filesystem::is_directory(sb_templates_dir_path)) {
+
+    command->appendFile("--sb_maps", sb_maps_file_path);
+    command->appendFile("--sb_templates", sb_templates_dir_path);
+    command->append("--preserve_input_pin_connections off");
+    command->append("--preserve_output_pin_connections off");
+    command->append("--annotated_rr_graph on");
+    command->append("--remove_dangling_nodes off");
+    // command->append("--sb_count_dir sb_count");
+    // command->append("--allow_dangling_combinational_nodes off");
+    command->append("--strict_checks off");
+    command->append("--verify_file_digests off");
+
+  }
+  else {
+
+    // use rr_graph and router_lookahead files, if available in the device data:
+    std::filesystem::path rr_graph_file_path = 
+        QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
+
+    std::filesystem::path router_lookahead_file_path = 
+        QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
+
+    if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
+      command->appendFile("--read_rr_graph", rr_graph_file_path);
+      command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+    }
   }
 
 

@@ -1932,6 +1932,19 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             continue;
           }
 
+          // include all CSV files for copy, required for RRG generation
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]CSV[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+          // include SB_MAPS.yml file for copy, required for RRG generation
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*SB_MAPS\\.yml",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
           // include all files in 'examples/' for copy
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]examples[\/\\].*)",
