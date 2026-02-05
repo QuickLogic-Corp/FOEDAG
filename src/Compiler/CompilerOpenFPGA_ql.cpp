@@ -6364,6 +6364,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
   std::string output_path = ProjManager()->projectName() + "_constraints.xml";
   std::string architectureFile = m_architectureFile.string();
+
+  auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
+  if (pinTableFile.empty()) 
+      // no pin table csv available, we cannot proceed with the pcf flow!
+      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
+
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
   #else // _WIN32
@@ -6388,7 +6394,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
                         std::string("--arch_file ") + architectureFile + " " +
                         std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
                         std::string("--region_groups ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " +
-                        std::string("--output_path ") + output_path); 
+                        std::string("--output_path ") + output_path + " " + 
+                        std::string("--pin_table_file ") + std::string(pinTableFile)); 
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
   if (fs::exists(floor_planning_constraint_filepath)) {
