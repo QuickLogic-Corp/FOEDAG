@@ -112,16 +112,16 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
 
-    m_bnRemovePartition = new QPushButton(QIcon(":/minus.png"), "");
-    connect(m_bnRemovePartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
-    m_bnRemovePartition->setToolTip(tr("Remove selected partition"));
-    m_bnRemovePartition->setEnabled(false);
+    m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/minus.png"), "");
+    connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
+    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected partition"));
+    m_bnRemoveSelectedPartition->setEnabled(false);
 
     connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested, this, &FloorPlanningWidget::createNewPartition);
 
-    QCheckBox* bnScrollPartition = new QCheckBox("scroll to partition");
+    QCheckBox* bnScrollPartition = new QCheckBox("Scroll to partition");
     connect(bnScrollPartition, &QCheckBox::stateChanged, m_deviceWidget, &DeviceGridWidget::setScrollToPartitionWhenSelected);
-    bnScrollPartition->setVisible(false);
+    //bnScrollPartition->setVisible(false);
 
     // move controls
     QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
@@ -161,22 +161,21 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     bnZoomFit->setToolTip(tr("Fit view to device grid"));
     m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
 
-    m_bnDeletePartitions = new QPushButton(QIcon(":/erase.png"), "");
-    connect(m_bnDeletePartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
-    m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
-    m_bnDeletePartitions->setEnabled(false);
+    m_bnRemoveAllPartitions = new QPushButton(QIcon(":/erase.png"), "");
+    connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
+    m_bnRemoveAllPartitions->setToolTip(tr("Delete all partitions"));
+    m_bnRemoveAllPartitions->setEnabled(false);
 
     const int spacing = 20;
     // toolBarLayout->addStretch();
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(bnCreateNewPartition);
-    toolBarLayout->addWidget(m_bnRemovePartition);
-    if (bnScrollPartition->isVisible()) {
-        toolBarLayout->addWidget(bnScrollPartition);
-    }
+    toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
+    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(m_bnRemoveAllPartitions);
+    toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(bnLeft);
     toolBarLayout->addWidget(bnRight);
     toolBarLayout->addWidget(bnDown);
@@ -188,8 +187,10 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(m_bnZoomInRegion);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnDeletePartitions);
-    toolBarLayout->addStretch();
+    if (bnScrollPartition->isVisible()) {
+      toolBarLayout->addWidget(bnScrollPartition);
+    }
+    // toolBarLayout->addStretch();
 
     bnScrollPartition->setChecked(true);
     m_deviceWidget->setScrollToPartitionWhenSelected(bnScrollPartition->isChecked());
@@ -248,11 +249,11 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 
     const bool partitionsNotEmpty = !partitions.empty();
     m_partitionsListWidget->setEnabled(partitionsNotEmpty);
-    m_bnRemovePartition->setEnabled(partitionsNotEmpty);
+    m_bnRemoveSelectedPartition->setEnabled(partitionsNotEmpty);
     if (!partitionsNotEmpty) {
         m_bnSaveQdc->setEnabled(false);
     }
-    m_bnDeletePartitions->setEnabled(partitionsNotEmpty);
+    m_bnRemoveAllPartitions->setEnabled(partitionsNotEmpty);
 }
 
 void FloorPlanningWidget::onCheckErrorsFinished(std::unordered_set<std::string> errors)

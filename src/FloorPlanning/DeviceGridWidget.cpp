@@ -390,15 +390,15 @@ void DeviceGridWidget::zoomFit()
   zoomInRect(rect);
 }
 
-void DeviceGridWidget::zoomInRect(QRectF& rect)
+void DeviceGridWidget::zoomInRect(QRectF& area)
 {
-  rect = rect.normalized();
-  const QSizeF deviceSize = rect.size();
+  area = area.normalized();
+  const QSizeF deviceSize = area.size();
   if ((deviceSize.width() <= 0.0) || (deviceSize.height() <= 0.0)) {
     return;
   }
 
-  const QRectF viewRect = contentsRect();
+  const QRect viewRect = contentsRect();
 
   const double wFactor = viewRect.width()  / deviceSize.width();
   const double hFactor = viewRect.height() / deviceSize.height();
@@ -408,17 +408,19 @@ void DeviceGridWidget::zoomInRect(QRectF& rect)
   const QSizeF scaledDeviceSize = deviceSize * m_scale;
 
   m_panPixels = QPointF(
-      viewRect.center().x() - scaledDeviceSize.width()  * 0.5 + m_scale*rect.x(),
-      viewRect.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*rect.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
+      viewRect.center().x() - scaledDeviceSize.width()  * 0.5 + m_scale*area.x(),
+      viewRect.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*area.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
       );
-
-  m_isZoomInRegionModeActive = false;
-  m_selectionBottomLeftOpt.reset();
-  m_selectionTopRightOpt.reset();
 
   update();
 
-  emit zoomInRectModeDeactivated();
+  if (m_isZoomInRegionModeActive) {
+    m_isZoomInRegionModeActive = false;
+    m_selectionBottomLeftOpt.reset();
+    m_selectionTopRightOpt.reset();
+
+    emit zoomInRectModeDeactivated();
+  }
 }
 
 void DeviceGridWidget::startPanning(const QPointF& pos)
@@ -496,12 +498,12 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   drawCurrentSelection(p);
 
   // debug
-  // QPen pen;
-  // pen.setWidthF(5.0);
-  // pen.setColor(Qt::red);
-  // p.setPen(pen);
-  // p.setBrush(Qt::NoBrush);
-  // p.drawRect(m_device.rect());
+  QPen pen;
+  pen.setWidthF(5.0);
+  pen.setColor(Qt::red);
+  p.setPen(pen);
+  p.setBrush(Qt::NoBrush);
+  p.drawRect(m_device.rect());
   // debug
 }
 
