@@ -90,11 +90,11 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     toolBarLayout->setContentsMargins(m,m,m,m);
     toolBarLayout->setSpacing(m);
 
-    QPushButton* bnLoadQdc = new QPushButton(QIcon(":/images/load-action.png"), "");
+    QPushButton* bnLoadQdc = new QPushButton(QIcon(":/load-action.png"), "");
     connect(bnLoadQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::loadQdc);
     bnLoadQdc->setToolTip(tr("Load QDC"));
 
-    m_bnSaveQdc = new QPushButton(QIcon(":/images/save-action.png"), "");
+    m_bnSaveQdc = new QPushButton(QIcon(":/save-action.png"), "");
     connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, [this]() {
         if (m_deviceWidget->saveQdc()) {
             m_bnSaveQdc->setEnabled(false);
@@ -106,16 +106,16 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     m_bnSaveQdc->setToolTip(tr("Save QDC"));
     m_bnSaveQdc->setEnabled(false);
 
-    m_bnDeletePartitions = new QPushButton(QIcon(":/images/erase.png"), "");
+    m_bnDeletePartitions = new QPushButton(QIcon(":/erase.png"), "");
     connect(m_bnDeletePartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
     m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
     m_bnDeletePartitions->setEnabled(false);
 
-    QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/images/add.png"), "");
+    QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/add.png"), "");
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
 
-    m_bnRemovePartition = new QPushButton(QIcon(":/images/minus.png"), "");
+    m_bnRemovePartition = new QPushButton(QIcon(":/minus.png"), "");
     connect(m_bnRemovePartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
     m_bnRemovePartition->setToolTip(tr("Remove selected partition"));
     m_bnRemovePartition->setEnabled(false);

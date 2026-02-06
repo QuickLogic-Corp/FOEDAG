@@ -91,7 +91,7 @@ install(
 if (STANDALONE_FP_APP)
     set(CMAKE_AUTORCC ON)
     set(QRC
-        ../MainWindow/main_window_resource.qrc
+        data/floorplanning_resource.qrc
         )
 
     add_executable(floorplanning_bin

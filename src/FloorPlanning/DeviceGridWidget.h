@@ -11,6 +11,7 @@
 #include <QLabel>
 
 class QPaintEvent;
+class QPushButton;
 
 namespace fp {
 
@@ -26,6 +27,8 @@ class DeviceGridWidget final : public QWidget {
     const QColor m_transparentColor{0, 0, 0, 0};
     const QColor m_textColor{30, 30, 35};
     const QColor m_partitionColor{50, 160, 50}; // green
+    const QColor m_selectionFrameColor{50, 160, 50}; // green
+    const QColor m_selectionBgColor{50, 160, 50, 50}; // green
     const QColor m_partitionTransparentColor{50, 160, 50, 150}; // transparent-green
     const QColor m_editPartitionColor{50, 50, 160}; // blue
     const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
@@ -127,8 +130,12 @@ private:
     void drawBackground(QPainter& p);
     void drawTilesBatched(QPainter& p);
     void drawPartitions(QPainter& p);
+    void drawCurrentSelection(QPainter& p);
     void drawTileLabels(QPainter& p);
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
+
+    QPushButton* m_bnZoomInRegion{nullptr};
+    bool m_isZoomInRegionModeActive = false;
 
     // panning
     PointAnimation m_moveAnimation;
@@ -141,6 +148,8 @@ private:
     // panning
 
     // selection
+    std::optional<QPointF> m_selectionBottomLeftOpt;
+    std::optional<QPointF> m_selectionTopRightOpt;
     RegionPtr m_newRegion;
     RegionPtr m_selectedRegion;
 

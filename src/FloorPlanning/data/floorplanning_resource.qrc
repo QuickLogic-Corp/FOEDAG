@@ -1,0 +1,18 @@
+<RCC>
+    <qresource prefix="/">
+        <file>down-arrow.png</file>
+        <file>left-arrow.png</file>
+        <file>right-arrow.png</file>
+        <file>up-arrow.png</file>
+        <file>expand.png</file>
+        <file>error.png</file>
+        <file>erase.png</file>
+        <file>add.png</file>
+        <file>minus.png</file>
+	<file>load-action.png</file>
+	<file>save-action.png</file>
+	<file>zoom-in.svg</file>
+	<file>zoom-out.svg</file>
+	<file>zoom-in-area.png</file>
+    </qresource>
+</RCC>

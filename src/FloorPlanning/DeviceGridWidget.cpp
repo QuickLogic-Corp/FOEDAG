@@ -27,39 +27,41 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
   toolBarLayout->setSpacing(m);
   m_toolBar->setLayout(toolBarLayout);
 
-  QPushButton* bnLeft = new QPushButton(QIcon(":/images/erase.png"), "");
-  QPushButton* bnUp = new QPushButton(QIcon(":/images/erase.png"), "");
-  QPushButton* bnRight = new QPushButton(QIcon(":/images/erase.png"), "");
-  QPushButton* bnDown = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
+  QPushButton* bnRight = new QPushButton(QIcon(":/right-arrow.png"), "");
+  QPushButton* bnDown = new QPushButton(QIcon(":/down-arrow.png"), "");
+  QPushButton* bnUp = new QPushButton(QIcon(":/up-arrow.png"), "");
 
   connect(bnLeft, &QPushButton::clicked, this, &DeviceGridWidget::moveViewLeft);
   connect(bnUp, &QPushButton::clicked, this, &DeviceGridWidget::moveViewUp);
   connect(bnRight, &QPushButton::clicked, this, &DeviceGridWidget::moveViewRight);
   connect(bnDown, &QPushButton::clicked, this, &DeviceGridWidget::moveViewDown);
 
-  QPushButton* bnZoomIn = new QPushButton(QIcon(":/images/erase.png"), "");
-  QPushButton* bnZoomOut = new QPushButton(QIcon(":/images/erase.png"), "");
-  QPushButton* bnZoomFit = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
+  QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
+  QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
   connect(bnZoomIn, &QPushButton::clicked, this, &DeviceGridWidget::zoomIn);
   connect(bnZoomOut, &QPushButton::clicked, this, &DeviceGridWidget::zoomOut);
   connect(bnZoomFit, &QPushButton::clicked, this, &DeviceGridWidget::zoomFit);
 
-  QPushButton* bnZoomInRegion = new QPushButton(QIcon(":/images/erase.png"), "");
-  QPushButton* bnDrawRegion = new QPushButton(QIcon(":/images/erase.png"), "");
+  m_bnZoomInRegion = new QPushButton(QIcon(":/zoom-in-area.png"), "");
+  connect(m_bnZoomInRegion, &QPushButton::clicked, this, [this](){
+    m_bnZoomInRegion->setEnabled(false);
+    m_isZoomInRegionModeActive = true;
+  });
 
   const int spacing = 20;
 
   toolBarLayout->addWidget(bnLeft);
-  toolBarLayout->addWidget(bnUp);
   toolBarLayout->addWidget(bnRight);
   toolBarLayout->addWidget(bnDown);
+  toolBarLayout->addWidget(bnUp);
   toolBarLayout->addSpacing(spacing);
   toolBarLayout->addWidget(bnZoomIn);
   toolBarLayout->addWidget(bnZoomOut);
   toolBarLayout->addWidget(bnZoomFit);
   toolBarLayout->addSpacing(spacing);
-  toolBarLayout->addWidget(bnZoomInRegion);
-  toolBarLayout->addWidget(bnDrawRegion);
+  toolBarLayout->addWidget(m_bnZoomInRegion);
 
 #ifdef SHOW_DRAWING_STAT
   toolBarLayout->addWidget(m_drawStat.label());
@@ -298,8 +300,12 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
-        if (!trySelect(worldCoord)) {
-            startNewRegionSelection(worldCoord);
+        if (m_isZoomInRegionModeActive) {
+          m_selectionBottomLeftOpt = worldCoord;
+        } else {
+          if (!trySelect(worldCoord)) {
+              startNewRegionSelection(worldCoord);
+          }
         }
         break;
     }
@@ -319,10 +325,19 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
-        stopRegionSelection(worldCoord);
-        m_device.alignRegions();
-        checkErrors();
-        update();
+        if (m_isZoomInRegionModeActive) {
+          m_selectionTopRightOpt = worldCoord;
+          QRectF rect(m_selectionBottomLeftOpt.value(), m_selectionTopRightOpt.value());
+          zoomInRect(rect);
+          update();
+        } else {
+          if (m_newRegion) {
+            stopRegionSelection(worldCoord);
+            m_device.alignRegions();
+            checkErrors();
+            update();
+          }
+        }
         break;
     }
     case Qt::MiddleButton:
@@ -347,6 +362,11 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         m_panPixels -= delta;
         update();
         return;
+    }
+    if (m_isZoomInRegionModeActive) {
+      m_selectionTopRightOpt = worldCoord;
+      update();
+      return;
     }
     if (m_newRegion) {
         m_newRegion->setStopPos(worldCoord);
@@ -443,6 +463,11 @@ void DeviceGridWidget::zoomInRect(QRectF& rect)
       viewRect.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*rect.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
       );
 
+  m_bnZoomInRegion->setEnabled(true);
+  m_isZoomInRegionModeActive = false;
+  m_selectionBottomLeftOpt.reset();
+  m_selectionTopRightOpt.reset();
+
   update();
 }
 
@@ -519,6 +544,8 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   }
 
   drawPartitions(p);
+  drawCurrentSelection(p);
+
 #ifdef SHOW_DRAWING_STAT
   m_drawStat.setDrawTimeMs(t.elapsed());
 #endif
@@ -601,6 +628,29 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
     }
 }
 
+void DeviceGridWidget::drawCurrentSelection(QPainter& p)
+{
+  QPen pen(m_selectionFrameColor);
+  pen.setCosmetic(true);
+  pen.setWidthF(adaptiveTileLineWidthF());
+  p.setPen(pen);
+  p.setBrush(m_selectionBgColor);
+
+  if (m_isZoomInRegionModeActive) {
+    if (m_selectionBottomLeftOpt && m_selectionTopRightOpt) {
+      QRectF selectionRect(m_selectionBottomLeftOpt.value(), m_selectionTopRightOpt.value());
+      selectionRect = selectionRect.normalized();
+      p.drawRect(selectionRect);
+    }
+  } else {
+    if (m_newRegion) {
+      if (m_newRegion->isClosed()) {
+        p.drawRect(m_newRegion->rect());
+      }
+    }
+  }
+}
+
 void DeviceGridWidget::drawPartitions(QPainter& p)
 {
     QPen pen(m_partitionColor);
@@ -608,13 +658,6 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     pen.setWidthF(adaptiveTileLineWidthF());
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
-
-    // draw selection
-    if (m_newRegion) {
-        if (m_newRegion->isClosed()) {
-            p.drawRect(m_newRegion->rect());
-        }
-    }
 
     // draw partitions
     for (const auto& [partitionId, partition]: m_device.partitions()) {
