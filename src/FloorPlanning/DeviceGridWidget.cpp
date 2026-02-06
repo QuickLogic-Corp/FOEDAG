@@ -20,72 +20,6 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
   setAutoFillBackground(false);
   setMouseTracking(true);
 
-  m_toolBar = new QWidget(this);
-  QHBoxLayout* toolBarLayout = new QHBoxLayout;
-  const int m = FP_UI_MARGIN;
-  toolBarLayout->setContentsMargins(m,m,m,m);
-  toolBarLayout->setSpacing(m);
-  m_toolBar->setLayout(toolBarLayout);
-
-  // move controls
-  QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
-  QPushButton* bnRight = new QPushButton(QIcon(":/right-arrow.png"), "");
-  QPushButton* bnDown = new QPushButton(QIcon(":/down-arrow.png"), "");
-  QPushButton* bnUp = new QPushButton(QIcon(":/up-arrow.png"), "");
-
-  bnLeft->setToolTip(tr("Pan view left"));
-  bnRight->setToolTip(tr("Pan view right"));
-  bnDown->setToolTip(tr("Pan view down"));
-  bnUp->setToolTip(tr("Pan view up"));
-
-  connect(bnLeft, &QPushButton::clicked, this, &DeviceGridWidget::moveViewLeft);
-  connect(bnUp, &QPushButton::clicked, this, &DeviceGridWidget::moveViewUp);
-  connect(bnRight, &QPushButton::clicked, this, &DeviceGridWidget::moveViewRight);
-  connect(bnDown, &QPushButton::clicked, this, &DeviceGridWidget::moveViewDown);
-
-  // zoom controls
-  QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
-  QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
-  QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
-  m_bnZoomInRegion = new QPushButton(QIcon(":/zoom-in-area.png"), "");
-
-  connect(bnZoomIn, &QPushButton::clicked, this, &DeviceGridWidget::zoomIn);
-  connect(bnZoomOut, &QPushButton::clicked, this, &DeviceGridWidget::zoomOut);
-  connect(bnZoomFit, &QPushButton::clicked, this, &DeviceGridWidget::zoomFit);
-  connect(m_bnZoomInRegion, &QPushButton::clicked, this, [this](){
-    m_bnZoomInRegion->setEnabled(false);
-    m_isZoomInRegionModeActive = true;
-  });
-
-  bnZoomIn->setToolTip(tr("Zoom in"));
-  bnZoomOut->setToolTip(tr("Zoom out"));
-  bnZoomFit->setToolTip(tr("Fit view to device grid"));
-  m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
-
-  m_bnDeletePartitions = new QPushButton(QIcon(":/erase.png"), "");
-  connect(m_bnDeletePartitions, &QPushButton::clicked, this, &DeviceGridWidget::clearPartitions);
-  m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
-  m_bnDeletePartitions->setEnabled(false);
-
-  const int spacing = 20;
-
-  toolBarLayout->addWidget(bnLeft);
-  toolBarLayout->addWidget(bnRight);
-  toolBarLayout->addWidget(bnDown);
-  toolBarLayout->addWidget(bnUp);
-  toolBarLayout->addSpacing(spacing);
-  toolBarLayout->addWidget(bnZoomIn);
-  toolBarLayout->addWidget(bnZoomOut);
-  toolBarLayout->addWidget(bnZoomFit);
-  toolBarLayout->addSpacing(spacing);
-  toolBarLayout->addWidget(m_bnZoomInRegion);
-  toolBarLayout->addSpacing(spacing);
-  toolBarLayout->addWidget(m_bnDeletePartitions);
-
-#ifdef SHOW_DRAWING_STAT
-  toolBarLayout->addWidget(m_drawStat.label());
-#endif // SHOW_DRAWING_STAT
-
   connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
 }
 
@@ -478,12 +412,13 @@ void DeviceGridWidget::zoomInRect(QRectF& rect)
       viewRect.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*rect.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
       );
 
-  m_bnZoomInRegion->setEnabled(true);
   m_isZoomInRegionModeActive = false;
   m_selectionBottomLeftOpt.reset();
   m_selectionTopRightOpt.reset();
 
   update();
+
+  emit zoomInRectModeDeactivated();
 }
 
 void DeviceGridWidget::startPanning(const QPointF& pos)
@@ -560,10 +495,6 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   drawPartitions(p);
   drawCurrentSelection(p);
 
-#ifdef SHOW_DRAWING_STAT
-  m_drawStat.setDrawTimeMs(t.elapsed());
-#endif
-
   // debug
   // QPen pen;
   // pen.setWidthF(5.0);
@@ -574,24 +505,10 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   // debug
 }
 
-void DeviceGridWidget::resizeEvent(QResizeEvent* event)
-{
-  QWidget::resizeEvent(event);
-  updateToolBarPosition();
-}
-
 void DeviceGridWidget::showEvent(QShowEvent* event)
 {
   QWidget::showEvent(event);
-  updateToolBarPosition();
   zoomFit();
-}
-
-void DeviceGridWidget::updateToolBarPosition()
-{
-  // align to horizontal center
-  int x = 0.5f*(width() - m_toolBar->width());
-  m_toolBar->move(x, m_toolBar->y());
 }
 
 void DeviceGridWidget::drawBackground(QPainter& p)
@@ -615,9 +532,6 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
         }
     }
 
-#ifdef SHOW_DRAWING_STAT
-    m_drawStat.setDrawableTilesNum(clbRects.size() + ioRects.size() + bramRects.size() + dspRects.size());
-#endif
     p.setPen(Qt::NoPen);
 
     p.setBrush(Tile::color(Tile::Type::Clb));
@@ -856,7 +770,6 @@ void DeviceGridWidget::checkErrors()
 void DeviceGridWidget::reportPartitionChanges()
 {
   checkErrors();
-  m_bnDeletePartitions->setEnabled(!m_device.partitions().empty());
   emit partitionsChanged(m_device.partitions());
 }
 

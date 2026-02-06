@@ -11,7 +11,6 @@
 #include <QLabel>
 
 class QPaintEvent;
-class QPushButton;
 
 namespace fp {
 
@@ -40,35 +39,6 @@ class DeviceGridWidget final : public QWidget {
         return std::clamp(m_tileLineBaseWidth * m_scale, 0.5, double(2*m_tileLineBaseWidth));
     }
 
-#ifdef SHOW_DRAWING_STAT
-    struct DrawStat {
-    public:
-        DrawStat() {
-            m_label = new QLabel;
-            m_label->setMinimumWidth(200);
-        }
-        void setLabel(QLabel* label) { m_label = label; }
-        void setDrawableTilesNum(int num) {
-            m_drawableTilesNum = num;
-            updateLabel();
-        }
-        void setDrawTimeMs(long long ms) {
-            m_drawTimeMs = ms;
-            updateLabel();
-        }
-
-        QLabel* label() { return m_label; }
-
-    private:
-        int m_drawableTilesNum = -1;
-        long long m_drawTimeMs = -1;
-        QLabel* m_label{nullptr};
-
-        void updateLabel() {
-            m_label->setText(QString("visible %1 tiles, took %2 ms").arg(m_drawableTilesNum).arg(m_drawTimeMs));
-        }
-    };
-#endif // SHOW_DRAWING_STAT
 public:
     explicit DeviceGridWidget(QWidget* parent = nullptr);
     virtual ~DeviceGridWidget()=default;
@@ -89,6 +59,17 @@ public:
     bool saveQdc();
     void loadQdc();
 
+    void moveViewUp();
+    void moveViewDown();
+    void moveViewLeft();
+    void moveViewRight();
+
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+
+    void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
+
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
     void createFirstPartitionRequested();
@@ -96,6 +77,7 @@ signals:
     void partitionSelected(const PartitionPtr&);
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
+    void zoomInRectModeDeactivated();
 
 protected:
     QSize sizeHint() const override final;
@@ -106,13 +88,9 @@ protected:
     void mouseMoveEvent(QMouseEvent*) override final;
     void wheelEvent(QWheelEvent*) override final;
     void paintEvent(QPaintEvent*) override final;
-    void resizeEvent(QResizeEvent*) override final;
     void showEvent(QShowEvent*) override final;
 
 private:
-    QWidget* m_toolBar{nullptr};
-    QPushButton* m_bnDeletePartitions{nullptr};
-
     DeviceGrid m_device;
     QdcSerializer m_qdcSerializer;
 
@@ -121,10 +99,6 @@ private:
     double m_scale = 1.0f;
 
     bool m_isMousePressed = false;
-
-#ifdef SHOW_DRAWING_STAT
-    DrawStat m_drawStat;
-#endif
 
     QRectF m_viewPort;
 
@@ -135,7 +109,6 @@ private:
     void drawTileLabels(QPainter& p);
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
-    QPushButton* m_bnZoomInRegion{nullptr};
     bool m_isZoomInRegionModeActive = false;
 
     // panning
@@ -176,17 +149,8 @@ private:
     void setWorldCenter(const QPointF&);
 
     void checkErrors();
-    void updateToolBarPosition();
-
-    void moveViewUp();
-    void moveViewDown();
-    void moveViewLeft();
-    void moveViewRight();
 
     void zoom(const QPointF& refPoint, double delta);
-    void zoomIn();
-    void zoomOut();
-    void zoomFit();
     void zoomInRect(QRectF&);
 };
 
