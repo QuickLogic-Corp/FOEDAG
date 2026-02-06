@@ -1,5 +1,4 @@
 #include "DeviceGridWidget.h"
-#include "HierarhyElement.h"
 
 #include <QElapsedTimer>
 #include <QPainter>
@@ -21,12 +20,49 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
   setAutoFillBackground(false);
   setMouseTracking(true);
 
-#ifdef SHOW_DRAWING_STAT
-  QHBoxLayout* layout = new QHBoxLayout;
-  QWidget* container = new QWidget(this);
-  container->setLayout(layout);
+  m_toolBar = new QWidget(this);
+  QHBoxLayout* toolBarLayout = new QHBoxLayout;
+  const int m = FP_UI_MARGIN;
+  toolBarLayout->setContentsMargins(m,m,m,m);
+  toolBarLayout->setSpacing(m);
+  m_toolBar->setLayout(toolBarLayout);
 
-  layout->addWidget(m_drawStat.label());
+  QPushButton* bnLeft = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnUp = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnRight = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnDown = new QPushButton(QIcon(":/images/erase.png"), "");
+
+  connect(bnLeft, &QPushButton::clicked, this, &DeviceGridWidget::moveViewLeft);
+  connect(bnUp, &QPushButton::clicked, this, &DeviceGridWidget::moveViewUp);
+  connect(bnRight, &QPushButton::clicked, this, &DeviceGridWidget::moveViewRight);
+  connect(bnDown, &QPushButton::clicked, this, &DeviceGridWidget::moveViewDown);
+
+  QPushButton* bnZoomIn = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnZoomOut = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnZoomFit = new QPushButton(QIcon(":/images/erase.png"), "");
+  connect(bnZoomIn, &QPushButton::clicked, this, &DeviceGridWidget::zoomIn);
+  connect(bnZoomOut, &QPushButton::clicked, this, &DeviceGridWidget::zoomOut);
+  connect(bnZoomFit, &QPushButton::clicked, this, &DeviceGridWidget::zoomFit);
+
+  QPushButton* bnZoomInRegion = new QPushButton(QIcon(":/images/erase.png"), "");
+  QPushButton* bnDrawRegion = new QPushButton(QIcon(":/images/erase.png"), "");
+
+  const int spacing = 20;
+
+  toolBarLayout->addWidget(bnLeft);
+  toolBarLayout->addWidget(bnUp);
+  toolBarLayout->addWidget(bnRight);
+  toolBarLayout->addWidget(bnDown);
+  toolBarLayout->addSpacing(spacing);
+  toolBarLayout->addWidget(bnZoomIn);
+  toolBarLayout->addWidget(bnZoomOut);
+  toolBarLayout->addWidget(bnZoomFit);
+  toolBarLayout->addSpacing(spacing);
+  toolBarLayout->addWidget(bnZoomInRegion);
+  toolBarLayout->addWidget(bnDrawRegion);
+
+#ifdef SHOW_DRAWING_STAT
+  toolBarLayout->addWidget(m_drawStat.label());
 #endif // SHOW_DRAWING_STAT
 
   connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
@@ -190,44 +226,66 @@ void DeviceGridWidget::cancelRegionCreation(const QString& msg)
 
 void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
 {
-    const double speed = 50.0;
     switch (event->key()) {
     case Qt::Key_Up: {
-        m_panPixels += QPointF(0, -speed);
-        break;
+      moveViewUp();
+      break;
     }
     case Qt::Key_Down: {
-        m_panPixels += QPointF(0, speed);
-        break;
+      moveViewDown();
+      break;
     }
     case Qt::Key_Left: {
-        m_panPixels += QPointF(-speed, 0);
-        break;
+      moveViewLeft();
+      break;
     }
     case Qt::Key_Right: {
-        m_panPixels += QPointF(speed, 0);
-        break;
+      moveViewRight();
+      break;
     }
     case Qt::Key_Delete: {
-        if (m_selectedPartition) {
-            removeSelectedPartition();
-        }
-        break;
+      if (m_selectedPartition) {
+        removeSelectedPartition();
+      }
+      break;
     }
     case Qt::Key_Escape: {
-        if (m_selectedPartition) {
-            unselectPartition();
-        }
-        break;
+      if (m_selectedPartition) {
+        unselectPartition();
+      }
+      break;
     }
     default: {
-        QWidget::keyPressEvent(event);
-        return;
+      QWidget::keyPressEvent(event);
+      return;
     }
     }
 
-    update();
     event->accept();
+}
+
+void DeviceGridWidget::moveViewUp()
+{
+  m_panPixels += QPointF(0, -moveStep);
+  update();
+}
+
+void DeviceGridWidget::moveViewDown()
+{
+  m_panPixels += QPointF(0, moveStep);
+  update();
+}
+
+void DeviceGridWidget::moveViewLeft()
+{
+  m_panPixels += QPointF(-moveStep, 0);
+  update();
+}
+
+void DeviceGridWidget::moveViewRight()
+{
+  m_panPixels += QPointF(moveStep, 0);
+  update();
 }
 
 void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
@@ -312,34 +370,73 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 
 void DeviceGridWidget::wheelEvent(QWheelEvent* event)
 {
-    double delta = 0.0;
+  double delta = 0.0;
 
-    if (!event->angleDelta().isNull()) {
-        delta = event->angleDelta().y() / 120.0;
-    } else if (!event->pixelDelta().isNull()) {
-        delta = event->pixelDelta().y() / 100.0;
-    }
-
-    if (delta == 0.0) {
-        return;
-    }
-
-    const double zoomFactor = std::pow(1.15, delta);
+  if (!event->angleDelta().isNull()) {
+    delta = event->angleDelta().y() / 120.0;
+  } else if (!event->pixelDelta().isNull()) {
+    delta = event->pixelDelta().y() / 100.0;
+  }
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    QPointF mouse = event->position();
+  QPointF cursorPos = event->position();
 #else
-    QPointF mouse = event->pos();
+  QPointF cursorPos = event->pos();
 #endif
 
-    QPointF before = (mouse + m_panPixels) / m_scale;
+  zoom(cursorPos, delta);
+}
 
-    m_scale = std::clamp(m_scale * zoomFactor, scaleMin, scaleMax);
+void DeviceGridWidget::zoom(const QPointF& refPoint, double delta)
+{
+  if (delta == 0.0) {
+    return;
+  }
 
-    QPointF after = before * m_scale;
-    m_panPixels = after - mouse;
+  const double zoomFactor = std::pow(1.15, delta);
 
-    update();
+  QPointF before = (refPoint + m_panPixels) / m_scale;
+
+  m_scale = std::clamp(m_scale * zoomFactor, scaleMin, scaleMax);
+
+  QPointF after = before * m_scale;
+  m_panPixels = after - refPoint;
+
+  update();
+}
+
+void DeviceGridWidget::zoomIn()
+{
+  zoom(viewPortCenter(), zoomStep);
+}
+
+void DeviceGridWidget::zoomOut()
+{
+  zoom(viewPortCenter(), -zoomStep);
+}
+
+void DeviceGridWidget::zoomFit()
+{
+  const QRectF deviceRect = m_device.rect();
+  const QSizeF deviceSize = deviceRect.size();
+  if (deviceSize.width() <= 0.0 || deviceSize.height() <= 0.0)
+    return;
+
+  const QRectF view = contentsRect();
+
+  const double wFactor = view.width()  / deviceSize.width();
+  const double hFactor = view.height() / deviceSize.height();
+
+  m_scale = std::min(wFactor, hFactor);
+
+  const QSizeF scaledDeviceSize = deviceSize * m_scale;
+
+  m_panPixels = QPointF(
+      view.center().x() - scaledDeviceSize.width()  * 0.5 + m_scale*deviceRect.x(),
+      view.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*deviceRect.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
+      );
+
+  update();
 }
 
 void DeviceGridWidget::startPanning(const QPointF& pos)
@@ -418,6 +515,35 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
 #ifdef SHOW_DRAWING_STAT
   m_drawStat.setDrawTimeMs(t.elapsed());
 #endif
+
+  // debug
+  // QPen pen;
+  // pen.setWidthF(5.0);
+  // pen.setColor(Qt::red);
+  // p.setPen(pen);
+  // p.setBrush(Qt::NoBrush);
+  // p.drawRect(m_device.rect());
+  // debug
+}
+
+void DeviceGridWidget::resizeEvent(QResizeEvent* event)
+{
+  QWidget::resizeEvent(event);
+  updateToolBarPosition();
+}
+
+void DeviceGridWidget::showEvent(QShowEvent* event)
+{
+  QWidget::showEvent(event);
+  updateToolBarPosition();
+  zoomFit();
+}
+
+void DeviceGridWidget::updateToolBarPosition()
+{
+  // align to horizontal center
+  int x = 0.5f*(width() - m_toolBar->width());
+  m_toolBar->move(x, m_toolBar->y());
 }
 
 void DeviceGridWidget::drawBackground(QPainter& p)
@@ -607,17 +733,20 @@ QPointF DeviceGridWidget::worldToScreenCoord(const QPointF& worldCoord) const
     return worldCoord * m_scale - m_panPixels;
 }
 
+QPointF DeviceGridWidget::viewPortCenter() const
+{
+  return 0.5f*QPointF(width(), height());
+}
+
 QPointF DeviceGridWidget::currentWorldCenter() const
 {
-    const QPointF screenCenter(0.5 * width(), 0.5 * height());
-    return (screenCenter + m_panPixels) / m_scale;
+  return (viewPortCenter() + m_panPixels) / m_scale;
 }
 
 void DeviceGridWidget::setWorldCenter(const QPointF& worldCenter)
 {
-    const QPointF screenCenter(0.5 * width(), 0.5 * height());
-    m_panPixels = worldCenter * m_scale - screenCenter;
-    update();
+  m_panPixels = worldCenter * m_scale - viewPortCenter();
+  update();
 }
 
 void DeviceGridWidget::createNewPartition(const std::string& partitionName)
@@ -636,6 +765,7 @@ void DeviceGridWidget::removeSelectedPartition()
         unselectPartition();
         checkErrors();
         emit partitionsChanged(m_device.partitions());
+        update();
     }
 }
 

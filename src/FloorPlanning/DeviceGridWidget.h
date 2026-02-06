@@ -10,8 +10,6 @@
 #include <QPoint>
 #include <QLabel>
 
-#include <algorithm>
-
 class QPaintEvent;
 
 namespace fp {
@@ -19,6 +17,8 @@ namespace fp {
 class DeviceGridWidget final : public QWidget {
     Q_OBJECT
 
+    const double moveStep = 50.0;
+    const double zoomStep = 2.0;
     const double scaleMin = 0.05;
     const double scaleMax = 10.0;
 
@@ -101,10 +101,14 @@ protected:
     void mousePressEvent(QMouseEvent*) override final;
     void mouseReleaseEvent(QMouseEvent*) override final;
     void mouseMoveEvent(QMouseEvent*) override final;
-    void wheelEvent(QWheelEvent* event) override final;
+    void wheelEvent(QWheelEvent*) override final;
     void paintEvent(QPaintEvent*) override final;
+    void resizeEvent(QResizeEvent*) override final;
+    void showEvent(QShowEvent*) override final;
 
 private:
+    QWidget* m_toolBar{nullptr};
+
     DeviceGrid m_device;
     QdcSerializer m_qdcSerializer;
 
@@ -155,10 +159,22 @@ private:
     QPointF worldToScreenCoord(const QPointF&) const;
     void scrollToPartition(const PartitionPtr&);
     void startMoveAnimation(const QPointF&);
+    QPointF viewPortCenter() const;
     QPointF currentWorldCenter() const;
     void setWorldCenter(const QPointF&);
 
     void checkErrors();
+    void updateToolBarPosition();
+
+    void moveViewUp();
+    void moveViewDown();
+    void moveViewLeft();
+    void moveViewRight();
+
+    void zoom(const QPointF& refPoint, double delta);
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
 };
 
 }  // namespace fp

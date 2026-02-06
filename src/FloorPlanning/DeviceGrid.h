@@ -55,6 +55,8 @@ public:
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
 
+    QRectF rect() const;
+
 private:
     DeviceGridDescriptorPtr m_descriptor;
 

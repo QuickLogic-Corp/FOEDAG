@@ -311,4 +311,22 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
     return errors;
 }
 
+QRectF DeviceGrid::rect() const
+{
+  const int cols = m_descriptor->columns();
+  const int rows = m_descriptor->rows();
+
+  if ((cols <= 0) || (rows <= 0)) {
+    return QRectF();
+  }
+
+  const double tileDistance = Tile::unitPx() + Tile::borderPx();
+  // rect start from tileDistance because we constructTileMap starting X from index 1, not 0, to mach vpr coord system.
+  // For Y pos is other storry, because we flipp coordinate vertically, this case is taken into account.
+  // To see this visually, please do QPainter::drawRect()
+  return QRectF(tileDistance,0,
+                cols*tileDistance - Tile::borderPx(),
+                rows*tileDistance - Tile::borderPx());
+}
+
 } // namespace fp
