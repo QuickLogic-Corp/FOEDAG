@@ -407,10 +407,8 @@ void DeviceGridWidget::zoomInRect(QRectF& area)
 
   const QSizeF scaledDeviceSize = deviceSize * m_scale;
 
-  m_panPixels = QPointF(
-      viewRect.center().x() - scaledDeviceSize.width()  * 0.5 + m_scale*area.x(),
-      viewRect.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*area.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
-      );
+  QPointF targetTopLeft = QPointF(viewRect.center()) - 0.5*QPointF(scaledDeviceSize.width(), scaledDeviceSize.height());
+  m_panPixels = m_scale * area.topLeft() - targetTopLeft;
 
   update();
 

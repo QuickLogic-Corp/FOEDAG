@@ -86,7 +86,7 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
             this, &FloorPlanningWidget::onCheckErrorsFinished);
 
     // toolBar
-    QWidget* toolBarContainer = new QWidget(this);
+    QWidget* toolBarContainer = new QWidget;
     QHBoxLayout* toolBarLayout = new QHBoxLayout;
     toolBarContainer->setLayout(toolBarLayout);
     toolBarLayout->setContentsMargins(m,m,m,m);
@@ -121,7 +121,7 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
 
     QCheckBox* bnScrollPartition = new QCheckBox("Scroll to partition");
     connect(bnScrollPartition, &QCheckBox::stateChanged, m_deviceWidget, &DeviceGridWidget::setScrollToPartitionWhenSelected);
-    //bnScrollPartition->setVisible(false);
+    bnScrollPartition->setVisible(false);
 
     // move controls
     QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
@@ -190,7 +190,7 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     if (bnScrollPartition->isVisible()) {
       toolBarLayout->addWidget(bnScrollPartition);
     }
-    // toolBarLayout->addStretch();
+    toolBarLayout->addStretch();
 
     bnScrollPartition->setChecked(true);
     m_deviceWidget->setScrollToPartitionWhenSelected(bnScrollPartition->isChecked());
@@ -200,7 +200,7 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     bodyLayout->setContentsMargins(m,m,m,m);
     bodyLayout->setSpacing(m);
 
-    QWidget* deviceWidgetContainer = new QWidget(this);
+    QWidget* deviceWidgetContainer = new QWidget;
     QVBoxLayout* deviceWidgetContainerLayout = new QVBoxLayout;
     deviceWidgetContainerLayout->setContentsMargins(m,m,m,m);
     deviceWidgetContainerLayout->setSpacing(m);
