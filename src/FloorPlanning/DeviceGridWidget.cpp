@@ -27,28 +27,45 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
   toolBarLayout->setSpacing(m);
   m_toolBar->setLayout(toolBarLayout);
 
+  // move controls
   QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
   QPushButton* bnRight = new QPushButton(QIcon(":/right-arrow.png"), "");
   QPushButton* bnDown = new QPushButton(QIcon(":/down-arrow.png"), "");
   QPushButton* bnUp = new QPushButton(QIcon(":/up-arrow.png"), "");
+
+  bnLeft->setToolTip(tr("Pan view left"));
+  bnRight->setToolTip(tr("Pan view right"));
+  bnDown->setToolTip(tr("Pan view down"));
+  bnUp->setToolTip(tr("Pan view up"));
 
   connect(bnLeft, &QPushButton::clicked, this, &DeviceGridWidget::moveViewLeft);
   connect(bnUp, &QPushButton::clicked, this, &DeviceGridWidget::moveViewUp);
   connect(bnRight, &QPushButton::clicked, this, &DeviceGridWidget::moveViewRight);
   connect(bnDown, &QPushButton::clicked, this, &DeviceGridWidget::moveViewDown);
 
+  // zoom controls
   QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
   QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
   QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
+  m_bnZoomInRegion = new QPushButton(QIcon(":/zoom-in-area.png"), "");
+
   connect(bnZoomIn, &QPushButton::clicked, this, &DeviceGridWidget::zoomIn);
   connect(bnZoomOut, &QPushButton::clicked, this, &DeviceGridWidget::zoomOut);
   connect(bnZoomFit, &QPushButton::clicked, this, &DeviceGridWidget::zoomFit);
-
-  m_bnZoomInRegion = new QPushButton(QIcon(":/zoom-in-area.png"), "");
   connect(m_bnZoomInRegion, &QPushButton::clicked, this, [this](){
     m_bnZoomInRegion->setEnabled(false);
     m_isZoomInRegionModeActive = true;
   });
+
+  bnZoomIn->setToolTip(tr("Zoom in"));
+  bnZoomOut->setToolTip(tr("Zoom out"));
+  bnZoomFit->setToolTip(tr("Fit view to device grid"));
+  m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
+
+  m_bnDeletePartitions = new QPushButton(QIcon(":/erase.png"), "");
+  connect(m_bnDeletePartitions, &QPushButton::clicked, this, &DeviceGridWidget::clearPartitions);
+  m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
+  m_bnDeletePartitions->setEnabled(false);
 
   const int spacing = 20;
 
@@ -62,6 +79,8 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
   toolBarLayout->addWidget(bnZoomFit);
   toolBarLayout->addSpacing(spacing);
   toolBarLayout->addWidget(m_bnZoomInRegion);
+  toolBarLayout->addSpacing(spacing);
+  toolBarLayout->addWidget(m_bnDeletePartitions);
 
 #ifdef SHOW_DRAWING_STAT
   toolBarLayout->addWidget(m_drawStat.label());
@@ -87,8 +106,7 @@ void DeviceGridWidget::onPartitionRenamed(int partitionId, QString newName)
     PartitionPtr partition = m_device.findPartition(partitionId);
     if (partition) {
         partition->setName(newName.toStdString());
-        checkErrors();
-        emit partitionsChanged(m_device.partitions());
+        reportPartitionChanges();
         update();
     }
 }
@@ -121,7 +139,7 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
 {
     if (m_selectedPartition) {
         emit partitionSelected(m_selectedPartition); // needs to update partition netlist widget
-        emit partitionsChanged(m_device.partitions());
+        reportPartitionChanges();
     } else {
         qCritical() << "cannot apply elemenets, because partition is not selected";
     }
@@ -152,8 +170,7 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
             if (roleOpt) {
                 if (roleOpt == Region::HandlerRole::REMOVE) {
                     m_selectedPartition->removeRegion(m_selectedRegion);
-                    checkErrors();
-                    emit partitionsChanged(m_device.partitions());
+                    reportPartitionChanges();
                     update();
                 } else {
                     m_regionEditRoleOpt = roleOpt;
@@ -196,9 +213,7 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
     if (m_newRegion->isValid()) {
         m_device.alignRegion(m_newRegion);
         m_selectedPartition->addRegion(m_newRegion);
-        checkErrors();
-        emit partitionsChanged(m_device.partitions());
-
+        reportPartitionChanges();
         m_newRegion.reset();
         update();
     }
@@ -507,9 +522,8 @@ void DeviceGridWidget::loadQdc()
 {
     unselectPartition();
     m_qdcSerializer.load(m_device);
-    checkErrors();
     emit unselectPartitionRequested();
-    emit partitionsChanged(m_device.partitions());
+    reportPartitionChanges();
     update();
 }
 
@@ -803,8 +817,7 @@ void DeviceGridWidget::createNewPartition(const std::string& partitionName)
 {
     PartitionPtr partition = std::make_shared<Partition>(partitionName);
     m_device.addPartition(partition);
-    checkErrors();
-    emit partitionsChanged(m_device.partitions());
+    reportPartitionChanges();
     selectPartition(partition); // automatically select
 }
 
@@ -813,8 +826,7 @@ void DeviceGridWidget::removeSelectedPartition()
     if (m_selectedPartition) {
         m_device.removePartition(m_selectedPartition);
         unselectPartition();
-        checkErrors();
-        emit partitionsChanged(m_device.partitions());
+        reportPartitionChanges();
         update();
     }
 }
@@ -824,8 +836,7 @@ void DeviceGridWidget::clearPartitions() {
     m_selectedRegion.reset();
     m_newRegion.reset();
     unselectPartition();
-    checkErrors();
-    emit partitionsChanged(m_device.partitions());
+    reportPartitionChanges();
     update();
 }
 
@@ -840,6 +851,13 @@ void DeviceGridWidget::checkErrors()
 {
     std::unordered_set<std::string> errors = m_device.collectErrors();
     emit checkErrorsFinished(errors);
+}
+
+void DeviceGridWidget::reportPartitionChanges()
+{
+  checkErrors();
+  m_bnDeletePartitions->setEnabled(!m_device.partitions().empty());
+  emit partitionsChanged(m_device.partitions());
 }
 
 } // namespace fp

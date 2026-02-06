@@ -111,6 +111,7 @@ protected:
 
 private:
     QWidget* m_toolBar{nullptr};
+    QPushButton* m_bnDeletePartitions{nullptr};
 
     DeviceGrid m_device;
     QdcSerializer m_qdcSerializer;
@@ -163,6 +164,8 @@ private:
     void cancelRegionCreation(const QString& msg = "");
     void selectPartition(PartitionPtr partition);
     // selection
+
+    void reportPartitionChanges();
 
     QPointF screenToWorldCoord(const QPointF&) const;
     QPointF worldToScreenCoord(const QPointF&) const;

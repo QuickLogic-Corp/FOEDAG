@@ -46,7 +46,6 @@ protected:
 private:
     QPushButton* m_bnSaveQdc{nullptr};
     QPushButton* m_bnRemovePartition{nullptr};
-    QPushButton* m_bnDeletePartitions{nullptr};
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
     SynthResourceHierarchyWidget* m_partitionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};

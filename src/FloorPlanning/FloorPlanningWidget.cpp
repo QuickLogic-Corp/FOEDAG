@@ -106,11 +106,6 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     m_bnSaveQdc->setToolTip(tr("Save QDC"));
     m_bnSaveQdc->setEnabled(false);
 
-    m_bnDeletePartitions = new QPushButton(QIcon(":/erase.png"), "");
-    connect(m_bnDeletePartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
-    m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
-    m_bnDeletePartitions->setEnabled(false);
-
     QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/add.png"), "");
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
@@ -130,7 +125,6 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnDeletePartitions);
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(bnCreateNewPartition);
     toolBarLayout->addWidget(m_bnRemovePartition);
@@ -191,7 +185,6 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
     const bool partitionsNotEmpty = !partitions.empty();
     m_partitionsListWidget->setEnabled(partitionsNotEmpty);
     m_bnRemovePartition->setEnabled(partitionsNotEmpty);
-    m_bnDeletePartitions->setEnabled(partitionsNotEmpty);
     if (!partitionsNotEmpty) {
         m_bnSaveQdc->setEnabled(false);
     }
