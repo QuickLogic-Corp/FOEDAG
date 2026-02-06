@@ -417,23 +417,30 @@ void DeviceGridWidget::zoomOut()
 
 void DeviceGridWidget::zoomFit()
 {
-  const QRectF deviceRect = m_device.rect();
-  const QSizeF deviceSize = deviceRect.size();
-  if (deviceSize.width() <= 0.0 || deviceSize.height() <= 0.0)
+  QRectF rect = m_device.rect();
+  zoomInRect(rect);
+}
+
+void DeviceGridWidget::zoomInRect(QRectF& rect)
+{
+  rect = rect.normalized();
+  const QSizeF deviceSize = rect.size();
+  if ((deviceSize.width() <= 0.0) || (deviceSize.height() <= 0.0)) {
     return;
+  }
 
-  const QRectF view = contentsRect();
+  const QRectF viewRect = contentsRect();
 
-  const double wFactor = view.width()  / deviceSize.width();
-  const double hFactor = view.height() / deviceSize.height();
+  const double wFactor = viewRect.width()  / deviceSize.width();
+  const double hFactor = viewRect.height() / deviceSize.height();
 
   m_scale = std::min(wFactor, hFactor);
 
   const QSizeF scaledDeviceSize = deviceSize * m_scale;
 
   m_panPixels = QPointF(
-      view.center().x() - scaledDeviceSize.width()  * 0.5 + m_scale*deviceRect.x(),
-      view.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*deviceRect.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
+      viewRect.center().x() - scaledDeviceSize.width()  * 0.5 + m_scale*rect.x(),
+      viewRect.center().y() - scaledDeviceSize.height() * 0.5 + m_scale*rect.y() - Tile::borderPx() // Tile::borderPx component here is because the way we render things + flipping index of OY axis
       );
 
   update();

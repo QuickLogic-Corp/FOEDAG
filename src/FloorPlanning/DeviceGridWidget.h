@@ -175,6 +175,7 @@ private:
     void zoomIn();
     void zoomOut();
     void zoomFit();
+    void zoomInRect(QRectF&);
 };
 
 }  // namespace fp
