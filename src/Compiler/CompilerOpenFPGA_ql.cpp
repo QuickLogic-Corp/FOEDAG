@@ -3987,26 +3987,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   Message("Timing Analysis for design: " + ProjManager()->projectName());
   Message("##################################################");
 
-#ifdef _WIN32
-
-// under WIN32, running the analysis stage alone causes issues, hence we call the
-// route and analysis stages together
-// hence, we can also be at Placed state here.
-  // state check: requires "Placed"/"Routed" to be completed.
-  // we should be *atleast* at "Placed"/"Routed" or later state.
-  if( (m_state == State::Placed) ||
-      (m_state == State::Routed) ||
-      (m_state == State::TimingAnalyzed) ||
-      (m_state == State::PowerAnalyzed) ||
-      (m_state == State::BistreamGenerated) ) {
-  }
-  else {
-    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in placed/routed state"));
-    return false;
-  }
-
-#else // #ifdef _WIN32
-
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
   if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
@@ -4080,8 +4060,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in routed state"));
     return false;
   }
-
-#endif // #ifdef _WIN32
 
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_vprExecutablePath)) {
@@ -4326,13 +4304,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
 
-#ifdef _WIN32
-// under WIN32, running the analysis stage along causes issues, hence we call the
-// route and analysis stages together
-// hence, we set the state here, so that just sta can be called instead of route and sta as well.
-  m_state = State::Routed;
-#endif // #ifdef _WIN32
-
   return true;
 }
 
@@ -4366,26 +4337,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   Message("##################################################");
   Message("Timing Analysis for design: " + ProjManager()->projectName());
   Message("##################################################");
-
-#ifdef _WIN32
-
-// under WIN32, running the analysis stage alone causes issues, hence we call the
-// route and analysis stages together
-// hence, we can also be at Placed state here.
-  // state check: requires "Placed"/"Routed" to be completed.
-  // we should be *atleast* at "Placed"/"Routed" or later state.
-  if( (m_state == State::Placed) ||
-      (m_state == State::Routed) ||
-      (m_state == State::TimingAnalyzed) ||
-      (m_state == State::PowerAnalyzed) ||
-      (m_state == State::BistreamGenerated) ) {
-  }
-  else {
-    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in placed/routed state"));
-    return false;
-  }
-
-#else // #ifdef _WIN32
 
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
@@ -4460,8 +4411,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in routed state"));
     return false;
   }
-
-#endif // #ifdef _WIN32
 
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_vprExecutablePath)) {
@@ -4585,13 +4534,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     TimingAnalysisOpt(STAOpt::None);
     
-#ifdef _WIN32
-    // under WIN32, running the analysis stage alone causes issues, hence we call the
-    // route and analysis stages together
-    std::string taCommand = BaseVprCommandLEGACY() + " --route --analysis --disp on";
-#else // #ifdef _WIN32
     std::string taCommand = BaseVprCommandLEGACY(current_device_sta) + " --analysis --disp on";
-#endif // #ifdef _WIN32
 
     if(!profile.empty()){
       taCommand += uniqueStaVprOptions();
@@ -4693,14 +4636,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       taCommand += uniqueStaVprOptions();
     }
     
-#ifdef _WIN32
-
-    // under WIN32, running the analysis stage along causes issues, hence we call the
-    // route and analysis stages together
-    taCommand += std::string(" --route");
-
-#endif // #ifdef _WIN32
-
     taCommand += std::string(" --analysis");
 
     std::ofstream ofs(sta_cmd_filepath);
@@ -4717,13 +4652,6 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   }
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
-
-#ifdef _WIN32
-// under WIN32, running the analysis stage along causes issues, hence we call the
-// route and analysis stages together
-// hence, we set the state here, so that just sta can be called instead of route and sta as well.
-  m_state = State::Routed;
-#endif // #ifdef _WIN32
 
   return true;
 }
@@ -4762,25 +4690,6 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   }
 
   PERF_LOG("PowerAnalysis has started");
-#ifdef _WIN32
-
-// under WIN32, running the analysis stage alone causes issues, hence we call the
-// route and analysis stages together
-// hence, we can also be at Placed state here.
-  // state check: requires "Placed"/"Routed" to be completed.
-  // we should be *atleast* at "Placed"/"Routed" or later state.
-  if( (m_state == State::Placed) ||
-      (m_state == State::Routed) ||
-      (m_state == State::TimingAnalyzed) ||
-      (m_state == State::PowerAnalyzed) ||
-      (m_state == State::BistreamGenerated) ) {
-  }
-  else {
-    ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in placed/routed state"));
-    return false;
-  }
-
-#else // #ifdef _WIN32
 
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
@@ -4794,7 +4703,6 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     return false;
   }
 
-#endif // #ifdef _WIN32
   Message("##################################################");
   Message("Power Analysis for design: " + ProjManager()->projectName());
   Message("##################################################");
@@ -4906,12 +4814,6 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     return false;
   }
   command += vpr_options +
-#ifdef _WIN32
-// under WIN32, running the analysis stage alone causes issues, hence we call the
-// route and analysis stages together
-             std::string(" ") + 
-             std::string("--route") +
-#endif // #ifdef _WIN32
              std::string(" ") + 
              std::string("--analysis");
 
@@ -5514,12 +5416,6 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     return std::string("");
   }
   vpr_analysis_command +=
-#ifdef _WIN32
-// under WIN32, running the analysis stage along causes issues, hence we call the
-// route and analysis stages together
-                          std::string(" ") + 
-                          std::string("--route") +
-#endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
 
@@ -9163,14 +9059,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
   } 
   
   if (TimingAnalysisOpt() == STAOpt::View) {
-#ifdef _WIN32
-    // under WIN32, running the analysis stage alone causes issues, hence we call the
-    // route and analysis stages together
-    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
-    taCommand->append("--route");
-    taCommand->append("--analysis");
-    taCommand->append("--disp", "on");
-#else // #ifdef _WIN32
     CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
     taCommand->append("--analysis");
     taCommand->append("--disp", "on");
@@ -9184,7 +9072,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
         taCommand->append("--route");
       }
     }
-#endif // #ifdef _WIN32
 
     if(!profile.empty()){
       taCommand->append(uniqueStaVprOptions());
@@ -9228,12 +9115,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
       taCommand->append(uniqueStaVprOptions());
     }
     
-#ifdef _WIN32
-    // under WIN32, running the analysis stage along causes issues, hence we call the
-    // route and analysis stages together
-    taCommand->append("--route");
-#endif // #ifdef _WIN32
-
     taCommand->append("--analysis");
   }
 

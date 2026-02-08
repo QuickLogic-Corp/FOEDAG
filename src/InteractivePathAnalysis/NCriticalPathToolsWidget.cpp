@@ -307,11 +307,6 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
 
   QString fullCmd = vprBaseCommand();
   if (!fullCmd.isEmpty()) {
-#ifdef _WIN32
-    // under WIN32, running the analysis stage alone causes issues, hence we
-    // call the route and analysis stages together
-    fullCmd += " --route";
-#endif
     fullCmd += " --analysis";
     fullCmd += " --server";
     fullCmd += QString(" --port %1").arg(portNum);
