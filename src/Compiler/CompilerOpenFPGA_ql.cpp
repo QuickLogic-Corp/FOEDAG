@@ -4003,9 +4003,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   } else { 
     std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.net");
-    Message("Attempting to read the net file from: " + std::string(net_file_path));
+    Message("Attempting to read the net file from: " + net_file_path.string());
     if (fs::exists(net_file_path)) {
-      Message("Found the net file in: " + std::string(net_file_path));
+      Message("Found the net file in: " + net_file_path.string());
       m_state = State::Packed;
     }
   }
@@ -4024,9 +4024,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   } else { 
     std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.place");
-    Message("Attempting to read the place file from: " + std::string(place_file_path));
+    Message("Attempting to read the place file from: " + place_file_path.string());
     if (fs::exists(place_file_path)) {
-      Message("Found the place file in: " + std::string(place_file_path));
+      Message("Found the place file in: " + place_file_path.string());
       m_state = State::Placed;
     }
   }
@@ -4354,9 +4354,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   } else { 
     std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.net");
-    Message("Attempting to read the net file from: " + std::string(net_file_path));
+    Message("Attempting to read the net file from: " + net_file_path.string());
     if (fs::exists(net_file_path)) {
-      Message("Found the net file in: " + std::string(net_file_path));
+      Message("Found the net file in: " + net_file_path.string());
       m_state = State::Packed;
     }
   }
@@ -4375,9 +4375,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   } else { 
     std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.place");
-    Message("Attempting to read the place file from: " + std::string(place_file_path));
+    Message("Attempting to read the place file from: " + place_file_path.string());
     if (fs::exists(place_file_path)) {
-      Message("Found the place file in: " + std::string(place_file_path));
+      Message("Found the place file in: " + place_file_path.string());
       m_state = State::Placed;
     }
   }
