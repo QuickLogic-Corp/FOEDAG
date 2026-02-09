@@ -69,6 +69,7 @@ public:
     void zoomFit();
 
     void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
+    void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
 
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
@@ -77,7 +78,6 @@ signals:
     void partitionSelected(const PartitionPtr&);
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
-    void zoomInRectModeDeactivated();
 
 protected:
     QSize sizeHint() const override final;

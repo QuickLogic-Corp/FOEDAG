@@ -5,6 +5,7 @@
 #include "PartitionsListWidget.h"
 #include "NewUniqueNameDialog.h"
 #include "ErrorsListWidget.h"
+#include "CheckableButton.h"
 
 #include <QHBoxLayout>
 #include <QMessageBox>
@@ -143,23 +144,27 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
     QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
     QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
-    m_bnZoomInRegion = new QPushButton(QIcon(":/zoom-in-area.png"), "");
+    m_bnZoomInRegion = new CheckableButton(QIcon(":/zoom-in-area.png"));
+    m_drawRegion = new CheckableButton(QIcon(":/selection.png"));
+    m_drawRegion->setChecked(true);
 
     connect(bnZoomIn, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomIn);
     connect(bnZoomOut, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomOut);
     connect(bnZoomFit, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomFit);
     connect(m_bnZoomInRegion, &QPushButton::clicked, this, [this](){
-      m_bnZoomInRegion->setEnabled(false);
+      m_drawRegion->setChecked(false);
       m_deviceWidget->activateZoomInRegionMode();
     });
-    connect(m_deviceWidget, &DeviceGridWidget::zoomInRectModeDeactivated, this, [this](){
-      m_bnZoomInRegion->setEnabled(true);
+    connect(m_drawRegion, &QPushButton::clicked, this, [this](){
+      m_bnZoomInRegion->setChecked(false);
+      m_deviceWidget->deactivateZoomInRegionMode();
     });
 
     bnZoomIn->setToolTip(tr("Zoom in"));
     bnZoomOut->setToolTip(tr("Zoom out"));
     bnZoomFit->setToolTip(tr("Fit view to device grid"));
     m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
+    m_drawRegion->setToolTip(tr("Draw new region"));
 
     m_bnRemoveAllPartitions = new QPushButton(QIcon(":/erase.png"), "");
     connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
@@ -167,7 +172,6 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     m_bnRemoveAllPartitions->setEnabled(false);
 
     const int spacing = 20;
-    // toolBarLayout->addStretch();
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
     toolBarLayout->addSpacing(spacing);
@@ -186,6 +190,7 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     toolBarLayout->addWidget(bnZoomFit);
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(m_bnZoomInRegion);
+    toolBarLayout->addWidget(m_drawRegion);
     toolBarLayout->addSpacing(spacing);
     if (bnScrollPartition->isVisible()) {
       toolBarLayout->addWidget(bnScrollPartition);

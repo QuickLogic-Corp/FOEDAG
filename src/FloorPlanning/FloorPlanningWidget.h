@@ -12,6 +12,7 @@ class QPushButton;
 
 namespace fp {
 
+class CheckableButton;
 class SynthResourceHierarchyWidget;
 class DeviceGridWidget;
 class PartitionsListWidget;
@@ -47,7 +48,8 @@ private:
     QPushButton* m_bnSaveQdc{nullptr};
     QPushButton* m_bnRemoveSelectedPartition{nullptr};
     QPushButton* m_bnRemoveAllPartitions{nullptr};
-    QPushButton* m_bnZoomInRegion{nullptr};
+    CheckableButton* m_bnZoomInRegion{nullptr};
+    CheckableButton* m_drawRegion{nullptr};
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
     SynthResourceHierarchyWidget* m_partitionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};

@@ -410,15 +410,12 @@ void DeviceGridWidget::zoomInRect(QRectF& area)
   QPointF targetTopLeft = QPointF(viewRect.center()) - 0.5*QPointF(scaledDeviceSize.width(), scaledDeviceSize.height());
   m_panPixels = m_scale * area.topLeft() - targetTopLeft;
 
-  update();
-
   if (m_isZoomInRegionModeActive) {
-    m_isZoomInRegionModeActive = false;
     m_selectionBottomLeftOpt.reset();
     m_selectionTopRightOpt.reset();
-
-    emit zoomInRectModeDeactivated();
   }
+
+  update();
 }
 
 void DeviceGridWidget::startPanning(const QPointF& pos)
@@ -496,12 +493,12 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   drawCurrentSelection(p);
 
   // debug
-  QPen pen;
-  pen.setWidthF(5.0);
-  pen.setColor(Qt::red);
-  p.setPen(pen);
-  p.setBrush(Qt::NoBrush);
-  p.drawRect(m_device.rect());
+  // QPen pen;
+  // pen.setWidthF(5.0);
+  // pen.setColor(Qt::red);
+  // p.setPen(pen);
+  // p.setBrush(Qt::NoBrush);
+  // p.drawRect(m_device.rect());
   // debug
 }
 
