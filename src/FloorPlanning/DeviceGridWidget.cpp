@@ -228,7 +228,6 @@ void DeviceGridWidget::moveViewRight()
 void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 {
     setFocus(); // needed for keyPressEvent
-    m_isMousePressed = true;
 
     const QPointF mousePos = QPointF(event->pos());
     
@@ -251,19 +250,24 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     }
     default: break;
     }
+
+    m_isMousePressed = true;
 }
 
 void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
-    m_isMousePressed = false;
     QPointF mousePos = QPointF(event->pos());
 
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
-        if (m_isZoomInRegionModeActive) {
+        if (m_isZoomInRegionModeActive && m_selectionBottomLeftOpt && m_selectionTopRightOpt) {
           m_selectionTopRightOpt = worldCoord;
           QRectF rect(m_selectionBottomLeftOpt.value(), m_selectionTopRightOpt.value());
           zoomInRect(rect);
+
+          m_selectionBottomLeftOpt.reset();
+          m_selectionTopRightOpt.reset();
+
           update();
         } else {
           if (m_newRegion) {
@@ -284,6 +288,7 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
     default: break;
     }
+    m_isMousePressed = false;
 }
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
@@ -397,11 +402,6 @@ void DeviceGridWidget::zoomInRect(QRectF& area)
 
   QPointF targetTopLeft = QPointF(viewRect.center()) - 0.5*QPointF(scaledDeviceSize.width(), scaledDeviceSize.height());
   m_panPixels = m_scale * area.topLeft() - targetTopLeft;
-
-  if (m_isZoomInRegionModeActive) {
-    m_selectionBottomLeftOpt.reset();
-    m_selectionTopRightOpt.reset();
-  }
 
   update();
 }
@@ -550,7 +550,7 @@ void DeviceGridWidget::drawCurrentSelection(QPainter& p)
   p.setBrush(m_selectionBgColor);
 
   if (m_isZoomInRegionModeActive) {
-    if (m_selectionBottomLeftOpt && m_selectionTopRightOpt) {
+    if (m_isMousePressed && m_selectionBottomLeftOpt && m_selectionTopRightOpt) {
       QRectF selectionRect(m_selectionBottomLeftOpt.value(), m_selectionTopRightOpt.value());
       selectionRect = selectionRect.normalized();
       p.drawRect(selectionRect);
