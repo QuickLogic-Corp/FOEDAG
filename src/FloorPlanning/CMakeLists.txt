@@ -6,7 +6,6 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     set(STANDALONE_FP_APP TRUE)
 else()
@@ -20,6 +19,8 @@ else()
 endif()
 
 include (../../cmake/cmake_qt.txt)
+
+set(CMAKE_AUTORCC ON)
 
 include_directories(${PROJECT_SOURCE_DIR}/../../src ${CMAKE_CURRENT_BINARY_DIR}/../../include/)
 
@@ -67,9 +68,14 @@ set (HDR_LIST
   PointAnimation.h
 )
 
+set(QRC_LIST
+    data/floorplanning_resource.qrc
+)
+
 add_library(floorplanning STATIC
   ${SRC_LIST}
   ${HDR_LIST}
+  ${QRC_LIST}
 )
 
 target_link_libraries(floorplanning PUBLIC Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
@@ -91,18 +97,12 @@ install(
 
 
 if (STANDALONE_FP_APP)
-    set(CMAKE_AUTORCC ON)
-    set(QRC
-        data/floorplanning_resource.qrc
-        )
-
     add_executable(floorplanning_bin
         Test/FloorPlanning_main.cpp
         ../Utils/StringUtils.cpp
         ../Utils/FileUtils.cpp
         ../Utils/StringUtils.h
         ../Utils/FileUtils.h
-        ${QRC}
     )
     target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
 
