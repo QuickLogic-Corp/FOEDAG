@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QSplitter>
+#include <QKeyEvent>
 
 namespace fp {
 	
@@ -174,12 +175,7 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     const int spacing = 20;
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(bnCreateNewPartition);
-    toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnRemoveAllPartitions);
-    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addStretch();
     toolBarLayout->addWidget(bnLeft);
     toolBarLayout->addWidget(bnRight);
     toolBarLayout->addWidget(bnDown);
@@ -196,6 +192,12 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
       toolBarLayout->addWidget(bnScrollPartition);
     }
     toolBarLayout->addStretch();
+    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(m_bnRemoveAllPartitions);
+    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(bnCreateNewPartition);
+    toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
+    toolBarLayout->addSpacing(spacing);
 
     bnScrollPartition->setChecked(true);
     m_deviceWidget->setScrollToPartitionWhenSelected(bnScrollPartition->isChecked());
@@ -300,6 +302,30 @@ void FloorPlanningWidget::createNewPartition()
 void FloorPlanningWidget::onNotify(QString title, QString msg)
 {
     QMessageBox::warning(this, title, msg);
+}
+
+void FloorPlanningWidget::closeEvent(QCloseEvent* event)
+{
+  emit closed();
+  QWidget::closeEvent(event);
+}
+
+void FloorPlanningWidget::keyPressEvent(QKeyEvent* event)
+{
+  switch (event->key()) {
+  case Qt::Key_Delete: {
+    m_deviceWidget->removeSelectedPartition();
+    event->accept();
+    break;
+  }
+  case Qt::Key_Escape: {
+    m_deviceWidget->unselectPartition();
+    event->accept();
+    break;
+  } default: {
+    QWidget::keyPressEvent(event);
+  }
+  }
 }
 
 } // namespace fp

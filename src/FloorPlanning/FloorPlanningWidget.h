@@ -39,10 +39,8 @@ signals:
     void qdcFileSaved();
 
 protected:
-    void closeEvent(QCloseEvent* event) override {
-        emit closed();
-        QWidget::closeEvent(event);
-    }
+    void closeEvent(QCloseEvent* event) override final;
+    void keyPressEvent(QKeyEvent* event) override final;
 
 private:
     QPushButton* m_bnSaveQdc{nullptr};

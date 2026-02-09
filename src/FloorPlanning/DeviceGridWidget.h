@@ -53,6 +53,7 @@ public:
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelectedPartition();
+    void unselectPartition();
     std::unordered_set<std::string> existedPartitionNames() const;
 
     void setQdcFilePath(const std::filesystem::path& path);
@@ -131,7 +132,6 @@ private:
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
 
-    void unselectPartition();
     void startNewRegionSelection(const QPointF& worldCoord);
     void stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");

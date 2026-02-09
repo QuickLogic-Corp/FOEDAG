@@ -77,8 +77,6 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
     } else {
         qCritical() << "cannot apply elemenets, because partition is not selected";
     }
-
-    checkErrors();
 }
 
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
@@ -193,19 +191,7 @@ void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
     case Qt::Key_Right: {
       moveViewRight();
       break;
-    }
-    case Qt::Key_Delete: {
-      if (m_selectedPartition) {
-        removeSelectedPartition();
-      }
-      break;
-    }
-    case Qt::Key_Escape: {
-      if (m_selectedPartition) {
-        unselectPartition();
-      }
-      break;
-    }
+    }    
     default: {
       QWidget::keyPressEvent(event);
       return;
@@ -282,10 +268,12 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
         } else {
           if (m_newRegion) {
             stopRegionSelection(worldCoord);
-            m_device.alignRegions();
-            checkErrors();
-            update();
           }
+          // even if there is no m_newRegion, we still could move existed regions, so we need refresh
+          m_device.alignRegions();
+          checkErrors();
+          update();
+
         }
         break;
     }
