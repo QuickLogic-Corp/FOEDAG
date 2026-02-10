@@ -5,12 +5,14 @@
 #include "PartitionsListWidget.h"
 #include "NewUniqueNameDialog.h"
 #include "ErrorsListWidget.h"
+#include "CheckableButton.h"
 
 #include <QHBoxLayout>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QCheckBox>
 #include <QSplitter>
+#include <QKeyEvent>
 
 namespace fp {
 	
@@ -86,15 +88,17 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
             this, &FloorPlanningWidget::onCheckErrorsFinished);
 
     // toolBar
-    QVBoxLayout* toolBarLayout = new QVBoxLayout;
+    QWidget* toolBarContainer = new QWidget;
+    QHBoxLayout* toolBarLayout = new QHBoxLayout;
+    toolBarContainer->setLayout(toolBarLayout);
     toolBarLayout->setContentsMargins(m,m,m,m);
     toolBarLayout->setSpacing(m);
 
-    QPushButton* bnLoadQdc = new QPushButton(QIcon(":/images/load-action.png"), "");
+    QPushButton* bnLoadQdc = new QPushButton(QIcon(":/load-action.png"), "");
     connect(bnLoadQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::loadQdc);
     bnLoadQdc->setToolTip(tr("Load QDC"));
 
-    m_bnSaveQdc = new QPushButton(QIcon(":/images/save-action.png"), "");
+    m_bnSaveQdc = new QPushButton(QIcon(":/save-action.png"), "");
     connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, [this]() {
         if (m_deviceWidget->saveQdc()) {
             m_bnSaveQdc->setEnabled(false);
@@ -106,38 +110,94 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     m_bnSaveQdc->setToolTip(tr("Save QDC"));
     m_bnSaveQdc->setEnabled(false);
 
-    m_bnDeletePartitions = new QPushButton(QIcon(":/images/erase.png"), "");
-    connect(m_bnDeletePartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
-    m_bnDeletePartitions->setToolTip(tr("Delete all partitions"));
-    m_bnDeletePartitions->setEnabled(false);
-
-    QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/images/add.png"), "");
+    QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/add.png"), "");
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
 
-    m_bnRemovePartition = new QPushButton(QIcon(":/images/minus.png"), "");
-    connect(m_bnRemovePartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
-    m_bnRemovePartition->setToolTip(tr("Remove selected partition"));
-    m_bnRemovePartition->setEnabled(false);
+    m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/minus.png"), "");
+    connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
+    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected partition"));
+    m_bnRemoveSelectedPartition->setEnabled(false);
 
     connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested, this, &FloorPlanningWidget::createNewPartition);
 
-    QCheckBox* bnScrollPartition = new QCheckBox("scroll to partition");
+    QCheckBox* bnScrollPartition = new QCheckBox("Scroll to partition");
     connect(bnScrollPartition, &QCheckBox::stateChanged, m_deviceWidget, &DeviceGridWidget::setScrollToPartitionWhenSelected);
     bnScrollPartition->setVisible(false);
+
+    // move controls
+    QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
+    QPushButton* bnRight = new QPushButton(QIcon(":/right-arrow.png"), "");
+    QPushButton* bnDown = new QPushButton(QIcon(":/down-arrow.png"), "");
+    QPushButton* bnUp = new QPushButton(QIcon(":/up-arrow.png"), "");
+
+    bnLeft->setToolTip(tr("Pan view left"));
+    bnRight->setToolTip(tr("Pan view right"));
+    bnDown->setToolTip(tr("Pan view down"));
+    bnUp->setToolTip(tr("Pan view up"));
+
+    connect(bnLeft, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewLeft);
+    connect(bnUp, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewUp);
+    connect(bnRight, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewRight);
+    connect(bnDown, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewDown);
+
+            // zoom controls
+    QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
+    QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
+    QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
+    m_bnZoomInRegion = new CheckableButton(QIcon(":/zoom-in-area.png"));
+    m_drawRegion = new CheckableButton(QIcon(":/selection.png"));
+    m_drawRegion->setChecked(true);
+
+    connect(bnZoomIn, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomIn);
+    connect(bnZoomOut, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomOut);
+    connect(bnZoomFit, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomFit);
+    connect(m_bnZoomInRegion, &QPushButton::clicked, this, [this](){
+      m_drawRegion->setChecked(false);
+      m_deviceWidget->activateZoomInRegionMode();
+    });
+    connect(m_drawRegion, &QPushButton::clicked, this, [this](){
+      m_bnZoomInRegion->setChecked(false);
+      m_deviceWidget->deactivateZoomInRegionMode();
+    });
+
+    bnZoomIn->setToolTip(tr("Zoom in"));
+    bnZoomOut->setToolTip(tr("Zoom out"));
+    bnZoomFit->setToolTip(tr("Fit view to device grid"));
+    m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
+    m_drawRegion->setToolTip(tr("Draw new region"));
+
+    m_bnRemoveAllPartitions = new QPushButton(QIcon(":/erase.png"), "");
+    connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
+    m_bnRemoveAllPartitions->setToolTip(tr("Delete all partitions"));
+    m_bnRemoveAllPartitions->setEnabled(false);
 
     const int spacing = 20;
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
+    toolBarLayout->addStretch();
+    toolBarLayout->addWidget(bnLeft);
+    toolBarLayout->addWidget(bnRight);
+    toolBarLayout->addWidget(bnDown);
+    toolBarLayout->addWidget(bnUp);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnDeletePartitions);
+    toolBarLayout->addWidget(bnZoomIn);
+    toolBarLayout->addWidget(bnZoomOut);
+    toolBarLayout->addWidget(bnZoomFit);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(bnCreateNewPartition);
-    toolBarLayout->addWidget(m_bnRemovePartition);
+    toolBarLayout->addWidget(m_bnZoomInRegion);
+    toolBarLayout->addWidget(m_drawRegion);
+    toolBarLayout->addSpacing(spacing);
     if (bnScrollPartition->isVisible()) {
-        toolBarLayout->addWidget(bnScrollPartition);
+      toolBarLayout->addWidget(bnScrollPartition);
     }
     toolBarLayout->addStretch();
+    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(m_bnRemoveAllPartitions);
+    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(bnCreateNewPartition);
+    toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
+    toolBarLayout->addSpacing(spacing);
 
     bnScrollPartition->setChecked(true);
     m_deviceWidget->setScrollToPartitionWhenSelected(bnScrollPartition->isChecked());
@@ -147,14 +207,20 @@ FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     bodyLayout->setContentsMargins(m,m,m,m);
     bodyLayout->setSpacing(m);
 
-    bodyLayout->addLayout(toolBarLayout);
+    QWidget* deviceWidgetContainer = new QWidget;
+    QVBoxLayout* deviceWidgetContainerLayout = new QVBoxLayout;
+    deviceWidgetContainerLayout->setContentsMargins(m,m,m,m);
+    deviceWidgetContainerLayout->setSpacing(m);
+    deviceWidgetContainer->setLayout(deviceWidgetContainerLayout);
+    deviceWidgetContainerLayout->addWidget(toolBarContainer);
+    deviceWidgetContainerLayout->addWidget(m_deviceWidget);
 
     QSplitter* splitter = new QSplitter(Qt::Horizontal);
     splitter->setChildrenCollapsible(false); // don't let panes disappear
     splitter->setHandleWidth(6);
 
     splitter->addWidget(m_synthResourcesWidget);
-    splitter->addWidget(m_deviceWidget);
+    splitter->addWidget(deviceWidgetContainer);
     splitter->addWidget(wRightPane);
 
     splitter->setSizes({1, 2, 1});    // initial proportions (relative)
@@ -190,11 +256,11 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 
     const bool partitionsNotEmpty = !partitions.empty();
     m_partitionsListWidget->setEnabled(partitionsNotEmpty);
-    m_bnRemovePartition->setEnabled(partitionsNotEmpty);
-    m_bnDeletePartitions->setEnabled(partitionsNotEmpty);
+    m_bnRemoveSelectedPartition->setEnabled(partitionsNotEmpty);
     if (!partitionsNotEmpty) {
         m_bnSaveQdc->setEnabled(false);
     }
+    m_bnRemoveAllPartitions->setEnabled(partitionsNotEmpty);
 }
 
 void FloorPlanningWidget::onCheckErrorsFinished(std::unordered_set<std::string> errors)
@@ -236,6 +302,30 @@ void FloorPlanningWidget::createNewPartition()
 void FloorPlanningWidget::onNotify(QString title, QString msg)
 {
     QMessageBox::warning(this, title, msg);
+}
+
+void FloorPlanningWidget::closeEvent(QCloseEvent* event)
+{
+  emit closed();
+  QWidget::closeEvent(event);
+}
+
+void FloorPlanningWidget::keyPressEvent(QKeyEvent* event)
+{
+  switch (event->key()) {
+  case Qt::Key_Delete: {
+    m_deviceWidget->removeSelectedPartition();
+    event->accept();
+    break;
+  }
+  case Qt::Key_Escape: {
+    m_deviceWidget->unselectPartition();
+    event->accept();
+    break;
+  } default: {
+    QWidget::keyPressEvent(event);
+  }
+  }
 }
 
 } // namespace fp

@@ -22,7 +22,7 @@ ErrorsListWidget::ErrorsListWidget(QWidget* parent)
     layout->addWidget(lbErrors);
     layout->addWidget(m_lwErrors);
 
-    QPixmap pm(":/images/error.png");
+    QPixmap pm(":/error.png");
     pm = pm.scaled(16,16, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     m_errorIcon = QIcon(pm);
 }

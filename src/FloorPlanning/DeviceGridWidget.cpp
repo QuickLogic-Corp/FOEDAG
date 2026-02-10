@@ -1,5 +1,4 @@
 #include "DeviceGridWidget.h"
-#include "HierarhyElement.h"
 
 #include <QElapsedTimer>
 #include <QPainter>
@@ -21,14 +20,6 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
   setAutoFillBackground(false);
   setMouseTracking(true);
 
-#ifdef SHOW_DRAWING_STAT
-  QHBoxLayout* layout = new QHBoxLayout;
-  QWidget* container = new QWidget(this);
-  container->setLayout(layout);
-
-  layout->addWidget(m_drawStat.label());
-#endif // SHOW_DRAWING_STAT
-
   connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
 }
 
@@ -49,8 +40,7 @@ void DeviceGridWidget::onPartitionRenamed(int partitionId, QString newName)
     PartitionPtr partition = m_device.findPartition(partitionId);
     if (partition) {
         partition->setName(newName.toStdString());
-        checkErrors();
-        emit partitionsChanged(m_device.partitions());
+        reportPartitionChanges();
         update();
     }
 }
@@ -83,12 +73,10 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
 {
     if (m_selectedPartition) {
         emit partitionSelected(m_selectedPartition); // needs to update partition netlist widget
-        emit partitionsChanged(m_device.partitions());
+        reportPartitionChanges();
     } else {
         qCritical() << "cannot apply elemenets, because partition is not selected";
     }
-
-    checkErrors();
 }
 
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
@@ -114,8 +102,7 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
             if (roleOpt) {
                 if (roleOpt == Region::HandlerRole::REMOVE) {
                     m_selectedPartition->removeRegion(m_selectedRegion);
-                    checkErrors();
-                    emit partitionsChanged(m_device.partitions());
+                    reportPartitionChanges();
                     update();
                 } else {
                     m_regionEditRoleOpt = roleOpt;
@@ -158,9 +145,7 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
     if (m_newRegion->isValid()) {
         m_device.alignRegion(m_newRegion);
         m_selectedPartition->addRegion(m_newRegion);
-        checkErrors();
-        emit partitionsChanged(m_device.partitions());
-
+        reportPartitionChanges();
         m_newRegion.reset();
         update();
     }
@@ -190,58 +175,71 @@ void DeviceGridWidget::cancelRegionCreation(const QString& msg)
 
 void DeviceGridWidget::keyPressEvent(QKeyEvent* event)
 {
-    const double speed = 50.0;
     switch (event->key()) {
     case Qt::Key_Up: {
-        m_panPixels += QPointF(0, -speed);
-        break;
+      moveViewUp();
+      break;
     }
     case Qt::Key_Down: {
-        m_panPixels += QPointF(0, speed);
-        break;
+      moveViewDown();
+      break;
     }
     case Qt::Key_Left: {
-        m_panPixels += QPointF(-speed, 0);
-        break;
+      moveViewLeft();
+      break;
     }
     case Qt::Key_Right: {
-        m_panPixels += QPointF(speed, 0);
-        break;
-    }
-    case Qt::Key_Delete: {
-        if (m_selectedPartition) {
-            removeSelectedPartition();
-        }
-        break;
-    }
-    case Qt::Key_Escape: {
-        if (m_selectedPartition) {
-            unselectPartition();
-        }
-        break;
-    }
+      moveViewRight();
+      break;
+    }    
     default: {
-        QWidget::keyPressEvent(event);
-        return;
+      QWidget::keyPressEvent(event);
+      return;
     }
     }
 
-    update();
     event->accept();
+}
+
+void DeviceGridWidget::moveViewUp()
+{
+  m_panPixels += QPointF(0, -moveStep);
+  update();
+}
+
+void DeviceGridWidget::moveViewDown()
+{
+  m_panPixels += QPointF(0, moveStep);
+  update();
+}
+
+void DeviceGridWidget::moveViewLeft()
+{
+  m_panPixels += QPointF(-moveStep, 0);
+  update();
+}
+
+void DeviceGridWidget::moveViewRight()
+{
+  m_panPixels += QPointF(moveStep, 0);
+  update();
 }
 
 void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 {
     setFocus(); // needed for keyPressEvent
-    m_isMousePressed = true;
 
     const QPointF mousePos = QPointF(event->pos());
     
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
-        if (!trySelect(worldCoord)) {
-            startNewRegionSelection(worldCoord);
+        if (m_isZoomInRegionModeActive) {
+          m_selectionBottomLeftOpt = worldCoord;
+        } else {
+          if (!trySelect(worldCoord)) {
+              startNewRegionSelection(worldCoord);
+          }
         }
         break;
     }
@@ -252,19 +250,35 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     }
     default: break;
     }
+
+    m_isMousePressed = true;
 }
 
 void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
-    m_isMousePressed = false;
     QPointF mousePos = QPointF(event->pos());
 
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
-        stopRegionSelection(worldCoord);
-        m_device.alignRegions();
-        checkErrors();
-        update();
+        if (m_isZoomInRegionModeActive && m_selectionBottomLeftOpt && m_selectionTopRightOpt) {
+          m_selectionTopRightOpt = worldCoord;
+          QRectF rect(m_selectionBottomLeftOpt.value(), m_selectionTopRightOpt.value());
+          zoomInRect(rect);
+
+          m_selectionBottomLeftOpt.reset();
+          m_selectionTopRightOpt.reset();
+
+          update();
+        } else {
+          if (m_newRegion) {
+            stopRegionSelection(worldCoord);
+          }
+          // even if there is no m_newRegion, we still could move existed regions, so we need refresh
+          m_device.alignRegions();
+          checkErrors();
+          update();
+
+        }
         break;
     }
     case Qt::MiddleButton:
@@ -274,6 +288,7 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     }
     default: break;
     }
+    m_isMousePressed = false;
 }
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
@@ -289,6 +304,11 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         m_panPixels -= delta;
         update();
         return;
+    }
+    if (m_isZoomInRegionModeActive) {
+      m_selectionTopRightOpt = worldCoord;
+      update();
+      return;
     }
     if (m_newRegion) {
         m_newRegion->setStopPos(worldCoord);
@@ -312,34 +332,78 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 
 void DeviceGridWidget::wheelEvent(QWheelEvent* event)
 {
-    double delta = 0.0;
+  double delta = 0.0;
 
-    if (!event->angleDelta().isNull()) {
-        delta = event->angleDelta().y() / 120.0;
-    } else if (!event->pixelDelta().isNull()) {
-        delta = event->pixelDelta().y() / 100.0;
-    }
-
-    if (delta == 0.0) {
-        return;
-    }
-
-    const double zoomFactor = std::pow(1.15, delta);
+  if (!event->angleDelta().isNull()) {
+    delta = event->angleDelta().y() / 120.0;
+  } else if (!event->pixelDelta().isNull()) {
+    delta = event->pixelDelta().y() / 100.0;
+  }
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    QPointF mouse = event->position();
+  QPointF cursorPos = event->position();
 #else
-    QPointF mouse = event->pos();
+  QPointF cursorPos = event->pos();
 #endif
 
-    QPointF before = (mouse + m_panPixels) / m_scale;
+  zoom(cursorPos, delta);
+}
 
-    m_scale = std::clamp(m_scale * zoomFactor, scaleMin, scaleMax);
+void DeviceGridWidget::zoom(const QPointF& refPoint, double delta)
+{
+  if (delta == 0.0) {
+    return;
+  }
 
-    QPointF after = before * m_scale;
-    m_panPixels = after - mouse;
+  const double zoomFactor = std::pow(1.15, delta);
 
-    update();
+  QPointF before = (refPoint + m_panPixels) / m_scale;
+
+  m_scale = std::clamp(m_scale * zoomFactor, scaleMin, scaleMax);
+
+  QPointF after = before * m_scale;
+  m_panPixels = after - refPoint;
+
+  update();
+}
+
+void DeviceGridWidget::zoomIn()
+{
+  zoom(viewPortCenter(), zoomStep);
+}
+
+void DeviceGridWidget::zoomOut()
+{
+  zoom(viewPortCenter(), -zoomStep);
+}
+
+void DeviceGridWidget::zoomFit()
+{
+  QRectF rect = m_device.rect();
+  zoomInRect(rect);
+}
+
+void DeviceGridWidget::zoomInRect(QRectF& area)
+{
+  area = area.normalized();
+  const QSizeF deviceSize = area.size();
+  if ((deviceSize.width() <= 0.0) || (deviceSize.height() <= 0.0)) {
+    return;
+  }
+
+  const QRect viewRect = contentsRect();
+
+  const double wFactor = viewRect.width()  / deviceSize.width();
+  const double hFactor = viewRect.height() / deviceSize.height();
+
+  m_scale = std::min(wFactor, hFactor);
+
+  const QSizeF scaledDeviceSize = deviceSize * m_scale;
+
+  QPointF targetTopLeft = QPointF(viewRect.center()) - 0.5*QPointF(scaledDeviceSize.width(), scaledDeviceSize.height());
+  m_panPixels = m_scale * area.topLeft() - targetTopLeft;
+
+  update();
 }
 
 void DeviceGridWidget::startPanning(const QPointF& pos)
@@ -378,9 +442,8 @@ void DeviceGridWidget::loadQdc()
 {
     unselectPartition();
     m_qdcSerializer.load(m_device);
-    checkErrors();
     emit unselectPartitionRequested();
-    emit partitionsChanged(m_device.partitions());
+    reportPartitionChanges();
     update();
 }
 
@@ -415,9 +478,22 @@ void DeviceGridWidget::paintEvent(QPaintEvent* event)
   }
 
   drawPartitions(p);
-#ifdef SHOW_DRAWING_STAT
-  m_drawStat.setDrawTimeMs(t.elapsed());
-#endif
+  drawCurrentSelection(p);
+
+  // debug
+  // QPen pen;
+  // pen.setWidthF(5.0);
+  // pen.setColor(Qt::red);
+  // p.setPen(pen);
+  // p.setBrush(Qt::NoBrush);
+  // p.drawRect(m_device.rect());
+  // debug
+}
+
+void DeviceGridWidget::showEvent(QShowEvent* event)
+{
+  QWidget::showEvent(event);
+  zoomFit();
 }
 
 void DeviceGridWidget::drawBackground(QPainter& p)
@@ -441,9 +517,6 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
         }
     }
 
-#ifdef SHOW_DRAWING_STAT
-    m_drawStat.setDrawableTilesNum(clbRects.size() + ioRects.size() + bramRects.size() + dspRects.size());
-#endif
     p.setPen(Qt::NoPen);
 
     p.setBrush(Tile::color(Tile::Type::Clb));
@@ -468,6 +541,29 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
     }
 }
 
+void DeviceGridWidget::drawCurrentSelection(QPainter& p)
+{
+  QPen pen(m_selectionFrameColor);
+  pen.setCosmetic(true);
+  pen.setWidthF(adaptiveTileLineWidthF());
+  p.setPen(pen);
+  p.setBrush(m_selectionBgColor);
+
+  if (m_isZoomInRegionModeActive) {
+    if (m_isMousePressed && m_selectionBottomLeftOpt && m_selectionTopRightOpt) {
+      QRectF selectionRect(m_selectionBottomLeftOpt.value(), m_selectionTopRightOpt.value());
+      selectionRect = selectionRect.normalized();
+      p.drawRect(selectionRect);
+    }
+  } else {
+    if (m_newRegion) {
+      if (m_newRegion->isClosed()) {
+        p.drawRect(m_newRegion->rect());
+      }
+    }
+  }
+}
+
 void DeviceGridWidget::drawPartitions(QPainter& p)
 {
     QPen pen(m_partitionColor);
@@ -475,13 +571,6 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     pen.setWidthF(adaptiveTileLineWidthF());
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
-
-    // draw selection
-    if (m_newRegion) {
-        if (m_newRegion->isClosed()) {
-            p.drawRect(m_newRegion->rect());
-        }
-    }
 
     // draw partitions
     for (const auto& [partitionId, partition]: m_device.partitions()) {
@@ -607,25 +696,27 @@ QPointF DeviceGridWidget::worldToScreenCoord(const QPointF& worldCoord) const
     return worldCoord * m_scale - m_panPixels;
 }
 
+QPointF DeviceGridWidget::viewPortCenter() const
+{
+  return 0.5f*QPointF(width(), height());
+}
+
 QPointF DeviceGridWidget::currentWorldCenter() const
 {
-    const QPointF screenCenter(0.5 * width(), 0.5 * height());
-    return (screenCenter + m_panPixels) / m_scale;
+  return (viewPortCenter() + m_panPixels) / m_scale;
 }
 
 void DeviceGridWidget::setWorldCenter(const QPointF& worldCenter)
 {
-    const QPointF screenCenter(0.5 * width(), 0.5 * height());
-    m_panPixels = worldCenter * m_scale - screenCenter;
-    update();
+  m_panPixels = worldCenter * m_scale - viewPortCenter();
+  update();
 }
 
 void DeviceGridWidget::createNewPartition(const std::string& partitionName)
 {
     PartitionPtr partition = std::make_shared<Partition>(partitionName);
     m_device.addPartition(partition);
-    checkErrors();
-    emit partitionsChanged(m_device.partitions());
+    reportPartitionChanges();
     selectPartition(partition); // automatically select
 }
 
@@ -634,8 +725,8 @@ void DeviceGridWidget::removeSelectedPartition()
     if (m_selectedPartition) {
         m_device.removePartition(m_selectedPartition);
         unselectPartition();
-        checkErrors();
-        emit partitionsChanged(m_device.partitions());
+        reportPartitionChanges();
+        update();
     }
 }
 
@@ -644,8 +735,7 @@ void DeviceGridWidget::clearPartitions() {
     m_selectedRegion.reset();
     m_newRegion.reset();
     unselectPartition();
-    checkErrors();
-    emit partitionsChanged(m_device.partitions());
+    reportPartitionChanges();
     update();
 }
 
@@ -660,6 +750,12 @@ void DeviceGridWidget::checkErrors()
 {
     std::unordered_set<std::string> errors = m_device.collectErrors();
     emit checkErrorsFinished(errors);
+}
+
+void DeviceGridWidget::reportPartitionChanges()
+{
+  checkErrors();
+  emit partitionsChanged(m_device.partitions());
 }
 
 } // namespace fp

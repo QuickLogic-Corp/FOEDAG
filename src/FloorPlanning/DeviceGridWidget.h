@@ -10,8 +10,6 @@
 #include <QPoint>
 #include <QLabel>
 
-#include <algorithm>
-
 class QPaintEvent;
 
 namespace fp {
@@ -19,6 +17,8 @@ namespace fp {
 class DeviceGridWidget final : public QWidget {
     Q_OBJECT
 
+    const double moveStep = 50.0;
+    const double zoomStep = 2.0;
     const double scaleMin = 0.05;
     const double scaleMax = 10.0;
 
@@ -26,6 +26,8 @@ class DeviceGridWidget final : public QWidget {
     const QColor m_transparentColor{0, 0, 0, 0};
     const QColor m_textColor{30, 30, 35};
     const QColor m_partitionColor{50, 160, 50}; // green
+    const QColor m_selectionFrameColor{50, 160, 50}; // green
+    const QColor m_selectionBgColor{50, 160, 50, 50}; // green
     const QColor m_partitionTransparentColor{50, 160, 50, 150}; // transparent-green
     const QColor m_editPartitionColor{50, 50, 160}; // blue
     const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
@@ -37,35 +39,6 @@ class DeviceGridWidget final : public QWidget {
         return std::clamp(m_tileLineBaseWidth * m_scale, 0.5, double(2*m_tileLineBaseWidth));
     }
 
-#ifdef SHOW_DRAWING_STAT
-    struct DrawStat {
-    public:
-        DrawStat() {
-            m_label = new QLabel;
-            m_label->setMinimumWidth(200);
-        }
-        void setLabel(QLabel* label) { m_label = label; }
-        void setDrawableTilesNum(int num) {
-            m_drawableTilesNum = num;
-            updateLabel();
-        }
-        void setDrawTimeMs(long long ms) {
-            m_drawTimeMs = ms;
-            updateLabel();
-        }
-
-        QLabel* label() { return m_label; }
-
-    private:
-        int m_drawableTilesNum = -1;
-        long long m_drawTimeMs = -1;
-        QLabel* m_label{nullptr};
-
-        void updateLabel() {
-            m_label->setText(QString("visible %1 tiles, took %2 ms").arg(m_drawableTilesNum).arg(m_drawTimeMs));
-        }
-    };
-#endif // SHOW_DRAWING_STAT
 public:
     explicit DeviceGridWidget(QWidget* parent = nullptr);
     virtual ~DeviceGridWidget()=default;
@@ -80,11 +53,24 @@ public:
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelectedPartition();
+    void unselectPartition();
     std::unordered_set<std::string> existedPartitionNames() const;
 
     void setQdcFilePath(const std::filesystem::path& path);
     bool saveQdc();
     void loadQdc();
+
+    void moveViewUp();
+    void moveViewDown();
+    void moveViewLeft();
+    void moveViewRight();
+
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+
+    void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
+    void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
 
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
@@ -101,8 +87,9 @@ protected:
     void mousePressEvent(QMouseEvent*) override final;
     void mouseReleaseEvent(QMouseEvent*) override final;
     void mouseMoveEvent(QMouseEvent*) override final;
-    void wheelEvent(QWheelEvent* event) override final;
+    void wheelEvent(QWheelEvent*) override final;
     void paintEvent(QPaintEvent*) override final;
+    void showEvent(QShowEvent*) override final;
 
 private:
     DeviceGrid m_device;
@@ -114,17 +101,16 @@ private:
 
     bool m_isMousePressed = false;
 
-#ifdef SHOW_DRAWING_STAT
-    DrawStat m_drawStat;
-#endif
-
     QRectF m_viewPort;
 
     void drawBackground(QPainter& p);
     void drawTilesBatched(QPainter& p);
     void drawPartitions(QPainter& p);
+    void drawCurrentSelection(QPainter& p);
     void drawTileLabels(QPainter& p);
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
+
+    bool m_isZoomInRegionModeActive = false;
 
     // panning
     PointAnimation m_moveAnimation;
@@ -137,6 +123,8 @@ private:
     // panning
 
     // selection
+    std::optional<QPointF> m_selectionBottomLeftOpt;
+    std::optional<QPointF> m_selectionTopRightOpt;
     RegionPtr m_newRegion;
     RegionPtr m_selectedRegion;
 
@@ -144,21 +132,26 @@ private:
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
 
-    void unselectPartition();
     void startNewRegionSelection(const QPointF& worldCoord);
     void stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");
     void selectPartition(PartitionPtr partition);
     // selection
 
+    void reportPartitionChanges();
+
     QPointF screenToWorldCoord(const QPointF&) const;
     QPointF worldToScreenCoord(const QPointF&) const;
     void scrollToPartition(const PartitionPtr&);
     void startMoveAnimation(const QPointF&);
+    QPointF viewPortCenter() const;
     QPointF currentWorldCenter() const;
     void setWorldCenter(const QPointF&);
 
     void checkErrors();
+
+    void zoom(const QPointF& refPoint, double delta);
+    void zoomInRect(QRectF&);
 };
 
 }  // namespace fp
