@@ -6251,107 +6251,114 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   m_blifParser.load(netlist_path);
   //m_blifParser.printHierachy(); // debug
   
+  auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
+  if (pinTableFile.empty()) 
+      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
+
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
-  if (!fs::exists(floor_planning_constraint_filepath)){
-    Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
-    return true;
+  if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
+    ErrorMessage("qdc Constraint File and Pin Table File Does Not Exist. Exiting the Flow.\n");
+    return false;
   }
+  std::string region_groups_str = "";
+  if (fs::exists(floor_planning_constraint_filepath)) {
+    std::string line;
+    std::ifstream infile(floor_planning_constraint_filepath);
+    std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
+    std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
+      {"left", &leftSet},
+      {"right", &rightSet},
+      {"top", &topSet},
+      {"bottom", &bottomSet}
+    };
 
-  std::string line;
-  std::ifstream infile(floor_planning_constraint_filepath);
-  std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
-  std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
-    {"left", &leftSet},
-    {"right", &rightSet},
-    {"top", &topSet},
-    {"bottom", &bottomSet}
-  };
+    std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
 
-  std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
+    while (std::getline(infile, line)) {
+      line = StringUtils::trim(line);
 
-  while (std::getline(infile, line)) {
-    line = StringUtils::trim(line);
+      // drop comment part
+      if (auto pos = line.find("#"); pos != std::string::npos) {
+        line = line.substr(0, pos); // drop commented part of line
+      }
 
-    // drop comment part
-    if (auto pos = line.find("#"); pos != std::string::npos) {
-      line = line.substr(0, pos); // drop commented part of line
+      if (line.empty()){
+        Message("Empty line found in QDC file. Skipping...\n");
+        continue; // Skip empty line
+      }
+
+      std::istringstream iss(line);
+      std::string token, signalName;
+      iss >> token;
+    
+      static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
+      if (supportedCommands.find(token) == supportedCommands.end()){
+        ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
+        return false;
+      }
+
+      if (token == "set_io_side") {
+        iss >> signalName;
+        std::string side;
+        while (iss >> side) {
+          StringUtils::toLower(side); 
+          auto it = sideMap.find(side);
+          if (it != sideMap.end()) {
+              it->second->insert(signalName); // insert avoids duplicates
+          }
+        }
+      } else if (token == "set_region") {
+        iss >> signalName;
+        std::vector<std::string> elements;
+        std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
+        for (const std::string& pattern: patterns) {
+          std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
+          if (patternElements.empty()) {
+            ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
+            return false;
+          } else {
+            elements.push_back(pattern);
+          }
+        }
+
+        std::string region;
+        while (iss >> region) {
+          StringUtils::toLower(region);
+          if (regionMap.find(region) == regionMap.end()) {
+            regionMap[region] = {};
+          }
+          for (const std::string& element: elements) {
+            regionMap[region].insert(element);
+          }
+        }
+      }
     }
 
-    if (line.empty()){
-      Message("Empty line found in QDC file. Skipping...\n");
-      continue; // Skip empty line
+    std::string leftStr   = StringUtils::toString(leftSet);
+    std::string rightStr  = StringUtils::toString(rightSet);
+    std::string topStr    = StringUtils::toString(topSet);
+    std::string bottomStr = StringUtils::toString(bottomSet);
+
+    std::string regionStr;
+    for (const auto& [region, patternsSet]: regionMap) {
+      regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
     }
 
-    std::istringstream iss(line);
-    std::string token, signalName;
-    iss >> token;
-   
-    static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
-    if (supportedCommands.find(token) == supportedCommands.end()){
-      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
+    // Output results
+    if (!leftStr.empty())
+      leftStr = std::string("left:"   + leftStr + ";");
+    if (!rightStr.empty())
+      rightStr = std::string("right:"  + rightStr + ";");
+    if (!topStr.empty())
+      topStr = std::string("top:"    + topStr + ";");
+    if (!bottomStr.empty())
+      bottomStr = std::string("bottom:" + bottomStr + ";");
+
+    if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
+      ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
       return false;
     }
-
-    if (token == "set_io_side") {
-      iss >> signalName;
-      std::string side;
-      while (iss >> side) {
-        StringUtils::toLower(side); 
-        auto it = sideMap.find(side);
-        if (it != sideMap.end()) {
-            it->second->insert(signalName); // insert avoids duplicates
-        }
-      }
-    } else if (token == "set_region") {
-      iss >> signalName;
-      std::vector<std::string> elements;
-      std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
-      for (const std::string& pattern: patterns) {
-        std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
-        if (patternElements.empty()) {
-          ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
-          return false;
-        } else {
-          elements.push_back(pattern);
-        }
-      }
-
-      std::string region;
-      while (iss >> region) {
-        StringUtils::toLower(region);
-        if (regionMap.find(region) == regionMap.end()) {
-          regionMap[region] = {};
-        }
-        for (const std::string& element: elements) {
-          regionMap[region].insert(element);
-        }
-      }
-    }
-  }
-
-  std::string leftStr   = StringUtils::toString(leftSet);
-  std::string rightStr  = StringUtils::toString(rightSet);
-  std::string topStr    = StringUtils::toString(topSet);
-  std::string bottomStr = StringUtils::toString(bottomSet);
-
-  std::string regionStr;
-  for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
-  }
-
-  // Output results
-  if (!leftStr.empty())
-    leftStr = std::string("left:"   + leftStr + ";");
-  if (!rightStr.empty())
-    rightStr = std::string("right:"  + rightStr + ";");
-  if (!topStr.empty())
-    topStr = std::string("top:"    + topStr + ";");
-  if (!bottomStr.empty())
-    bottomStr = std::string("bottom:" + bottomStr + ";");
-
-  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
-    ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
-    return false;
+    region_groups_str = leftStr + rightStr + topStr + bottomStr + regionStr;
   }
   
   std::filesystem::path generate_floorplanning_script_path =
@@ -6364,11 +6371,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
   std::string output_path = ProjManager()->projectName() + "_constraints.xml";
   std::string architectureFile = m_architectureFile.string();
-
-  auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
-  if (pinTableFile.empty()) 
-      // no pin table csv available, we cannot proceed with the pcf flow!
-      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
 
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
@@ -6387,18 +6389,20 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     return false;
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
-
   std::string command = std::string(python_exec.string() + " " +
                         generate_floorplanning_script_path.string() + " " +
                         std::string("--blif_file ") + netlistFile + " " + 
                         std::string("--arch_file ") + architectureFile + " " +
                         std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
-                        std::string("--region_groups ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " +
-                        std::string("--output_path ") + output_path + " " + 
-                        std::string("--pin_table_file ") + std::string(pinTableFile)); 
+                        std::string("--output_path ") + output_path);
+  
+  if(fs::exists(pinTableFile))
+    command += std::string(" --pin_table_file ") + std::string(pinTableFile);                       
+  if(region_groups_str != "")
+    command += std::string(" --region_groups ") + region_groups_str;
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
-  if (fs::exists(floor_planning_constraint_filepath)) {
+  if (fs::exists(pin_constraint_filepath)) {
     command += std::string(" --pcf_file ") + pin_constraint_filepath.string();
   }
 
