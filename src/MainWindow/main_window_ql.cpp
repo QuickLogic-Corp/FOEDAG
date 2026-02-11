@@ -2285,6 +2285,10 @@ void MainWindow::floorPlanningActionTriggered()
         QList<QString> args;
         args.append(QString::fromStdString(archFileProviderPtr->get().string()));
         args.append(QString::fromStdString(postSynthBlifFilePath.string()));
+        args.append("--circuit_format");
+        args.append("eblif");
+        args.append("--timing_analysis");
+        args.append("off");
         args.append("--show_arch_resources");
         args.append("--echo_file");
         args.append("on");
@@ -2293,11 +2297,11 @@ void MainWindow::floorPlanningActionTriggered()
         const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
         std::filesystem::current_path(projectPath);
         process->start(vpr_program, args);
-        //qInfo() << "run" << vpr_program << args;
+        qInfo() << "~~~ run" << vpr_program << args.join(" ");
 
         // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
         QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, compiler, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr](int exitCode) {
-          //qInfo() << "~~~ vpr netlist dump proc finished" << exitCode;
+          qInfo() << "~~~ vpr netlist dump proc finished" << exitCode;
           if (exitCode == 0) {
             if (m_floorPlanningWidget) {
               fp::SynthResourceExtractor resourceExtractor;
@@ -2305,23 +2309,39 @@ void MainWindow::floorPlanningActionTriggered()
               resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
               // DEBUG: compare netlist start
               if (std::filesystem::exists(compiler->getPostSynthNetFilePath())) {
-                fp::SynthResourceExtractor resourceExtractorDebug;
-                resourceExtractorDebug.loadAtomNamesFromNetFile(compiler->getPostSynthNetFilePath());
-                if (resourceExtractor.elements() != resourceExtractorDebug.elements()) {
-                  const auto& a = resourceExtractor.elements();
-                  const auto& b = resourceExtractorDebug.elements();
-                  std::set<std::string> diff;
-                  std::set_difference(
-                      a.begin(), a.end(),
-                      b.begin(), b.end(),
-                      std::inserter(diff, diff.end())
-                  );
-                  if (!diff.empty()) {
-                    for (const std::string& el: diff) {
-                      qCritical() << "~~~ diff element=" << el.c_str();
-                    }
+                fp::SynthResourceExtractor resourceExtractorNet;
+                resourceExtractorNet.loadAtomNamesFromNetFile(compiler->getPostSynthNetFilePath());
+                const auto& netElements = resourceExtractorNet.elements();
+                const auto& blifElements = resourceExtractor.elements();
+                std::set<std::string> missingInBlif;
+                for (const std::string& netElemenet: netElements) {
+                  if (blifElements.find(netElemenet) == blifElements.end()) {
+                      missingInBlif.insert(netElemenet);
                   }
                 }
+                std::set<std::string> missingInNet;
+                for (const std::string& blifElement: blifElements) {
+                  if (netElements.find(blifElement) == netElements.end()) {
+                      missingInNet.insert(blifElement);
+                  }
+                }
+
+                if (!missingInBlif.empty()) {
+                  for (const std::string& element: missingInBlif) {
+                    qCritical() << "~~~ missingInBlif element=" << element.c_str();
+                  }
+                } else {
+                  qCritical() << "~~~ missingInBlif is empty [expected]";
+                }
+
+                if (!missingInNet.empty()) {
+                  for (const std::string& element: missingInNet) {
+                    qCritical() << "~~~ missingInNet element=" << e.c_str();
+                  }
+                } else {
+                  qCritical() << "~~~ missingInNet is empty [expected]";
+                }
+                //m_floorPlanningWidget->loadNetList(resourceExtractorNet.elements());
               }
               // DEBUG: compare netlist end
 
@@ -2345,9 +2365,6 @@ void MainWindow::floorPlanningActionTriggered()
             QMessageBox::critical(this, "Floor Planning cannot be started.", "VPR cannot dump netlist file");
             cleanFloorPlanningUI();
           }
-          // if (archFileProviderPtr) {
-          //   archFileProviderPtr->clean();
-          // }
           process->deleteLater();
         });
       }
