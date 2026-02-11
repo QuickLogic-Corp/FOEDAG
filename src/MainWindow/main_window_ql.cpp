@@ -2336,7 +2336,7 @@ void MainWindow::floorPlanningActionTriggered()
 
                 if (!missingInNet.empty()) {
                   for (const std::string& element: missingInNet) {
-                    qCritical() << "~~~ missingInNet element=" << e.c_str();
+                    qCritical() << "~~~ missingInNet element=" << element.c_str();
                   }
                 } else {
                   qCritical() << "~~~ missingInNet is empty [expected]";
