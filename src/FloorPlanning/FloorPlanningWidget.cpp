@@ -236,6 +236,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     mainLayout->setSpacing(m);
 
     mainLayout->addLayout(bodyLayout);
+
+    m_busyOverlayWidget->setVisible(true);
 }
 
 FloorPlanningWidget::~FloorPlanningWidget()
@@ -306,12 +308,6 @@ void FloorPlanningWidget::createNewPartition()
 void FloorPlanningWidget::onNotify(QString title, QString msg)
 {
     QMessageBox::warning(this, title, msg);
-}
-
-void FloorPlanningWidget::showEvent(QShowEvent* event)
-{
-    QWidget::showEvent(event);
-    m_busyOverlayWidget->show();
 }
 
 void FloorPlanningWidget::resizeEvent(QResizeEvent* event)

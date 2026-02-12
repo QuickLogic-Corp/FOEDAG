@@ -15,5 +15,6 @@
         <file>zoom-out.svg</file>
         <file>zoom-in-area.png</file>
         <file>selection.png</file>
+        <file>loading.png</file>
     </qresource>
 </RCC>

@@ -101,8 +101,10 @@ if (STANDALONE_FP_APP)
         Test/FloorPlanning_main.cpp
         ../Utils/StringUtils.cpp
         ../Utils/FileUtils.cpp
+        ../Widgets/RoundProgressWidget.cpp
         ../Utils/StringUtils.h
         ../Utils/FileUtils.h
+        ../Widgets/RoundProgressWidget.h
     )
     target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
 

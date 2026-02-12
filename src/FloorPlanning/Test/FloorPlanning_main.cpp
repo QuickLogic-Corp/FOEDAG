@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
     Q_INIT_RESOURCE(floorplanning_resource);
     QApplication app(argc, argv);
 
-    fp::FloorPlanningWidget w;
+    fp::FloorPlanningWidget w("Demo");
 
     std::set<std::string> elements = genTestElements();
     // debug
