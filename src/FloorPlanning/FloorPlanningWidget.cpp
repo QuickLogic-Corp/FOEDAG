@@ -21,7 +21,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     : QWidget(parent)
 {
     setWindowTitle(projectName + tr(" - Floor Planning"));
-    m_busyOverlayWidget = new FOEDAG::RoundProgressWidget(32, this);
+    const int indicatorSize = 32;
+    m_busyOverlayWidget = new FOEDAG::RoundProgressWidget(indicatorSize, this);
     const int m = FP_UI_MARGIN;
 
     m_synthResourcesWidget = new SynthResourceHierarchyWidget;

@@ -6185,11 +6185,9 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
-// debug
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
 }
-// debug
 
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
@@ -6248,8 +6246,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
 
   m_blifParser.load(netlist_path);
   //m_blifParser.printHierachy(); // debug
-
-  //std::filesystem::path post_synth_net_filepath = getPostSynthNetFilePath();
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
