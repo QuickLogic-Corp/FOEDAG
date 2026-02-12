@@ -227,6 +227,9 @@ const TilePtr& DeviceGrid::tile(const Tile::Index& index) const
 
 std::unordered_set<std::string> DeviceGrid::collectErrors()
 {
+    m_overlappedConflictingIndexes.clear();
+    m_overlappedNonConflictingIndexes.clear();
+
     std::unordered_set<std::string> errors;
     for (const auto& [partitionId, partition]: m_partitions) {
         // element presence
@@ -246,7 +249,6 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
     }
 
     // tiles overlapping between different partitions
-    m_overlappedIndexes.clear();
     for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {
         for (auto pit2 = std::next(pit1); pit2 != m_partitions.end(); ++pit2) {
             const PartitionPtr& p1 = pit1->second;
@@ -267,14 +269,14 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
                         for (const Tile::Index& index: indexes) {
                             errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
                         }
-                        m_overlappedIndexes.insert(indexes.begin(), indexes.end());
+                        m_overlappedConflictingIndexes.insert(indexes.begin(), indexes.end());
                     }
                 }
             }
         }
     }
 
-    // tiles overlapping within partition
+    // tiles overlapping within partition (this is not error case, but we still want just highlight such tiles)
     for (auto& [pid, part] : m_partitions) {
         auto& regs = part->regions();
 
@@ -284,10 +286,7 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
                 const RegionPtr& r2 = rit2->second;
                 if (r1->rect().intersects(r2->rect())) {
                     std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
-                    for (const Tile::Index& index: indexes) {
-                        errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partition '"+part->name()+"'");
-                    }
-                    m_overlappedIndexes.insert(indexes.begin(), indexes.end());
+                    m_overlappedNonConflictingIndexes.insert(indexes.begin(), indexes.end());
                 }
             }
         }

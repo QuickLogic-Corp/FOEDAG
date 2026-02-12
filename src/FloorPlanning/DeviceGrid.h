@@ -31,7 +31,8 @@ public:
 
     const std::map<int, PartitionPtr>& partitions() const { return m_partitions; }
     const std::unordered_map<Tile::Index, TilePtr>& tiles() const { return m_tiles; }
-    const std::unordered_set<Tile::Index>& overlappedIndexes() const { return m_overlappedIndexes; }
+    const std::unordered_set<Tile::Index>& overlappedConflictingIndexes() const { return m_overlappedConflictingIndexes; }
+    const std::unordered_set<Tile::Index>& overlappedNonConflictingIndexes() const { return m_overlappedNonConflictingIndexes; }
     const std::unordered_map<Tile::Index, Tile::Index>& tileFragments() const { return m_tileFragments; }
 
     void alignRegions();
@@ -65,7 +66,8 @@ private:
 
     std::map<int, PartitionPtr> m_partitions;
 
-    std::unordered_set<Tile::Index> m_overlappedIndexes;
+    std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;
+    std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;
 
     TilePtr m_nullPtrTile;
 

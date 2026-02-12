@@ -32,7 +32,8 @@ class DeviceGridWidget final : public QWidget {
     const QColor m_editPartitionColor{50, 50, 160}; // blue
     const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
     const QColor m_removeHandlerColor{160, 50, 50, 150}; // transparent-red
-    const QColor m_overlappedTileColor{160, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedConflictingTileColor{160, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedNonConflictingTileColor{m_partitionTransparentColor}; // transparent-green
     const int m_tileLineBaseWidth = 3;
 
     double adaptiveTileLineWidthF() const {
