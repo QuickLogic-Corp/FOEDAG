@@ -2307,7 +2307,7 @@ void MainWindow::floorPlanningActionTriggered()
               fp::SynthResourceExtractor resourceExtractor;
               std::filesystem::path vprEchoBlifFilePath(projectPath / "atom_netlist.cleaned.echo.blif");
               resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
-              // DEBUG: compare netlist start
+#ifdef UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
               if (std::filesystem::exists(compiler->getPostSynthNetFilePath())) {
                 fp::SynthResourceExtractor resourceExtractorNet;
                 resourceExtractorNet.loadAtomNamesFromNetFile(compiler->getPostSynthNetFilePath());
@@ -2316,35 +2316,34 @@ void MainWindow::floorPlanningActionTriggered()
                 std::set<std::string> missingInBlif;
                 for (const std::string& netElemenet: netElements) {
                   if (blifElements.find(netElemenet) == blifElements.end()) {
-                      missingInBlif.insert(netElemenet);
+                    missingInBlif.insert(netElemenet);
                   }
                 }
                 std::set<std::string> missingInNet;
                 for (const std::string& blifElement: blifElements) {
                   if (netElements.find(blifElement) == netElements.end()) {
-                      missingInNet.insert(blifElement);
+                    missingInNet.insert(blifElement);
                   }
                 }
 
                 if (!missingInBlif.empty()) {
                   for (const std::string& element: missingInBlif) {
-                    qCritical() << "~~~ missingInBlif element=" << element.c_str();
+                    qDebug() << "~~~ missingInBlif element=" << element.c_str();
                   }
                 } else {
-                  qCritical() << "~~~ missingInBlif is empty [expected]";
+                  qDebug() << "~~~ missingInBlif is empty [expected]";
                 }
 
                 if (!missingInNet.empty()) {
                   for (const std::string& element: missingInNet) {
-                    qCritical() << "~~~ missingInNet element=" << element.c_str();
+                    qDebug() << "~~~ missingInNet element=" << element.c_str();
                   }
                 } else {
-                  qCritical() << "~~~ missingInNet is empty [expected]";
+                  qDebug() << "~~~ missingInNet is empty [expected]";
                 }
                 //m_floorPlanningWidget->loadNetList(resourceExtractorNet.elements());
               }
-              // DEBUG: compare netlist end
-
+#endif // UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
               if (!resourceExtractor.elements().empty()) {
                 m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
                 // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
