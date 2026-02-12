@@ -82,6 +82,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   }
 
   std::filesystem::path getPostSynthNetFilePath() const;
+  std::filesystem::path getPostSynthBlifFilePath() const;
 
   void setCustomYosysScript(const std::string& script) { m_customYosysScript = script; }
   void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }

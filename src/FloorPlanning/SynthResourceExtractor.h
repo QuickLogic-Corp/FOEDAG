@@ -1,17 +1,19 @@
 #pragma once
 
 #include <string>
+#include <filesystem>
 #include <set>
 
 namespace fp {
 
-enum BlockType {
-  UNKNOWN, FLE, CLB, BRAM, DSP
-};
-
 class SynthResourceExtractor {
 public:
-  bool parseNetFileContent(const std::string&);
+  bool loadAtomNamesFromNetFile(const std::filesystem::path&);
+  bool loadAtomNamesFromBlifFile(const std::filesystem::path&);
+
+  bool parseAtomNamesFromNetFileContent(const std::string&);
+  bool parseAtomNamesFromBlifFileContent(const std::string&);
+
   std::string error() const { return m_error; }
 
   const std::set<std::string>& elements() const { return m_elements; }

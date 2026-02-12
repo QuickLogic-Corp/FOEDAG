@@ -6189,6 +6189,10 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
+}
+
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
@@ -6242,8 +6246,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
 
   m_blifParser.load(netlist_path);
   //m_blifParser.printHierachy(); // debug
-
-  std::filesystem::path post_synth_net_filepath = getPostSynthNetFilePath();
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath)){
@@ -6792,8 +6794,7 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
     return "";
   }
   TilesCfgResult tiles_cfg_result = parseTilesCfg(archFileProvider.get());
-  archFileProvider.clean()
-  ;
+  archFileProvider.clean();
   if (!tiles_cfg_result.error.empty()) {
     ErrorMessage(tiles_cfg_result.error);
     return "";

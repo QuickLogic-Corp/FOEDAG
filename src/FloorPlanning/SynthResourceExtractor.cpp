@@ -8,13 +8,34 @@
 
 #include <functional>
 
-#ifdef DEBUG_NETLIST
-#include <Utils/FileUtils.h>
-#endif
+#include "Utils/FileUtils.h"
+#include "Utils/StringUtils.h"
 
 namespace fp {
 
-bool SynthResourceExtractor::parseNetFileContent(const std::string& content)
+bool SynthResourceExtractor::loadAtomNamesFromNetFile(const std::filesystem::path& filePath)
+{
+  if (!std::filesystem::exists(filePath)) {
+    return false;
+  }
+  if (filePath.extension() != ".net") {
+    return false;
+  }
+  return parseAtomNamesFromNetFileContent(FOEDAG::FileUtils::GetFileContent(filePath));
+}
+
+bool SynthResourceExtractor::loadAtomNamesFromBlifFile(const std::filesystem::path& filePath)
+{
+  if (!std::filesystem::exists(filePath)) {
+    return false;
+  }
+  if (filePath.extension() != ".blif") {
+    return false;
+  }
+  return parseAtomNamesFromBlifFileContent(FOEDAG::FileUtils::GetFileContent(filePath));
+}
+
+bool SynthResourceExtractor::parseAtomNamesFromNetFileContent(const std::string& fileContent)
 {
     m_error.clear();
 
@@ -24,7 +45,7 @@ bool SynthResourceExtractor::parseNetFileContent(const std::string& content)
     int errLine = 0;
     int errCol = 0;
 
-    if (!doc.setContent(QByteArray::fromStdString(content), &errMsg, &errLine, &errCol)) {
+    if (!doc.setContent(QByteArray::fromStdString(fileContent), &errMsg, &errLine, &errCol)) {
         m_error = "XML parse error at" + std::to_string(errLine) + ":" + std::to_string(errCol) + "-" + errMsg.toStdString();
         return false;
     }
@@ -87,6 +108,40 @@ bool SynthResourceExtractor::parseNetFileContent(const std::string& content)
 #endif
 
     return true;
+}
+
+bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string& fileContent) {
+  m_elements.clear();
+
+  std::string content{fileContent};
+  FOEDAG::StringUtils::replaceAllInPlace(content, "\\n", "");
+  auto lines = FOEDAG::StringUtils::tokenize(content, "\n");
+
+  for (const auto& line : lines) {
+    if (!FOEDAG::StringUtils::startsWith(line, ".subckt")) {
+      continue;
+    }
+
+    // extract token after ".subckt" assuming it's atom element
+    size_t pos = strlen(".subckt");
+    while (pos < line.size() && std::isspace((unsigned char)line[pos])) {
+      ++pos;
+    }
+
+    size_t start = pos;
+    while (pos < line.size() && !std::isspace((unsigned char)line[pos])) {
+      ++pos;
+    }
+
+    if (start == pos) {
+      continue;
+    }
+
+    std::string inst = line.substr(start, pos - start);
+    m_elements.insert(inst);
+  }
+
+  return true;
 }
 
 }  // namespace fp

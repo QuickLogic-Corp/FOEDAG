@@ -3,6 +3,8 @@
 #include "DeviceGridDescriptor.h"
 #include "FloorPlanningWidget.h"
 
+#include "SynthResourceExtractor.h"
+
 std::set<std::string> genTestElements()
 {
   std::set<std::string> elements = {"dut.prism.el00.sub001",
@@ -39,9 +41,15 @@ int main(int argc, char** argv) {
     Q_INIT_RESOURCE(floorplanning_resource);
     QApplication app(argc, argv);
 
-    fp::FloorPlanningWidget w;
+    fp::FloorPlanningWidget w("Demo");
 
     std::set<std::string> elements = genTestElements();
+    // debug
+    // fp::SynthResourceExtractor extractor;
+    // extractor.parseAtomNamesFromBlifFile("/home/work/aurora_projects/counter_16bit/atom_netlist.cleaned.echo.blif");
+    // const std::set<std::string>& elements = extractor.elements();
+    // debug
+
     w.loadNetList(elements);
 
     fp::DeviceGridDescriptorPtr descriptor = genTestDeviceDescriptor();

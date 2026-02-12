@@ -71,6 +71,8 @@ else(IPA)
   set(USE_IPA OFF CACHE BOOL "" FORCE)
 endif(NOT DEFINED DISABLE_IPA)
 
+#add_definitions(-DUI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON)
+
 # Find Qt packages and error out if not found
 #find_package(Qt5 COMPONENTS Core Gui Widgets Quick Xml REQUIRED)
 find_package(Qt5 COMPONENTS Core Gui Widgets Xml REQUIRED)

@@ -10,6 +10,8 @@
 
 class QPushButton;
 
+namespace FOEDAG { class RoundProgressWidget; }
+
 namespace fp {
 
 class CheckableButton;
@@ -23,7 +25,7 @@ class FloorPlanningWidget : public QWidget {
     Q_OBJECT
 
 public:
-    explicit FloorPlanningWidget(QWidget* parent = nullptr);
+    explicit FloorPlanningWidget(const QString& projectName, QWidget* parent = nullptr);
     ~FloorPlanningWidget();
 
     void loadNetList(const std::set<std::string>& elements);
@@ -39,10 +41,12 @@ signals:
     void qdcFileSaved();
 
 protected:
+    void resizeEvent(QResizeEvent* event) override final;
     void closeEvent(QCloseEvent* event) override final;
     void keyPressEvent(QKeyEvent* event) override final;
 
 private:
+    FOEDAG::RoundProgressWidget* m_busyOverlayWidget{nullptr};
     QPushButton* m_bnSaveQdc{nullptr};
     QPushButton* m_bnRemoveSelectedPartition{nullptr};
     QPushButton* m_bnRemoveAllPartitions{nullptr};
