@@ -9412,7 +9412,6 @@ VprArchitectureFileProfider::~VprArchitectureFileProfider()
 
 void VprArchitectureFileProfider::clean()
 {
-  qInfo() << "VprArchitectureFileProfider::clean()";
   if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
     std::filesystem::remove(m_architectureFile);
   }

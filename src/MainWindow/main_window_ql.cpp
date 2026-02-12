@@ -2297,11 +2297,11 @@ void MainWindow::floorPlanningActionTriggered()
         const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
         std::filesystem::current_path(projectPath);
         process->start(vpr_program, args);
-        qInfo() << "~~~ run" << vpr_program << args.join(" ");
+        //QDebug() << "run" << vpr_program << args.join(" ");
 
         // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
         QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, compiler, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr](int exitCode) {
-          qInfo() << "~~~ vpr netlist dump proc finished" << exitCode;
+          //QDebug() << "vpr netlist dump proc finished" << exitCode;
           if (exitCode == 0) {
             if (m_floorPlanningWidget) {
               fp::SynthResourceExtractor resourceExtractor;
