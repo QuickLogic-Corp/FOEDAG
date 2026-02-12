@@ -44,9 +44,10 @@
 #include "NCriticalPathModel.h"
 #include "NCriticalPathParameters.h"
 #include "NCriticalPathTheme.h"
-#include "RoundProgressWidget.h"
 #include "SimpleLogger.h"
 #include "client/CommConstants.h"
+
+#include "Widgets/RoundProgressWidget.h"
 
 #define IPA_DISABLE_CTRL_A_KEYSEQUENCE
 

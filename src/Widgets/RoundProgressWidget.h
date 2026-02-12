@@ -26,10 +26,10 @@
 
 #pragma once
 
+#include <QWidget>
 #include <QEasingCurve>
 #include <QPixmap>
 #include <QTimer>
-#include <QWidget>
 
 namespace FOEDAG {
 
