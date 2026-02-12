@@ -2269,7 +2269,7 @@ void MainWindow::floorPlanningActionTriggered()
       }
       
       if (!m_floorPlanningWidget) {
-        m_floorPlanningWidget = new fp::FloorPlanningWidget;
+        m_floorPlanningWidget = new fp::FloorPlanningWidget(compiler->ProjManager()->getProjectName());
 
         connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
           cleanFloorPlanningUI();

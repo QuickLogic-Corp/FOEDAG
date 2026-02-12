@@ -17,9 +17,10 @@
 
 namespace fp {
 	
-FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
+FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* parent)
     : QWidget(parent)
 {
+    setWindowTitle(projectName + tr(" - Floor Planning"));
     m_busyOverlayWidget = new FOEDAG::RoundProgressWidget(32, this);
     const int m = FP_UI_MARGIN;
 

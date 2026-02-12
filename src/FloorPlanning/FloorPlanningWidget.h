@@ -25,7 +25,7 @@ class FloorPlanningWidget : public QWidget {
     Q_OBJECT
 
 public:
-    explicit FloorPlanningWidget(QWidget* parent = nullptr);
+    explicit FloorPlanningWidget(const QString& projectName, QWidget* parent = nullptr);
     ~FloorPlanningWidget();
 
     void loadNetList(const std::set<std::string>& elements);
