@@ -1,5 +1,5 @@
 /**
-  * @file NCriticalPathReportParser.cpp
+  * @file RoundProgressWidget.cpp
   * @author Oleksandr Pyvovarov (APivovarov@quicklogic.com or
   aleksandr.pivovarov.84@gmail.com or
   * https://github.com/w0lek)
