@@ -81,34 +81,42 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
 
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
 {
-    auto trySelectHelper = [this](const QPointF& worldCoord)->bool {
+    m_focusedRegion.reset();
+    m_selectedRegions.clear();
+
+    auto trySelectHelper = [this](const QPointF& worldCoord)->RegionPtr {
         for (const auto& [partitionId, partition]: m_device.partitions()) {
             for (const auto& [regionId, region]: partition->regions()) {
                 if (region->rect().contains(worldCoord)) {
-                    m_selectedRegion = region;
-                    selectPartition(partition);
-                    update();
-                    return true;
+                    return region;
+                    // selectRegion(region);
+                    // m_focusedRegion = region;
+                    // //m_selectedRegion = region;
+                    // //selectPartition(partition);
+                    //update();
+                    //return region;
                 }
             }
         }
-        return false;
+        return nullptr;
     };
 
-    bool selectionResult = trySelectHelper(worldCoord);
-    if (selectionResult) {
-        if (m_selectedPartition && m_selectedRegion) {
-            std::optional<Region::HandlerRole> roleOpt = m_selectedRegion->checkHandlerClick(worldCoord);
-            if (roleOpt) {
-                if (roleOpt == Region::HandlerRole::REMOVE) {
-                    m_selectedPartition->removeRegion(m_selectedRegion);
-                    reportPartitionChanges();
-                    update();
-                } else {
-                    m_regionEditRoleOpt = roleOpt;
-                }
-                return true;
+    // check focused region handlers
+    m_focusedRegion = trySelectHelper(worldCoord);
+    if (m_focusedRegion) {
+        selectRegion(m_focusedRegion);
+        update();
+        std::optional<Region::HandlerRole> roleOpt = m_focusedRegion->checkHandlerClick(worldCoord);
+        if (roleOpt) {
+            if (roleOpt == Region::HandlerRole::REMOVE) {
+                const PartitionPtr& partition = m_focusedRegion->partition();
+                partition->removeRegion(m_focusedRegion);
+                reportPartitionChanges();
+                update();
+            } else {
+                m_regionEditRoleOpt = roleOpt;
             }
+            return true;
         }
     }
     return selectionResult;
@@ -149,6 +157,11 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
         m_newRegion.reset();
         update();
     }
+}
+
+void DeviceGridWidget::selectRegion(const RegionPtr& region)
+{
+    m_selectedRegions.insert(region);
 }
 
 void DeviceGridWidget::selectPartition(PartitionPtr partition)

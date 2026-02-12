@@ -127,9 +127,10 @@ private:
     std::optional<QPointF> m_selectionBottomLeftOpt;
     std::optional<QPointF> m_selectionTopRightOpt;
     RegionPtr m_newRegion;
-    RegionPtr m_selectedRegion;
+    RegionPtr m_focusedRegion;
 
     PartitionPtr m_selectedPartition;
+    std::set<RegionPtr> m_selectedRegions;
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
 
@@ -137,6 +138,7 @@ private:
     void stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");
     void selectPartition(PartitionPtr partition);
+    void selectRegion(const RegionPtr& region);
     // selection
 
     void reportPartitionChanges();

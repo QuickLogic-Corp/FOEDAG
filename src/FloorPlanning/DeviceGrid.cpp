@@ -277,7 +277,7 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
     }
 
     // tiles overlapping within partition (this is not error case, but we still want just highlight such tiles)
-    for (auto& [pid, part] : m_partitions) {
+    for (auto& [pid, part]: m_partitions) {
         auto& regs = part->regions();
 
         for (auto rit1 = regs.begin(); rit1 != regs.end(); ++rit1) {
