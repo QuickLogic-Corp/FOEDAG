@@ -10,6 +10,8 @@
 
 class QPushButton;
 
+namespace FOEDAG { class RoundProgressWidget; }
+
 namespace fp {
 
 class CheckableButton;
@@ -39,10 +41,13 @@ signals:
     void qdcFileSaved();
 
 protected:
+    void showEvent(QShowEvent* event) override final;
+    void resizeEvent(QResizeEvent* event) override final;
     void closeEvent(QCloseEvent* event) override final;
     void keyPressEvent(QKeyEvent* event) override final;
 
 private:
+    FOEDAG::RoundProgressWidget* m_busyOverlayWidget{nullptr};
     QPushButton* m_bnSaveQdc{nullptr};
     QPushButton* m_bnRemoveSelectedPartition{nullptr};
     QPushButton* m_bnRemoveAllPartitions{nullptr};

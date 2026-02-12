@@ -6,6 +6,7 @@
 #include "NewUniqueNameDialog.h"
 #include "ErrorsListWidget.h"
 #include "CheckableButton.h"
+#include "Widgets/RoundProgressWidget.h"
 
 #include <QHBoxLayout>
 #include <QMessageBox>
@@ -19,6 +20,7 @@ namespace fp {
 FloorPlanningWidget::FloorPlanningWidget(QWidget* parent)
     : QWidget(parent)
 {
+    m_busyOverlayWidget = new FOEDAG::RoundProgressWidget(32, this);
     const int m = FP_UI_MARGIN;
 
     m_synthResourcesWidget = new SynthResourceHierarchyWidget;
@@ -278,6 +280,7 @@ void FloorPlanningWidget::loadNetList(const std::set<std::string>& elements)
 {
     m_synthResourcesWidget->build(elements);
     m_partitionResourcesWidget->build(elements);
+    m_busyOverlayWidget->hide();
 }
 
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)
@@ -302,6 +305,18 @@ void FloorPlanningWidget::createNewPartition()
 void FloorPlanningWidget::onNotify(QString title, QString msg)
 {
     QMessageBox::warning(this, title, msg);
+}
+
+void FloorPlanningWidget::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    m_busyOverlayWidget->show();
+}
+
+void FloorPlanningWidget::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    m_busyOverlayWidget->resize(event->size());
 }
 
 void FloorPlanningWidget::closeEvent(QCloseEvent* event)
