@@ -334,6 +334,7 @@ void NCriticalPathView::resizeEvent(QResizeEvent* event) {
   m_sourceModel->limitLineCharsNum(lineCharsNumMax);
 
   QTreeView::resizeEvent(event);
+  m_overlay->resize(event->size());
 }
 
 void NCriticalPathView::showEvent(QShowEvent* event) {
@@ -443,8 +444,6 @@ void NCriticalPathView::updateControlsLocation() {
   m_bnExpandCollapse->move(offset, offset);
   m_bnClearSelection->move(offset,
                            offset + offset + m_bnExpandCollapse->height());
-  m_overlay->move(0.5 * size().width() - 0.5 * m_overlay->width(),
-                  0.5 * size().height() - 0.5 * m_overlay->height());
 }
 
 void NCriticalPathView::clearSelection() {
