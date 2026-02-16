@@ -25,7 +25,7 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
 
 void DeviceGridWidget::onPartitionSelected(int partitionId)
 {
-    PartitionPtr partition = m_device.findPartition(partitionId);
+    PartitionPtr partition = m_device.partition(partitionId);
     if (partition) {
         selectPartition(partition);
         if (m_isScrollToPartitionWhenSelected) {
@@ -37,7 +37,7 @@ void DeviceGridWidget::onPartitionSelected(int partitionId)
 
 void DeviceGridWidget::onPartitionRenamed(int partitionId, QString newName)
 {
-    PartitionPtr partition = m_device.findPartition(partitionId);
+    PartitionPtr partition = m_device.partition(partitionId);
     if (partition) {
         partition->setName(newName.toStdString());
         reportPartitionChanges();
@@ -89,12 +89,6 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
             for (const auto& [regionId, region]: partition->regions()) {
                 if (region->rect().contains(worldCoord)) {
                     return region;
-                    // selectRegion(region);
-                    // m_focusedRegion = region;
-                    // //m_selectedRegion = region;
-                    // //selectPartition(partition);
-                    //update();
-                    //return region;
                 }
             }
         }
@@ -109,17 +103,17 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
         std::optional<Region::HandlerRole> roleOpt = m_focusedRegion->checkHandlerClick(worldCoord);
         if (roleOpt) {
             if (roleOpt == Region::HandlerRole::REMOVE) {
-                const PartitionPtr& partition = m_focusedRegion->partition();
-                partition->removeRegion(m_focusedRegion);
+            if (m_device.removeRegion(m_focusedRegion)) {
                 reportPartitionChanges();
                 update();
+              }
             } else {
                 m_regionEditRoleOpt = roleOpt;
             }
             return true;
         }
     }
-    return selectionResult;
+    return (m_focusedRegion != nullptr);
 }
 
 void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
@@ -328,13 +322,13 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
-    if (m_isMousePressed && m_selectedPartition && m_selectedRegion && m_regionEditRoleOpt) {
+    if (m_isMousePressed && /*m_selectedPartition &&*/ m_focusedRegion && m_regionEditRoleOpt) {
         switch (m_regionEditRoleOpt.value()) {
-        case Region::HandlerRole::BL: m_selectedRegion->setBottomLeft(worldCoord); break;
-        case Region::HandlerRole::BR: m_selectedRegion->setBottomRight(worldCoord); break;
-        case Region::HandlerRole::TR: m_selectedRegion->setTopRight(worldCoord); break;
-        case Region::HandlerRole::TL: m_selectedRegion->setTopLeft(worldCoord); break;
-        case Region::HandlerRole::MOVE: m_selectedRegion->moveCenter(worldCoord); break;
+        case Region::HandlerRole::BL: m_focusedRegion->setBottomLeft(worldCoord); break;
+        case Region::HandlerRole::BR: m_focusedRegion->setBottomRight(worldCoord); break;
+        case Region::HandlerRole::TR: m_focusedRegion->setTopRight(worldCoord); break;
+        case Region::HandlerRole::TL: m_focusedRegion->setTopLeft(worldCoord); break;
+        case Region::HandlerRole::MOVE: m_focusedRegion->moveCenter(worldCoord); break;
         default: break;
         }
 
@@ -757,7 +751,7 @@ void DeviceGridWidget::removeSelectedPartition()
 
 void DeviceGridWidget::clearPartitions() {
     m_device.clearPartitions();
-    m_selectedRegion.reset();
+    m_selectedRegions.clear();
     m_newRegion.reset();
     unselectPartition();
     reportPartitionChanges();

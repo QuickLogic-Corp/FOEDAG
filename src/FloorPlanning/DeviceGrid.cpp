@@ -84,13 +84,13 @@ void DeviceGrid::markVisibleTiles(const QRectF& visibleArea)
     }
 }
 
-PartitionPtr DeviceGrid::findPartition(int partitionId) const
+const PartitionPtr& DeviceGrid::partition(int partitionId) const
 {
     auto it = m_partitions.find(partitionId);
     if (it != m_partitions.end()) {
         return it->second;
     }
-    return nullptr;
+    return m_nullPtrPartition;
 }
 
 void DeviceGrid::removePartition(const PartitionPtr& partition)
@@ -115,6 +115,27 @@ void DeviceGrid::refreshPartition(const PartitionPtr& partition)
         region->rebuildHandles();
         region->setTiles(findTiles(region->rect()));
     }
+}
+
+bool DeviceGrid::removeRegion(const RegionPtr& region)
+{
+  const PartitionPtr& p = partition(region->partitionId());
+  if (p) {
+    p->removeRegion(region);
+    return true;
+  }
+  return false;
+}
+
+bool DeviceGrid::removeRegions(const std::set<RegionPtr>& regions)
+{
+  bool result = false;
+  for (const RegionPtr& region: regions) {
+    if (removeRegion(region)) {
+      result = true;
+    }
+  }
+  return result;
 }
 
 void DeviceGrid::alignRegions()

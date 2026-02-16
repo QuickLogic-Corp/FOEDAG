@@ -25,6 +25,7 @@ std::unordered_set<std::string> Partition::collectOverlappedElements(const Parti
 void Partition::addRegion(const RegionPtr& region)
 {
     m_regions[region->id()] = region;
+    region->setPartitionId(id());
     updateRect();
 }
 

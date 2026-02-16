@@ -129,7 +129,7 @@ private:
     RegionPtr m_newRegion;
     RegionPtr m_focusedRegion;
 
-    PartitionPtr m_selectedPartition;
+    //PartitionPtr m_selectedPartition;
     std::set<RegionPtr> m_selectedRegions;
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);

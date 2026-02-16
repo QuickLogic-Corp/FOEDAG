@@ -26,8 +26,11 @@ public:
 
     void addPartition(const PartitionPtr& partition);
     void removePartition(const PartitionPtr&);
-    PartitionPtr findPartition(int partitionId) const;
+    const PartitionPtr& partition(int partitionId) const;
     void refreshPartition(const PartitionPtr&);
+
+    bool removeRegion(const RegionPtr&);
+    bool removeRegions(const std::set<RegionPtr>&);
 
     const std::map<int, PartitionPtr>& partitions() const { return m_partitions; }
     const std::unordered_map<Tile::Index, TilePtr>& tiles() const { return m_tiles; }
@@ -70,6 +73,7 @@ private:
     std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;
 
     TilePtr m_nullPtrTile;
+    PartitionPtr m_nullPtrPartition;
 
     void constructTile(Tile::Type type, int col, int row);
     void constructTileFragment(int col, int row, const Tile::Index& bottomLeftTileIndex);
