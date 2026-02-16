@@ -2235,7 +2235,8 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_ipCatalogTree = nullptr;
   }
 }
-
+#define UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
+#define UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_TXT_COMPARISON
 void MainWindow::floorPlanningActionTriggered()
 {
   auto cleanFloorPlanningUI = [this]() {
@@ -2297,7 +2298,7 @@ void MainWindow::floorPlanningActionTriggered()
         const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
         std::filesystem::current_path(projectPath);
         process->start(vpr_program, args);
-        //QDebug() << "run" << vpr_program << args.join(" ");
+        qDebug() << "run" << vpr_program << args.join(" ");
 
         // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
         QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, compiler, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr](int exitCode) {
@@ -2307,6 +2308,7 @@ void MainWindow::floorPlanningActionTriggered()
               fp::SynthResourceExtractor resourceExtractor;
               std::filesystem::path vprEchoBlifFilePath(projectPath / "atom_netlist.cleaned.echo.blif");
               resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
+              qDebug() << "\n\n~~~ COMPARE BLIF AND NET";
 #ifdef UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
               if (std::filesystem::exists(compiler->getPostSynthNetFilePath())) {
                 fp::SynthResourceExtractor resourceExtractorNet;
@@ -2314,9 +2316,9 @@ void MainWindow::floorPlanningActionTriggered()
                 const auto& netElements = resourceExtractorNet.elements();
                 const auto& blifElements = resourceExtractor.elements();
                 std::set<std::string> missingInBlif;
-                for (const std::string& netElemenet: netElements) {
-                  if (blifElements.find(netElemenet) == blifElements.end()) {
-                    missingInBlif.insert(netElemenet);
+                for (const std::string& netElement: netElements) {
+                  if (blifElements.find(netElement) == blifElements.end()) {
+                    missingInBlif.insert(netElement);
                   }
                 }
                 std::set<std::string> missingInNet;
@@ -2344,6 +2346,45 @@ void MainWindow::floorPlanningActionTriggered()
                 //m_floorPlanningWidget->loadNetList(resourceExtractorNet.elements());
               }
 #endif // UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
+#ifdef UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_TXT_COMPARISON
+              qDebug() << "\n\n~~~ COMPARE BLIF AND TXT";
+              std::filesystem::path vprTxtAtomsFilePath(projectPath / "atom_netlist_dump.txt");
+              if (std::filesystem::exists(vprTxtAtomsFilePath)) {
+                fp::SynthResourceExtractor resourceExtractorTxt;
+                resourceExtractorTxt.loadAtomNamesFromTxtFile(vprTxtAtomsFilePath);
+                const auto& txtElements = resourceExtractorTxt.elements();
+                const auto& blifElements = resourceExtractor.elements();
+                std::set<std::string> missingInBlif;
+                for (const std::string& txtElement: txtElements) {
+                  if (blifElements.find(txtElement) == blifElements.end()) {
+                    missingInBlif.insert(txtElement);
+                  }
+                }
+                std::set<std::string> missingInTxt;
+                for (const std::string& blifElement: blifElements) {
+                  if (txtElements.find(blifElement) == txtElements.end()) {
+                    missingInTxt.insert(blifElement);
+                  }
+                }
+
+                if (!missingInBlif.empty()) {
+                  for (const std::string& element: missingInBlif) {
+                    qDebug() << "~~~ missingInBlif element=" << element.c_str();
+                  }
+                } else {
+                  qDebug() << "~~~ missingInBlif is empty [expected]";
+                }
+
+                if (!missingInTxt.empty()) {
+                  for (const std::string& element: missingInTxt) {
+                    qDebug() << "~~~ missingInTxt element=" << element.c_str();
+                  }
+                } else {
+                  qDebug() << "~~~ missingInTxt is empty [expected]";
+                }
+                //m_floorPlanningWidget->loadNetList(resourceExtractorTxt.elements());
+              }
+#endif // UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_TXT_COMPARISON
               if (!resourceExtractor.elements().empty()) {
                 m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
                 // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
@@ -2352,7 +2393,7 @@ void MainWindow::floorPlanningActionTriggered()
       
                 m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
               } else {
-                QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elemenets are empty. Something wrong with %1?").arg(QString::fromStdString(vprEchoBlifFilePath.string())));
+                QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(vprEchoBlifFilePath.string())));
                 cleanFloorPlanningUI();
               }
             } else {

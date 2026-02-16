@@ -35,6 +35,17 @@ bool SynthResourceExtractor::loadAtomNamesFromBlifFile(const std::filesystem::pa
   return parseAtomNamesFromBlifFileContent(FOEDAG::FileUtils::GetFileContent(filePath));
 }
 
+bool SynthResourceExtractor::loadAtomNamesFromTxtFile(const std::filesystem::path& filePath)
+{
+  if (!std::filesystem::exists(filePath)) {
+    return false;
+  }
+  if (filePath.extension() != ".txt") {
+    return false;
+  }
+  return parseAtomNamesFromTxtFileContent(FOEDAG::FileUtils::GetFileContent(filePath));
+}
+
 bool SynthResourceExtractor::parseAtomNamesFromNetFileContent(const std::string& fileContent)
 {
     m_error.clear();
@@ -84,61 +95,51 @@ bool SynthResourceExtractor::parseAtomNamesFromNetFileContent(const std::string&
     m_elements.clear();
     collectLeafBlocksRecursive(doc.documentElement(), m_elements);
 
-#ifdef DEBUG_NETLIST
-
-    /* base/vpr_api.cpp
-    void vpr_print_arch_resources(const t_vpr_setup& vpr_setup, const t_arch& Arch) {
-    ...
-    vpr_create_device(vpr_setup, arch);
-    // Dump atom netlist (DEBUG FLOORPLANNING)
-    {
-        std::ofstream atom_file("atom_netlist.txt");
-        const auto& atom_netlist = g_vpr_ctx.atom().netlist();
-        for (auto blk_id: atom_netlist.blocks()) {
-            atom_file << atom_netlist.block_name(blk_id)) << "\n";
-        }
-    }
-    // Dump atom netlist (DEBUG FLOORPLANNING)
-     */
-    QList<QString> lines;
-    for (const std::string& element: m_elements) {
-        lines.append(QString::fromStdString(element));
-    }
-    FOEDAG::FileUtils::WriteToFile("aurora_floorplanning_netlist.txt", lines.join("\n").toStdString());
-#endif
-
     return true;
 }
 
-bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string& fileContent) {
+bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string& fileContent)
+{
   m_elements.clear();
 
   std::string content{fileContent};
   FOEDAG::StringUtils::replaceAllInPlace(content, "\\n", "");
   auto lines = FOEDAG::StringUtils::tokenize(content, "\n");
 
+  constexpr const char* keySubckt = ".subckt";
+  constexpr const char* keyNames = ".names";
   for (const auto& line : lines) {
-    if (!FOEDAG::StringUtils::startsWith(line, ".subckt")) {
-      continue;
+    if (FOEDAG::StringUtils::startsWith(line, keySubckt)) {
+      // extract token right after token ".subckt" if line starts with ".subckt"
+      const size_t base = strlen(keySubckt);
+      const size_t start = line.find_first_not_of(" ", base);
+      if (start != std::string::npos) {
+        const size_t end = line.find_first_of(" ", start);
+        const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
+        m_elements.emplace(line.data() + start, len);
+      }
+    } else if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
+      // extract last token in line which starts with ".names"
+      const size_t end = line.find_last_not_of(" ");
+      if (end != std::string::npos) {
+        const size_t start = line.find_last_of(" ", end);
+        const size_t tokenStart = (start == std::string::npos) ? 0 : (start + 1);
+        m_elements.emplace(line.data() + tokenStart, end - tokenStart + 1);
+      }
     }
+  }
 
-    // extract token after ".subckt" assuming it's atom element
-    size_t pos = strlen(".subckt");
-    while (pos < line.size() && std::isspace((unsigned char)line[pos])) {
-      ++pos;
-    }
+  return true;
+}
 
-    size_t start = pos;
-    while (pos < line.size() && !std::isspace((unsigned char)line[pos])) {
-      ++pos;
-    }
+bool SynthResourceExtractor::parseAtomNamesFromTxtFileContent(const std::string& fileContent)
+{
+  m_elements.clear();
 
-    if (start == pos) {
-      continue;
-    }
+  auto lines = FOEDAG::StringUtils::tokenize(fileContent, "\n");
 
-    std::string inst = line.substr(start, pos - start);
-    m_elements.insert(inst);
+  for (const auto& line : lines) {
+    m_elements.insert(line);
   }
 
   return true;
