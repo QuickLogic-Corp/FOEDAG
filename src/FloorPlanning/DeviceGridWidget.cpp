@@ -81,7 +81,7 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
 
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
 {
-    m_focusedRegion.reset();
+    m_selectedRegion.reset();
     m_selectedRegions.clear();
 
     auto trySelectHelper = [this](const QPointF& worldCoord)->RegionPtr {
@@ -96,14 +96,14 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
     };
 
     // check focused region handlers
-    m_focusedRegion = trySelectHelper(worldCoord);
-    if (m_focusedRegion) {
-        selectRegion(m_focusedRegion);
+    m_selectedRegion = trySelectHelper(worldCoord);
+    if (m_selectedRegion) {
+        selectRegion(m_selectedRegion);
         update();
-        std::optional<Region::HandlerRole> roleOpt = m_focusedRegion->checkHandlerClick(worldCoord);
+        std::optional<Region::HandlerRole> roleOpt = m_selectedRegion->checkHandlerClick(worldCoord);
         if (roleOpt) {
             if (roleOpt == Region::HandlerRole::REMOVE) {
-            if (m_device.removeRegion(m_focusedRegion)) {
+            if (m_device.removeRegion(m_selectedRegion)) {
                 reportPartitionChanges();
                 update();
               }
@@ -113,7 +113,7 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
             return true;
         }
     }
-    return (m_focusedRegion != nullptr);
+    return (m_selectedRegion != nullptr);
 }
 
 void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
@@ -322,13 +322,13 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
-    if (m_isMousePressed && /*m_selectedPartition &&*/ m_focusedRegion && m_regionEditRoleOpt) {
+    if (m_isMousePressed && /*m_selectedPartition &&*/ m_selectedRegion && m_regionEditRoleOpt) {
         switch (m_regionEditRoleOpt.value()) {
-        case Region::HandlerRole::BL: m_focusedRegion->setBottomLeft(worldCoord); break;
-        case Region::HandlerRole::BR: m_focusedRegion->setBottomRight(worldCoord); break;
-        case Region::HandlerRole::TR: m_focusedRegion->setTopRight(worldCoord); break;
-        case Region::HandlerRole::TL: m_focusedRegion->setTopLeft(worldCoord); break;
-        case Region::HandlerRole::MOVE: m_focusedRegion->moveCenter(worldCoord); break;
+        case Region::HandlerRole::BL: m_selectedRegion->setBottomLeft(worldCoord); break;
+        case Region::HandlerRole::BR: m_selectedRegion->setBottomRight(worldCoord); break;
+        case Region::HandlerRole::TR: m_selectedRegion->setTopRight(worldCoord); break;
+        case Region::HandlerRole::TL: m_selectedRegion->setTopLeft(worldCoord); break;
+        case Region::HandlerRole::MOVE: m_selectedRegion->moveCenter(worldCoord); break;
         default: break;
         }
 
