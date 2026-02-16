@@ -119,7 +119,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
 
-    m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/minus.png"), "");
+    m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/erase.png"), "");
     connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelected);
     m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected partition or region"));
     m_bnRemoveSelectedPartition->setEnabled(false);
@@ -172,7 +172,10 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
     m_drawRegion->setToolTip(tr("Draw new region"));
 
-    m_bnRemoveAllPartitions = new QPushButton(QIcon(":/erase.png"), "");
+    m_bnRemoveAllPartitions = new QPushButton(QIcon(":/delete-10402_32.png"), "");
+    //
+
+    //
     connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
     connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
       m_bnRemoveSelectedPartition->setEnabled(m_deviceWidget->hasSelection());
@@ -289,6 +292,7 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 
 void FloorPlanningWidget::onCheckErrorsFinished(std::unordered_set<std::string> errors)
 {
+    TODO: unify m_bnSaveQdc->setEnable respect two factors, errors and non empty partition
     if (errors.empty()) {
         m_bnSaveQdc->setEnabled(true);
         m_errorsListWidget->clear();
