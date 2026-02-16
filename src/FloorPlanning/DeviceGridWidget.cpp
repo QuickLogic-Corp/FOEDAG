@@ -159,17 +159,19 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
 
 void DeviceGridWidget::selectRegion(const RegionPtr& region)
 {
-    unselectPartition();
+    unselectPartition(/*silent*/true);
     m_selectedRegion = region;
+    emit selectionChanged();
     update();
 }
 
 void DeviceGridWidget::selectPartition(PartitionPtr partition)
 {
     if (m_selectedPartition != partition) {
-        m_selectedRegion.reset();
+        unselectRegion(/*silent*/true);
         m_selectedPartition = partition;
         emit partitionSelected(partition);
+        emit selectionChanged();
         update();
     }
 }
@@ -455,16 +457,11 @@ bool DeviceGridWidget::saveQdc()
 
 void DeviceGridWidget::loadQdc()
 {
-    unselectPartition();
+    unselect();
     m_qdcSerializer.load(m_device);
     emit unselectPartitionRequested();
     reportPartitionChanges();
     update();
-}
-
-void DeviceGridWidget::unselectRegion()
-{
-  m_selectedRegion.reset();
 }
 
 void DeviceGridWidget::paintEvent(QPaintEvent* event)
@@ -770,30 +767,72 @@ void DeviceGridWidget::createNewPartition(const std::string& partitionName)
     selectPartition(partition); // automatically select
 }
 
+void DeviceGridWidget::removeSelected()
+{
+  if (m_selectedPartition) {
+    removeSelectedPartition();
+  }
+  if (m_selectedRegion) {
+    removeSelectedRegion();
+  }
+}
+
 void DeviceGridWidget::removeSelectedPartition()
 {
     if (m_selectedPartition) {
         m_device.removePartition(m_selectedPartition);
-        unselectPartition();
+        unselect();
         reportPartitionChanges();
         update();
     }
+}
+
+void DeviceGridWidget::removeSelectedRegion()
+{
+  if (m_selectedRegion) {
+    m_device.removeRegion(m_selectedRegion);
+    unselect();
+    reportPartitionChanges();
+    update();
+  }
 }
 
 void DeviceGridWidget::clearPartitions() {
     m_device.clearPartitions();
     m_selectedRegion.reset();
     m_newRegion.reset();
-    unselectPartition();
+    unselect();
     reportPartitionChanges();
     update();
 }
 
-void DeviceGridWidget::unselectPartition() {
-    m_selectedPartition.reset();
-    m_regionEditRoleOpt.reset();
+void DeviceGridWidget::unselect()
+{
+  if (m_selectedPartition) {
+    unselectPartition();
+  }
+  if (m_selectedRegion || m_regionEditRoleOpt) {
+    unselectRegion();
+  }
+}
+
+void DeviceGridWidget::unselectPartition(bool silent) {
+  m_selectedPartition.reset();
+  if (!silent) {
     emit unselectPartitionRequested();
-    update();
+    emit selectionChanged();
+  }
+  update();
+}
+
+void DeviceGridWidget::unselectRegion(bool silent)
+{
+  m_selectedRegion.reset();
+  m_regionEditRoleOpt.reset();
+  if (!silent) {
+    emit selectionChanged();
+  }
+  update();
 }
 
 void DeviceGridWidget::checkErrors()

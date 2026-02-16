@@ -44,6 +44,7 @@ public:
     explicit DeviceGridWidget(QWidget* parent = nullptr);
     virtual ~DeviceGridWidget()=default;
 
+    bool hasSelection() const { return (m_selectedPartition != nullptr) || (m_selectedRegion != nullptr); }
     void constructTiles(const DeviceGridDescriptorPtr& descriptor);
     void onPartitionSelectedElementsChanged(PartitionPtr partition);
     void onPartitionSelected(int);
@@ -53,9 +54,8 @@ public:
 
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
-    void removeSelectedPartition();
-    void unselectPartition();
-    void unselectRegion();
+    void removeSelected();
+    void unselect();
     std::unordered_set<std::string> existedPartitionNames() const;
 
     void setQdcFilePath(const std::filesystem::path& path);
@@ -88,6 +88,7 @@ signals:
     void partitionSelected(const PartitionPtr&);
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
+    void selectionChanged();
 
 protected:
     QSize sizeHint() const override final;
@@ -167,6 +168,12 @@ private:
     void zoomInRect(QRectF&);
 
     QColor colorFromIndex(int index) const;
+
+    void unselectPartition(bool silent = false);
+    void unselectRegion(bool silent = false);
+
+    void removeSelectedPartition();
+    void removeSelectedRegion();
 };
 
 }  // namespace fp

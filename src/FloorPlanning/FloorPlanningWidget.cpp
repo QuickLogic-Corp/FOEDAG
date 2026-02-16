@@ -120,8 +120,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     bnCreateNewPartition->setToolTip(tr("Create new partition"));
 
     m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/minus.png"), "");
-    connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelectedPartition);
-    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected partition"));
+    connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelected);
+    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected partition or region"));
     m_bnRemoveSelectedPartition->setEnabled(false);
 
     connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested, this, &FloorPlanningWidget::createNewPartition);
@@ -174,6 +174,10 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
 
     m_bnRemoveAllPartitions = new QPushButton(QIcon(":/erase.png"), "");
     connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
+    connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
+      m_bnRemoveSelectedPartition->setEnabled(m_deviceWidget->hasSelection());
+    });
+
     m_bnRemoveAllPartitions->setToolTip(tr("Delete all partitions"));
     m_bnRemoveAllPartitions->setEnabled(false);
 
@@ -277,7 +281,6 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 
     const bool partitionsNotEmpty = !partitions.empty();
     m_partitionsListWidget->setEnabled(partitionsNotEmpty);
-    m_bnRemoveSelectedPartition->setEnabled(partitionsNotEmpty);
     if (!partitionsNotEmpty) {
         m_bnSaveQdc->setEnabled(false);
     }
@@ -342,12 +345,12 @@ void FloorPlanningWidget::keyPressEvent(QKeyEvent* event)
 {
   switch (event->key()) {
   case Qt::Key_Delete: {
-    m_deviceWidget->removeSelectedPartition();
+    m_deviceWidget->removeSelected();
     event->accept();
     break;
   }
   case Qt::Key_Escape: {
-    m_deviceWidget->unselectPartition();
+    m_deviceWidget->unselect();
     event->accept();
     break;
   } default: {
