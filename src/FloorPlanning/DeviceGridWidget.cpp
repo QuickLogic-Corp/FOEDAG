@@ -83,22 +83,28 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
 {
     m_selectedRegion.reset();
 
-    auto trySelectHelper = [this](const QPointF& worldCoord)->RegionPtr {
+    auto trySelectHelper = [this](const QPointF& worldCoord)->std::pair<RegionPtr, std::optional<Region::HandlerRole>> {
+        RegionPtr candidate;
         for (const auto& [partitionId, partition]: m_device.partitions()) {
             for (const auto& [regionId, region]: partition->regions()) {
                 if (region->rect().contains(worldCoord)) {
-                    return region;
+                  if (std::optional<Region::HandlerRole> roleOpt = region->checkHandlerClick(worldCoord)) {
+                    // if user click on area which contains several regions,
+                    // the one who has intersection with handler will have more priority
+                    return std::make_pair(region, roleOpt);
+                  } else {
+                    candidate = region;
+                  }
                 }
             }
         }
-        return nullptr;
+        return std::make_pair(candidate, std::nullopt);
     };
 
     // check focused region handlers
-    RegionPtr region = trySelectHelper(worldCoord);
+    auto [region, roleOpt] = trySelectHelper(worldCoord);
     if (region) {
       selectRegion(region);
-      std::optional<Region::HandlerRole> roleOpt = region->checkHandlerClick(worldCoord);
       if (roleOpt) {
         if (roleOpt == Region::HandlerRole::REMOVE) {
           if (m_device.removeRegion(region)) {
