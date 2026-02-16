@@ -30,7 +30,6 @@ public:
     void refreshPartition(const PartitionPtr&);
 
     bool removeRegion(const RegionPtr&);
-    bool removeRegions(const std::set<RegionPtr>&);
 
     const std::map<int, PartitionPtr>& partitions() const { return m_partitions; }
     const std::unordered_map<Tile::Index, TilePtr>& tiles() const { return m_tiles; }

@@ -55,6 +55,7 @@ public:
     void createNewPartition(const std::string& partitionName = "");
     void removeSelectedPartition();
     void unselectPartition();
+    void unselectRegion();
     std::unordered_set<std::string> existedPartitionNames() const;
 
     void setQdcFilePath(const std::filesystem::path& path);
@@ -72,6 +73,13 @@ public:
 
     void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
     void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
+
+    bool hasSelectedPartition() const { return m_selectedPartition != nullptr; }
+    void changeSelectedPartitionColor(const QColor& color) {
+      if (m_selectedPartition) {
+        m_partitionsPallete[m_selectedPartition->id()] = color;
+      }
+    }
 
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
@@ -109,9 +117,12 @@ private:
     void drawPartitions(QPainter& p);
     void drawCurrentSelection(QPainter& p);
     void drawTileLabels(QPainter& p);
+    void drawRegion(QPainter& p, const RegionPtr& region, const QColor& color);
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
     bool m_isZoomInRegionModeActive = false;
+
+    std::map<int, QColor> m_partitionsPallete;
 
     // panning
     PointAnimation m_moveAnimation;
@@ -127,10 +138,9 @@ private:
     std::optional<QPointF> m_selectionBottomLeftOpt;
     std::optional<QPointF> m_selectionTopRightOpt;
     RegionPtr m_newRegion;
-    RegionPtr m_selectedRegion;
 
     PartitionPtr m_selectedPartition;
-    std::set<RegionPtr> m_selectedRegions;
+    RegionPtr m_selectedRegion;
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
 
@@ -155,6 +165,8 @@ private:
 
     void zoom(const QPointF& refPoint, double delta);
     void zoomInRect(QRectF&);
+
+    QColor colorFromIndex(int index) const;
 };
 
 }  // namespace fp

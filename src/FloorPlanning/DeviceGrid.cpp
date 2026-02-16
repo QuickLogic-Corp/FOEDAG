@@ -127,17 +127,6 @@ bool DeviceGrid::removeRegion(const RegionPtr& region)
   return false;
 }
 
-bool DeviceGrid::removeRegions(const std::set<RegionPtr>& regions)
-{
-  bool result = false;
-  for (const RegionPtr& region: regions) {
-    if (removeRegion(region)) {
-      result = true;
-    }
-  }
-  return result;
-}
-
 void DeviceGrid::alignRegions()
 {
     for (const auto& [partitionId, partition]: m_partitions) {

@@ -8,6 +8,7 @@
 #include "CheckableButton.h"
 #include "Widgets/RoundProgressWidget.h"
 
+#include <QColorDialog>
 #include <QHBoxLayout>
 #include <QMessageBox>
 #include <QPushButton>
@@ -145,7 +146,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(bnRight, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewRight);
     connect(bnDown, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewDown);
 
-            // zoom controls
+    // zoom controls
     QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
     QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
     QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
@@ -176,6 +177,18 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_bnRemoveAllPartitions->setToolTip(tr("Delete all partitions"));
     m_bnRemoveAllPartitions->setEnabled(false);
 
+    // color
+    m_bnPartitionColor = new QPushButton(QIcon(":/icons8-color-palette-48.png"), "");
+    connect(m_bnPartitionColor, &QPushButton::clicked, this, [this](){
+      if (m_deviceWidget->hasSelectedPartition()) {
+        QColor color = QColorDialog::getColor(Qt::white, this, "Select color");
+        m_deviceWidget->changeSelectedPartitionColor(color);
+      } else {
+        onNotify("Cannot change color", "Please select a partition before changing its color.");
+      }
+    });
+    m_bnPartitionColor->setToolTip(tr("Change selected partition color"));
+
     const int spacing = 20;
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
@@ -191,6 +204,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(m_bnZoomInRegion);
     toolBarLayout->addWidget(m_drawRegion);
+    toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(m_bnPartitionColor);
     toolBarLayout->addSpacing(spacing);
     if (bnScrollPartition->isVisible()) {
       toolBarLayout->addWidget(bnScrollPartition);

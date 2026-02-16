@@ -82,7 +82,6 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
 {
     m_selectedRegion.reset();
-    m_selectedRegions.clear();
 
     auto trySelectHelper = [this](const QPointF& worldCoord)->RegionPtr {
         for (const auto& [partitionId, partition]: m_device.partitions()) {
@@ -96,24 +95,23 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
     };
 
     // check focused region handlers
-    m_selectedRegion = trySelectHelper(worldCoord);
-    if (m_selectedRegion) {
-        selectRegion(m_selectedRegion);
-        update();
-        std::optional<Region::HandlerRole> roleOpt = m_selectedRegion->checkHandlerClick(worldCoord);
-        if (roleOpt) {
-            if (roleOpt == Region::HandlerRole::REMOVE) {
-            if (m_device.removeRegion(m_selectedRegion)) {
-                reportPartitionChanges();
-                update();
-              }
-            } else {
-                m_regionEditRoleOpt = roleOpt;
-            }
-            return true;
+    RegionPtr region = trySelectHelper(worldCoord);
+    if (region) {
+      selectRegion(region);
+      std::optional<Region::HandlerRole> roleOpt = region->checkHandlerClick(worldCoord);
+      if (roleOpt) {
+        if (roleOpt == Region::HandlerRole::REMOVE) {
+          if (m_device.removeRegion(region)) {
+            reportPartitionChanges();
+            update();
+          }
+        } else {
+          m_regionEditRoleOpt = roleOpt;
         }
+        return true;
+      }
     }
-    return (m_selectedRegion != nullptr);
+    return (region != nullptr);
 }
 
 void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
@@ -155,12 +153,15 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
 
 void DeviceGridWidget::selectRegion(const RegionPtr& region)
 {
-    m_selectedRegions.insert(region);
+    unselectPartition();
+    m_selectedRegion = region;
+    update();
 }
 
 void DeviceGridWidget::selectPartition(PartitionPtr partition)
 {
     if (m_selectedPartition != partition) {
+        m_selectedRegion.reset();
         m_selectedPartition = partition;
         emit partitionSelected(partition);
         update();
@@ -322,7 +323,7 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
-    if (m_isMousePressed && /*m_selectedPartition &&*/ m_selectedRegion && m_regionEditRoleOpt) {
+    if (m_isMousePressed && m_selectedRegion && m_regionEditRoleOpt) {
         switch (m_regionEditRoleOpt.value()) {
         case Region::HandlerRole::BL: m_selectedRegion->setBottomLeft(worldCoord); break;
         case Region::HandlerRole::BR: m_selectedRegion->setBottomRight(worldCoord); break;
@@ -332,7 +333,8 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         default: break;
         }
 
-        m_device.refreshPartition(m_selectedPartition);
+        PartitionPtr partition = m_device.partition(m_selectedRegion->partitionId());
+        m_device.refreshPartition(partition);
         update();
     }
 }
@@ -452,6 +454,11 @@ void DeviceGridWidget::loadQdc()
     emit unselectPartitionRequested();
     reportPartitionChanges();
     update();
+}
+
+void DeviceGridWidget::unselectRegion()
+{
+  m_selectedRegion.reset();
 }
 
 void DeviceGridWidget::paintEvent(QPaintEvent* event)
@@ -591,11 +598,16 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
 
-    // draw partitions
+    // draw partitions (excluding selected)
     for (const auto& [partitionId, partition]: m_device.partitions()) {
         if (m_selectedPartition && (partition->id() == m_selectedPartition->id())) {
             continue;
         }
+        if (auto it=m_partitionsPallete.find(partitionId) == m_partitionsPallete.end()) {
+          m_partitionsPallete[partitionId] = colorFromIndex(partitionId);
+        }
+        pen.setColor(m_partitionsPallete[partitionId]);
+        p.setPen(pen);
         for (const auto& [regionId, region]: partition->regions()) {
             p.drawRect(region->rect());
             highLightTilesInRegion(p, *region);
@@ -605,24 +617,12 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     // selected partition
     if (m_selectedPartition) {
         for (const auto& [regionId, region]: m_selectedPartition->regions()) {
-            region->rebuildHandles(1.0/m_scale);
-            p.setBrush(Qt::NoBrush);
-            pen.setColor(m_editPartitionColor);
-            p.setPen(pen);
-            p.drawRect(region->rect());
-            highLightTilesInRegion(p, *region);
-
-            p.setPen(Qt::NoPen);
-
-            for (const auto& [role, rect]: region->handles) {
-                if (role == Region::HandlerRole::REMOVE) {
-                    p.setBrush(m_removeHandlerColor);
-                } else {
-                    p.setBrush(m_editPartitionTransparentColor);
-                }
-                p.drawRect(rect);
-            }
+          drawRegion(p, region, m_editPartitionColor);
         }
+    }
+
+    if (m_selectedRegion) {
+      drawRegion(p, m_selectedRegion, m_editPartitionColor);
     }
 
     // draw partition labels (id etc)
@@ -678,6 +678,31 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
         }
     }
     //
+}
+
+void DeviceGridWidget::drawRegion(QPainter& p, const RegionPtr& region, const QColor& color)
+{
+  region->rebuildHandles(1.0/m_scale);
+  p.setBrush(Qt::NoBrush);
+
+  QPen pen(color);
+  pen.setCosmetic(true);
+  pen.setWidthF(adaptiveTileLineWidthF());
+
+  p.setPen(pen);
+  p.drawRect(region->rect());
+  highLightTilesInRegion(p, *region);
+
+  p.setPen(Qt::NoPen);
+
+  for (const auto& [role, rect]: region->handles) {
+    if (role == Region::HandlerRole::REMOVE) {
+      p.setBrush(m_removeHandlerColor);
+    } else {
+      p.setBrush(m_editPartitionTransparentColor);
+    }
+    p.drawRect(rect);
+  }
 }
 
 void DeviceGridWidget::highLightTilesInRegion(QPainter& p, const Region& region) const {
@@ -751,7 +776,7 @@ void DeviceGridWidget::removeSelectedPartition()
 
 void DeviceGridWidget::clearPartitions() {
     m_device.clearPartitions();
-    m_selectedRegions.clear();
+    m_selectedRegion.reset();
     m_newRegion.reset();
     unselectPartition();
     reportPartitionChanges();
@@ -775,6 +800,13 @@ void DeviceGridWidget::reportPartitionChanges()
 {
   checkErrors();
   emit partitionsChanged(m_device.partitions());
+}
+
+QColor DeviceGridWidget::colorFromIndex(int index) const
+{
+  const double goldenAngle = 137.508;
+  int hue = int(std::fmod(index * goldenAngle, 360.0));
+  return QColor::fromHsv(hue, 180, 160);
 }
 
 } // namespace fp
