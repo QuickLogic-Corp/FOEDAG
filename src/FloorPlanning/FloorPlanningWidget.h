@@ -52,6 +52,7 @@ private:
     QPushButton* m_bnRemoveAllPartitions{nullptr};
     CheckableButton* m_bnZoomInRegion{nullptr};
     CheckableButton* m_drawRegion{nullptr};
+    QPushButton* m_bnPartitionColor{nullptr};
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
     SynthResourceHierarchyWidget* m_partitionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};
@@ -62,6 +63,8 @@ private:
     void createNewPartition();
     void checkErrors();
     void onNotify(QString, QString);
+
+    void updateSaveQdcButtonEnability();
 };
 
 }  // namespace fp

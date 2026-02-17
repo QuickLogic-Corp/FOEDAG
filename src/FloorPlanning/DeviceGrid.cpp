@@ -84,13 +84,13 @@ void DeviceGrid::markVisibleTiles(const QRectF& visibleArea)
     }
 }
 
-PartitionPtr DeviceGrid::findPartition(int partitionId) const
+const PartitionPtr& DeviceGrid::partition(int partitionId) const
 {
     auto it = m_partitions.find(partitionId);
     if (it != m_partitions.end()) {
         return it->second;
     }
-    return nullptr;
+    return m_nullPtrPartition;
 }
 
 void DeviceGrid::removePartition(const PartitionPtr& partition)
@@ -115,6 +115,16 @@ void DeviceGrid::refreshPartition(const PartitionPtr& partition)
         region->rebuildHandles();
         region->setTiles(findTiles(region->rect()));
     }
+}
+
+bool DeviceGrid::removeRegion(const RegionPtr& region)
+{
+  const PartitionPtr& p = partition(region->partitionId());
+  if (p) {
+    p->removeRegion(region);
+    return true;
+  }
+  return false;
 }
 
 void DeviceGrid::alignRegions()
@@ -225,28 +235,30 @@ const TilePtr& DeviceGrid::tile(const Tile::Index& index) const
     return m_nullPtrTile;
 }
 
-std::unordered_set<std::string> DeviceGrid::collectErrors()
+const std::unordered_set<std::string>& DeviceGrid::checkErrors()
 {
-    std::unordered_set<std::string> errors;
+    m_errors.clear();
+    m_overlappedConflictingIndexes.clear();
+    m_overlappedNonConflictingIndexes.clear();
+
     for (const auto& [partitionId, partition]: m_partitions) {
         // element presence
         if (partition->elements().empty()) {
-            errors.insert("Partition '" + partition->name() + "' has no elements assigned to it");
+            m_errors.insert("Partition '" + partition->name() + "' has no elements assigned to it");
         }
         // region presence
         if (partition->regions().empty()) {
-            errors.insert("Partition '" + partition->name() + "' has no any region");
+            m_errors.insert("Partition '" + partition->name() + "' has no any region");
         }
         // tiles presence in region
         for (const auto& [regionId, region]: partition->regions()) {
             if (region->tiles().empty()) {
-                errors.insert("Partition '" + partition->name() + "' has region with no any tiles");
+                m_errors.insert("Partition '" + partition->name() + "' has region with no any tiles");
             }
         }
     }
 
     // tiles overlapping between different partitions
-    m_overlappedIndexes.clear();
     for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {
         for (auto pit2 = std::next(pit1); pit2 != m_partitions.end(); ++pit2) {
             const PartitionPtr& p1 = pit1->second;
@@ -265,17 +277,17 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
                     if (r1->rect().intersects(r2->rect())) {
                         std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
                         for (const Tile::Index& index: indexes) {
-                            errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
+                            m_errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
                         }
-                        m_overlappedIndexes.insert(indexes.begin(), indexes.end());
+                        m_overlappedConflictingIndexes.insert(indexes.begin(), indexes.end());
                     }
                 }
             }
         }
     }
 
-    // tiles overlapping within partition
-    for (auto& [pid, part] : m_partitions) {
+    // tiles overlapping within partition (this is not error case, but we still want just highlight such tiles)
+    for (auto& [pid, part]: m_partitions) {
         auto& regs = part->regions();
 
         for (auto rit1 = regs.begin(); rit1 != regs.end(); ++rit1) {
@@ -284,10 +296,7 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
                 const RegionPtr& r2 = rit2->second;
                 if (r1->rect().intersects(r2->rect())) {
                     std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
-                    for (const Tile::Index& index: indexes) {
-                        errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partition '"+part->name()+"'");
-                    }
-                    m_overlappedIndexes.insert(indexes.begin(), indexes.end());
+                    m_overlappedNonConflictingIndexes.insert(indexes.begin(), indexes.end());
                 }
             }
         }
@@ -303,12 +312,12 @@ std::unordered_set<std::string> DeviceGrid::collectErrors()
 
             std::unordered_set<std::string> elements = p1->collectOverlappedElements(*p2);
             for (const std::string& element: elements) {
-                errors.insert("Overlapping element '"+element+"' in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
+                m_errors.insert("Overlapping element '"+element+"' in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
             }
         }
     }
 #endif
-    return errors;
+    return m_errors;
 }
 
 QRectF DeviceGrid::rect() const

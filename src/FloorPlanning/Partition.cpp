@@ -1,10 +1,27 @@
 #include "Partition.h"
 
+#include <cmath>
+
 #include <QDebug>
 
 namespace fp {
 
 int Partition::s_idGenerator = 0;
+
+Partition::Partition(const std::string& name): m_name(name) {
+  m_id = s_idGenerator++;
+  setColor(colorFromIndex(m_id));
+  if (m_name.empty()) {
+    m_name = "partition" + std::to_string(m_id);
+  }
+}
+
+void Partition::setColor(const QColor& color)
+{
+  m_color = color;
+  m_colorTransparent = m_color;
+  m_colorTransparent.setAlphaF(0.4);
+}
 
 std::unordered_set<std::string> Partition::collectOverlappedElements(const Partition& partition) const
 {
@@ -25,6 +42,7 @@ std::unordered_set<std::string> Partition::collectOverlappedElements(const Parti
 void Partition::addRegion(const RegionPtr& region)
 {
     m_regions[region->id()] = region;
+    region->setPartitionId(id());
     updateRect();
 }
 
@@ -49,6 +67,13 @@ void Partition::updateRect()
             m_rect = m_rect.united(region->rect());
         }
     }
+}
+
+QColor Partition::colorFromIndex(int index) const
+{
+  const double goldenAngle = 137.508;
+  int hue = int(std::fmod(index * goldenAngle, 360.0));
+  return QColor::fromHsv(hue, 180, 140);
 }
 
 } // namespace fp

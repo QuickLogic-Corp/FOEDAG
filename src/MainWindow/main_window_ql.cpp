@@ -2235,8 +2235,8 @@ void MainWindow::ipConfiguratorActionTriggered() {
     m_ipCatalogTree = nullptr;
   }
 }
-#define UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
-#define UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_TXT_COMPARISON
+
+//#define UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
 void MainWindow::floorPlanningActionTriggered()
 {
   auto cleanFloorPlanningUI = [this]() {

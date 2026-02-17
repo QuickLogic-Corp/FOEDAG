@@ -14,18 +14,28 @@
 namespace fp {
 
 DeviceGridWidget::DeviceGridWidget(QWidget* parent)
-    : QWidget(parent),
-    m_moveAnimation(this)
+    : QWidget(parent)
+    , m_moveAnimation(this)
 {
   setAutoFillBackground(false);
   setMouseTracking(true);
-
   connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
+}
+
+bool DeviceGridWidget::isSaveQdcAllowed() const
+{
+  if (m_device.partitions().empty()) {
+    return false;
+  }
+  if (m_device.hasErrors()) {
+    return false;
+  }
+  return true;
 }
 
 void DeviceGridWidget::onPartitionSelected(int partitionId)
 {
-    PartitionPtr partition = m_device.findPartition(partitionId);
+    PartitionPtr partition = m_device.partition(partitionId);
     if (partition) {
         selectPartition(partition);
         if (m_isScrollToPartitionWhenSelected) {
@@ -37,7 +47,7 @@ void DeviceGridWidget::onPartitionSelected(int partitionId)
 
 void DeviceGridWidget::onPartitionRenamed(int partitionId, QString newName)
 {
-    PartitionPtr partition = m_device.findPartition(partitionId);
+    PartitionPtr partition = m_device.partition(partitionId);
     if (partition) {
         partition->setName(newName.toStdString());
         reportPartitionChanges();
@@ -81,37 +91,43 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
 
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
 {
-    auto trySelectHelper = [this](const QPointF& worldCoord)->bool {
+    m_selectedRegion.reset();
+
+    auto trySelectHelper = [this](const QPointF& worldCoord)->std::pair<RegionPtr, std::optional<Region::HandlerRole>> {
+        RegionPtr candidate;
         for (const auto& [partitionId, partition]: m_device.partitions()) {
             for (const auto& [regionId, region]: partition->regions()) {
                 if (region->rect().contains(worldCoord)) {
-                    m_selectedRegion = region;
-                    selectPartition(partition);
-                    update();
-                    return true;
+                  if (std::optional<Region::HandlerRole> roleOpt = region->checkHandlerClick(worldCoord)) {
+                    // if user click on area which contains several regions,
+                    // the one who has intersection with handler will have more priority
+                    return std::make_pair(region, roleOpt);
+                  } else {
+                    candidate = region;
+                  }
                 }
             }
         }
-        return false;
+        return std::make_pair(candidate, std::nullopt);
     };
 
-    bool selectionResult = trySelectHelper(worldCoord);
-    if (selectionResult) {
-        if (m_selectedPartition && m_selectedRegion) {
-            std::optional<Region::HandlerRole> roleOpt = m_selectedRegion->checkHandlerClick(worldCoord);
-            if (roleOpt) {
-                if (roleOpt == Region::HandlerRole::REMOVE) {
-                    m_selectedPartition->removeRegion(m_selectedRegion);
-                    reportPartitionChanges();
-                    update();
-                } else {
-                    m_regionEditRoleOpt = roleOpt;
-                }
-                return true;
-            }
+    // check focused region handlers
+    auto [region, roleOpt] = trySelectHelper(worldCoord);
+    if (region) {
+      selectRegion(region);
+      if (roleOpt) {
+        if (roleOpt == Region::HandlerRole::REMOVE) {
+          if (m_device.removeRegion(region)) {
+            reportPartitionChanges();
+            update();
+          }
+        } else {
+          m_regionEditRoleOpt = roleOpt;
         }
+        return true;
+      }
     }
-    return selectionResult;
+    return (region != nullptr);
 }
 
 void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
@@ -151,11 +167,22 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
     }
 }
 
+void DeviceGridWidget::selectRegion(const RegionPtr& region)
+{
+    unselectPartition(/*silent*/true);
+    m_selectedRegion = region;
+    emit unselectPartitionRequested();
+    emit selectionChanged();
+    update();
+}
+
 void DeviceGridWidget::selectPartition(PartitionPtr partition)
 {
     if (m_selectedPartition != partition) {
+        unselectRegion(/*silent*/true);
         m_selectedPartition = partition;
         emit partitionSelected(partition);
+        emit selectionChanged();
         update();
     }
 }
@@ -315,7 +342,7 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
-    if (m_isMousePressed && m_selectedPartition && m_selectedRegion && m_regionEditRoleOpt) {
+    if (m_isMousePressed && m_selectedRegion && m_regionEditRoleOpt) {
         switch (m_regionEditRoleOpt.value()) {
         case Region::HandlerRole::BL: m_selectedRegion->setBottomLeft(worldCoord); break;
         case Region::HandlerRole::BR: m_selectedRegion->setBottomRight(worldCoord); break;
@@ -325,7 +352,8 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         default: break;
         }
 
-        m_device.refreshPartition(m_selectedPartition);
+        PartitionPtr partition = m_device.partition(m_selectedRegion->partitionId());
+        m_device.refreshPartition(partition);
         update();
     }
 }
@@ -440,7 +468,7 @@ bool DeviceGridWidget::saveQdc()
 
 void DeviceGridWidget::loadQdc()
 {
-    unselectPartition();
+    unselect();
     m_qdcSerializer.load(m_device);
     emit unselectPartitionRequested();
     reportPartitionChanges();
@@ -528,16 +556,28 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
     p.setBrush(Tile::color(Tile::Type::Dsp));
     p.drawRects(dspRects);
 
-    // draw overlapped tiles
-    if (!m_device.overlappedIndexes().empty()) {
+    // draw conflicting overlapped tiles
+    if (!m_device.overlappedConflictingIndexes().empty()) {
         QVector<QRectF> rects;
-        rects.reserve(m_device.overlappedIndexes().size());
-        for (const Tile::Index& index: m_device.overlappedIndexes()) {
+        rects.reserve(m_device.overlappedConflictingIndexes().size());
+        for (const Tile::Index& index: m_device.overlappedConflictingIndexes()) {
             const TilePtr& tile = m_device.tile(index);
             rects.append(tile->rect());
         }
-        p.setBrush(m_overlappedTileColor);
+        p.setBrush(m_overlappedConflictingTileColor);
         p.drawRects(rects);
+    }
+
+    // draw overlapped non conflicting tiles
+    if (!m_device.overlappedNonConflictingIndexes().empty()) {
+      QVector<QRectF> rects;
+      rects.reserve(m_device.overlappedNonConflictingIndexes().size());
+      for (const Tile::Index& index: m_device.overlappedNonConflictingIndexes()) {
+        const TilePtr& tile = m_device.tile(index);
+        rects.append(tile->rect());
+      }
+      p.setBrush(m_overlappedNonConflictingTileColor);
+      p.drawRects(rects);
     }
 }
 
@@ -572,11 +612,13 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
 
-    // draw partitions
+    // draw partitions (excluding selected)
     for (const auto& [partitionId, partition]: m_device.partitions()) {
         if (m_selectedPartition && (partition->id() == m_selectedPartition->id())) {
             continue;
         }
+        pen.setColor(partition->color());
+        p.setPen(pen);
         for (const auto& [regionId, region]: partition->regions()) {
             p.drawRect(region->rect());
             highLightTilesInRegion(p, *region);
@@ -586,24 +628,12 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     // selected partition
     if (m_selectedPartition) {
         for (const auto& [regionId, region]: m_selectedPartition->regions()) {
-            region->rebuildHandles(1.0/m_scale);
-            p.setBrush(Qt::NoBrush);
-            pen.setColor(m_editPartitionColor);
-            p.setPen(pen);
-            p.drawRect(region->rect());
-            highLightTilesInRegion(p, *region);
-
-            p.setPen(Qt::NoPen);
-
-            for (const auto& [role, rect]: region->handles) {
-                if (role == Region::HandlerRole::REMOVE) {
-                    p.setBrush(m_removeHandlerColor);
-                } else {
-                    p.setBrush(m_editPartitionTransparentColor);
-                }
-                p.drawRect(rect);
-            }
+          drawRegion(p, region, m_editPartitionColor);
         }
+    }
+
+    if (m_selectedRegion) {
+      drawRegion(p, m_selectedRegion, m_editPartitionColor);
     }
 
     // draw partition labels (id etc)
@@ -622,13 +652,16 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     const double shadowOffset = std::clamp(1.0/m_scale, shadowOffsetMin, shadowOffsetMax);
     font.setPointSize(std::max(minFontSize, baseFontSize / m_scale));
     p.setFont(font);
-    for (const auto& [id, partition]: m_device.partitions()) {
+    for (const auto& [partitionId, partition]: m_device.partitions()) {
         QString text = QString::fromStdString(partition->name());
         for (const auto& [regionId, region]: partition->regions()) {
             const QRectF rect = region->rect().translated(0, -10);
 
+            const bool isRegionSelected = (partitionId == selectedPartitionId) ||
+                                          (m_selectedRegion && (m_selectedRegion->id() == regionId) && (partitionId == m_selectedRegion->partitionId()));
+
             // pass 0: draw text (to determine rendered text rectangle stored in textBoundRect)
-            if (partition->id() == selectedPartitionId) {
+            if (isRegionSelected) {
                 p.setPen(Qt::black);
             } else {
                 p.setPen(Qt::white);
@@ -639,15 +672,15 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
 
             // pass 1: draw background
             p.setPen(Qt::NoPen);
-            if (partition->id() == selectedPartitionId) {
+            if (isRegionSelected) {
                 p.setBrush(m_editPartitionTransparentColor);
             } else {
-                p.setBrush(m_partitionTransparentColor);
+                p.setBrush(partition->colorTransparent());
             }
             p.drawRoundedRect(textBoundRect.adjusted(-padding, -padding, padding, padding), radius, radius);
 
             // pass 2: draw text (second time on the top of background)
-            if (partition->id() == selectedPartitionId) {
+            if (isRegionSelected) {
                 p.setPen(Qt::white);
             } else {
                 p.setPen(Qt::black);
@@ -659,6 +692,31 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
         }
     }
     //
+}
+
+void DeviceGridWidget::drawRegion(QPainter& p, const RegionPtr& region, const QColor& color)
+{
+  region->rebuildHandles(1.0/m_scale);
+  p.setBrush(Qt::NoBrush);
+
+  QPen pen(color);
+  pen.setCosmetic(true);
+  pen.setWidthF(adaptiveTileLineWidthF());
+
+  p.setPen(pen);
+  p.drawRect(region->rect());
+  highLightTilesInRegion(p, *region);
+
+  p.setPen(Qt::NoPen);
+
+  for (const auto& [role, rect]: region->handles) {
+    if (role == Region::HandlerRole::REMOVE) {
+      p.setBrush(m_removeHandlerColor);
+    } else {
+      p.setBrush(m_editPartitionTransparentColor);
+    }
+    p.drawRect(rect);
+  }
 }
 
 void DeviceGridWidget::highLightTilesInRegion(QPainter& p, const Region& region) const {
@@ -720,35 +778,77 @@ void DeviceGridWidget::createNewPartition(const std::string& partitionName)
     selectPartition(partition); // automatically select
 }
 
+void DeviceGridWidget::removeSelected()
+{
+  if (m_selectedPartition) {
+    removeSelectedPartition();
+  }
+  if (m_selectedRegion) {
+    removeSelectedRegion();
+  }
+}
+
 void DeviceGridWidget::removeSelectedPartition()
 {
     if (m_selectedPartition) {
         m_device.removePartition(m_selectedPartition);
-        unselectPartition();
+        unselect();
         reportPartitionChanges();
         update();
     }
+}
+
+void DeviceGridWidget::removeSelectedRegion()
+{
+  if (m_selectedRegion) {
+    m_device.removeRegion(m_selectedRegion);
+    unselect();
+    reportPartitionChanges();
+    update();
+  }
 }
 
 void DeviceGridWidget::clearPartitions() {
     m_device.clearPartitions();
     m_selectedRegion.reset();
     m_newRegion.reset();
-    unselectPartition();
+    unselect();
     reportPartitionChanges();
     update();
 }
 
-void DeviceGridWidget::unselectPartition() {
-    m_selectedPartition.reset();
-    m_regionEditRoleOpt.reset();
+void DeviceGridWidget::unselect()
+{
+  if (m_selectedPartition) {
+    unselectPartition();
+  }
+  if (m_selectedRegion || m_regionEditRoleOpt) {
+    unselectRegion();
+  }
+}
+
+void DeviceGridWidget::unselectPartition(bool silent) {
+  m_selectedPartition.reset();
+  if (!silent) {
     emit unselectPartitionRequested();
-    update();
+    emit selectionChanged();
+  }
+  update();
+}
+
+void DeviceGridWidget::unselectRegion(bool silent)
+{
+  m_selectedRegion.reset();
+  m_regionEditRoleOpt.reset();
+  if (!silent) {
+    emit selectionChanged();
+  }
+  update();
 }
 
 void DeviceGridWidget::checkErrors()
 {
-    std::unordered_set<std::string> errors = m_device.collectErrors();
+    std::unordered_set<std::string> errors = m_device.checkErrors();
     emit checkErrorsFinished(errors);
 }
 

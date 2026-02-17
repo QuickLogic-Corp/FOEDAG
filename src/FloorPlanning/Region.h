@@ -45,6 +45,9 @@ public:
 
     int id() const { return m_id; }
 
+    void setPartitionId(int partitionId) { m_partitionId = partitionId; }
+    int partitionId() const { return m_partitionId; }
+
     std::optional<HandlerRole> checkHandlerClick(const QPointF& point) {
         for (const auto& [role, rect]: handles) {
             if (rect.contains(point)) {
@@ -147,6 +150,7 @@ public:
 
 private:
     int m_id = -1;
+    int m_partitionId = -1;
 
     QPointF m_startPos;
     std::optional<QPointF> m_stopPosOpt;

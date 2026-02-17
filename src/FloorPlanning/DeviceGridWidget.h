@@ -32,7 +32,8 @@ class DeviceGridWidget final : public QWidget {
     const QColor m_editPartitionColor{50, 50, 160}; // blue
     const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
     const QColor m_removeHandlerColor{160, 50, 50, 150}; // transparent-red
-    const QColor m_overlappedTileColor{160, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedConflictingTileColor{160, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedNonConflictingTileColor{m_partitionTransparentColor}; // transparent-green
     const int m_tileLineBaseWidth = 3;
 
     double adaptiveTileLineWidthF() const {
@@ -43,6 +44,9 @@ public:
     explicit DeviceGridWidget(QWidget* parent = nullptr);
     virtual ~DeviceGridWidget()=default;
 
+    bool isSaveQdcAllowed() const;
+
+    bool hasSelection() const { return (m_selectedPartition != nullptr) || (m_selectedRegion != nullptr); }
     void constructTiles(const DeviceGridDescriptorPtr& descriptor);
     void onPartitionSelectedElementsChanged(PartitionPtr partition);
     void onPartitionSelected(int);
@@ -52,8 +56,8 @@ public:
 
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
-    void removeSelectedPartition();
-    void unselectPartition();
+    void removeSelected();
+    void unselect();
     std::unordered_set<std::string> existedPartitionNames() const;
 
     void setQdcFilePath(const std::filesystem::path& path);
@@ -72,6 +76,13 @@ public:
     void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
     void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
 
+    bool hasSelectedPartition() const { return m_selectedPartition != nullptr; }
+    void changeSelectedPartitionColor(const QColor& color) {
+      if (m_selectedPartition) {
+        m_selectedPartition->setColor(color);
+      }
+    }
+
 signals:
     void checkErrorsFinished(std::unordered_set<std::string> errors);
     void createFirstPartitionRequested();
@@ -79,6 +90,7 @@ signals:
     void partitionSelected(const PartitionPtr&);
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
+    void selectionChanged();
 
 protected:
     QSize sizeHint() const override final;
@@ -108,12 +120,14 @@ private:
     void drawPartitions(QPainter& p);
     void drawCurrentSelection(QPainter& p);
     void drawTileLabels(QPainter& p);
+    void drawRegion(QPainter& p, const RegionPtr& region, const QColor& color);
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
     bool m_isZoomInRegionModeActive = false;
 
     // panning
     PointAnimation m_moveAnimation;
+
     bool m_isPanning{false};
     QPointF m_lastMousePos;
     QPointF m_panPixels{0.0, 0.0};
@@ -126,9 +140,9 @@ private:
     std::optional<QPointF> m_selectionBottomLeftOpt;
     std::optional<QPointF> m_selectionTopRightOpt;
     RegionPtr m_newRegion;
-    RegionPtr m_selectedRegion;
 
     PartitionPtr m_selectedPartition;
+    RegionPtr m_selectedRegion;
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
 
@@ -136,6 +150,7 @@ private:
     void stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");
     void selectPartition(PartitionPtr partition);
+    void selectRegion(const RegionPtr& region);
     // selection
 
     void reportPartitionChanges();
@@ -152,6 +167,14 @@ private:
 
     void zoom(const QPointF& refPoint, double delta);
     void zoomInRect(QRectF&);
+
+    QColor colorFromIndex(int index) const;
+
+    void unselectPartition(bool silent = false);
+    void unselectRegion(bool silent = false);
+
+    void removeSelectedPartition();
+    void removeSelectedRegion();
 };
 
 }  // namespace fp

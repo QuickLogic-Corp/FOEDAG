@@ -26,12 +26,15 @@ public:
 
     void addPartition(const PartitionPtr& partition);
     void removePartition(const PartitionPtr&);
-    PartitionPtr findPartition(int partitionId) const;
+    const PartitionPtr& partition(int partitionId) const;
     void refreshPartition(const PartitionPtr&);
+
+    bool removeRegion(const RegionPtr&);
 
     const std::map<int, PartitionPtr>& partitions() const { return m_partitions; }
     const std::unordered_map<Tile::Index, TilePtr>& tiles() const { return m_tiles; }
-    const std::unordered_set<Tile::Index>& overlappedIndexes() const { return m_overlappedIndexes; }
+    const std::unordered_set<Tile::Index>& overlappedConflictingIndexes() const { return m_overlappedConflictingIndexes; }
+    const std::unordered_set<Tile::Index>& overlappedNonConflictingIndexes() const { return m_overlappedNonConflictingIndexes; }
     const std::unordered_map<Tile::Index, Tile::Index>& tileFragments() const { return m_tileFragments; }
 
     void alignRegions();
@@ -50,7 +53,8 @@ public:
     Tile::Index toBottomLeftGridIndex(const TileDescriptor&) const;
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
-    std::unordered_set<std::string> collectErrors();
+    const std::unordered_set<std::string>& checkErrors();
+    bool hasErrors() const { return !m_errors.empty(); }
 
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
@@ -60,14 +64,18 @@ public:
 private:
     DeviceGridDescriptorPtr m_descriptor;
 
+    std::unordered_set<std::string> m_errors;
+
     std::unordered_map<Tile::Index, TilePtr> m_tiles;
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;
 
     std::map<int, PartitionPtr> m_partitions;
 
-    std::unordered_set<Tile::Index> m_overlappedIndexes;
+    std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;
+    std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;
 
     TilePtr m_nullPtrTile;
+    PartitionPtr m_nullPtrPartition;
 
     void constructTile(Tile::Type type, int col, int row);
     void constructTileFragment(int col, int row, const Tile::Index& bottomLeftTileIndex);

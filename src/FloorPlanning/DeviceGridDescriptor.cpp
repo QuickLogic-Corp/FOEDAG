@@ -82,7 +82,6 @@ bool DeviceGridDescriptor::parseLayout(const QDomDocument& doc, const std::strin
                 if (startx == endx) {
                     int column = startx.toInt(&ok);
                     if (ok) {
-                        column -= borderColumn;
                         if (regionType == "dsp") {
                             m_dspColumns.insert(column);
                         } if (regionType == "bram") {
