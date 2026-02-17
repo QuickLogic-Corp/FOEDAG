@@ -2346,45 +2346,6 @@ void MainWindow::floorPlanningActionTriggered()
                 //m_floorPlanningWidget->loadNetList(resourceExtractorNet.elements());
               }
 #endif // UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
-#ifdef UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_TXT_COMPARISON
-              qDebug() << "\n\n~~~ COMPARE BLIF AND TXT";
-              std::filesystem::path vprTxtAtomsFilePath(projectPath / "atom_netlist_dump.txt");
-              if (std::filesystem::exists(vprTxtAtomsFilePath)) {
-                fp::SynthResourceExtractor resourceExtractorTxt;
-                resourceExtractorTxt.loadAtomNamesFromTxtFile(vprTxtAtomsFilePath);
-                const auto& txtElements = resourceExtractorTxt.elements();
-                const auto& blifElements = resourceExtractor.elements();
-                std::set<std::string> missingInBlif;
-                for (const std::string& txtElement: txtElements) {
-                  if (blifElements.find(txtElement) == blifElements.end()) {
-                    missingInBlif.insert(txtElement);
-                  }
-                }
-                std::set<std::string> missingInTxt;
-                for (const std::string& blifElement: blifElements) {
-                  if (txtElements.find(blifElement) == txtElements.end()) {
-                    missingInTxt.insert(blifElement);
-                  }
-                }
-
-                if (!missingInBlif.empty()) {
-                  for (const std::string& element: missingInBlif) {
-                    qDebug() << "~~~ missingInBlif element=" << element.c_str();
-                  }
-                } else {
-                  qDebug() << "~~~ missingInBlif is empty [expected]";
-                }
-
-                if (!missingInTxt.empty()) {
-                  for (const std::string& element: missingInTxt) {
-                    qDebug() << "~~~ missingInTxt element=" << element.c_str();
-                  }
-                } else {
-                  qDebug() << "~~~ missingInTxt is empty [expected]";
-                }
-                //m_floorPlanningWidget->loadNetList(resourceExtractorTxt.elements());
-              }
-#endif // UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_TXT_COMPARISON
               if (!resourceExtractor.elements().empty()) {
                 m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
                 // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
