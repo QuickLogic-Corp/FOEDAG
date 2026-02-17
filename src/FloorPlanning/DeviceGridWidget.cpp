@@ -171,6 +171,7 @@ void DeviceGridWidget::selectRegion(const RegionPtr& region)
 {
     unselectPartition(/*silent*/true);
     m_selectedRegion = region;
+    emit unselectPartitionRequested();
     emit selectionChanged();
     update();
 }
