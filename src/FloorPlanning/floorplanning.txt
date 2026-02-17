@@ -4,36 +4,112 @@ FloorPlanning UI Tool Usage Tips:
 ### RUN ###
 ###########
 - run Aurora UI
-- make sure at least two stages are completed (SYNTHESIS and PACKING)
+- make sure SYNTHESIS has been completed.
 - navigate to the menu "View" where "IP Configurator" and "Pin Planner" are located and run third item "Floorplanning"
 
-################################
-### PARTITIONS LIST CONTROLS ###
-################################
-- Double Left Mouse Button Click - enter to partition renaming
+###############
+### Actions ###
+###############
 
-############################
-### DEVICE GRID CONTROLS ###
-############################
-Mouse:
-- Holding [Left Button] + dragging on empty area — draw a Region for the currently selected Partition.
-- Holding [Left Button] + dragging on corner of Region — resize the Region.
-- Holding [Left Button] + dragging on center of Region — move the Region.
-- Click [Left Button] on one of the Regions — select the whole Partition the clicked Region belongs to.
-- Click [Left Button] on red button of the Region — delete Region.
-Note: when a Partition is selected, it is highlighted in blue.
-- Holding [Right Button] + dragging — change the device grid viewport position.
-- Scroll wheel — zoom in / zoom out.
+#####################
+### Add Partition ###
+#####################
+1) On tool bar click "+" Button
+2)
+- Unselect Region and Partition by clicking [ESC] Button.
+- Click [Left Mouse Button] on empty area will prompt new partition dialog name creation.
 
-Keyboard:
-- [UP], [LEFT], [RIGHT], [DOWN] — change the device grid viewport position.
-- Keyboard button [DELETE] — remove the currently selected Partition.
-- Keyboard button [ESC] — unselect the currently selected Partition.
+########################
+### Rename Partition ###
+########################
+- Focus on Partitions List Widget
+- Double [Left Mouse Button] Click - enter to partition renaming.
+- Type new name, and press [Enter]
+
+########################
+### Select Partition ###
+########################
+- Focus on Partitions List Widget.
+- Click [Left Mouse Button] in Partitions list widget.
+Note: when partition is selected in Device Grid View all regions belong to this partition will be highlighted.
+
+########################
+### Remove Partition ###
+########################
+- Select partition.
+- Press Key [DELETE] or Press "eraser" button on top toolbar.
+
+##########################
+### Unselect Partition ###
+##########################
+- Press Keyboard button [ESC]
+
+##################
+### Add Region ###
+##################
+- Select partition
+- Draw Region rectangle by holding and dragging [Left Mouse Button] on outside any of other regions.
+
+#####################
+### Select Region ###
+#####################
+- Focus on Device Grid View Widget
+- Click [Left Mouse Button] on Region in order to select it.
 
 ###################
-### LIMITATIONS ###
+### Move Region ###
 ###################
-1) Currently, the PACKING run stage is required to build the netlist for the FloorPlanning UI.
-2) Aurora crash scenario https://github.com/QL-Proprietary/aurora2/issues/1614
-Workaround to avoid it:
-Whenever you use Save QDC, make sure that the VPR View (if used) is closed before the save QDC event.
+- Focus on Device Grid View Widget
+- Select region, in order to have Region handlers visible.
+- Holding [Left Button] + dragging on move handler (on center of Region).
+
+#######################
+### Unselect Region ###
+#######################
+- Press Keyboard button [ESC]
+
+#####################
+### Resize Region ###
+#####################
+- Select region, the Region's handlers becomes visible.
+- Holding [Left Mouse Button] + dragging on Region's corner handlers, responsible for resizing, draw new geometry.
+
+#####################
+### Remove Region ###
+#####################
+- Select Region
+- Press key [DELETE] or Click [Left Mouse Button] on red handler button inside the Region area.
+
+##############################
+### ZoomIn/Out device view ###
+##############################
+1) Mouse scroll wheel — zoom in/out.
+2) Use toolbar buttons.
+
+############################
+### Device view position ###
+############################
+1) Key buttons [UP], [LEFT], [RIGHT], [DOWN] — change the device grid viewport position.
+2) Holding [Right Button] + dragging — change the device grid viewport position.
+3) Use toolbar buttons.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
