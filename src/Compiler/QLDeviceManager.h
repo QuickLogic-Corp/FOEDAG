@@ -197,6 +197,8 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceOpenFPGAPinTableFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAIOMapFile(QLDeviceTarget device_target = QLDeviceTarget());
 
+  std::filesystem::path deviceSBMAPSFile(QLDeviceTarget device_target = QLDeviceTarget());
+  std::filesystem::path deviceSBTemplatesDir(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVPRRRGraphFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVPRRouterLookaheadFile(QLDeviceTarget device_target = QLDeviceTarget());
 

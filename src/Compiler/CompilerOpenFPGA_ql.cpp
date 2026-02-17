@@ -2291,6 +2291,13 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
+
+  // note: this exists since a long time. should this be removed by default?
+  // add the *internal* option to allow dangling nodes in the logic.
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
+  // this is a workaround, to avoid putting timing arcs for static input ports.
+  vpr_options += " --allow_dangling_combinational_nodes on";
+
   // use rr_graph and router_lookahead files, if available in the device data:
   std::filesystem::path rr_graph_file_path = 
       QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
@@ -2303,6 +2310,31 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
                     rr_graph_file_path.string() +
                     " --read_router_lookahead " +
                     router_lookahead_file_path.string();
+
+  }
+  else {
+    // no rr_graph available to use, try to use dynamic rr_graph generation.
+    // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
+    std::filesystem::path sb_maps_file_path = 
+    QLDeviceManager::getInstance()->deviceSBMAPSFile(device_target);
+
+    std::filesystem::path sb_templates_dir_path = 
+      QLDeviceManager::getInstance()->deviceSBTemplatesDir(device_target);
+
+    if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
+
+      vpr_options += " --sb_maps " + sb_maps_file_path.string();
+      vpr_options += " --sb_templates " + sb_templates_dir_path.string();
+
+      vpr_options += " --preserve_input_pin_connections off";
+      vpr_options += " --preserve_output_pin_connections off";
+      vpr_options += " --annotated_rr_graph on";
+      vpr_options += " --remove_dangling_nodes off";
+      vpr_options += " --sb_count_dir sb_count";
+      // this is always enabled in the default Aurora flow, so don't add here.
+      // if that is removed, only then uncomment this.
+      // vpr_options += " --allow_dangling_combinational_nodes on";
+    }
   }
 
 
@@ -2338,10 +2370,6 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
   Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
 
-  // add the *internal* option to allow dangling nodes in the logic.
-  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
-  // this is a workaround, to avoid putting timing arcs for static input ports.
-  vpr_options += " --allow_dangling_combinational_nodes on";
 
   // construct the base vpr command with all the options here.
 #if UPSTREAM_UNUSED
@@ -2647,43 +2675,46 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
-  // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
-  std::filesystem::path sb_maps_file_path = 
-      QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
-      std::string("aurora") /
-      std::string("SB_MAPS.yml");
 
-  std::filesystem::path sb_templates_dir_path = 
-      QLDeviceManager::getInstance()->deviceVariantDirPath(device_target) /
-      std::string("CSV");
+  // note: this exists since a long time. should this be removed by default?
+  // add the *internal* option to allow dangling nodes in the logic.
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
+  // this is a workaround, to avoid putting timing arcs for static input ports.
+  command->append("--allow_dangling_combinational_nodes on");
 
-  if(std::filesystem::is_regular_file(sb_maps_file_path) && 
-     std::filesystem::is_directory(sb_templates_dir_path)) {
+  // use rr_graph and router_lookahead files, if available in the device data:
+  std::filesystem::path rr_graph_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
 
-    command->appendFile("--sb_maps", sb_maps_file_path);
-    command->appendFile("--sb_templates", sb_templates_dir_path);
-    command->append("--preserve_input_pin_connections off");
-    command->append("--preserve_output_pin_connections off");
-    command->append("--annotated_rr_graph on");
-    command->append("--remove_dangling_nodes off");
-    // command->append("--sb_count_dir sb_count");
-    // command->append("--allow_dangling_combinational_nodes off");
-    command->append("--strict_checks off");
-    command->append("--verify_file_digests off");
+  std::filesystem::path router_lookahead_file_path = 
+      QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
+  if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
+    command->appendFile("--read_rr_graph", rr_graph_file_path);
+    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
   }
   else {
+    // no rr_graph available to use, try to use dynamic rr_graph generation.
+    // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
+    std::filesystem::path sb_maps_file_path = 
+        QLDeviceManager::getInstance()->deviceSBMAPSFile(device_target);
 
-    // use rr_graph and router_lookahead files, if available in the device data:
-    std::filesystem::path rr_graph_file_path = 
-        QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
+    std::filesystem::path sb_templates_dir_path = 
+        QLDeviceManager::getInstance()->deviceSBTemplatesDir(device_target);
 
-    std::filesystem::path router_lookahead_file_path = 
-        QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
+    if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
 
-    if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
-      command->appendFile("--read_rr_graph", rr_graph_file_path);
-      command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+      command->appendFile("--sb_maps", sb_maps_file_path);
+      command->appendFile("--sb_templates", sb_templates_dir_path);
+
+      command->append("--preserve_input_pin_connections off");
+      command->append("--preserve_output_pin_connections off");
+      command->append("--annotated_rr_graph on");
+      command->append("--remove_dangling_nodes off");
+      command->append("--sb_count_dir sb_count");
+      // this is always enabled in the default Aurora flow, so don't add here.
+      // if that is removed, only then uncomment this.
+      // command->append("--allow_dangling_combinational_nodes on");
     }
   }
 
@@ -2719,11 +2750,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
-
-  // add the *internal* option to allow dangling nodes in the logic.
-  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
-  // this is a workaround, to avoid putting timing arcs for static input ports.
-  command->append("--allow_dangling_combinational_nodes", "on");
 
   // construct the base vpr command with all the options here.
 #if UPSTREAM_UNUSED
@@ -2940,9 +2966,9 @@ bool CompilerOpenFPGA_ql::Packing() {
   if(m_autoLayoutGenerationMode) {
     Message("Packing is running in Auto Layout Generation Mode!\n");
 
-    // Regardless of the status (whether the design fits into the base auto layout or now)
+    // Regardless of the status (whether the design fits into the base auto layout or not)
     // we generated a device package.
-    // Even if the design fits, the layout being is called 'FPGA_AUTO' necessary to trigger the
+    // Even if the design fits, the layout being called 'FPGA_AUTO' necessary to trigger the
     // auto layout generation mode, prevents it from being used in the normal flow.
     // So, we generate a device package (which will be identical to the FPGA_AUTO) with the
     // devicename and layoutname changed according to the generated layout from the script.

@@ -1931,8 +1931,26 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                 std::regex::icase))) {
             continue;
           }
+          // skip any 'design_variables.yml'
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*design_variables\\.yml",
+                                  std::regex::icase))) {
+            continue;
+          }
+          // skip any 'vpr-template.xml'
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*vpr-template\\.xml",
+                                  std::regex::icase))) {
+            continue;
+          }
+          // skip any 'openfpga-template.xml'
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*openfpga-template\\.xml",
+                                  std::regex::icase))) {
+            continue;
+          }
 
-          // include all CSV files for copy, required for RRG generation
+          // include all files in 'CSV/' files for copy, required for RRG generation
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]CSV[\/\\].*)",
                                 std::regex::icase))) {
@@ -3557,6 +3575,133 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAIOMapFile(QLDeviceTarget de
   }
 
   return io_map_file_path;
+}
+
+
+std::filesystem::path QLDeviceManager::deviceSBMAPSFile(QLDeviceTarget device_target) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path empty_path;
+  std::filesystem::path sb_maps_yml_file_path;
+
+  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
+  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
+
+  if(compiler->m_autoLayoutGenerationMode){
+    // if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
+
+    //   compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
+    //   return empty_path;
+    // }
+    // return compiler->m_autoLayoutGeneratedRRGraphBinPath;
+  }
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // find SB_MAPS.yml as "<device-type-dir>/filename-from-json-value" (use config.json name)
+
+  // check for config.json (it should exist at v2.9.0+)
+  std::filesystem::path device_target_config_json_filepath = 
+      deviceConfigJSONPath(device_target);
+  if(device_target_config_json_filepath.empty()) {
+
+    compiler->ErrorMessage("no compatible 'config.json' found in device data, cannot use this device!");
+    return empty_path;
+  }
+
+
+  // read config JSON and get the value
+  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // get json value
+  std::string json_value;
+  if( device_target_config_json.contains("SB_MAPS") ) {
+
+    json_value = device_target_config_json["SB_MAPS"].get<std::string>();
+  }
+
+
+  // check for filename as in config.json from the device
+  sb_maps_yml_file_path = 
+      deviceTypeDirPath(device_target) / json_value;
+  if(!FileUtils::FileIsRegular(sb_maps_yml_file_path)) {
+      sb_maps_yml_file_path.clear();
+  }
+
+  if(sb_maps_yml_file_path.empty()) {
+    compiler->Message("Cannot find device SB_MAPS file: " + sb_maps_yml_file_path.string());
+  }
+  else {
+    compiler->Message("Using device SB_MAPS file: " + sb_maps_yml_file_path.string());
+  }
+
+  return sb_maps_yml_file_path;
+}
+
+
+std::filesystem::path QLDeviceManager::deviceSBTemplatesDir(QLDeviceTarget device_target) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path empty_path;
+  std::filesystem::path sb_templates_dir_path;
+
+  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
+  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
+  if(compiler->m_autoLayoutGenerationMode){
+    // if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
+
+    //   compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
+    //   return empty_path;
+    // }
+    // return compiler->m_autoLayoutGeneratedRRGraphBinPath;
+  }
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // find SB_TEMPLATES_DIR as "<devicevariant-dir>/filename-from-json-value" (use config.json name)
+
+  // check for config.json (it should exist at v2.9.0+)
+  std::filesystem::path device_target_config_json_filepath = 
+      deviceConfigJSONPath(device_target);
+  if(device_target_config_json_filepath.empty()) {
+
+    compiler->ErrorMessage("no compatible 'config.json' found in device data, cannot use this device!");
+    return empty_path;
+  }
+
+
+  // read config JSON and get the value
+  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // get json value
+  std::string json_value;
+  if( device_target_config_json.contains("CORNER_SB_TEMPLATE_DIR") ) {
+
+    json_value = device_target_config_json["CORNER_SB_TEMPLATE_DIR"].get<std::string>();
+  }
+
+
+  // check for filename as in config.json from the device
+  sb_templates_dir_path = 
+    deviceVariantDirPath(device_target) / json_value;
+  if(!FileUtils::FileIsDirectory(sb_templates_dir_path)) {
+    sb_templates_dir_path.clear();
+  }
+
+  if(sb_templates_dir_path.empty()) {
+    compiler->Message("Cannot find device SB_TEMPLATES dir: " + sb_templates_dir_path.string());
+  }
+  else {
+    compiler->Message("Using device SB_TEMPLATES dir: " + sb_templates_dir_path.string());
+  }
+
+  return sb_templates_dir_path;
 }
 
 
