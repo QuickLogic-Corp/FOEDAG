@@ -656,8 +656,11 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
         for (const auto& [regionId, region]: partition->regions()) {
             const QRectF rect = region->rect().translated(0, -10);
 
+            const bool isRegionSelected = (partitionId == selectedPartitionId) ||
+                                          (m_selectedRegion && (m_selectedRegion->id() == regionId) && (partitionId == m_selectedRegion->partitionId()));
+
             // pass 0: draw text (to determine rendered text rectangle stored in textBoundRect)
-            if (partitionId == selectedPartitionId) {
+            if (isRegionSelected) {
                 p.setPen(Qt::black);
             } else {
                 p.setPen(Qt::white);
@@ -668,8 +671,6 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
 
             // pass 1: draw background
             p.setPen(Qt::NoPen);
-            const bool isRegionSelected = (partitionId == selectedPartitionId) ||
-                                    (m_selectedRegion && (m_selectedRegion->id() == regionId) && (partitionId == region->partitionId()));
             if (isRegionSelected) {
                 p.setBrush(m_editPartitionTransparentColor);
             } else {
@@ -678,7 +679,7 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
             p.drawRoundedRect(textBoundRect.adjusted(-padding, -padding, padding, padding), radius, radius);
 
             // pass 2: draw text (second time on the top of background)
-            if (partition->id() == selectedPartitionId) {
+            if (isRegionSelected) {
                 p.setPen(Qt::white);
             } else {
                 p.setPen(Qt::black);
