@@ -284,22 +284,24 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 
     const bool partitionsNotEmpty = !partitions.empty();
     m_partitionsListWidget->setEnabled(partitionsNotEmpty);
-    if (!partitionsNotEmpty) {
-        m_bnSaveQdc->setEnabled(false);
-    }
+
     m_bnRemoveAllPartitions->setEnabled(partitionsNotEmpty);
+    updateSaveQdcButtonEnability();
 }
 
 void FloorPlanningWidget::onCheckErrorsFinished(std::unordered_set<std::string> errors)
 {
-    TODO: unify m_bnSaveQdc->setEnable respect two factors, errors and non empty partition
     if (errors.empty()) {
-        m_bnSaveQdc->setEnabled(true);
         m_errorsListWidget->clear();
     } else {
-        m_bnSaveQdc->setEnabled(false);
         m_errorsListWidget->setErrors(errors);
     }
+    updateSaveQdcButtonEnability();
+}
+
+void FloorPlanningWidget::updateSaveQdcButtonEnability()
+{
+    m_bnSaveQdc->setEnabled(m_deviceWidget->isSaveQdcAllowed());
 }
 
 void FloorPlanningWidget::loadNetList(const std::set<std::string>& elements)

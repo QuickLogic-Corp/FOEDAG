@@ -19,8 +19,19 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
 {
   setAutoFillBackground(false);
   setMouseTracking(true);
-
+  qCritical() << "smooth pan";
   connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
+}
+
+bool DeviceGridWidget::isSaveQdcAllowed() const
+{
+  if (m_device.partitions().empty()) {
+    return false;
+  }
+  if (m_device.hasErrors()) {
+    return false;
+  }
+  return true;
 }
 
 void DeviceGridWidget::onPartitionSelected(int partitionId)
@@ -837,7 +848,7 @@ void DeviceGridWidget::unselectRegion(bool silent)
 
 void DeviceGridWidget::checkErrors()
 {
-    std::unordered_set<std::string> errors = m_device.collectErrors();
+    std::unordered_set<std::string> errors = m_device.checkErrors();
     emit checkErrorsFinished(errors);
 }
 

@@ -63,6 +63,8 @@ private:
     void createNewPartition();
     void checkErrors();
     void onNotify(QString, QString);
+
+    void updateSaveQdcButtonEnability();
 };
 
 }  // namespace fp

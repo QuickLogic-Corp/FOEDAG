@@ -44,6 +44,8 @@ public:
     explicit DeviceGridWidget(QWidget* parent = nullptr);
     virtual ~DeviceGridWidget()=default;
 
+    bool isSaveQdcAllowed() const;
+
     bool hasSelection() const { return (m_selectedPartition != nullptr) || (m_selectedRegion != nullptr); }
     void constructTiles(const DeviceGridDescriptorPtr& descriptor);
     void onPartitionSelectedElementsChanged(PartitionPtr partition);

@@ -53,7 +53,8 @@ public:
     Tile::Index toBottomLeftGridIndex(const TileDescriptor&) const;
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
-    std::unordered_set<std::string> collectErrors();
+    const std::unordered_set<std::string>& checkErrors();
+    bool hasErrors() const { return !m_errors.empty(); }
 
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
@@ -62,6 +63,8 @@ public:
 
 private:
     DeviceGridDescriptorPtr m_descriptor;
+
+    std::unordered_set<std::string> m_errors;
 
     std::unordered_map<Tile::Index, TilePtr> m_tiles;
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;
