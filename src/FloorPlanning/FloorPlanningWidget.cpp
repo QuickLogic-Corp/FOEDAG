@@ -8,6 +8,7 @@
 #include "CheckableButton.h"
 #include "Widgets/RoundProgressWidget.h"
 
+#include <QButtonGroup>
 #include <QColorDialog>
 #include <QHBoxLayout>
 #include <QMessageBox>
@@ -157,13 +158,24 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(bnZoomIn, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomIn);
     connect(bnZoomOut, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomOut);
     connect(bnZoomFit, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomFit);
-    connect(m_bnZoomInRegion, &QPushButton::clicked, this, [this](){
-      m_drawRegion->setChecked(false);
-      m_deviceWidget->activateZoomInRegionMode();
+
+    // exclusive toggle
+    auto* group = new QButtonGroup(this);
+    group->setExclusive(true);
+
+    group->addButton(m_bnZoomInRegion);
+    group->addButton(m_drawRegion);
+    //
+
+    connect(m_bnZoomInRegion, &QPushButton::toggled, this, [this](bool checked){
+      if (checked) {
+        m_deviceWidget->activateZoomInRegionMode();
+      }
     });
-    connect(m_drawRegion, &QPushButton::clicked, this, [this](){
-      m_bnZoomInRegion->setChecked(false);
-      m_deviceWidget->deactivateZoomInRegionMode();
+    connect(m_drawRegion, &QPushButton::toggled, this, [this](bool checked){
+      if (checked) {
+        m_deviceWidget->deactivateZoomInRegionMode();
+      }
     });
 
     bnZoomIn->setToolTip(tr("Zoom in"));
