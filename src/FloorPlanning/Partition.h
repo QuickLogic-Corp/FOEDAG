@@ -6,6 +6,7 @@
 #include <QPoint>
 #include <QRect>
 #include <QLine>
+#include <QColor>
 
 #include <memory>
 
@@ -16,17 +17,16 @@ class Partition {
 public:
     static void resetIdGenerator() { s_idGenerator = 0; }
 
-    Partition(const std::string& name = "") {
-        m_name = name;
-        m_id = s_idGenerator++;
-        if (m_name.empty()) {
-            m_name = "partition" + std::to_string(m_id);
-        }
-    }
+    Partition(const std::string& name = "");
 
     void setName(const std::string& name) { m_name = name; }
 
     const std::string name() const { return m_name; }
+
+    void setColor(const QColor& color);
+
+    const QColor& color() const { return m_color; }
+    const QColor& colorTransparent() const { return m_colorTransparent; }
 
     int id() const { return m_id; }
 
@@ -46,6 +46,8 @@ public:
 private:
     int m_id = -1;
     std::string m_name;
+    QColor m_color;
+    QColor m_colorTransparent;
 
     QRectF m_rect;
 
@@ -53,6 +55,7 @@ private:
     std::map<int, RegionPtr> m_regions;
 
     void updateRect();
+    QColor colorFromIndex(int index) const;
 
 };
 using PartitionPtr = std::shared_ptr<Partition>;

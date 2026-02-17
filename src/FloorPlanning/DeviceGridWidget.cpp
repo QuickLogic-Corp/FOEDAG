@@ -616,10 +616,7 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
         if (m_selectedPartition && (partition->id() == m_selectedPartition->id())) {
             continue;
         }
-        if (auto it=m_partitionsPallete.find(partitionId) == m_partitionsPallete.end()) {
-          m_partitionsPallete[partitionId] = colorFromIndex(partitionId);
-        }
-        pen.setColor(m_partitionsPallete[partitionId]);
+        pen.setColor(partition->color());
         p.setPen(pen);
         for (const auto& [regionId, region]: partition->regions()) {
             p.drawRect(region->rect());
@@ -654,13 +651,13 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
     const double shadowOffset = std::clamp(1.0/m_scale, shadowOffsetMin, shadowOffsetMax);
     font.setPointSize(std::max(minFontSize, baseFontSize / m_scale));
     p.setFont(font);
-    for (const auto& [id, partition]: m_device.partitions()) {
+    for (const auto& [partitionId, partition]: m_device.partitions()) {
         QString text = QString::fromStdString(partition->name());
         for (const auto& [regionId, region]: partition->regions()) {
             const QRectF rect = region->rect().translated(0, -10);
 
             // pass 0: draw text (to determine rendered text rectangle stored in textBoundRect)
-            if (partition->id() == selectedPartitionId) {
+            if (partitionId == selectedPartitionId) {
                 p.setPen(Qt::black);
             } else {
                 p.setPen(Qt::white);
@@ -671,10 +668,12 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
 
             // pass 1: draw background
             p.setPen(Qt::NoPen);
-            if (partition->id() == selectedPartitionId) {
+            const bool isRegionSelected = (partitionId == selectedPartitionId) ||
+                                    (m_selectedRegion && (m_selectedRegion->id() == regionId) && (partitionId == region->partitionId()));
+            if (isRegionSelected) {
                 p.setBrush(m_editPartitionTransparentColor);
             } else {
-                p.setBrush(m_partitionTransparentColor);
+                p.setBrush(partition->colorTransparent());
             }
             p.drawRoundedRect(textBoundRect.adjusted(-padding, -padding, padding, padding), radius, radius);
 
@@ -855,13 +854,6 @@ void DeviceGridWidget::reportPartitionChanges()
 {
   checkErrors();
   emit partitionsChanged(m_device.partitions());
-}
-
-QColor DeviceGridWidget::colorFromIndex(int index) const
-{
-  const double goldenAngle = 137.508;
-  int hue = int(std::fmod(index * goldenAngle, 360.0));
-  return QColor::fromHsv(hue, 180, 160);
 }
 
 } // namespace fp

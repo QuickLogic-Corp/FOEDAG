@@ -79,7 +79,7 @@ public:
     bool hasSelectedPartition() const { return m_selectedPartition != nullptr; }
     void changeSelectedPartitionColor(const QColor& color) {
       if (m_selectedPartition) {
-        m_partitionsPallete[m_selectedPartition->id()] = color;
+        m_selectedPartition->setColor(color);
       }
     }
 
@@ -124,8 +124,6 @@ private:
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
     bool m_isZoomInRegionModeActive = false;
-
-    std::map<int, QColor> m_partitionsPallete;
 
     // panning
     PointAnimation m_moveAnimation;

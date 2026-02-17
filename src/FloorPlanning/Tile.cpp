@@ -2,10 +2,10 @@
 
 namespace fp {
 
-QColor Tile::s_clbColor = QColor{200, 200, 0};
+QColor Tile::s_clbColor = QColor("#dcd9b1");
 QColor Tile::s_ioColor = QColor{20, 20, 20, 50};
-QColor Tile::s_bramColor = QColor{100, 100, 200};
-QColor Tile::s_dspColor = QColor{100, 200, 100};
+QColor Tile::s_bramColor = QColor("#aaaafe");
+QColor Tile::s_dspColor = QColor("#83e183");
 QColor Tile::s_emptyColor = QColor{0, 0, 0, 0};
 
 float Tile::s_unitPx{32.0};
