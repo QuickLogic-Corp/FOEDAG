@@ -129,6 +129,7 @@ private:
 
     // panning
     PointAnimation m_moveAnimation;
+
     bool m_isPanning{false};
     QPointF m_lastMousePos;
     QPointF m_panPixels{0.0, 0.0};

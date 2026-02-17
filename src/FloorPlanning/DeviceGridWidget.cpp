@@ -14,12 +14,11 @@
 namespace fp {
 
 DeviceGridWidget::DeviceGridWidget(QWidget* parent)
-    : QWidget(parent),
-    m_moveAnimation(this)
+    : QWidget(parent)
+    , m_moveAnimation(this)
 {
   setAutoFillBackground(false);
   setMouseTracking(true);
-  qCritical() << "smooth pan";
   connect(&m_moveAnimation, &PointAnimation::pointChanged, this, &DeviceGridWidget::setWorldCenter);
 }
 
