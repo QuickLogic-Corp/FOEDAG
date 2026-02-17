@@ -2291,14 +2291,12 @@ void MainWindow::floorPlanningActionTriggered()
         args.append("--timing_analysis");
         args.append("off");
         args.append("--show_arch_resources");
-        args.append("--echo_file");
-        args.append("on");
 
         QProcess* process = new QProcess;
         const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
         std::filesystem::current_path(projectPath);
         process->start(vpr_program, args);
-        qDebug() << "run" << vpr_program << args.join(" ");
+        //qDebug() << "run" << vpr_program << args.join(" ");
 
         // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
         QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, compiler, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr](int exitCode) {
@@ -2308,8 +2306,8 @@ void MainWindow::floorPlanningActionTriggered()
               fp::SynthResourceExtractor resourceExtractor;
               std::filesystem::path vprEchoBlifFilePath(projectPath / "atom_netlist.cleaned.echo.blif");
               resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
-              qDebug() << "\n\n~~~ COMPARE BLIF AND NET";
 #ifdef UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
+              qDebug() << "\n\n~~~ COMPARE BLIF AND NET";
               if (std::filesystem::exists(compiler->getPostSynthNetFilePath())) {
                 fp::SynthResourceExtractor resourceExtractorNet;
                 resourceExtractorNet.loadAtomNamesFromNetFile(compiler->getPostSynthNetFilePath());
