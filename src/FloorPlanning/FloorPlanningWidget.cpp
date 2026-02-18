@@ -191,6 +191,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
     connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
       m_bnRemoveSelectedPartition->setEnabled(m_deviceWidget->hasSelection());
+      m_bnPartitionColor->setEnabled(m_deviceWidget->hasSelectedPartition());
     });
 
     m_bnRemoveAllPartitions->setToolTip(tr("Delete all partitions"));
@@ -199,14 +200,11 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     // color
     m_bnPartitionColor = new QPushButton(QIcon(":/icons8-color-palette-48.png"), "");
     connect(m_bnPartitionColor, &QPushButton::clicked, this, [this](){
-      if (m_deviceWidget->hasSelectedPartition()) {
-        QColor color = QColorDialog::getColor(Qt::white, this, "Select color");
-        m_deviceWidget->changeSelectedPartitionColor(color);
-      } else {
-        onNotify("Cannot change color", "Please select a partition before changing its color.");
-      }
+      QColor color = QColorDialog::getColor(Qt::white, this, "Select color");
+      m_deviceWidget->changeSelectedPartitionColor(color);
     });
     m_bnPartitionColor->setToolTip(tr("Change selected partition color"));
+    m_bnPartitionColor->setEnabled(false);
 
     const int spacing = 20;
     toolBarLayout->addWidget(bnLoadQdc);
