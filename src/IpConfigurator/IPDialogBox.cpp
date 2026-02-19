@@ -587,7 +587,7 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
           jsonF.insert(param.Name(), value);
         }
 
-        jsonF["build_dir"] = inst->OutputLocation().string();
+        jsonF["build_dir"] =  FileUtils::resolvePathStr(inst->OutputLocation().string());
         jsonF["build_name"] = inst->ModuleName();
         jsonF["build"] = false;
         jsonF["json"] = jsonFile.filename().string();

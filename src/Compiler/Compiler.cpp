@@ -61,6 +61,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/LogUtils.h"
 #include "Utils/ProcessUtils.h"
 #include "Utils/StringUtils.h"
+#include "Utils/PathUtils.h"
 #include "scope_guard/scope_guard.hpp"
 
 extern FOEDAG::Session* GlobalSession;
@@ -219,6 +220,12 @@ void Compiler::Help(std::ostream* out) {
 
 void Compiler::CustomSimulatorSetup(Simulator::SimulationType action) {}
 
+Compiler::Compiler()
+{
+  IPCatalog* catalog = new IPCatalog();
+  SetIPGenerator(new IPGenerator(PathUtils::instance().installDir(), catalog, this));
+}
+
 Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
                    TclInterpreterHandler* tclInterpreterHandler)
     : m_interp(interp),
@@ -227,7 +234,7 @@ Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
   if (m_tclInterpreterHandler) m_tclInterpreterHandler->setCompiler(this);
   SetConstraints(new Constraints{this});
   IPCatalog* catalog = new IPCatalog();
-  SetIPGenerator(new IPGenerator(catalog, this));
+  SetIPGenerator(new IPGenerator(PathUtils::instance().installDir(), catalog, this));
   m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
 }
 
@@ -357,11 +364,6 @@ tcl_interp_clone
 
 bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
                                    bool namesOnly) {
-  if (m_IPGenerator == nullptr) {
-    IPCatalog* catalog = new IPCatalog();
-    SetIPGenerator(new IPGenerator(catalog, this));
-    
-  }
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
   }
@@ -426,10 +428,6 @@ Simulator* Compiler::GetSimulator() {
 }
 
 bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
-  if (m_IPGenerator == nullptr) {
-    IPCatalog* catalog = new IPCatalog();
-    m_IPGenerator = new IPGenerator(catalog, this);
-  }
   // if (m_DesignQuery == nullptr) {
   //   m_DesignQuery = new DesignQuery(this);
   // }

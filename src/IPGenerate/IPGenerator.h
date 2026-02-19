@@ -42,14 +42,13 @@ class IPInstance;
 
 class IPGenerator {
  public:
-  IPGenerator(IPCatalog* catalog, Compiler* compiler);
+  IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
   
   void setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation);
   void shareContext();
   const std::map<std::string, std::string>& environment() const { return m_environment; }
   
-  std::filesystem::path ExecPath() const;
   std::filesystem::path EnvsPath() const;
   std::filesystem::path IPCatalogPath() const;
 
@@ -98,6 +97,7 @@ class IPGenerator {
   std::map<std::string, std::string> m_environment;
 
 private:
+  std::filesystem::path m_installDir;
   std::map<std::string, std::filesystem::path> m_ipOutputLocations;
 
   void dumpDeviceInfo(const std::filesystem::path&);

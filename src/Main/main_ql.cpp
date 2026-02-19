@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Main/ToolContext.h"
 #include "MainWindow/Session.h"
 #include "MainWindow/main_window.h"
+#include "Utils/PathUtils.h"
 
 QWidget* mainWindowBuilder(FOEDAG::Session* session) {
   auto m = new FOEDAG::MainWindow{session};
@@ -40,6 +41,8 @@ QWidget* mainWindowBuilder(FOEDAG::Session* session) {
 int main(int argc, char** argv) {
   FOEDAG::CommandLine* cmd = new FOEDAG::CommandLine(argc, argv);
   cmd->processArgs();
+
+  FOEDAG::PathUtils::instance().init(cmd->Argv()[0]);
 
   FOEDAG::GUI_TYPE guiType =
       FOEDAG::Foedag::getGuiType(cmd->WithQt(), cmd->WithQml());
