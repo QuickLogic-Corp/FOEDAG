@@ -1,6 +1,5 @@
 #include "SynthResourceHierarchyWidget.h"
 #include "HierarhyElement.h"
-#include "Utils/StringUtils.h"
 
 #include <QStringListModel>
 #include <QVBoxLayout>

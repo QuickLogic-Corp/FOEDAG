@@ -667,8 +667,8 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
                 p.setPen(Qt::white);
             }
             p.setBrush(Qt::NoBrush);
-            QRectF textBoundRect;
-            p.drawText(rect, flags, text, &textBoundRect);
+            QRectF textBoundRect = p.boundingRect(rect, flags, text);
+            p.drawText(textBoundRect, flags, text);
 
             // pass 1: draw background
             p.setPen(Qt::NoPen);
@@ -686,7 +686,7 @@ void DeviceGridWidget::drawPartitions(QPainter& p)
                 p.setPen(Qt::black);
             }
             p.setBrush(Qt::NoBrush);
-            p.drawText(rect.translated(shadowOffset, -shadowOffset), flags, text);
+            p.drawText(textBoundRect.translated(shadowOffset, -shadowOffset), flags, text);
 
             // Note: in pass 0 and pass 2 text are drawn in opposite colors and shifted with some offset in order to imitate font shadow, for better readability
         }
