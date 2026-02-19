@@ -3030,7 +3030,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       if (status_auto_device == 0) {
 
         // get the layout name generated from the log file:
-        const QRegularExpression auto_layout_regex("Layout: (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
+        const QRegularExpression auto_layout_regex("Layout for (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
         QFile file{QString::fromStdString(logfile_auto_device.string())};
         file.open(QFile::ReadOnly);
         while (!file.atEnd()) {
@@ -3062,6 +3062,14 @@ bool CompilerOpenFPGA_ql::Packing() {
         ErrorMessage("Generating Device Failed, Error Code: " + std::to_string(status_auto_device) + "\n");
         return false;
       }
+
+      // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
+      // if the layout name of the device is 'FPGA_AUTO'
+      m_autoLayoutGeneratedLayoutName = 
+              std::string("AUTOFPGA") + 
+              std::to_string(generated_layout_width) + 
+              std::to_string(generated_layout_height);
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
     }
     else {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
@@ -3082,6 +3090,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     }
 
 
+#if UNUSED_GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
     // so that the next stages can be run quicker.
     // use a basic blif file for generating the rr_graph.bin and router_lookahead.bin
@@ -3128,7 +3137,12 @@ bool CompilerOpenFPGA_ql::Packing() {
         std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
     FileUtils::removeFile(logfile_vpr_stdout);
     FileUtils::removeFile(logfile_generate_rr_graph);
+#endif //#if UNUSED_GENERATE_RR_GRAPH_FPGA_AUTO
 
+
+    // encrypt the generated vpr file, and remove the unencrypted generated file.
+    // delete the temporary FPGA_AUTO vpr xml file as we won't use it anymore.
+    // instead, use the encrypted generated vpr file in the autogeneration mode.
 
 
     // re-run packing with the generated vpr xml now.
