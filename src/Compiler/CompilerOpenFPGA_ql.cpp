@@ -5633,23 +5633,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
                       read_openfpga_bitstream_setting_command);
 
   // repack constraints
-  // 1. pass in the PCF file, if available with '--pcf'
-  // 2. pass in the user provided repack design constraint xml if available with '--design_constraints'
-  // 3. pass in option '--write_design_constraints' to dump constraints to verify
+  // 1. pass in the user provided repack design constraint xml if available with '--design_constraints'
   std::string openfpga_repack_constraints_command = "repack";
-  std::filesystem::path filepath_pcf = QLSettingsManager::getInstance()->getPCFFilePath();
-  if(!filepath_pcf.empty()) {
-    openfpga_repack_constraints_command += 
-        " --pcf " + filepath_pcf.string();
-  }
   if(!m_OpenFpgaRepackConstraintsFile.empty()) {
     openfpga_repack_constraints_command += 
         " --design_constraints " + m_OpenFpgaRepackConstraintsFile.string();
   }
-  std::string generated_repack_design_constraint_filename =
-      "repack_design_constraint_generated.xml";
-  openfpga_repack_constraints_command += 
-      " --write_design_constraints " + generated_repack_design_constraint_filename;
   result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
                       openfpga_repack_constraints_command);
 
