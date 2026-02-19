@@ -5590,8 +5590,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     // empty string returned on error.
     return std::string("");
   }
-  Message("kkkk");
-  Message(base_vpr_options);
+
   vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the

@@ -68,6 +68,8 @@ using namespace FOEDAG;
 using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
 
+#define OVERRIDE_WITH_ENV_VAR 1
+
 auto CreateDummyLog =
     [](ProjectManager* projManager,
        const std::string& outfileName) -> std::filesystem::path {
@@ -2745,12 +2747,59 @@ QProcess* Compiler::ExecuteCommand(const std::string& command) const {
 
 std::string Compiler::ReplaceAll(std::string_view str, std::string_view from,
                                  std::string_view to) {
+
+#if OVERRIDE_WITH_ENV_VAR
+  // check if the string replacement 'from' is an env variable style definition: '${xxx}'
+  // if so, see if an env variable of the same name is already defined
+  // if so, use the value of the env variable if not empty
+
+  std::string env_var_name;
+  std::string env_var_value;
+  static const QRegularExpression env_var_pattern_re(
+    R"(^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$)"
+  );
+  QRegularExpressionMatch env_var_pattern_match = env_var_pattern_re.match(QString::fromStdString(std::string(from)));
+  if(env_var_pattern_match.hasMatch()){
+    // 'from' has matched expected pattern of ENV variable ${}
+    env_var_name = QString(env_var_pattern_match.captured(1)).toStdString();
+  }
+  // if 'from' has matched ENV variable name pattern ${}
+  if(!env_var_name.empty()) {
+    const char* const env_var_value_str = std::getenv(env_var_name.c_str());
+    // if the ENV variable is defined
+    if (env_var_value_str != nullptr) {
+      env_var_value = std::string(env_var_value_str);
+      // if the value of the ENV variable is not an empty string
+      if(!env_var_value.empty()) {
+        std::cout << std::string("<info> ENV override: ") + std::string(from) + std::string(" with value from ENV!") << std::endl;
+      }
+    }
+  }
+
+  size_t start_pos = 0;
+  std::string result(str);
+  while ((start_pos = result.find(from, start_pos)) != std::string::npos) {
+    if(!env_var_value.empty()) {
+      result.replace(start_pos, from.length(), env_var_value);
+      start_pos += env_var_value.length();  // Handles case where 'env_var_value' is a substr of 'from'
+    }
+    else {
+      result.replace(start_pos, from.length(), to);
+      start_pos += to.length();  // Handles case where 'to' is a substr of 'from'
+    }
+  }
+
+#else //#if OVERRIDE_WITH_ENV_VAR
+
   size_t start_pos = 0;
   std::string result(str);
   while ((start_pos = result.find(from, start_pos)) != std::string::npos) {
     result.replace(start_pos, from.length(), to);
     start_pos += to.length();  // Handles case where 'to' is a substr of 'from'
   }
+
+#endif //#if OVERRIDE_WITH_ENV_VAR
+
   return result;
 }
 
