@@ -3585,16 +3585,16 @@ std::filesystem::path QLDeviceManager::deviceSBMAPSFile(QLDeviceTarget device_ta
   std::filesystem::path empty_path;
   std::filesystem::path sb_maps_yml_file_path;
 
-  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
-  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
+  // if we are in auto layout generation mode, then return the generated SB_MAPS.yml filepath here
+  // as we will not be using the (auto) device's own SB_MAPS.yml, even if it exists.
 
   if(compiler->m_autoLayoutGenerationMode){
-    // if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
+    if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedSBMapsYMLPath)) {
 
-    //   compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
-    //   return empty_path;
-    // }
-    // return compiler->m_autoLayoutGeneratedRRGraphBinPath;
+      compiler->ErrorMessage("Cannot find generated SB_MAPS.yml file: " + compiler->m_autoLayoutGeneratedSBMapsYMLPath.string());
+      return empty_path;
+    }
+    return compiler->m_autoLayoutGeneratedSBMapsYMLPath;
   }
 
   if( !isDeviceTargetValid(device_target) ) {

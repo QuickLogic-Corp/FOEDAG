@@ -227,6 +227,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaFabricKeyFile = "";
   std::filesystem::path m_OpenFpgaPinMapXml = "";
   std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
+  std::filesystem::path m_SBMapsFile = "";
+  std::filesystem::path m_SBTemplatesDir = "";
   std::string m_deviceSize;
   std::string m_customYosysScript;
   std::string m_openFPGAScript;

@@ -87,6 +87,8 @@ using json = nlohmann::ordered_json;
 using namespace FOEDAG;
 
 #define USE_INCREMENTAL_COMPILATION
+#define GENERATE_NEW_DEVICE_FPGA_AUTO 1
+#define GENERATE_RR_GRAPH_FPGA_AUTO 0
 
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
 {
@@ -2696,16 +2698,16 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   else {
     // no rr_graph available to use, try to use dynamic rr_graph generation.
     // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
-    std::filesystem::path sb_maps_file_path = 
+    m_SBMapsFile = 
         QLDeviceManager::getInstance()->deviceSBMAPSFile(device_target);
 
-    std::filesystem::path sb_templates_dir_path = 
+    m_SBTemplatesDir = 
         QLDeviceManager::getInstance()->deviceSBTemplatesDir(device_target);
 
-    if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
+    if(!m_SBMapsFile.empty() && !m_SBTemplatesDir.empty()) {
 
-      command->appendFile("--sb_maps", sb_maps_file_path);
-      command->appendFile("--sb_templates", sb_templates_dir_path);
+      command->appendFile("--sb_maps", m_SBMapsFile);
+      command->appendFile("--sb_templates", m_SBTemplatesDir);
 
       command->append("--preserve_input_pin_connections off");
       command->append("--preserve_output_pin_connections off");
@@ -2959,6 +2961,12 @@ bool CompilerOpenFPGA_ql::Packing() {
   m_autoLayoutGenerationMode = false;
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  
+  // Note: At this point:
+  // m_architectureFile is already populated in the vpr base command
+  // m_SBMapsFile is already populated in the vpr base command
+  // m_SBTemplatesDir is already populated in the vpr base command
+  
   if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
     m_autoLayoutGenerationMode = true;
   }
@@ -2976,6 +2984,9 @@ bool CompilerOpenFPGA_ql::Packing() {
     // m_architectureFile -> decrypted vpr.xml of current device target.
     std::filesystem::path generated_vpr_xml_path = 
           std::filesystem::path(ProjManager()->projectPath()) / "vpr_generated.xml";
+
+    std::filesystem::path generated_sb_maps_yml_path = 
+          std::filesystem::path(ProjManager()->projectPath()) / "sb_maps_generated.yml";
 
     // layout to be used in generated device
     int generated_layout_width = 0;
@@ -3010,12 +3021,15 @@ bool CompilerOpenFPGA_ql::Packing() {
         }
       }
 
+      std::string add_layout_script_generated_layout_name;
+
       std::string command_auto_device = 
           std::string("python3") + std::string(" ") +
           add_layout_script_path.string() + std::string(" ") +
           std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
           std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
-          std::string("--output ") + generated_vpr_xml_path.string();
+          std::string("--output ") + generated_vpr_xml_path.string() + std::string(" ") +
+          std::string("--output_sb_map ") + generated_sb_maps_yml_path.string();
 
       if(overhead_percentage > 0) {
         command_auto_device += 
@@ -3038,7 +3052,7 @@ bool CompilerOpenFPGA_ql::Packing() {
           auto match = auto_layout_regex.match(line);
           if (match.hasMatch()) {
             bool ok;
-            m_autoLayoutGeneratedLayoutName = QString(match.captured(1)).toStdString();
+            add_layout_script_generated_layout_name = QString(match.captured(1)).toStdString();
             generated_layout_width = QString(match.captured(2)).toInt(&ok);
             if(!ok) {
               ErrorMessage("Error parsing log from auto-layout script: width\n");
@@ -3053,7 +3067,7 @@ bool CompilerOpenFPGA_ql::Packing() {
             break;
           }
         }
-        if(m_autoLayoutGeneratedLayoutName.empty()) {
+        if(add_layout_script_generated_layout_name.empty()) {
           ErrorMessage("Error parsing log from auto-layout script: layoutname\n");
           return false;
         }
@@ -3069,7 +3083,7 @@ bool CompilerOpenFPGA_ql::Packing() {
               std::string("AUTOFPGA") + 
               std::to_string(generated_layout_width) + 
               std::to_string(generated_layout_height);
-      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
     }
     else {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
@@ -3085,12 +3099,15 @@ bool CompilerOpenFPGA_ql::Packing() {
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
 
-      // update the layout_name in the vpr.xml
+      // copy the SB_MAPS.yml of the current device into the same path as the python script would have done.
+      FileUtils::overwriteFile(m_SBMapsFile, generated_sb_maps_yml_path);
+
+      // update the layout_name in the vpr.xml, we know that it would be called 'FPGA_AUTO' in this case.
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
     }
 
 
-#if UNUSED_GENERATE_RR_GRAPH_FPGA_AUTO
+#if GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
     // so that the next stages can be run quicker.
     // use a basic blif file for generating the rr_graph.bin and router_lookahead.bin
@@ -3137,36 +3154,16 @@ bool CompilerOpenFPGA_ql::Packing() {
         std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
     FileUtils::removeFile(logfile_vpr_stdout);
     FileUtils::removeFile(logfile_generate_rr_graph);
-#endif //#if UNUSED_GENERATE_RR_GRAPH_FPGA_AUTO
+#endif // #if GENERATE_RR_GRAPH_FPGA_AUTO
 
 
-    // encrypt the generated vpr file, and remove the unencrypted generated file.
-    // delete the temporary FPGA_AUTO vpr xml file as we won't use it anymore.
-    // instead, use the encrypted generated vpr file in the autogeneration mode.
-
-
-    // re-run packing with the generated vpr xml now.
-    // easiest way is to take the previous command as is, and 
-    // - replace the architecture file path
-    // - replace the layout name
-    std::string command_rerun = command->string();
-
-    // ensure that 'FPGA_AUTO' replacement is done first!!
-    command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
-    command_rerun = ReplaceAll(command_rerun, m_architectureFile.string(), generated_vpr_xml_path.string());
-
-    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                      std::string(ProjManager()->projectName() + "_pack.cmd"))
-                          .string());
-    ofs << command_rerun << std::endl;
-    ofs.close();
-
-    Message("Packing is being re-run with Auto Layout Generated Device!\n");
-    status = ExecuteAndMonitorSystemCommand(command_rerun);
-
-    // the 'status' will be checked as in the usual flow, as for us, the usual flow
-    // resumes, but in 'm_autoLayoutGenerationMode'
-
+    // Deal with the generated vpr xml:
+    // NOTE: we encrypt the generated vpr xml, then delete the generated vpr xml,
+    // and then again decrypt this encrypted-generated-vpr-xml 
+    // why do seemingly unnecessary steps?
+    // to follow usual code flow of using temporarily decrypted arch file.
+    // to ensure that generated vpr xml does not stay in the project directory for a longer time than necessary.
+    
     // encrypt the generated vpr xml with the same key as the current device
     // this will be saved into m_autoLayoutGeneratedVPRXMLPath.
     m_cryptdbPath = 
@@ -3191,13 +3188,55 @@ bool CompilerOpenFPGA_ql::Packing() {
     // for the next stages
     FileUtils::removeFile(generated_vpr_xml_path);
 
+    // now use the new encrypted vpr xml path for re-running the pack stage with
+    // generated device, after temporary decrypting as usual.
+    // the previously decrypted architecture file path will be cleaned up in the flow later anyway.
+    // save the path of the previously decrypted architecture file path for easy replacement in command to re-run pack.
+    std::filesystem::path old_m_architectureFile = m_architectureFile;
+    m_architectureFile = GenerateTempFilePath();
+  
+    if (!CRFileCryptProc::getInstance()->decryptFile(m_autoLayoutGeneratedVPRXMLPath, m_architectureFile)) {
+      ErrorMessage("decryption failed!");
+      return false;
+    }
 
+    // Deal with the generated SB_MAPS yml:
+    m_autoLayoutGeneratedSBMapsYMLPath = generated_sb_maps_yml_path;
+
+
+    // re-run packing with the generated vpr xml now.
+    // easiest way is to take the previous command as is, and 
+    // - replace the architecture file path
+    // - replace the layout name
+    std::string command_rerun = command->string();
+
+    // ensure that 'FPGA_AUTO' replacement is done first!!
+    command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+    command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
+    command_rerun = ReplaceAll(command_rerun, m_SBMapsFile.string(), m_autoLayoutGeneratedSBMapsYMLPath.string());
+
+    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
+                      std::string(ProjManager()->projectName() + "_pack.cmd"))
+                          .string());
+    ofs << command_rerun << std::endl;
+    ofs.close();
+
+    Message("Packing is being re-run with Auto Layout Generated Device!\n");
+    status = ExecuteAndMonitorSystemCommand(command_rerun);
+
+    // the 'status' will be checked as in the usual flow, as for us, the usual flow
+    // resumes, but in 'm_autoLayoutGenerationMode'
+
+
+#if GENERATE_NEW_DEVICE_FPGA_AUTO
     // DEVICE CREATION LOGIC ++
     // At this point, (if) the packing is completed with the generated device vpr xml, and we can create a usable device
     // 1 copy <device>: as a copy of the FPGA_AUTO device parallel to the device (device_data location)
     //   where devicename: replace FPGA_AUTO with the generated layout name
     // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
     // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
+    // -OR-
+    // 3 SB_MAPS.yml/CSV : copy the generated SB_MAPS.yml, and the CSVs need not change.
     // 4 cryptdb: replace FPGA_AUTO with the generated layout name
     // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
     // 6 example logs: if currently running design within examples, clean up logs
@@ -3261,7 +3300,7 @@ bool CompilerOpenFPGA_ql::Packing() {
           "vpr.xml.en";
       FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
 
-
+#if GENERATE_RR_GRAPH_FPGA_AUTO
       // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
       std::filesystem::path target_device_rr_graph_filepath =
           target_device_vpr_xml_filepath.parent_path() /
@@ -3272,7 +3311,14 @@ bool CompilerOpenFPGA_ql::Packing() {
           target_device_vpr_xml_filepath.parent_path() /
           "router_lookahead.bin";
       FileUtils::overwriteFile(m_autoLayoutGeneratedRouterLookaheadBinPath, target_device_router_lookahead_filepath);
+#endif // #if GENERATE_RR_GRAPH_FPGA_AUTO
 
+      // 3 SB_MAPS.yml and SB_TEMPLATES dir: copy the output SB_MAPS.yml and the SB_TEMPLATES directory of the current device:
+      // SB_MAPS.yml should be copied into the aurora/ directory, overwriting existing one.
+      // SB_TEMPLATES dir is copied parallel to the vpr.xml.en (this is probably not required at all!, as it will remain same as current device.)
+      std::filesystem::path target_device_sb_maps_yml_filepath =
+          target_device_copy_dirpath / "aurora" / "SB_MAPS.yml";
+      FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
       // 4 cryptdb: replace FPGA_AUTO with the generated layout name
       std::filesystem::path source_device_cryptdb_filepath = 
@@ -3372,6 +3418,36 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout.py");
       FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout_params.json");
 
+      // 8 remove all other corners if they exist in the new device, except for the one we are currently using.
+      // get all the device_variants for this device:
+      std::vector<QLDeviceVariant> device_variants = 
+          QLDeviceManager::getInstance()->listDeviceVariants(current_device_target.device_variant.family,
+                                                             current_device_target.device_variant.foundry,
+                                                             current_device_target.device_variant.node,
+                                                             current_device_target.device_variant.devicename);
+
+      std::error_code ec;
+      std::vector<std::filesystem::path> list_of_dirs_to_delete = {};
+
+      for (QLDeviceVariant device_variant: device_variants) {
+        if(device_variant.voltage_threshold == current_device_target.device_variant.voltage_threshold &&
+           device_variant.p_v_t_corner == current_device_target.device_variant.p_v_t_corner) {
+
+          // keep the current variant directory.
+        }
+        else {
+          // mark all other variant directories for deletion
+          std::filesystem::path dirpath = target_device_copy_dirpath / device_variant.voltage_threshold / device_variant.p_v_t_corner;
+          list_of_dirs_to_delete.push_back(dirpath);
+        }
+      }
+
+      for(std::filesystem::path dir_path_to_delete: list_of_dirs_to_delete) {
+
+        std:: cout << std::string("deleting path: ") + dir_path_to_delete.string() << std::endl;
+        FileUtils::RmDirRecursively(dir_path_to_delete );
+      }
+
 
       // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
       QLDeviceManager::getInstance()->parseDeviceData();
@@ -3380,6 +3456,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
     }
     // DEVICE CREATION LOGIC --
+#endif // #if GENERATE_NEW_DEVICE_FPGA_AUTO
   }
   // FPGA_AUTO device logic --
 
