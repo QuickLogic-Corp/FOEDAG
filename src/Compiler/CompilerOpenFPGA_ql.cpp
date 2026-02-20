@@ -2917,6 +2917,14 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
+  QLDeviceTarget current_device_target = 
+      QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
+  m_customLayoutGenerationMode = false;
+  if(current_device_target.device_variant_layout.name == "FPGA_CUSTOM") {
+    m_customLayoutGenerationMode = true;
+  }
+
   CommandWrapperPtr command = getPackingCommand();
   if(!command) {
     return false;
@@ -2960,8 +2968,6 @@ bool CompilerOpenFPGA_ql::Packing() {
   // FPGA_AUTO device logic ++
   // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
   m_autoLayoutGenerationMode = false;
-  QLDeviceTarget current_device_target = 
-      QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   
   // Note: At this point:
   // m_architectureFile is already populated in the vpr base command
