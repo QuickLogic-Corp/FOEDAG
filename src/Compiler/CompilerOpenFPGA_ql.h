@@ -80,6 +80,10 @@ class CompilerOpenFPGA_ql : public Compiler {
   void ArchitectureFile(const std::filesystem::path& path) {
     m_architectureFile = path;
   }
+
+  std::filesystem::path getPostSynthNetFilePath() const;
+  std::filesystem::path getPostSynthBlifFilePath() const;
+
   void setCustomYosysScript(const std::string& script) { m_customYosysScript = script; }
   void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }
   void OpenFpgaArchitectureFile(const std::filesystem::path& path) {
@@ -152,6 +156,13 @@ class CompilerOpenFPGA_ql : public Compiler {
   QLDeviceTarget getDeviceByStaProfile(const std::string staProfile) const;
   std::string uniqueStaVprOptions() const;
   
+  void onQdcFileSaved() {
+    // incr compilation itself didn't track qdc file, so we must re-generate xml 
+    // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+    GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
+    invalidateTaskStatuses();
+  }
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -166,7 +177,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
-  bool GenerateIOFloorPlanConstraints();
+  bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
@@ -278,6 +289,22 @@ private:
     int col = 0;
     int row = 0;
   };
+};
+
+class VprArchitectureFileProfider {
+public:
+  VprArchitectureFileProfider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
+  ~VprArchitectureFileProfider();
+
+  const std::filesystem::path& get();
+  void clean();
+
+private:
+  CompilerOpenFPGA_ql* m_compiler = nullptr;
+  std::filesystem::path m_architectureFile;
+  bool m_isFileTemporary = false;
+
+  const std::filesystem::path& error(const std::string& msg);
 };
 
 }  // namespace FOEDAG

@@ -2630,6 +2630,11 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
   auto path = std::filesystem::current_path();                  // getting path
   std::filesystem::current_path(m_projManager->projectPath());  // setting path
   m_environmentVariableMap["PWD"] = m_projManager->projectPath(); // fix "PWD environment variable doesn't match current directory; pwd = ..." warning
+  if (m_process) {
+    // this error may occur only when ExecuteAndMonitorSystemCommand used inproperly (not in sequence)
+    ErrorMessage("Faulty condition detected, several qprocess from different threads will possible collide.");
+  }
+
   // new QProcess must be created here to avoid issues related to creating
   // QObjects in different threads
   m_process = new QProcess;

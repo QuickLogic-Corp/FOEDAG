@@ -108,7 +108,10 @@ bool FileUtils::GetFullPath(const std::filesystem::path& path,
   return found;
 }
 
-std::string FileUtils::GetFileContent(const std::filesystem::path& filename) {
+std::string FileUtils::GetFileContent(const std::filesystem::path& filename, bool* ok) {
+  if (ok) {
+    *ok = false;
+  }
   std::ifstream in(filename, std::ios::in | std::ios::binary);
   std::string result;
 
@@ -122,8 +125,9 @@ std::string FileUtils::GetFileContent(const std::filesystem::path& filename) {
       in.read(buffer, sizeof(buffer));
       result.append(buffer, in.gcount());
     }
-  } else {
-    result = "FAILED_TO_LOAD_CONTENT";
+    if (ok) {
+      *ok = in.eof() && !in.bad();
+    }
   }
   return result;
 }
@@ -378,9 +382,16 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
                      });
   }
 
+  std::string commandStr{command};
+
   QString program = QString::fromStdString(command);
   QStringList args_{};
-  for (const auto& ar : args) args_ << QString::fromStdString(ar);
+  for (const auto& ar : args) {
+    args_ << QString::fromStdString(ar);
+    commandStr += " " + ar;
+  }
+  (*out) << "Command: " << commandStr << std::endl;
+
   if (startDetached) {
     auto success = process.startDetached(program, args_);
     return {success ? 0 : -1,
@@ -405,7 +416,7 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   int returnStatus =
       finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
 
-  return {returnStatus, {message}};
+  return {returnStatus, {message}, exitCode};
 }
 
 Return FileUtils::ExecuteSystemCommand(const std::string& command,
@@ -471,7 +482,7 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   int returnStatus =
       finished ? (status == QProcess::NormalExit) ? exitCode : -1 : -1;
 
-  return {returnStatus, {message}};
+  return {returnStatus, {message}, exitCode};
 }
 
 bool FileUtils::IsUptoDate(const std::string& sourceFile,

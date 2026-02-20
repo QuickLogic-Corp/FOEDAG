@@ -75,6 +75,7 @@ set (SRC_CPP_LIST ../Main/Foedag_ql.cpp
   ../MainWindow/MessageItemParser.cpp
   ../Widgets/MultiComboBox.cpp
   ../Widgets/SelectionDialog.cpp
+  ../Widgets/RoundProgressWidget.cpp
   )
 
 set (SRC_H_LIST ../Main/Foedag.h
@@ -110,7 +111,8 @@ set (SRC_H_LIST ../Main/Foedag.h
   ../MainWindow/MessageItemParser.h
   ../Widgets/MultiComboBox.h
   ../Widgets/SelectionDialog.h
-)
+  ../Widgets/RoundProgressWidget.h
+  )
 
 set (SRC_UI_LIST "")
 
@@ -144,6 +146,7 @@ target_link_libraries(foedagcore PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml
 if (USE_IPA)
   target_link_libraries(foedagcore PUBLIC interactive_path_analysis)
 endif()
+target_link_libraries(foedagcore PUBLIC floorplanning)
 target_compile_definitions(foedagcore PUBLIC FOEDAG_CORE_LIBRARY)
 
 set(FOEDAG_CORE_STATIC_LIB libfoedagcore.a)

@@ -1,0 +1,115 @@
+FloorPlanning UI Tool Usage Tips:
+
+###########
+### RUN ###
+###########
+- run Aurora UI
+- make sure SYNTHESIS has been completed.
+- navigate to the menu "View" where "IP Configurator" and "Pin Planner" are located and run third item "Floorplanning"
+
+###############
+### Actions ###
+###############
+
+#####################
+### Add Partition ###
+#####################
+1) On tool bar click "+" Button
+2)
+- Unselect Region and Partition by clicking [ESC] Button.
+- Click [Left Mouse Button] on empty area will prompt new partition dialog name creation.
+
+########################
+### Rename Partition ###
+########################
+- Focus on Partitions List Widget
+- Double [Left Mouse Button] Click - enter to partition renaming.
+- Type new name, and press [Enter]
+
+########################
+### Select Partition ###
+########################
+- Focus on Partitions List Widget.
+- Click [Left Mouse Button] in Partitions list widget.
+Note: when partition is selected in Device Grid View all regions belong to this partition will be highlighted.
+
+########################
+### Remove Partition ###
+########################
+- Select partition.
+- Press Key [DELETE] or Press "eraser" button on top toolbar.
+
+##########################
+### Unselect Partition ###
+##########################
+- Press Keyboard button [ESC]
+
+##################
+### Add Region ###
+##################
+- Select partition
+- Draw Region rectangle by holding and dragging [Left Mouse Button] on outside any of other regions.
+
+#####################
+### Select Region ###
+#####################
+- Focus on Device Grid View Widget
+- Click [Left Mouse Button] on Region in order to select it.
+
+###################
+### Move Region ###
+###################
+- Focus on Device Grid View Widget
+- Select region, in order to have Region handlers visible.
+- Holding [Left Button] + dragging on move handler (on center of Region).
+
+#######################
+### Unselect Region ###
+#######################
+- Press Keyboard button [ESC]
+
+#####################
+### Resize Region ###
+#####################
+- Select region, the Region's handlers becomes visible.
+- Holding [Left Mouse Button] + dragging on Region's corner handlers, responsible for resizing, draw new geometry.
+
+#####################
+### Remove Region ###
+#####################
+- Select Region
+- Press key [DELETE] or Click [Left Mouse Button] on red handler button inside the Region area.
+
+##############################
+### ZoomIn/Out device view ###
+##############################
+1) Mouse scroll wheel — zoom in/out.
+2) Use toolbar buttons.
+
+############################
+### Device view position ###
+############################
+1) Key buttons [UP], [LEFT], [RIGHT], [DOWN] — change the device grid viewport position.
+2) Holding [Right Button] + dragging — change the device grid viewport position.
+3) Use toolbar buttons.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
