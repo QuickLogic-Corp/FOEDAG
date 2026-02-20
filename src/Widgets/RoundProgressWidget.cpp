@@ -1,5 +1,5 @@
 /**
-  * @file NCriticalPathReportParser.cpp
+  * @file RoundProgressWidget.cpp
   * @author Oleksandr Pyvovarov (APivovarov@quicklogic.com or
   aleksandr.pivovarov.84@gmail.com or
   * https://github.com/w0lek)
@@ -27,6 +27,7 @@
 #include "RoundProgressWidget.h"
 
 #include <QPainter>
+#include <QPaintEvent>
 
 namespace FOEDAG {
 
@@ -45,8 +46,6 @@ RoundProgressWidget::RoundProgressWidget(int size, QWidget* parent)
 
     update();
   });
-
-  resize(size, size);
 }
 
 void RoundProgressWidget::showEvent(QShowEvent* event) {
@@ -54,6 +53,7 @@ void RoundProgressWidget::showEvent(QShowEvent* event) {
   m_timer.start();
 
   QWidget::showEvent(event);
+  raise(); // put on a top
 }
 
 void RoundProgressWidget::hideEvent(QHideEvent* event) {
@@ -63,9 +63,10 @@ void RoundProgressWidget::hideEvent(QHideEvent* event) {
 }
 
 void RoundProgressWidget::paintEvent(QPaintEvent* event) {
-  QWidget::paintEvent(event);
-
   QPainter painter(this);
+  painter.setBrush(Qt::white);
+  painter.drawRect(rect());
+
   painter.setRenderHint(QPainter::SmoothPixmapTransform);
   const float angleDegrees =
       ROTATION_DEGREES_MAX * m_animCurve.valueForProgress(m_animProgressNorm);
@@ -76,6 +77,8 @@ void RoundProgressWidget::paintEvent(QPaintEvent* event) {
       -m_pixmap.width() / 2,
       -m_pixmap.height() / 2);  // Translate back to the top-left corner
   painter.drawPixmap(0, 0, m_pixmap);
+
+  event->accept();
 }
 
 void RoundProgressWidget::resetAnimationProgress() {

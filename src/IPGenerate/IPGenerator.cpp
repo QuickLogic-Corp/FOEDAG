@@ -52,16 +52,12 @@ using ms = std::chrono::milliseconds;
 // Right now we bypass new approach and still use legacy flow of building commandline arguments.
 #define EXCLUDE_MODIFICATION_JSON_FLOW
 
-std::filesystem::path IPGenerator::ExecPath() const {
-  return GlobalSession->Context()->DataPath()/std::filesystem::path("..")/std::filesystem::path("bin");
-}
-
 std::filesystem::path IPGenerator::EnvsPath() const {
-  return std::filesystem::weakly_canonical(ExecPath() / ".." / "envs");
+  return std::filesystem::weakly_canonical(m_installDir / "envs");
 }
 
 std::filesystem::path IPGenerator::IPCatalogPath() const {
-  return std::filesystem::weakly_canonical(ExecPath() / ".." / "IP_Catalog");
+  return std::filesystem::weakly_canonical(m_installDir / "IP_Catalog");
 }
 
 void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation)
@@ -69,7 +65,7 @@ void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::
   m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
 }
 
-IPGenerator::IPGenerator(IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler) {
+IPGenerator::IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler): m_installDir(installDir), m_catalog(catalog), m_compiler(compiler) {
   m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
 #ifndef __WIN32
   // IP Generator requires libffi.so.6 which is absent on ubuntu>=20.04
@@ -655,7 +651,7 @@ bool IPGenerator::Generate() {
           jsonF << "   \"" << param.Name() << "\": " << value << ","
                 << std::endl;
         }
-        jsonF << "   \"build_dir\": \"" << inst->OutputLocation().string() << "\","
+        jsonF << "   \"build_dir\": \"" << FileUtils::resolvePathStr(inst->OutputLocation().string()) << "\","
               << std::endl;
         jsonF << "   \"build_name\": \"" << inst->ModuleName() << "\","
               << std::endl;
