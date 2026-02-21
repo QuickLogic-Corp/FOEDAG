@@ -76,6 +76,7 @@
 #include "QLDeviceManager.h"
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
+#include "FloorPlanning/QdcSerializer.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -4802,19 +4803,6 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
 
-  /// when we restart aurora after complete compilation flow
-  /// and run power_estimation task directly (without previous tasks) the metrics are empty,
-  /// so we restore them (https://github.com/QL-Proprietary/aurora2/issues/1459)
-  if (QLMetricsManager::getInstance()->isEmpty()) {
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
-    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
-  }
-  ///
-
-
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
@@ -6186,11 +6174,19 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
-bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
+}
+
+bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
-  if (fs::exists(io_floor_planningpath)){
+  if (!forceOverwrite && fs::exists(io_floor_planningpath)){
     Message(ProjManager()->projectName() + "_constraints.xml" + 
             " Already Exists. Using the Existing Constraint File.");
     return true;
@@ -6251,8 +6247,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   }
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
-    std::string line;
-    std::ifstream infile(floor_planning_constraint_filepath);
     std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
     std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
       {"left", &leftSet},
@@ -6261,9 +6255,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       {"bottom", &bottomSet}
     };
 
-    std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
+    std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
 
-    while (std::getline(infile, line)) {
+    std::string qdcContent = FileUtils::GetFileContent(floor_planning_constraint_filepath);
+    StringUtils::replaceAllInPlace(qdcContent, fp::QdcSerializer::lineDelimiter(), ""); // remove syntax sugar added by better human readability
+    std::vector<std::string_view> lines = StringUtils::splitLines(qdcContent);
+    for (std::string_view lineView: lines) {
+      std::string line{lineView};
       line = StringUtils::trim(line);
 
       // drop comment part
@@ -6272,7 +6270,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       }
 
       if (line.empty()){
-        Message("Empty line found in QDC file. Skipping...\n");
         continue; // Skip empty line
       }
 
@@ -6296,6 +6293,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
               it->second->insert(signalName); // insert avoids duplicates
           }
         }
+        signalName.clear();
       } else if (token == "set_region") {
         iss >> signalName;
         std::vector<std::string> elements;
@@ -6310,16 +6308,26 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
           }
         }
 
-        std::string region;
-        while (iss >> region) {
-          StringUtils::toLower(region);
-          if (regionMap.find(region) == regionMap.end()) {
-            regionMap[region] = {};
+        std::string partition;
+        iss >> partition;
+        bool hasPartition = !iss.fail();
+
+        std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
+        iss >> partitionName;
+        bool hasPartitionName = !iss.fail();
+
+        if (hasPartition) {
+          StringUtils::toLower(partition);
+          std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
+          if (partitionMap.find(partitionKey) == partitionMap.end()) {
+            partitionMap[partitionKey] = {};
           }
           for (const std::string& element: elements) {
-            regionMap[region].insert(element);
+            partitionMap[partitionKey].insert(element);
           }
         }
+
+        signalName.clear();
       }
     }
 
@@ -6328,9 +6336,9 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     std::string topStr    = StringUtils::toString(topSet);
     std::string bottomStr = StringUtils::toString(bottomSet);
 
-    std::string regionStr;
-    for (const auto& [region, patternsSet]: regionMap) {
-      regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
+    std::string partitionStr;
+    for (const auto& [partition, patternsSet]: partitionMap) {
+      partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
     }
 
     // Output results
@@ -6343,11 +6351,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     if (!bottomStr.empty())
       bottomStr = std::string("bottom:" + bottomStr + ";");
 
-    if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
+    if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
       ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
       return false;
     }
-    region_groups_str = leftStr + rightStr + topStr + bottomStr + regionStr;
+    region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
   
   std::filesystem::path generate_floorplanning_script_path =
@@ -6357,10 +6365,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  std::string output_path = ProjManager()->projectName() + "_constraints.xml";
-  std::string architectureFile = m_architectureFile.string();
-
+  std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
   #else // _WIN32
@@ -6378,24 +6384,35 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
     return false;
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
-  std::string command = std::string(python_exec.string() + " " +
-                        generate_floorplanning_script_path.string() + " " +
-                        std::string("--blif_file ") + netlistFile + " " + 
-                        std::string("--arch_file ") + architectureFile + " " +
-                        std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
-                        std::string("--output_path ") + output_path);
-  
-  if(fs::exists(pinTableFile))
-    command += std::string(" --pin_table_file ") + std::string(pinTableFile);                       
-  if(region_groups_str != "")
-    command += std::string(" --region_groups ") + region_groups_str;
+
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(generate_floorplanning_script_path.string());
+  args.push_back("--blif_file");
+  args.push_back(netlistFile.string());
+  args.push_back("--arch_file");
+  args.push_back(m_architectureFile.string());
+  args.push_back("--fpga_layout");
+  args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
+  args.push_back("--output_path");
+  args.push_back(output_path.string());
+
+  if(fs::exists(pinTableFile)) {
+    args.push_back("--pin_table_file");
+    args.push_back(pinTableFile.string());
+  }                      
+  if(region_groups_str != "") {
+    args.push_back("--region_groups");
+    args.push_back(region_groups_str);
+  }
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
   if (fs::exists(pin_constraint_filepath)) {
-    command += std::string(" --pcf_file ") + pin_constraint_filepath.string();
+    args.push_back("--pcf_file");
+    args.push_back(pin_constraint_filepath.string());
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
 
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -6775,35 +6792,12 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const int IO_COLUMNS = 2;
   const int device_clb_rows = device_size_y - EMPTY_ROWS - IO_ROWS;
 
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /// fetching data from vpr.xml, probably will be replaced with simplier solution, see https://github.com/QL-Proprietary/aurora2/issues/1465
-  std::filesystem::path architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
-  if(architectureFile.empty()) {
-    ErrorMessage("Cannot proceed without VPR Architecture file.");
+  VprArchitectureFileProfider archFileProvider(this);
+  if (archFileProvider.get().empty()) {
     return "";
   }
-
-  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(architectureFile)) {
-
-    std::filesystem::path vpr_xml_en_path = architectureFile;
-    architectureFile = GenerateTempFilePath();
-
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      return "";
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
-      ErrorMessage("decryption failed!");
-      return "";
-    }
-  }
-  TilesCfgResult tiles_cfg_result = parseTilesCfg(architectureFile);
+  TilesCfgResult tiles_cfg_result = parseTilesCfg(archFileProvider.get());
+  archFileProvider.clean();
   if (!tiles_cfg_result.error.empty()) {
     ErrorMessage(tiles_cfg_result.error);
     return "";
@@ -6811,8 +6805,6 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
   const int bram_size_y = tiles_cfg_result.contains("bram") ? tiles_cfg_result.tiles_cfg["bram"].second: 0;
   const int dsp_size_y = tiles_cfg_result.contains("dsp") ? tiles_cfg_result.tiles_cfg["dsp"].second: 0;
-  /// fetching data from vpr.xml
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   const int clb_rows_without_io = device_size_y - 2;
   const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
@@ -9380,3 +9372,54 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 // clang-format on
+
+const std::filesystem::path& VprArchitectureFileProfider::get()
+{
+  if (m_architectureFile.empty()) {
+    QLDeviceTarget device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    m_architectureFile = QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
+    if(!std::filesystem::exists(m_architectureFile)) {
+      return error("VPR Architecture file is not available.");
+    }
+
+    if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+
+      std::filesystem::path vpr_xml_en_path = m_architectureFile;
+      m_architectureFile = m_compiler->GenerateTempFilePath(true);
+      m_isFileTemporary = true;
+
+      std::filesystem::path cryptdbPath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
+                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
+
+      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
+        return error("load cryptdb failed!");
+      }
+
+      if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+        return error("decryption failed!");
+      }
+    }
+  }  
+    
+  return m_architectureFile;
+}
+
+const std::filesystem::path& VprArchitectureFileProfider::error(const std::string& msg)
+{
+  m_compiler->ErrorMessage(msg);
+  m_architectureFile = "";
+  return m_architectureFile;
+}
+
+VprArchitectureFileProfider::~VprArchitectureFileProfider()
+{
+  clean();
+}
+
+void VprArchitectureFileProfider::clean()
+{
+  if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
+    std::filesystem::remove(m_architectureFile);
+  }
+}

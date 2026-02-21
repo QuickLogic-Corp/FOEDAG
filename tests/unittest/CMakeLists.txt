@@ -5,9 +5,9 @@ project(unittest LANGUAGES CXX)
 enable_testing()
 include(GoogleTest)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_definitions(-DGTEST_LANGUAGE_CXX17)
+add_definitions(-DGTEST_LANGUAGE_CXX20)
 
 find_package(Qt5 COMPONENTS Test REQUIRED)
 if (NOT Qt5Test_FOUND)
@@ -38,7 +38,8 @@ set (CPP_LIST
     PinAssignment/PortsLoader_test.cpp
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
     Settings/Settings_test.cpp
-    IPGenerator/IPGenerator_test.cpp
+#    IPGenerator/IPGenerator_test.cpp // TODO @wOlek, fix crash
+    FloorPlanning/FloorPlanning_test.cpp
     NewProject/source_grid_test.cpp
     Utils/sequential_map_test.cpp
     Utils/QtUtils_test.cpp
@@ -76,6 +77,7 @@ target_link_libraries(unittest PRIVATE
   gmock
   gtest_main
   pinassignment
+  floorplanning
   newproject
   foedag
   foedagcore

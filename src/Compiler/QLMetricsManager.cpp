@@ -235,6 +235,16 @@ std::vector<AuroraMetrics> QLMetricsManager::buildMetricsListForAction(Compiler:
   return metrics_list;
 }
 
+void QLMetricsManager::parseAll()
+{
+  for (Compiler::Action action = Compiler::next(Compiler::Action::NoAction);
+     action <= Compiler::Action::SimulateBitstream;
+     action = Compiler::next(action)) 
+  {
+    QLMetricsManager::getInstance()->parseMetricsForAction(action);
+  }
+  QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
+}
 
 void QLMetricsManager::parseMetricsForAction(Compiler::Action action) {
 
@@ -453,7 +463,7 @@ void QLMetricsManager::parseRoutingReportForDetailedUtilization() {
   
   // if log file does not exist, skip:
   if(!FileUtils::FileExists(filepath)) {
-     std::cout << "[warning] file not found: " << filepath << std::endl;
+    std::cout << "[warning] file not found: " << filepath << std::endl;
     return;
   }
 

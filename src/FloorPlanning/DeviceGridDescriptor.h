@@ -1,0 +1,74 @@
+#pragma once
+
+#include "Tile.h"
+
+#include <QSize>
+#include <QDomDocument>
+
+#include <set>
+#include <memory>
+#include <filesystem>
+#include <optional>
+
+namespace fp {
+
+class DeviceGridDescriptor {
+public:
+    DeviceGridDescriptor(const std::filesystem::path& architectureFile, const std::string& layoutName);
+    DeviceGridDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
+        :
+        m_columns(columns)
+        , m_rows(rows)
+        , m_dspColumns(dspColumns)
+        , m_bramColumns(bramColumns)
+        , m_dspSize(dspSize)
+        , m_bramSize(bramSize)
+    {
+        Tile::setDeviceRowsNum(m_rows);
+        validateFit();
+    }
+
+    bool hasError() const { return !m_error.isEmpty(); }
+    const QString& error() const { return m_error; }
+
+    int columns() const { return m_columns; }
+    int rows() const { return m_rows; }
+
+    const QSize& dspSize() const { return m_dspSize; }
+    const QSize& bramSize() const { return m_bramSize; }
+
+    bool isDspColumn(int column) const { return m_dspColumns.find(column) != m_dspColumns.end(); }
+    bool isBramColumn(int column) const { return m_bramColumns.find(column) != m_bramColumns.end(); }
+
+    QSize elementSize(Tile::Type type) const {
+        QSize minSize(1,1);
+        switch(type) {
+        case Tile::Type::Io: return minSize;
+        case Tile::Type::Clb: return minSize;
+        case Tile::Type::Bram: return m_bramSize;
+        case Tile::Type::Dsp: return m_dspSize;
+        default: return minSize;
+        }
+        return minSize;
+    }
+
+    bool validateFit();
+
+private:
+    QString m_error;
+    int m_columns = -1;
+    int m_rows = -1;
+    std::set<int> m_dspColumns;
+    std::set<int> m_bramColumns;
+    QSize m_dspSize;
+    QSize m_bramSize;
+
+    bool parse(const std::filesystem::path& architectureFile, const std::string& targetLayoutName);
+    bool parseLayout(const QDomDocument&, const std::string& targetLayoutName);
+    bool parseTileSizes(const QDomDocument&);
+
+    std::optional<QSize> parseSize(const QString&, const QString&);
+};
+using DeviceGridDescriptorPtr = std::shared_ptr<DeviceGridDescriptor>;
+
+}  // namespace fp
