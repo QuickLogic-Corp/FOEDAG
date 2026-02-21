@@ -6245,6 +6245,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     ErrorMessage("qdc Constraint File and Pin Table File Does Not Exist. Exiting the Flow.\n");
     return false;
   }
+  std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::string line;   
     std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
@@ -6255,105 +6256,107 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       {"bottom", &bottomSet}
     };
 
-  std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
+    std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
 
-  std::string qdcContent = FileUtils::GetFileContent(floor_planning_constraint_filepath);
-  StringUtils::replaceAllInPlace(qdcContent, fp::QdcSerializer::lineDelimiter(), ""); // remove syntax sugar added by better human readability
-  std::vector<std::string_view> lines = StringUtils::splitLines(qdcContent);
-  for (std::string_view lineView: lines) {
-    std::string line{lineView};
-    line = StringUtils::trim(line);
+    std::string qdcContent = FileUtils::GetFileContent(floor_planning_constraint_filepath);
+    StringUtils::replaceAllInPlace(qdcContent, fp::QdcSerializer::lineDelimiter(), ""); // remove syntax sugar added by better human readability
+    std::vector<std::string_view> lines = StringUtils::splitLines(qdcContent);
+    for (std::string_view lineView: lines) {
+      std::string line{lineView};
+      line = StringUtils::trim(line);
 
-    // drop comment part
-    if (auto pos = line.find("#"); pos != std::string::npos) {
-      line = line.substr(0, pos); // drop commented part of line
+      // drop comment part
+      if (auto pos = line.find("#"); pos != std::string::npos) {
+        line = line.substr(0, pos); // drop commented part of line
+      }
+
+      if (line.empty()){
+        continue; // Skip empty line
+      }
+
+      std::istringstream iss(line);
+      std::string token, signalName;
+      iss >> token;
+    
+      static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
+      if (supportedCommands.find(token) == supportedCommands.end()){
+        ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
+        return false;
+      }
+
+      if (token == "set_io_side") {
+        iss >> signalName;
+        std::string side;
+        while (iss >> side) {
+          StringUtils::toLower(side); 
+          auto it = sideMap.find(side);
+          if (it != sideMap.end()) {
+              it->second->insert(signalName); // insert avoids duplicates
+          }
+        }
+        signalName.clear();
+      } else if (token == "set_region") {
+        iss >> signalName;
+        std::vector<std::string> elements;
+        std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
+        for (const std::string& pattern: patterns) {
+          std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
+          if (patternElements.empty()) {
+            ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
+            return false;
+          } else {
+            elements.push_back(pattern);
+          }
+        }
+
+        std::string partition;
+        iss >> partition;
+        bool hasPartition = !iss.fail();
+
+        std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
+        iss >> partitionName;
+        bool hasPartitionName = !iss.fail();
+
+        if (hasPartition) {
+          StringUtils::toLower(partition);
+          std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
+          if (partitionMap.find(partitionKey) == partitionMap.end()) {
+            partitionMap[partitionKey] = {};
+          }
+          for (const std::string& element: elements) {
+            partitionMap[partitionKey].insert(element);
+          }
+        }
+
+        signalName.clear();
+      }
     }
 
-    if (line.empty()){
-      continue; // Skip empty line
+    std::string leftStr   = StringUtils::toString(leftSet);
+    std::string rightStr  = StringUtils::toString(rightSet);
+    std::string topStr    = StringUtils::toString(topSet);
+    std::string bottomStr = StringUtils::toString(bottomSet);
+
+    std::string partitionStr;
+    for (const auto& [partition, patternsSet]: partitionMap) {
+      partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
     }
 
-    std::istringstream iss(line);
-    std::string token, signalName;
-    iss >> token;
-   
-    static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
-    if (supportedCommands.find(token) == supportedCommands.end()){
-      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
+    // Output results
+    if (!leftStr.empty())
+      leftStr = std::string("left:"   + leftStr + ";");
+    if (!rightStr.empty())
+      rightStr = std::string("right:"  + rightStr + ";");
+    if (!topStr.empty())
+      topStr = std::string("top:"    + topStr + ";");
+    if (!bottomStr.empty())
+      bottomStr = std::string("bottom:" + bottomStr + ";");
+
+    if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
+      ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
       return false;
     }
-
-    if (token == "set_io_side") {
-      iss >> signalName;
-      std::string side;
-      while (iss >> side) {
-        StringUtils::toLower(side); 
-        auto it = sideMap.find(side);
-        if (it != sideMap.end()) {
-            it->second->insert(signalName); // insert avoids duplicates
-        }
-      }
-      signalName.clear();
-    } else if (token == "set_region") {
-      iss >> signalName;
-      std::vector<std::string> elements;
-      std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
-      for (const std::string& pattern: patterns) {
-        std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
-        if (patternElements.empty()) {
-          ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
-          return false;
-        } else {
-          elements.push_back(pattern);
-        }
-      }
-
-      std::string partition;
-      iss >> partition;
-      bool hasPartition = !iss.fail();
-
-      std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
-      iss >> partitionName;
-      bool hasPartitionName = !iss.fail();
-
-      if (hasPartition) {
-        StringUtils::toLower(partition);
-        std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
-        if (partitionMap.find(partitionKey) == partitionMap.end()) {
-          partitionMap[partitionKey] = {};
-        }
-        for (const std::string& element: elements) {
-          partitionMap[partitionKey].insert(element);
-        }
-      }
-
-      signalName.clear();
-    }
-  }
-
-  std::string leftStr   = StringUtils::toString(leftSet);
-  std::string rightStr  = StringUtils::toString(rightSet);
-  std::string topStr    = StringUtils::toString(topSet);
-  std::string bottomStr = StringUtils::toString(bottomSet);
-
-  std::string partitionStr;
-  for (const auto& [partition, patternsSet]: partitionMap) {
-    partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
-  }
-
-  // Output results
-  if (!leftStr.empty())
-    leftStr = std::string("left:"   + leftStr + ";");
-  if (!rightStr.empty())
-    rightStr = std::string("right:"  + rightStr + ";");
-  if (!topStr.empty())
-    topStr = std::string("top:"    + topStr + ";");
-  if (!bottomStr.empty())
-    bottomStr = std::string("bottom:" + bottomStr + ";");
-
-  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
-    ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
-    return false;
+    region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
   
   std::filesystem::path generate_floorplanning_script_path =
@@ -6401,7 +6404,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }                      
   if(region_groups_str != "") {
     args.push_back("--region_groups"); 
-    args.push_back(leftStr + rightStr + topStr + bottomStr + partitionStr);
+    args.push_back(region_groups_str);
   }
 
   std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
