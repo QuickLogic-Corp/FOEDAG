@@ -6399,11 +6399,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   args.push_back(output_path.string());
 
   if(fs::exists(pinTableFile)) {
-    args.push_back("--pin_table_file ");
+    args.push_back("--pin_table_file");
     args.push_back(pinTableFile.string());
   }                      
   if(region_groups_str != "") {
-    args.push_back("--region_groups"); 
+    args.push_back("--region_groups");
     args.push_back(region_groups_str);
   }
 
