@@ -6247,7 +6247,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
-    std::string line;   
     std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
     std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
       {"left", &leftSet},
