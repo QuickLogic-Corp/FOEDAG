@@ -58,7 +58,6 @@ set (SRC_CPP_LIST
   FilterCriteriaConf.cpp
   CustomMenu.cpp
   VprProcess.cpp
-  RoundProgressWidget.cpp
   client/ConvertUtils.cpp
   client/GateIO.cpp
   client/TcpSocket.cpp
@@ -87,7 +86,6 @@ set (SRC_H_LIST
   CustomMenu.h
   SimpleLogger.h
   VprProcess.h
-  RoundProgressWidget.h
   client/ConvertUtils.h
   client/GateIO.h
   client/ServerFreePortDetector.h

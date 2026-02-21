@@ -83,8 +83,12 @@ class StringUtils final {
   // Return the last element of a dot-separated path foo.bar.baz -> baz
   static std::string_view leaf(std::string_view str);
 
-  // In given string "str", replace all occurences of "from" with "to"
+  // For given string "str", replace all occurences of "from" with "to"
   static std::string replaceAll(std::string_view str, std::string_view from,
+                                std::string_view to);
+
+  // In given string "src", replace all occurences of "from" with "to" in place
+  static void replaceAllInPlace(std::string& src, std::string_view from,
                                 std::string_view to);
 
   // Given a large input, return the content of line number "line".
@@ -147,6 +151,7 @@ class StringUtils final {
   static bool matchesWildcardPattern(const std::string& text, const std::string& pattern);
   static std::string extractWildcardSegment(const std::string& text, const std::string& pattern);
   static void removePrefix(std::string& str, const std::string& prefix);
+  static void removeSuffix(std::string& str, const std::string& suffix);
 
   static std::string toString(const std::unordered_set<std::string>& set, char delimiter = ',') {
     std::string result;

@@ -1,5 +1,5 @@
 /**
-  * @file NCriticalPathReportParser.cpp
+  * @file RoundProgressWidget.h
   * @author Oleksandr Pyvovarov (APivovarov@quicklogic.com or
   aleksandr.pivovarov.84@gmail.com or
   * https://github.com/w0lek)
@@ -26,10 +26,10 @@
 
 #pragma once
 
+#include <QWidget>
 #include <QEasingCurve>
 #include <QPixmap>
 #include <QTimer>
-#include <QWidget>
 
 namespace FOEDAG {
 

@@ -44,9 +44,10 @@
 #include "NCriticalPathModel.h"
 #include "NCriticalPathParameters.h"
 #include "NCriticalPathTheme.h"
-#include "RoundProgressWidget.h"
 #include "SimpleLogger.h"
 #include "client/CommConstants.h"
+
+#include "Widgets/RoundProgressWidget.h"
 
 #define IPA_DISABLE_CTRL_A_KEYSEQUENCE
 
@@ -100,7 +101,8 @@ NCriticalPathView::NCriticalPathView(QWidget* parent)
 
   setupFilterMenu();
 
-  m_overlay = new RoundProgressWidget(32, this);
+  const int indicatorSize = 32;
+  m_overlay = new RoundProgressWidget(indicatorSize, this);
 
   hideControls();
 }
@@ -334,6 +336,7 @@ void NCriticalPathView::resizeEvent(QResizeEvent* event) {
   m_sourceModel->limitLineCharsNum(lineCharsNumMax);
 
   QTreeView::resizeEvent(event);
+  m_overlay->resize(event->size());
 }
 
 void NCriticalPathView::showEvent(QShowEvent* event) {
@@ -443,8 +446,6 @@ void NCriticalPathView::updateControlsLocation() {
   m_bnExpandCollapse->move(offset, offset);
   m_bnClearSelection->move(offset,
                            offset + offset + m_bnExpandCollapse->height());
-  m_overlay->move(0.5 * size().width() - 0.5 * m_overlay->width(),
-                  0.5 * size().height() - 0.5 * m_overlay->height());
 }
 
 void NCriticalPathView::clearSelection() {

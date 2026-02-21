@@ -72,6 +72,10 @@ extern "C" {
 
 FOEDAG::Session* GlobalSession;
 
+inline void initializeResources() { 
+  Q_INIT_RESOURCE(floorplanning_resource); 
+}
+
 using namespace FOEDAG;
 
 FOEDAG::GUI_TYPE Foedag::getGuiType(const bool& withQt, const bool& withQml) {
@@ -162,6 +166,7 @@ Foedag::Foedag(FOEDAG::CommandLine* cmdLine, MainWindowBuilder* mainWinBuilder,
 Foedag::~Foedag() { delete m_tclChannelHandler; }
 
 bool Foedag::initGui() {
+  initializeResources();
   // close the console on Windows, we don't need it
 #if (defined(__MINGW32__))
   FreeConsole();  // Closes the console window, but it still shows for a small instant.

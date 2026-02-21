@@ -126,7 +126,8 @@ private:
 public:
   void parseMetricsForAction(Compiler::Action action);
   void parseRoutingReportForDetailedUtilization();
-
+  void parseAll();
+  
 public:
   static QLMetricsManager* getInstance();
   static std::string getStringValue(const std::string& stage, const std::string& name);
