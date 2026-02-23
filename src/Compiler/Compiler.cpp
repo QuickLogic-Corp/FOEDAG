@@ -61,6 +61,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/LogUtils.h"
 #include "Utils/ProcessUtils.h"
 #include "Utils/StringUtils.h"
+#include "Utils/PathUtils.h"
 #include "scope_guard/scope_guard.hpp"
 
 extern FOEDAG::Session* GlobalSession;
@@ -217,6 +218,12 @@ void Compiler::Help(std::ostream* out) {
 
 void Compiler::CustomSimulatorSetup(Simulator::SimulationType action) {}
 
+Compiler::Compiler()
+{
+  IPCatalog* catalog = new IPCatalog();
+  SetIPGenerator(new IPGenerator(PathUtils::instance().installDir(), catalog, this));
+}
+
 Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
                    TclInterpreterHandler* tclInterpreterHandler)
     : m_interp(interp),
@@ -225,7 +232,7 @@ Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
   if (m_tclInterpreterHandler) m_tclInterpreterHandler->setCompiler(this);
   SetConstraints(new Constraints{this});
   IPCatalog* catalog = new IPCatalog();
-  SetIPGenerator(new IPGenerator(catalog, this));
+  SetIPGenerator(new IPGenerator(PathUtils::instance().installDir(), catalog, this));
   m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
 }
 
@@ -355,11 +362,6 @@ tcl_interp_clone
 
 bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
                                    bool namesOnly) {
-  if (m_IPGenerator == nullptr) {
-    IPCatalog* catalog = new IPCatalog();
-    SetIPGenerator(new IPGenerator(catalog, this));
-    
-  }
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
   }
@@ -424,10 +426,6 @@ Simulator* Compiler::GetSimulator() {
 }
 
 bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
-  if (m_IPGenerator == nullptr) {
-    IPCatalog* catalog = new IPCatalog();
-    m_IPGenerator = new IPGenerator(catalog, this);
-  }
   // if (m_DesignQuery == nullptr) {
   //   m_DesignQuery = new DesignQuery(this);
   // }
@@ -2630,6 +2628,11 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
   auto path = std::filesystem::current_path();                  // getting path
   std::filesystem::current_path(m_projManager->projectPath());  // setting path
   m_environmentVariableMap["PWD"] = m_projManager->projectPath(); // fix "PWD environment variable doesn't match current directory; pwd = ..." warning
+  if (m_process) {
+    // this error may occur only when ExecuteAndMonitorSystemCommand used inproperly (not in sequence)
+    ErrorMessage("Faulty condition detected, several qprocess from different threads will possible collide.");
+  }
+
   // new QProcess must be created here to avoid issues related to creating
   // QObjects in different threads
   m_process = new QProcess;

@@ -129,6 +129,15 @@ std::string StringUtils::replaceAll(std::string_view str, std::string_view from,
   return result;
 }
 
+void StringUtils::replaceAllInPlace(std::string& src, std::string_view from,
+                                    std::string_view to) {
+    size_t start_pos = 0;
+    while ((start_pos = src.find(from, start_pos)) != std::string::npos) {
+        src.replace(start_pos, from.length(), to);
+        start_pos += to.length();  // Handles case where 'to' is a substr of 'from'
+    }
+}
+
 // Split off the next view split with "separator" character.
 // Modifies "src" to contain the remaining string.
 // If "src" is exhausted, returned string-view will have data() == nullptr.
@@ -323,9 +332,16 @@ std::string StringUtils::extractWildcardSegment(const std::string& text, const s
 
 void StringUtils::removePrefix(std::string& str, const std::string& prefix)
 {
-  if (str.compare(0, prefix.length(), prefix) == 0) {
-    str.erase(0, prefix.length());
-  }
+    if (startsWith(str, prefix)) {
+        str.erase(0, prefix.length());
+    }
+}
+
+void StringUtils::removeSuffix(std::string& str, const std::string& suffix)
+{
+    if (endsWith(str, suffix)) {
+        str.erase(str.size()-suffix.size(), suffix.size());
+    }
 }
 
 }  // namespace FOEDAG
