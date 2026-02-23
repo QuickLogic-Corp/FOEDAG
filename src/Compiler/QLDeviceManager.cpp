@@ -2730,10 +2730,11 @@ std::filesystem::path QLDeviceManager::deviceVPRArchitectureFile(QLDeviceTarget 
   std::filesystem::path empty_path;
   std::filesystem::path vpr_architecture_file_path;
 
-  // if we are in auto layout generation mode, then return the generated vpr xml filepath here
-  // as we will not be using the (auto) device's own vpr xml.
+  // if we are in auto/custom layout generation mode, then return the generated vpr xml filepath here
+  // as we will not be using the (auto/cuustom) device's own vpr xml.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+     compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedVPRXMLPath)) {
 
       compiler->ErrorMessage("Cannot find generated vpr architecture file: " + compiler->m_autoLayoutGeneratedVPRXMLPath.string());
@@ -3585,10 +3586,11 @@ std::filesystem::path QLDeviceManager::deviceSBMAPSFile(QLDeviceTarget device_ta
   std::filesystem::path empty_path;
   std::filesystem::path sb_maps_yml_file_path;
 
-  // if we are in auto layout generation mode, then return the generated SB_MAPS.yml filepath here
-  // as we will not be using the (auto) device's own SB_MAPS.yml, even if it exists.
+  // if we are in auto/custom layout generation mode, then return the generated SB_MAPS.yml filepath here
+  // as we will not be using the (auto/custom) device's own SB_MAPS.yml, even if it exists.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedSBMapsYMLPath)) {
 
       compiler->ErrorMessage("Cannot find generated SB_MAPS.yml file: " + compiler->m_autoLayoutGeneratedSBMapsYMLPath.string());
@@ -3649,15 +3651,9 @@ std::filesystem::path QLDeviceManager::deviceSBTemplatesDir(QLDeviceTarget devic
   std::filesystem::path empty_path;
   std::filesystem::path sb_templates_dir_path;
 
-  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
-  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
-  if(compiler->m_autoLayoutGenerationMode){
-    // if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
-
-    //   compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
-    //   return empty_path;
-    // }
-    // return compiler->m_autoLayoutGeneratedRRGraphBinPath;
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
+    // no change in CSV, we can use the existing device's CSV unless something changes in the future.
   }
 
   if( !isDeviceTargetValid(device_target) ) {
@@ -3712,10 +3708,11 @@ std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget devic
   std::filesystem::path empty_path;
   std::filesystem::path vpr_rr_graph_file_path;
 
-  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
-  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
+  // if we are in auto/custom layout generation mode, then return the generated rr_graph.bin filepath here
+  // as we will not be using the (auto/custom) device's own rr_graph.bin, even if it exists.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
 
       compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
@@ -3828,10 +3825,11 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
   std::filesystem::path vpr_router_lookahead_file_path;
 
 
-  // if we are in auto layout generation mode, then return the generated router_lookahead.bin filepath here
-  // as we will not be using the (auto) device's own router_lookahead.bin, even if it exists.
+  // if we are in auto/custom layout generation mode, then return the generated router_lookahead.bin filepath here
+  // as we will not be using the (auto/custom) device's own router_lookahead.bin, even if it exists.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRouterLookaheadBinPath)) {
 
       compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRouterLookaheadBinPath.string());
