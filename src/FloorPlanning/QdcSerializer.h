@@ -15,14 +15,15 @@ public:
     void load(DeviceGrid& device, const std::filesystem::path& overrideFilePath = "");
     void load(DeviceGrid& device, const std::vector<std::string>& lines);
 
-    std::vector<std::string> readLines(const std::filesystem::path& overrideFilePath = "") const;
-    static constexpr std::string_view lineDelimiter() { return "\\\n"; }
+    static std::vector<std::string> readLines(const std::filesystem::path& filePath);
 
     static std::optional<TileDescriptor> extractGridCoord(const std::string& data);
 
 private:
     std::filesystem::path m_path = "floorplanning.qdc";
     std::string m_reservedContent;
+
+    static constexpr std::string_view lfCommandDelimiter() { return "\\\n"; }
 };
 
 }  // namespace fp
