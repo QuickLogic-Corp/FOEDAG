@@ -148,7 +148,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Leakage();
 #endif // LEGACY_POWER_CALCULATOR
 
-  virtual std::string BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
+  virtual std::tuple<std::string, std::string> BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
 
   std::string staProfile(const QLDeviceTarget& device) const;  
@@ -238,6 +238,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaFabricKeyFile = "";
   std::filesystem::path m_OpenFpgaPinMapXml = "";
   std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
+  std::filesystem::path m_SBMapsFile = "";
+  std::filesystem::path m_SBTemplatesDir = "";
   std::string m_deviceSize;
   std::string m_customYosysScript;
   std::string m_openFPGAScript;

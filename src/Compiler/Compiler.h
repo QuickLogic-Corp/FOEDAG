@@ -321,10 +321,12 @@ class Compiler {
   // this will apply to all file types as of now.
   bool m_copyFilesWhileAdding = false;
   bool m_autoLayoutGenerationMode = false;
+  bool m_customLayoutGenerationMode = false;
   std::string m_autoLayoutGeneratedLayoutName{};
   std::filesystem::path m_autoLayoutGeneratedVPRXMLPath{};
   std::filesystem::path m_autoLayoutGeneratedRRGraphBinPath{};
   std::filesystem::path m_autoLayoutGeneratedRouterLookaheadBinPath{};
+  std::filesystem::path m_autoLayoutGeneratedSBMapsYMLPath{};
 
   // Tasks generic options
   IPGenerateOpt m_ipGenerateOpt = IPGenerateOpt::None;

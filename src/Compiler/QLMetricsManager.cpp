@@ -143,9 +143,30 @@ QLMetricsManager::QLMetricsManager(QObject *parent)
 
 bool QLMetricsManager::parseJSON() {
 
-  std::string metrics_json_filename = "aurora_metrics.json";
-  std::filesystem::path scripts_path = GlobalSession->Context()->DataPath() / ".." / "scripts";
-  std::filesystem::path metrics_json_filepath = scripts_path / metrics_json_filename;
+  std::filesystem::path metrics_json_filepath;
+
+  // allow user to override the aurora_metrics.json path using an env variable.
+  // read env var
+  const char* const path_aurora_metrics_env_str = std::getenv("AURORA2_METRICS_JSON_PATH");
+
+  if (path_aurora_metrics_env_str != nullptr) {
+
+    // convert to std::filesystem::path and check if the path exists
+    metrics_json_filepath = std::string(path_aurora_metrics_env_str);
+
+    if(!FileUtils::FileExists(metrics_json_filepath)) {
+      // clear the variable to indicate that the env variable is either empty or incorrect.
+      metrics_json_filepath.clear();
+    }
+  }
+
+  // if we did not get the path from the env var
+  if(metrics_json_filepath.empty()) {
+    // use the default path from the scripts directory of the Aurora install
+    std::string metrics_json_filename = "aurora_metrics.json";
+    std::filesystem::path scripts_path = GlobalSession->Context()->DataPath() / ".." / "scripts";
+    metrics_json_filepath = scripts_path / metrics_json_filename;
+  }
 
   if(FileUtils::FileExists(metrics_json_filepath)) {
     try {

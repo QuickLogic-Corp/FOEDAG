@@ -834,6 +834,30 @@ void QLSettingsManager::populateSettingsWidget() {
               continue;
           }
 
+          // TODO: auto-populate sta_p_v_t_corner, and sta_voltage_threshold in GUI mode.
+          // if(categoryId == "vpr" && subcategoryId == "analysis" && widgetId == "sta_p_v_t_corner") {
+          //   // std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+          //   //   foundry,
+          //   //   node,
+          //   //   devicename);
+          //   // loop through, and set the values for the p_v_t corner from the device information.
+          //   // widgetJsonObj.value("options", json::array())
+          //   // check if current userValue exists in these options, if not, make it empty (default)
+          //   // also add this combo to ignore list for 'saving JSON' or isJSONUpdated as we don't
+          //   // want to "save" these options to JSON file, it will always be autopopulated.
+          // }
+          // if(categoryId == "vpr" && subcategoryId == "analysis" && widgetId == "sta_voltage_threshold") {
+          //   // std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+          //   //   foundry,
+          //   //   node,
+          //   //   devicename);
+          //   // loop through, and set the values for the vt from the device information.
+          //   // widgetJsonObj.value("options", json::array())
+          //   // check if current userValue exists in these options, if not, make it empty (default)
+          //   // also add this combo to ignore list for 'saving JSON' or isJSONUpdated as we don't
+          //   // want to "save" these options to JSON file, it will always be autopopulated.
+          // }
+
           std::string widgetType = widgetJson["widgetType"].get<std::string>();
           
           // std::cout << "widgetId: " << QString::fromStdString(widgetId).toStdString() << std::endl;
@@ -1304,6 +1328,14 @@ bool QLSettingsManager::areJSONSettingsChanged() {
           // std::string value_string;
           // int value_int;
           // double value_double;
+
+          // TODO: ignore any updates in sta_p_v_t_corner/sta_voltage_threshold
+          // if(categoryId == "vpr" && subcategoryId == "analysis" && widgetId == "sta_p_v_t_corner") {
+          //   continue;
+          // }
+          // if(categoryId == "vpr" && subcategoryId == "analysis" && widgetId == "sta_voltage_threshold") {
+          //   continue;
+          // }
 
           if(widgetType == std::string("input") || widgetType == std::string("filepath")) {
 
