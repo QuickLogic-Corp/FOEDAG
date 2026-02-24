@@ -16,6 +16,8 @@ class QCheckBox;
 
 namespace fp {
 
+class CheckableButton;
+
 class SynthResourceHierarchyWidget : public QWidget {
     Q_OBJECT
 
@@ -48,6 +50,7 @@ public:
 
 private:
     int m_flags = Flag::None;
+    CheckableButton* m_bnExpandCollapse{nullptr};
     QLineEdit* m_leFilter{nullptr};
     QString m_viewLabelTemplate;
     QLabel* m_lbView{nullptr};
