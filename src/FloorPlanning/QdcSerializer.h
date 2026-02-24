@@ -15,7 +15,7 @@ public:
     void load(DeviceGrid& device, const std::filesystem::path& overrideFilePath = "");
     void load(DeviceGrid& device, const std::vector<std::string>& lines);
 
-    static std::vector<std::string> readLines(const std::filesystem::path& filePath);
+    static std::vector<std::string> readCommands(const std::filesystem::path& filePath);
 
     static std::optional<TileDescriptor> extractGridCoord(const std::string& data);
 

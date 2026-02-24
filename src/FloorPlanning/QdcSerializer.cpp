@@ -114,7 +114,7 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
 void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
     const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
-    std::vector<std::string> lines = readLines(filePath);
+    std::vector<std::string> lines = readCommands(filePath);
     if (!lines.empty()) {
         load(device, lines);
     }
@@ -215,8 +215,9 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
     }
 }
 
-std::vector<std::string> QdcSerializer::readLines(const std::filesystem::path& filePath)
+std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path& filePath)
 {
+    std::vector<std::string> commands;
     std::string content = FOEDAG::FileUtils::GetFileContent(filePath);
     FOEDAG::StringUtils::replaceAllInPlace(content, "  ", " ");
 
@@ -227,7 +228,24 @@ std::vector<std::string> QdcSerializer::readLines(const std::filesystem::path& f
     FOEDAG::StringUtils::replaceAllInPlace(content, lfCommandDelimiter(), "");
 
     FOEDAG::StringUtils::replaceAllInPlace(content, "\n\n", "\n");
-    return FOEDAG::StringUtils::tokenize(content, "\n");
+
+    std::vector<std::string> lines = FOEDAG::StringUtils::tokenize(content, "\n");
+    for (std::string line: lines) {
+      line = FOEDAG::StringUtils::trim(line);
+
+      // drop comment part
+      if (auto pos = line.find("#"); pos != std::string::npos) {
+        line = line.substr(0, pos); // drop commented part of line
+      }
+
+      if (line.empty()){
+        continue; // Skip empty line
+      }
+
+      commands.push_back(line);
+    }
+
+    return commands;
 }
 
 std::optional<TileDescriptor> QdcSerializer::extractGridCoord(const std::string& data)
