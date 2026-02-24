@@ -1,5 +1,6 @@
 #include "SynthResourceHierarchyWidget.h"
 #include "HierarhyElement.h"
+#include "CheckableButton.h"
 
 #include <QStringListModel>
 #include <QVBoxLayout>
@@ -77,6 +78,21 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     if (chShowChecked) {
         toolbarLayout->addWidget(chShowChecked);
     }
+
+    m_bnExpandCollapse = new CheckableButton(QIcon(":/right-arrow.png"), QIcon(":/down-arrow.png"));
+    m_bnExpandCollapse->setChecked(isShowOnlyCheckedItems());
+
+    m_bnExpandCollapse->setToolTip(tr("Expand/collapse netlist items"));
+    QObject::connect(m_bnExpandCollapse, &QPushButton::toggled, this, [this](bool checked) {
+      if (checked) {
+        m_view->expandAll();
+      } else {
+        m_view->collapseAll();
+      }
+    });
+
+    toolbarLayout->addWidget(m_bnExpandCollapse);
+
     if (m_leFilter) {
         toolbarLayout->addWidget(new QLabel("Filter"));
         toolbarLayout->addWidget(m_leFilter);
@@ -90,6 +106,10 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         });
     }
     //
+
+    if (toolbarLayout->count() == 1) {
+      toolbarLayout->addStretch();
+    }
 
     layout->addWidget(m_lbView);
     layout->addWidget(m_view);
@@ -148,7 +168,9 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
     }
     m_view->viewport()->update();
 
-    m_view->expandAll();
+    if (m_bnExpandCollapse->isChecked()) {
+      m_view->expandAll();
+    }
 }
 
 void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
@@ -513,7 +535,9 @@ void SynthResourceHierarchyWidget::showAllItems()
 
     showAllRecursive(m_view, m_model->invisibleRootItem(), QModelIndex());
 
-    m_view->expandAll();
+    if (m_bnExpandCollapse->isChecked()) {
+      m_view->expandAll();
+    }
 }
 
 void SynthResourceHierarchyWidget::showOnlyCheckedItems()
@@ -559,7 +583,9 @@ void SynthResourceHierarchyWidget::showOnlyCheckedItems()
 
     showOnlyCheckedRecursive(m_view, m_model->invisibleRootItem(), QModelIndex());
 
-    m_view->expandAll();
+    if (m_bnExpandCollapse->isChecked()) {
+      m_view->expandAll();
+    }
 }
 
 void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
