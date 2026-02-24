@@ -6591,7 +6591,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
 
     std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
     for (std::string line: lines) {
-      std::istringstream iss(command);
+      std::istringstream iss(line);
       std::string token, signalName;
       iss >> token;
     
