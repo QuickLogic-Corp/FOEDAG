@@ -238,8 +238,7 @@ const TilePtr& DeviceGrid::tile(const Tile::Index& index) const
 const std::unordered_set<std::string>& DeviceGrid::checkErrors()
 {
     m_errors.clear();
-    m_overlappedConflictingIndexes.clear();
-    m_overlappedNonConflictingIndexes.clear();
+    m_overlappedIndexes.clear();
 
     for (const auto& [partitionId, partition]: m_partitions) {
         // element presence
@@ -279,7 +278,7 @@ const std::unordered_set<std::string>& DeviceGrid::checkErrors()
                         for (const Tile::Index& index: indexes) {
                             m_errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
                         }
-                        m_overlappedConflictingIndexes.insert(indexes.begin(), indexes.end());
+                        m_overlappedIndexes.insert(indexes.begin(), indexes.end());
                     }
                 }
             }
@@ -296,7 +295,10 @@ const std::unordered_set<std::string>& DeviceGrid::checkErrors()
                 const RegionPtr& r2 = rit2->second;
                 if (r1->rect().intersects(r2->rect())) {
                     std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
-                    m_overlappedNonConflictingIndexes.insert(indexes.begin(), indexes.end());
+                    for (const Tile::Index& index: indexes) {
+                        m_errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partition: '"+part->name()+"'");
+                    }
+                    m_overlappedIndexes.insert(indexes.begin(), indexes.end());
                 }
             }
         }

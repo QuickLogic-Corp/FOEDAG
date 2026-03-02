@@ -556,28 +556,16 @@ void DeviceGridWidget::drawTilesBatched(QPainter& p)
     p.setBrush(Tile::color(Tile::Type::Dsp));
     p.drawRects(dspRects);
 
-    // draw conflicting overlapped tiles
-    if (!m_device.overlappedConflictingIndexes().empty()) {
+    // draw overlapped tiles
+    if (!m_device.overlappedIndexes().empty()) {
         QVector<QRectF> rects;
-        rects.reserve(m_device.overlappedConflictingIndexes().size());
-        for (const Tile::Index& index: m_device.overlappedConflictingIndexes()) {
+        rects.reserve(m_device.overlappedIndexes().size());
+        for (const Tile::Index& index: m_device.overlappedIndexes()) {
             const TilePtr& tile = m_device.tile(index);
             rects.append(tile->rect());
         }
-        p.setBrush(m_overlappedConflictingTileColor);
+        p.setBrush(m_overlappedTileColor);
         p.drawRects(rects);
-    }
-
-    // draw overlapped non conflicting tiles
-    if (!m_device.overlappedNonConflictingIndexes().empty()) {
-      QVector<QRectF> rects;
-      rects.reserve(m_device.overlappedNonConflictingIndexes().size());
-      for (const Tile::Index& index: m_device.overlappedNonConflictingIndexes()) {
-        const TilePtr& tile = m_device.tile(index);
-        rects.append(tile->rect());
-      }
-      p.setBrush(m_overlappedNonConflictingTileColor);
-      p.drawRects(rects);
     }
 }
 
