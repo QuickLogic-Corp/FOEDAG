@@ -50,9 +50,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_partitionResourcesWidget->setViewLabelTemplate(tr("Partition '%1' netlist:"));
     rightPaneLayout->addWidget(m_partitionResourcesWidget);
 
-    m_errorsListWidget = new ErrorsListWidget;
-    rightPaneLayout->addWidget(m_errorsListWidget);
-    m_errorsListWidget->setEnabled(false);
+    m_issuesListWidget = new ErrorsListWidget;
+    rightPaneLayout->addWidget(m_issuesListWidget);
 
     // m_synthResourcesWidget
     connect(m_deviceWidget, &DeviceGridWidget::partitionSelected,
@@ -90,8 +89,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(m_deviceWidget, &DeviceGridWidget::notify,
             this, &FloorPlanningWidget::onNotify);
 
-    connect(m_deviceWidget, &DeviceGridWidget::checkErrorsFinished,
-            this, &FloorPlanningWidget::onCheckErrorsFinished);
+    connect(m_deviceWidget, &DeviceGridWidget::checkIssuesFinished,
+            this, &FloorPlanningWidget::onCheckIssuesFinished);
 
     // toolBar
     QWidget* toolBarContainer = new QWidget;
@@ -299,12 +298,12 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
     updateSaveQdcButtonEnability();
 }
 
-void FloorPlanningWidget::onCheckErrorsFinished(std::unordered_set<std::string> errors)
+void FloorPlanningWidget::onCheckIssuesFinished(DeviceGrid::IssuesPtr issues)
 {
-    if (errors.empty()) {
-        m_errorsListWidget->clear();
+    if (issues->empty()) {
+        m_issuesListWidget->clear();
     } else {
-        m_errorsListWidget->setErrors(errors);
+        m_issuesListWidget->setIssues(issues->errors, issues->warnings);
     }
     updateSaveQdcButtonEnability();
 }

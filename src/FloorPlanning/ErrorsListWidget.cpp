@@ -16,33 +16,60 @@ ErrorsListWidget::ErrorsListWidget(QWidget* parent)
     layout->setSpacing(m);
     setLayout(layout);
 
-    QLabel* lbErrors = new QLabel("Errors:");
+    m_lbErrors = new QLabel("Errors:");
     m_lwErrors = new QListWidget;
 
-    layout->addWidget(lbErrors);
+    layout->addWidget(m_lbErrors);
     layout->addWidget(m_lwErrors);
 
-    QPixmap pm(":/error.png");
-    pm = pm.scaled(16,16, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    m_errorIcon = QIcon(pm);
+    m_lbWarnings = new QLabel("Warnings:");
+    m_lwWarnings = new QListWidget;
+
+    layout->addWidget(m_lbWarnings);
+    layout->addWidget(m_lwWarnings);
+
+    QPixmap epm(":/error.png");
+    epm = epm.scaled(16,16, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    m_errorIcon = QIcon(epm);
+
+    QPixmap wpm(":/warning.png");
+    wpm = wpm.scaled(16,16, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    m_warningIcon = QIcon(wpm);
 }
 
-void ErrorsListWidget::setErrors(const std::unordered_set<std::string>& errors)
+void ErrorsListWidget::setIssues(const std::unordered_set<std::string>& errors, const std::unordered_set<std::string>& warnings)
 {
-    setEnabled(true);
+    clear();
 
-    m_lwErrors->clear();
     for (const std::string& error: errors) {
         QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(error));
         item->setIcon(m_errorIcon);
         m_lwErrors->addItem(item);
     }
+
+    for (const std::string& warning: warnings) {
+      QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(warning));
+      item->setIcon(m_warningIcon);
+      m_lwWarnings->addItem(item);
+    }
+    updateVisibility(!errors.empty(), !warnings.empty());
 }
 
 void ErrorsListWidget::clear()
 {
-    setEnabled(false);
     m_lwErrors->clear();
+    m_lwWarnings->clear();
+
+    updateVisibility(false, false);
+}
+
+void ErrorsListWidget::updateVisibility(bool hasErrors, bool hasWarnings)
+{
+  m_lbErrors->setVisible(hasErrors);
+  m_lwErrors->setVisible(hasErrors);
+
+  m_lbWarnings->setVisible(hasWarnings);
+  m_lwWarnings->setVisible(hasWarnings);
 }
 
 } // namespace fp

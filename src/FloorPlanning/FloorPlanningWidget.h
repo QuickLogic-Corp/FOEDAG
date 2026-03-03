@@ -3,6 +3,7 @@
 #include <QWidget>
 
 #include "DeviceGridDescriptor.h"
+#include "DeviceGrid.h"
 #include "Partition.h"
 
 #include <map>
@@ -34,7 +35,7 @@ public:
 
 private slots:
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
-    void onCheckErrorsFinished(std::unordered_set<std::string> errors);
+    void onCheckIssuesFinished(DeviceGrid::IssuesPtr);
 
 signals:
     void closed();
@@ -58,7 +59,7 @@ private:
     DeviceGridWidget* m_deviceWidget{nullptr};
     PartitionsListWidget* m_partitionsListWidget{nullptr};
     NewUniqueNameDialog* m_newPartitionNameDialog{nullptr};
-    ErrorsListWidget* m_errorsListWidget{nullptr};
+    ErrorsListWidget* m_issuesListWidget{nullptr};
 
     void createNewPartition();
     void checkErrors();

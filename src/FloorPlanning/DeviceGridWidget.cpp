@@ -299,7 +299,7 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
           }
           // even if there is no m_newRegion, we still could move existed regions, so we need refresh
           m_device.alignRegions();
-          checkErrors();
+          checkIssues();
           update();
 
         }
@@ -843,15 +843,15 @@ void DeviceGridWidget::unselectRegion(bool silent)
   update();
 }
 
-void DeviceGridWidget::checkErrors()
+void DeviceGridWidget::checkIssues()
 {
-    std::unordered_set<std::string> errors = m_device.checkErrors();
-    emit checkErrorsFinished(errors);
+    DeviceGrid::IssuesPtr issues = m_device.checkIssues();
+    emit checkIssuesFinished(issues);
 }
 
 void DeviceGridWidget::reportPartitionChanges()
 {
-  checkErrors();
+  checkIssues();
   emit partitionsChanged(m_device.partitions());
 }
 

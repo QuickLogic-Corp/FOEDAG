@@ -15,7 +15,19 @@ class TileDescriptor;
 
 class DeviceGrid {
 public:
-    DeviceGrid()=default;
+  struct Issues {
+    std::unordered_set<std::string> errors;
+    std::unordered_set<std::string> warnings;
+    void clear() {
+      errors.clear();
+      warnings.clear();
+    }
+    bool empty() const { return errors.empty() && warnings.empty(); }
+  };
+  using IssuesPtr = std::shared_ptr<Issues>;
+
+public:
+    DeviceGrid();
     DeviceGrid(const DeviceGridDescriptorPtr& device);
     ~DeviceGrid()=default;
 
@@ -53,8 +65,8 @@ public:
     Tile::Index toBottomLeftGridIndex(const TileDescriptor&) const;
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
-    const std::unordered_set<std::string>& checkErrors();
-    bool hasErrors() const { return !m_errors.empty(); }
+    const IssuesPtr& checkIssues();
+    bool hasErrors() const { return !m_issues->errors.empty(); }
 
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
@@ -64,7 +76,7 @@ public:
 private:
     DeviceGridDescriptorPtr m_descriptor;
 
-    std::unordered_set<std::string> m_errors;
+    IssuesPtr m_issues;
 
     std::unordered_map<Tile::Index, TilePtr> m_tiles;
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;
