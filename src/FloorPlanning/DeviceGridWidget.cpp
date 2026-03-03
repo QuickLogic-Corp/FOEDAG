@@ -117,10 +117,7 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
       selectRegion(region);
       if (roleOpt) {
         if (roleOpt == Region::HandlerRole::REMOVE) {
-          if (m_device.removeRegion(region)) {
-            reportPartitionChanges();
-            update();
-          }
+          removeSelectedRegion();
         } else {
           m_regionEditRoleOpt = roleOpt;
         }
