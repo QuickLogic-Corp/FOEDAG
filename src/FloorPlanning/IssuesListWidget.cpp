@@ -1,4 +1,4 @@
-#include "ErrorsListWidget.h"
+#include "IssuesListWidget.h"
 
 #include <QListWidget>
 #include <QVBoxLayout>
@@ -7,7 +7,7 @@
 
 namespace fp {
 
-ErrorsListWidget::ErrorsListWidget(QWidget* parent)
+IssuesListWidget::IssuesListWidget(QWidget* parent)
     : QWidget(parent)
 {
     QVBoxLayout* layout = new QVBoxLayout;
@@ -37,7 +37,7 @@ ErrorsListWidget::ErrorsListWidget(QWidget* parent)
     m_warningIcon = QIcon(wpm);
 }
 
-void ErrorsListWidget::setIssues(const std::unordered_map<std::string, std::string>& errors, const std::unordered_map<std::string, std::string>& warnings)
+void IssuesListWidget::setIssues(const std::unordered_map<std::string, std::string>& errors, const std::unordered_map<std::string, std::string>& warnings)
 {
     clear();
 
@@ -61,7 +61,7 @@ void ErrorsListWidget::setIssues(const std::unordered_map<std::string, std::stri
     updateVisibility(!errors.empty(), !warnings.empty());
 }
 
-void ErrorsListWidget::clear()
+void IssuesListWidget::clear()
 {
     m_lwErrors->clear();
     m_lwWarnings->clear();
@@ -69,7 +69,7 @@ void ErrorsListWidget::clear()
     updateVisibility(false, false);
 }
 
-void ErrorsListWidget::updateVisibility(bool hasErrors, bool hasWarnings)
+void IssuesListWidget::updateVisibility(bool hasErrors, bool hasWarnings)
 {
   m_lbErrors->setVisible(hasErrors);
   m_lwErrors->setVisible(hasErrors);

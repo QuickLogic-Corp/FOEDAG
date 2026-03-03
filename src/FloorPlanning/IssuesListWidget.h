@@ -11,10 +11,10 @@ class QLabel;
 
 namespace fp {
 
-class ErrorsListWidget final : public QWidget {
+class IssuesListWidget final : public QWidget {
     Q_OBJECT
 public:
-    ErrorsListWidget(QWidget* parent = nullptr);
+    IssuesListWidget(QWidget* parent = nullptr);
     void setIssues(const std::unordered_map<std::string, std::string>& errors, const std::unordered_map<std::string, std::string>& warnings);
 
     void clear();

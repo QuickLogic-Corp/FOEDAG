@@ -4,7 +4,7 @@
 #include "DeviceGridWidget.h"
 #include "PartitionsListWidget.h"
 #include "NewUniqueNameDialog.h"
-#include "ErrorsListWidget.h"
+#include "IssuesListWidget.h"
 #include "CheckableButton.h"
 #include "Widgets/RoundProgressWidget.h"
 
@@ -50,7 +50,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_partitionResourcesWidget->setViewLabelTemplate(tr("Partition '%1' netlist:"));
     rightPaneLayout->addWidget(m_partitionResourcesWidget);
 
-    m_issuesListWidget = new ErrorsListWidget;
+    m_issuesListWidget = new IssuesListWidget;
     rightPaneLayout->addWidget(m_issuesListWidget);
 
     // m_synthResourcesWidget

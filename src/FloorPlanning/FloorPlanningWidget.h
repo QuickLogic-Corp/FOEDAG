@@ -20,7 +20,7 @@ class SynthResourceHierarchyWidget;
 class DeviceGridWidget;
 class PartitionsListWidget;
 class NewUniqueNameDialog;
-class ErrorsListWidget;
+class IssuesListWidget;
 
 class FloorPlanningWidget : public QWidget {
     Q_OBJECT
@@ -59,7 +59,7 @@ private:
     DeviceGridWidget* m_deviceWidget{nullptr};
     PartitionsListWidget* m_partitionsListWidget{nullptr};
     NewUniqueNameDialog* m_newPartitionNameDialog{nullptr};
-    ErrorsListWidget* m_issuesListWidget{nullptr};
+    IssuesListWidget* m_issuesListWidget{nullptr};
 
     void createNewPartition();
     void checkErrors();
