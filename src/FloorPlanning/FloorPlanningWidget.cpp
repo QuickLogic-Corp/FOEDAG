@@ -300,7 +300,7 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 
 void FloorPlanningWidget::onCheckIssuesFinished(DeviceGrid::IssuesPtr issues)
 {
-    if (issues->empty()) {
+    if (issues->isEmpty()) {
         m_issuesListWidget->clear();
     } else {
         m_issuesListWidget->setIssues(issues->errors, issues->warnings);

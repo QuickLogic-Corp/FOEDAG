@@ -37,19 +37,25 @@ ErrorsListWidget::ErrorsListWidget(QWidget* parent)
     m_warningIcon = QIcon(wpm);
 }
 
-void ErrorsListWidget::setIssues(const std::unordered_set<std::string>& errors, const std::unordered_set<std::string>& warnings)
+void ErrorsListWidget::setIssues(const std::unordered_map<std::string, std::string>& errors, const std::unordered_map<std::string, std::string>& warnings)
 {
     clear();
 
-    for (const std::string& error: errors) {
+    for (const auto& [error, toolTip]: errors) {
         QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(error));
         item->setIcon(m_errorIcon);
+        if (!toolTip.empty()) {
+          item->setToolTip(QString::fromStdString(toolTip));
+        }
         m_lwErrors->addItem(item);
     }
 
-    for (const std::string& warning: warnings) {
+    for (const auto& [warning, toolTip]: warnings) {
       QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(warning));
       item->setIcon(m_warningIcon);
+      if (!toolTip.empty()) {
+        item->setToolTip(QString::fromStdString(toolTip));
+      }
       m_lwWarnings->addItem(item);
     }
     updateVisibility(!errors.empty(), !warnings.empty());

@@ -14,15 +14,17 @@ namespace fp {
 class TileDescriptor;
 
 class DeviceGrid {
+  const char* VPR_DOC_FRAGMENT_OVERLAP_IN_ONE_PARTITION = "The regions within one partition must not overlap with each other (in order to ease processing when loading in the file). \nMore information in https://docs.verilogtorouting.org/en/latest/vpr/placement_constraints/";
+  const char* VPR_DOC_FRAGMENT_OVERLAP_IN_DIFFERENT_PARTITIONS = "It is strongly recommended that different partitions do not overlap. The packing algorithm compares the number of clustered blocks and the number of physical blocks in a region to decide if it should pack atoms inside a partition more aggressively when there are not enough resources in a partition. Overlapping partitions cause some physical blocks to be counted in more than one partition, which will degrade the packing algorithm’s ability to create a clustering that can be placed given the floorplan constraints. \nMore information in https://docs.verilogtorouting.org/en/latest/vpr/placement_constraints/";
 public:
   struct Issues {
-    std::unordered_set<std::string> errors;
-    std::unordered_set<std::string> warnings;
+    std::unordered_map<std::string, std::string> errors;
+    std::unordered_map<std::string, std::string> warnings;
     void clear() {
       errors.clear();
       warnings.clear();
     }
-    bool empty() const { return errors.empty() && warnings.empty(); }
+    bool isEmpty() const { return (errors.empty() && warnings.empty()); }
   };
   using IssuesPtr = std::shared_ptr<Issues>;
 
