@@ -103,7 +103,14 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
   m_elements.clear();
 
   std::string content{fileContent};
-  FOEDAG::StringUtils::replaceAllInPlace(content, "\\n", "");
+
+  // Normalize line endings first
+  FOEDAG::StringUtils::replaceAllInPlace(content, "\r\n", "\n");
+  FOEDAG::StringUtils::replaceAllInPlace(content, "\r", "\n");
+
+  // Remove line continuation backslash-newline
+  FOEDAG::StringUtils::replaceAllInPlace(content, "\\\n", "");
+
   auto lines = FOEDAG::StringUtils::tokenize(content, "\n");
 
   constexpr const char* keySubckt = ".subckt";
@@ -112,17 +119,17 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
     if (FOEDAG::StringUtils::startsWith(line, keySubckt)) {
       // extract token right after token ".subckt" if line starts with ".subckt"
       const size_t base = strlen(keySubckt);
-      const size_t start = line.find_first_not_of(" ", base);
+      const size_t start = line.find_first_not_of(" \t", base);
       if (start != std::string::npos) {
-        const size_t end = line.find_first_of(" ", start);
+        const size_t end = line.find_first_of(" \t", start);
         const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
         m_elements.emplace(line.data() + start, len);
       }
     } else if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
       // extract last token in line which starts with ".names"
-      const size_t end = line.find_last_not_of(" ");
+      const size_t end = line.find_last_not_of(" \t");
       if (end != std::string::npos) {
-        const size_t start = line.find_last_of(" ", end);
+        const size_t start = line.find_last_of(" \t", end);
         const size_t tokenStart = (start == std::string::npos) ? 0 : (start + 1);
         m_elements.emplace(line.data() + tokenStart, end - tokenStart + 1);
       }
