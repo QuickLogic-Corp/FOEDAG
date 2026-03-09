@@ -91,7 +91,7 @@ using namespace FOEDAG;
 #define GENERATE_NEW_DEVICE_FPGA_AUTO 1
 #define GENERATE_RR_GRAPH_FPGA_AUTO 0
 
-#define BITSTREAM_LEGACY_WAY // not use new template
+//#define USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
 
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
 {
@@ -6236,7 +6236,7 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-#ifdef BITSTREAM_LEGACY_WAY
+#ifndef USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
   std::ofstream ofs(
       (std::filesystem::path(ProjManager()->projectPath()) /
        std::string(ProjManager()->projectName() + "_bitstream.cmd"))
@@ -6244,7 +6244,7 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
   ofs << command << std::endl;
   ofs.close();
 int status = ExecuteAndMonitorSystemCommand(command);
-#else
+#else // USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
   // process script
   std::string processedScript;
   processedScript += "############################################\n";
@@ -6297,7 +6297,7 @@ int status = ExecuteAndMonitorSystemCommand(command);
     Message(out);
   }
   int status = false;
-#endif 
+#endif // USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
