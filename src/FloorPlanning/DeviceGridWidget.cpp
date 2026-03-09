@@ -24,9 +24,6 @@ DeviceGridWidget::DeviceGridWidget(QWidget* parent)
 
 bool DeviceGridWidget::isSaveQdcAllowed() const
 {
-  if (m_device.partitions().empty()) {
-    return false;
-  }
   if (m_device.hasErrors()) {
     return false;
   }
