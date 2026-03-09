@@ -48,6 +48,7 @@ set (SRC_CPP_LIST
   QtUtils.cpp
   LogUtils.cpp
   JsonWriter.cpp
+  PathUtils.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -59,6 +60,7 @@ set (SRC_H_INSTALL_LIST
   LogUtils.h
   JsonWriter.h
   SerializationUtils.h
+  PathUtils.h
 )
 
 set (SRC_H_LIST

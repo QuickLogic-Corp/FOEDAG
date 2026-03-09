@@ -75,6 +75,10 @@ class Compiler {
     SimulatePNR,
     SimulateBitstream
   };
+  static constexpr Action next(Action a) {
+    return static_cast<Action>(
+        static_cast<int>(a) + 1);
+  }
   enum class State {
     None,
     IPGenerated,
@@ -103,7 +107,7 @@ class Compiler {
   enum class STAEngineOpt { Tatum, Opensta };
 
   // Most common use case, create the compiler in your main
-  Compiler() = default;
+  Compiler();
   Compiler(TclInterpreter* interp, std::ostream* out,
            TclInterpreterHandler* tclInterpreterHandler = nullptr);
   void SetInterpreter(TclInterpreter* interp) { m_interp = interp; }
@@ -317,10 +321,12 @@ class Compiler {
   // this will apply to all file types as of now.
   bool m_copyFilesWhileAdding = false;
   bool m_autoLayoutGenerationMode = false;
+  bool m_customLayoutGenerationMode = false;
   std::string m_autoLayoutGeneratedLayoutName{};
   std::filesystem::path m_autoLayoutGeneratedVPRXMLPath{};
   std::filesystem::path m_autoLayoutGeneratedRRGraphBinPath{};
   std::filesystem::path m_autoLayoutGeneratedRouterLookaheadBinPath{};
+  std::filesystem::path m_autoLayoutGeneratedSBMapsYMLPath{};
 
   // Tasks generic options
   IPGenerateOpt m_ipGenerateOpt = IPGenerateOpt::None;

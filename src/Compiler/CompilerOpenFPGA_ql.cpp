@@ -77,6 +77,7 @@
 #include "QLDeviceManager.h"
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
+#include "FloorPlanning/QdcSerializer.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -88,6 +89,8 @@ using json = nlohmann::ordered_json;
 using namespace FOEDAG;
 
 #define USE_INCREMENTAL_COMPILATION
+#define GENERATE_NEW_DEVICE_FPGA_AUTO 1
+#define GENERATE_RR_GRAPH_FPGA_AUTO 0
 
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
 {
@@ -1988,7 +1991,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
+std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -1998,7 +2001,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
     ErrorMessage("Project Settings JSON is missing, please check <project_name> and corresponding <project_name>.json exists: " + ProjManager()->projectName());
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
   // if device_target is explicitly specified (STA does this):
@@ -2023,11 +2026,12 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     Message("voltage_threshold: " + voltage_threshold);
     Message("p_v_t_corner: " + p_v_t_corner);
     Message("layout: " + layout);
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
 
   std::string vpr_options;
+  std::string device_layout_name;
 
   // parse vpr general options
 #if UPSTREAM_UNUSED
@@ -2036,26 +2040,24 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     device_size = " --device " + m_deviceSize;
   }
 #endif // #if UPSTREAM_UNUSED
- if(m_autoLayoutGenerationMode) {
+  if(m_autoLayoutGenerationMode) {
     Message("Base VPR Command running with Auto Layout Generated Device!\n");
-    vpr_options += std::string(" --device") + 
-                   std::string(" ") + 
-                   m_autoLayoutGeneratedLayoutName;
-  } 
+    device_layout_name = m_autoLayoutGeneratedLayoutName;
+  }
+  else if(m_customLayoutGenerationMode) {
+    Message("Base VPR Command running with Custom Layout Generated Device!\n");
+    device_layout_name = m_autoLayoutGeneratedLayoutName;
+  }
   else {
     if (!m_deviceSize.empty()) {
-      vpr_options += std::string(" --device") + 
-                      std::string(" ") + 
-                      m_deviceSize;
+      device_layout_name = m_deviceSize;
     }
     else if( !QLSettingsManager::getStringValue("general", "device", "layout").empty() ) {
-      vpr_options += std::string(" --device") + 
-                      std::string(" ") + 
-                      QLSettingsManager::getStringValue("general", "device", "layout");
+      device_layout_name = QLSettingsManager::getStringValue("general", "device", "layout");
     }
     else {
         std::cout << "Should never be here, we should have a layout specified!" << std::endl;
-        return std::string("");
+        return std::make_tuple(std::string(""), std::string(""));
     }
   }
 
@@ -2099,7 +2101,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
         ErrorMessage("Could not find " + 
           QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
-        return "";
+        return std::make_tuple(std::string(""), std::string(""));
       }
     vpr_options += std::string(" --net_file") + 
                    std::string(" ") + 
@@ -2115,7 +2117,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
                 ErrorMessage("Could not find " + 
           QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
-        return "";
+        return std::make_tuple(std::string(""), std::string(""));
       }
     vpr_options += std::string(" --place_file") + 
                    std::string(" ") + 
@@ -2132,7 +2134,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
       ErrorMessage("Could not find " + 
           QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
-        return "";
+      return std::make_tuple(std::string(""), std::string(""));
       }
     vpr_options += std::string(" --route_file") + 
                    std::string(" ") + 
@@ -2244,15 +2246,6 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
                    QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail");
   }
 
-  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
-      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
-      // until Synplify side is fixed to resolve the root cause of the error.
-      vpr_options += std::string(" --skip_sync_clustering_and_routing_results on");
-    }
-  }
-
   // custom vpr command-line options for *all* stages
   // it is upto the user to ensure that the options are passed in correctly.
   if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
@@ -2306,6 +2299,13 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
+
+  // note: this exists since a long time. should this be removed by default?
+  // add the *internal* option to allow dangling nodes in the logic.
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
+  // this is a workaround, to avoid putting timing arcs for static input ports.
+  vpr_options += " --allow_dangling_combinational_nodes on";
+
   // use rr_graph and router_lookahead files, if available in the device data:
   std::filesystem::path rr_graph_file_path = 
       QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
@@ -2318,6 +2318,31 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
                     rr_graph_file_path.string() +
                     " --read_router_lookahead " +
                     router_lookahead_file_path.string();
+
+  }
+  else {
+    // no rr_graph available to use, try to use dynamic rr_graph generation.
+    // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
+    std::filesystem::path sb_maps_file_path = 
+    QLDeviceManager::getInstance()->deviceSBMAPSFile(device_target);
+
+    std::filesystem::path sb_templates_dir_path = 
+      QLDeviceManager::getInstance()->deviceSBTemplatesDir(device_target);
+
+    if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
+
+      vpr_options += " --sb_maps " + sb_maps_file_path.string();
+      vpr_options += " --sb_templates " + sb_templates_dir_path.string();
+
+      vpr_options += " --preserve_input_pin_connections off";
+      vpr_options += " --preserve_output_pin_connections off";
+      vpr_options += " --annotated_rr_graph on";
+      vpr_options += " --remove_dangling_nodes off";
+      vpr_options += " --sb_count_dir sb_count";
+      // this is always enabled in the default Aurora flow, so don't add here.
+      // if that is removed, only then uncomment this.
+      // vpr_options += " --allow_dangling_combinational_nodes on";
+    }
   }
 
 
@@ -2326,7 +2351,7 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
   if(m_architectureFile.empty()) {
 
     ErrorMessage("Cannot proceed without VPR Architecture file.");
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
   if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
@@ -2341,22 +2366,18 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
       Message("load cryptdb failed!");
       // empty string returned on error.
-      return std::string("");
+      return std::make_tuple(std::string(""), std::string(""));
     }
 
     if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
       ErrorMessage("decryption failed!");
       // empty string returned on error.
-      return std::string("");
+      return std::make_tuple(std::string(""), std::string(""));
     }
   }
 
   Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
 
-  // add the *internal* option to allow dangling nodes in the logic.
-  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
-  // this is a workaround, to avoid putting timing arcs for static input ports.
-  vpr_options += " --allow_dangling_combinational_nodes on";
 
   // construct the base vpr command with all the options here.
 #if UPSTREAM_UNUSED
@@ -2379,20 +2400,24 @@ std::string CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_targ
     }
   }
   else { //IO floorplanning generation failed, must stop the flow
-    return std::string("");
+    return std::make_tuple(std::string(""), std::string(""));
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
   vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:load_rr_indexed_data_T_values:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
-  //
 
+
+  // construct vpr base command with mandatory args + options:
   std::string base_vpr_command =
       m_vprExecutablePath.string() + std::string(" ") +
       m_architectureFile.string() + std::string(" ") +
-      std::string(netlistFile) + // NOTE: don't add a " " here as vpr options start with a " "
+      std::string(netlistFile) + std::string(" ") +
+      std::string("--device") + std::string(" ") + device_layout_name +// NOTE: don't add a " " here as vpr options start with a " "
       vpr_options;
-  
-  return base_vpr_command;
+
+
+  // return tuple of full vpr command, as well as just the options for use by clients
+  return std::make_tuple(base_vpr_command, vpr_options);
 }
 
 CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target, const VprStageCfg& cfg) {
@@ -2443,7 +2468,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if(m_autoLayoutGenerationMode) {
     Message("Base VPR Command running with Auto Layout Generated Device!\n");
     command->append("--device", m_autoLayoutGeneratedLayoutName);
-  } 
+  }
+  else if(m_customLayoutGenerationMode) {
+    Message("Base VPR Command running with Custom Layout Generated Device!\n");
+    command->append("--device", m_autoLayoutGeneratedLayoutName);
+  }
   else {
     if (!m_deviceSize.empty()) {
       command->append("--device", m_deviceSize);
@@ -2605,15 +2634,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     command->append("--timing_report_detail", QLSettingsManager::getStringValue("vpr", "analysis", "timing_report_detail"));
   }
 
-  if(m_projManager->synthesisTool() == Synplify || m_projManager->projectType() == PostMapSynplify) {
-    if( QLSettingsManager::getStringValue("vpr", "route", "flat_routing") == "checked" ) {
-      // using Synplify and flat_routing enabled, we get a crash at sync_netlists_to_routing_flat();
-      // to skip this synchronization, we can add '--skip_sync_clustering_and_routing_results on'
-      // until Synplify side is fixed to resolve the root cause of the error.
-      command->append("--skip_sync_clustering_and_routing_results", "on");
-    }
-  }
-
   // custom vpr command-line options for *all* stages
   // it is upto the user to ensure that the options are passed in correctly.
   if( !QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str").empty() ) {
@@ -2667,6 +2687,13 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
+
+  // note: this exists since a long time. should this be removed by default?
+  // add the *internal* option to allow dangling nodes in the logic.
+  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
+  // this is a workaround, to avoid putting timing arcs for static input ports.
+  command->append("--allow_dangling_combinational_nodes on");
+
   // use rr_graph and router_lookahead files, if available in the device data:
   std::filesystem::path rr_graph_file_path = 
       QLDeviceManager::getInstance()->deviceVPRRRGraphFile(device_target);
@@ -2677,6 +2704,30 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
     command->appendFile("--read_rr_graph", rr_graph_file_path);
     command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+  }
+  else {
+    // no rr_graph available to use, try to use dynamic rr_graph generation.
+    // use SB_MAPS yml + CORNER_SB_TEMPLATE_DIR csv files, if available in the device_data:
+    m_SBMapsFile = 
+        QLDeviceManager::getInstance()->deviceSBMAPSFile(device_target);
+
+    m_SBTemplatesDir = 
+        QLDeviceManager::getInstance()->deviceSBTemplatesDir(device_target);
+
+    if(!m_SBMapsFile.empty() && !m_SBTemplatesDir.empty()) {
+
+      command->appendFile("--sb_maps", m_SBMapsFile);
+      command->appendFile("--sb_templates", m_SBTemplatesDir);
+
+      command->append("--preserve_input_pin_connections off");
+      command->append("--preserve_output_pin_connections off");
+      command->append("--annotated_rr_graph on");
+      command->append("--remove_dangling_nodes off");
+      command->append("--sb_count_dir sb_count");
+      // this is always enabled in the default Aurora flow, so don't add here.
+      // if that is removed, only then uncomment this.
+      // command->append("--allow_dangling_combinational_nodes on");
+    }
   }
 
 
@@ -2711,11 +2762,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
-
-  // add the *internal* option to allow dangling nodes in the logic.
-  // ref: https://github.com/verilog-to-routing/vtr-verilog-to-routing/blob/a7f573b7a5432711042ddeb9f2958cd035097a10/vpr/src/timing/timing_graph_builder.cpp#L277
-  // this is a workaround, to avoid putting timing arcs for static input ports.
-  command->append("--allow_dangling_combinational_nodes", "on");
 
   // construct the base vpr command with all the options here.
 #if UPSTREAM_UNUSED
@@ -2880,6 +2926,9 @@ bool CompilerOpenFPGA_ql::Packing() {
         " Before Packing");
   }
 
+  QLDeviceTarget current_device_target = 
+      QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+
   CommandWrapperPtr command = getPackingCommand();
   if(!command) {
     return false;
@@ -2917,24 +2966,48 @@ bool CompilerOpenFPGA_ql::Packing() {
   // in some reason empty place file is still generated by packing flow, sometimes overwrite the .place file with good content (generated by place task)
   PostTaskFileRemover placeFileRemover(ProjManager()->projectPath() / std::filesystem::path(ProjManager()->projectName() + "_post_synth.place"));
 
-  int status = ExecuteAndMonitorSystemCommand(command->string());
+
+  m_customLayoutGenerationMode = false;
+  if(current_device_target.device_variant_layout.name == "FPGA_CUSTOM") {
+    m_customLayoutGenerationMode = true;
+  }
+
+  int status = 0;
+  if(m_customLayoutGenerationMode == true) 
+  {
+    // don't run packing command, we need to run the python script
+    // to generate the device first.
+  }
+  else {
+    status = ExecuteAndMonitorSystemCommand(command->string());
+  }
 
 
   // FPGA_AUTO device logic ++
   // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
   m_autoLayoutGenerationMode = false;
-  QLDeviceTarget current_device_target = 
-      QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  
+  // Note: At this point:
+  // m_architectureFile is already populated in the vpr base command
+  // m_SBMapsFile is already populated in the vpr base command
+  // m_SBTemplatesDir is already populated in the vpr base command
+  
   if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
     m_autoLayoutGenerationMode = true;
   }
 
-  if(m_autoLayoutGenerationMode) {
-    Message("Packing is running in Auto Layout Generation Mode!\n");
+  if(m_autoLayoutGenerationMode || m_customLayoutGenerationMode) {
 
-    // Regardless of the status (whether the design fits into the base auto layout or now)
-    // we generated a device package.
-    // Even if the design fits, the layout being is called 'FPGA_AUTO' necessary to trigger the
+    if(m_autoLayoutGenerationMode) {
+      Message("Packing is running in Auto Layout Generation Mode!\n");
+    }
+    if(m_customLayoutGenerationMode) {
+      Message("Packing is running in Custom Layout Generation Mode!\n");
+    }
+
+    // Regardless of the status (whether the design fits into the base auto layout or not)
+    // we generate a device package.
+    // Even if the design fits, the layout being called 'FPGA_AUTO' necessary to trigger the
     // auto layout generation mode, prevents it from being used in the normal flow.
     // So, we generate a device package (which will be identical to the FPGA_AUTO) with the
     // devicename and layoutname changed according to the generated layout from the script.
@@ -2943,21 +3016,53 @@ bool CompilerOpenFPGA_ql::Packing() {
     std::filesystem::path generated_vpr_xml_path = 
           std::filesystem::path(ProjManager()->projectPath()) / "vpr_generated.xml";
 
+    std::filesystem::path generated_sb_maps_yml_path = 
+          std::filesystem::path(ProjManager()->projectPath()) / "sb_maps_generated.yml";
+
     // layout to be used in generated device
     int generated_layout_width = 0;
     int generated_layout_height = 0;
     m_autoLayoutGeneratedLayoutName = "";
 
-    if (status) {
-      Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
-      Message("Try to generate a device that can accomodate current design...\n");
+    if ( (m_autoLayoutGenerationMode && (status != 0)) ||
+         (m_customLayoutGenerationMode) ) {
+
+      if(m_autoLayoutGenerationMode) {
+        Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
+        Message("Try to generate a device that can accomodate current design...\n");
+      }
+      if(m_customLayoutGenerationMode) {
+        Message("Generate a device that can accomodate current layout specification...\n");
+      }
 
       std::filesystem::path add_layout_script_path = 
           QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout.py";
 
-      std::filesystem::path vpr_stdout_log_filepath = 
-          std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
+      std::filesystem::path vpr_stdout_log_filepath;
+      if(m_autoLayoutGenerationMode) {
+        vpr_stdout_log_filepath = 
+            std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
+      }
 
+      std::filesystem::path custom_layout_yml_filepath;
+      if(m_customLayoutGenerationMode) {
+        custom_layout_yml_filepath = 
+            std::filesystem::path(ProjManager()->projectPath()) / ".." / "custom_layout.yml";
+        // canonicalize to remove relative paths.
+        try {
+          custom_layout_yml_filepath = std::filesystem::weakly_canonical(custom_layout_yml_filepath);
+        }
+        catch (const std::filesystem::filesystem_error& e) {
+          ErrorMessage("Error Canonicalizing Directory Paths\n");
+          //std::cerr << "Error: " << e.what() << std::endl;
+          return false;
+        }
+        if(!FileUtils::FileExists(custom_layout_yml_filepath)) {
+          ErrorMessage("[Error] custom layout spec yml not found at expected path: " + custom_layout_yml_filepath.string() + "\n");
+          ErrorMessage("Please ensure to create a 'custom_layout.yml' file in the project path.");
+          return false;
+        }
+      }
 
       // overhead settings and other settings, read from file 'add_layout_params.json' if it exists:
       std::filesystem::path add_layout_params_json_filepath = 
@@ -2976,12 +3081,23 @@ bool CompilerOpenFPGA_ql::Packing() {
         }
       }
 
+      std::string add_layout_script_generated_layout_name;
+
       std::string command_auto_device = 
           std::string("python3") + std::string(" ") +
           add_layout_script_path.string() + std::string(" ") +
           std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
-          std::string("--vpr_stdout_log ") + vpr_stdout_log_filepath.string() + std::string(" ") +
-          std::string("--output ") + generated_vpr_xml_path.string();
+          std::string("--output ") + generated_vpr_xml_path.string() + std::string(" ") +
+          std::string("--output_sb_map ") + generated_sb_maps_yml_path.string();
+
+      if(m_autoLayoutGenerationMode) {
+        command_auto_device +=
+          std::string(" --vpr_stdout_log ") + vpr_stdout_log_filepath.string();
+      }
+      if(m_customLayoutGenerationMode) {
+        command_auto_device +=
+          std::string(" --custom_layout ") + custom_layout_yml_filepath.string();
+      }
 
       if(overhead_percentage > 0) {
         command_auto_device += 
@@ -2996,7 +3112,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       if (status_auto_device == 0) {
 
         // get the layout name generated from the log file:
-        const QRegularExpression auto_layout_regex("Layout: (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
+        const QRegularExpression auto_layout_regex("Layout for (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
         QFile file{QString::fromStdString(logfile_auto_device.string())};
         file.open(QFile::ReadOnly);
         while (!file.atEnd()) {
@@ -3004,7 +3120,7 @@ bool CompilerOpenFPGA_ql::Packing() {
           auto match = auto_layout_regex.match(line);
           if (match.hasMatch()) {
             bool ok;
-            m_autoLayoutGeneratedLayoutName = QString(match.captured(1)).toStdString();
+            add_layout_script_generated_layout_name = QString(match.captured(1)).toStdString();
             generated_layout_width = QString(match.captured(2)).toInt(&ok);
             if(!ok) {
               ErrorMessage("Error parsing log from auto-layout script: width\n");
@@ -3019,7 +3135,7 @@ bool CompilerOpenFPGA_ql::Packing() {
             break;
           }
         }
-        if(m_autoLayoutGeneratedLayoutName.empty()) {
+        if(add_layout_script_generated_layout_name.empty()) {
           ErrorMessage("Error parsing log from auto-layout script: layoutname\n");
           return false;
         }
@@ -3028,8 +3144,27 @@ bool CompilerOpenFPGA_ql::Packing() {
         ErrorMessage("Generating Device Failed, Error Code: " + std::to_string(status_auto_device) + "\n");
         return false;
       }
+
+      if(m_autoLayoutGenerationMode) {
+        // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
+        // if the layout name of the device is 'FPGA_AUTO'
+        m_autoLayoutGeneratedLayoutName = 
+                std::string("AUTOFPGA") + 
+                std::to_string(generated_layout_width) + 
+                std::to_string(generated_layout_height);
+      }
+      if(m_customLayoutGenerationMode) {
+      // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
+      // if the layout name of the device is 'FPGA_AUTO'
+      m_autoLayoutGeneratedLayoutName = 
+              std::string("CUSTOMFPGA") + 
+              std::to_string(generated_layout_width) + 
+              std::to_string(generated_layout_height);
+      }
+
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
     }
-    else {
+    else if(m_autoLayoutGenerationMode && (status == 0)) {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
       Message("Generating Device equivalent to the current device...\n");
 
@@ -3043,11 +3178,15 @@ bool CompilerOpenFPGA_ql::Packing() {
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
 
-      // update the layout_name in the vpr.xml
+      // copy the SB_MAPS.yml of the current device into the same path as the python script would have done.
+      FileUtils::overwriteFile(m_SBMapsFile, generated_sb_maps_yml_path);
+
+      // update the layout_name in the vpr.xml, we know that it would be called 'FPGA_AUTO' in this case.
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
     }
 
 
+#if GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
     // so that the next stages can be run quicker.
     // use a basic blif file for generating the rr_graph.bin and router_lookahead.bin
@@ -3094,31 +3233,16 @@ bool CompilerOpenFPGA_ql::Packing() {
         std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
     FileUtils::removeFile(logfile_vpr_stdout);
     FileUtils::removeFile(logfile_generate_rr_graph);
+#endif // #if GENERATE_RR_GRAPH_FPGA_AUTO
 
 
-
-    // re-run packing with the generated vpr xml now.
-    // easiest way is to take the previous command as is, and 
-    // - replace the architecture file path
-    // - replace the layout name
-    std::string command_rerun = command->string();
-
-    // ensure that 'FPGA_AUTO' replacement is done first!!
-    command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
-    command_rerun = ReplaceAll(command_rerun, m_architectureFile.string(), generated_vpr_xml_path.string());
-
-    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
-                      std::string(ProjManager()->projectName() + "_pack.cmd"))
-                          .string());
-    ofs << command_rerun << std::endl;
-    ofs.close();
-
-    Message("Packing is being re-run with Auto Layout Generated Device!\n");
-    status = ExecuteAndMonitorSystemCommand(command_rerun);
-
-    // the 'status' will be checked as in the usual flow, as for us, the usual flow
-    // resumes, but in 'm_autoLayoutGenerationMode'
-
+    // Deal with the generated vpr xml:
+    // NOTE: we encrypt the generated vpr xml, then delete the generated vpr xml,
+    // and then again decrypt this encrypted-generated-vpr-xml 
+    // why do seemingly unnecessary steps?
+    // to follow usual code flow of using temporarily decrypted arch file.
+    // to ensure that generated vpr xml does not stay in the project directory for a longer time than necessary.
+    
     // encrypt the generated vpr xml with the same key as the current device
     // this will be saved into m_autoLayoutGeneratedVPRXMLPath.
     m_cryptdbPath = 
@@ -3143,13 +3267,65 @@ bool CompilerOpenFPGA_ql::Packing() {
     // for the next stages
     FileUtils::removeFile(generated_vpr_xml_path);
 
+    // now use the new encrypted vpr xml path for re-running the pack stage with
+    // generated device, after temporary decrypting as usual.
+    // the previously decrypted architecture file path will be cleaned up in the flow later anyway.
+    // save the path of the previously decrypted architecture file path for easy replacement in command to re-run pack.
+    std::filesystem::path old_m_architectureFile = m_architectureFile;
+    m_architectureFile = GenerateTempFilePath();
+  
+    if (!CRFileCryptProc::getInstance()->decryptFile(m_autoLayoutGeneratedVPRXMLPath, m_architectureFile)) {
+      ErrorMessage("decryption failed!");
+      return false;
+    }
 
+    // Deal with the generated SB_MAPS yml:
+    m_autoLayoutGeneratedSBMapsYMLPath = generated_sb_maps_yml_path;
+
+
+    // re-run packing with the generated vpr xml now.
+    // easiest way is to take the previous command as is, and 
+    // - replace the architecture file path
+    // - replace the layout name
+    std::string command_rerun = command->string();
+
+    // ensure that 'FPGA_AUTO' replacement is done first!!
+    if(m_autoLayoutGenerationMode) {
+      command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+    }
+    if(m_customLayoutGenerationMode) {
+      command_rerun = ReplaceAll(command_rerun, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+    }
+    command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
+    command_rerun = ReplaceAll(command_rerun, m_SBMapsFile.string(), m_autoLayoutGeneratedSBMapsYMLPath.string());
+
+    std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
+                      std::string(ProjManager()->projectName() + "_pack.cmd"))
+                          .string());
+    ofs << command_rerun << std::endl;
+    ofs.close();
+
+    if(m_autoLayoutGenerationMode) {
+      Message("Packing is being re-run with Auto Layout Generated Device!\n");
+    }
+    if(m_customLayoutGenerationMode) {
+      Message("Packing is being run with Custom Layout Generated Device!\n");
+    }
+    status = ExecuteAndMonitorSystemCommand(command_rerun);
+
+    // the 'status' will be checked as in the usual flow, as for us, the usual flow
+    // resumes, but in 'm_autoLayoutGenerationMode' or 'm_customLayoutGenerationMode'
+
+
+#if GENERATE_NEW_DEVICE_FPGA_AUTO
     // DEVICE CREATION LOGIC ++
     // At this point, (if) the packing is completed with the generated device vpr xml, and we can create a usable device
     // 1 copy <device>: as a copy of the FPGA_AUTO device parallel to the device (device_data location)
     //   where devicename: replace FPGA_AUTO with the generated layout name
     // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
     // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
+    // -OR-
+    // 3 SB_MAPS.yml/CSV : copy the generated SB_MAPS.yml, and the CSVs need not change.
     // 4 cryptdb: replace FPGA_AUTO with the generated layout name
     // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
     // 6 example logs: if currently running design within examples, clean up logs
@@ -3159,10 +3335,19 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       // 1 copy the FPGA_AUTO device directory recursively to create new device.
       //   and replace devicename using the generated layoutname.
-      std::string target_device_copy_devicename = 
+      std::string target_device_copy_devicename;
+      if(m_autoLayoutGenerationMode) {
+        target_device_copy_devicename = 
           StringUtils::replaceAll(current_device_target.device_variant.devicename,
                                   std::string("FPGA_AUTO"),
                                   m_autoLayoutGeneratedLayoutName);
+      }
+      if(m_customLayoutGenerationMode) {
+        target_device_copy_devicename = 
+          StringUtils::replaceAll(current_device_target.device_variant.devicename,
+                                  std::string("FPGA_CUSTOM"),
+                                  m_autoLayoutGeneratedLayoutName);
+      }
 
       std::filesystem::path source_device_copy_dirpath = 
           QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
@@ -3213,7 +3398,7 @@ bool CompilerOpenFPGA_ql::Packing() {
           "vpr.xml.en";
       FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
 
-
+#if GENERATE_RR_GRAPH_FPGA_AUTO
       // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
       std::filesystem::path target_device_rr_graph_filepath =
           target_device_vpr_xml_filepath.parent_path() /
@@ -3224,7 +3409,14 @@ bool CompilerOpenFPGA_ql::Packing() {
           target_device_vpr_xml_filepath.parent_path() /
           "router_lookahead.bin";
       FileUtils::overwriteFile(m_autoLayoutGeneratedRouterLookaheadBinPath, target_device_router_lookahead_filepath);
+#endif // #if GENERATE_RR_GRAPH_FPGA_AUTO
 
+      // 3 SB_MAPS.yml and SB_TEMPLATES dir: copy the output SB_MAPS.yml and the SB_TEMPLATES directory of the current device:
+      // SB_MAPS.yml should be copied into the aurora/ directory, overwriting existing one.
+      // SB_TEMPLATES dir is copied parallel to the vpr.xml.en (this is probably not required at all!, as it will remain same as current device.)
+      std::filesystem::path target_device_sb_maps_yml_filepath =
+          target_device_copy_dirpath / "aurora" / "SB_MAPS.yml";
+      FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
       // 4 cryptdb: replace FPGA_AUTO with the generated layout name
       std::filesystem::path source_device_cryptdb_filepath = 
@@ -3233,10 +3425,19 @@ bool CompilerOpenFPGA_ql::Packing() {
       std::string source_device_cryptdb_filename = 
           source_device_cryptdb_filepath.filename().string();
 
-      std::string target_device_copy_cryptdb_filename = 
-          StringUtils::replaceAll(source_device_cryptdb_filename,
-                                  std::string("FPGA_AUTO"),
-                                  m_autoLayoutGeneratedLayoutName);
+      std::string target_device_copy_cryptdb_filename;
+      if(m_autoLayoutGenerationMode) {
+        target_device_copy_cryptdb_filename = 
+            StringUtils::replaceAll(source_device_cryptdb_filename,
+                                    std::string("FPGA_AUTO"),
+                                    m_autoLayoutGeneratedLayoutName);
+      }
+      if(m_customLayoutGenerationMode) {
+        target_device_copy_cryptdb_filename = 
+            StringUtils::replaceAll(source_device_cryptdb_filename,
+                                    std::string("FPGA_CUSTOM"),
+                                    m_autoLayoutGeneratedLayoutName);
+      }
 
       std::filesystem::path target_device_copy_cryptdb_filepath_original = 
           target_device_copy_dirpath / source_device_cryptdb_filename;
@@ -3268,9 +3469,17 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
         }
 
-        // replace "FPGA_AUTO" with generated layout name in all the files
-        for(auto filepath: filepath_list) {
-          FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+        if(m_autoLayoutGenerationMode) {
+          // replace "FPGA_AUTO" with generated layout name in all the files
+          for(auto filepath: filepath_list) {
+            FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+          }
+        }
+        if(m_customLayoutGenerationMode) {
+          // replace "FPGA_CUSTOM" with generated layout name in all the files
+          for(auto filepath: filepath_list) {
+            FileUtils::findAndReplaceInFile(filepath, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+          }
         }
       }
 
@@ -3324,6 +3533,36 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout.py");
       FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout_params.json");
 
+      // 8 remove all other corners if they exist in the new device, except for the one we are currently using.
+      // get all the device_variants for this device:
+      std::vector<QLDeviceVariant> device_variants = 
+          QLDeviceManager::getInstance()->listDeviceVariants(current_device_target.device_variant.family,
+                                                             current_device_target.device_variant.foundry,
+                                                             current_device_target.device_variant.node,
+                                                             current_device_target.device_variant.devicename);
+
+      std::error_code ec;
+      std::vector<std::filesystem::path> list_of_dirs_to_delete = {};
+
+      for (QLDeviceVariant device_variant: device_variants) {
+        if(device_variant.voltage_threshold == current_device_target.device_variant.voltage_threshold &&
+           device_variant.p_v_t_corner == current_device_target.device_variant.p_v_t_corner) {
+
+          // keep the current variant directory.
+        }
+        else {
+          // mark all other variant directories for deletion
+          std::filesystem::path dirpath = target_device_copy_dirpath / device_variant.voltage_threshold / device_variant.p_v_t_corner;
+          list_of_dirs_to_delete.push_back(dirpath);
+        }
+      }
+
+      for(std::filesystem::path dir_path_to_delete: list_of_dirs_to_delete) {
+
+        std:: cout << std::string("deleting path: ") + dir_path_to_delete.string() << std::endl;
+        FileUtils::RmDirRecursively(dir_path_to_delete );
+      }
+
 
       // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
       QLDeviceManager::getInstance()->parseDeviceData();
@@ -3332,6 +3571,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
     }
     // DEVICE CREATION LOGIC --
+#endif // #if GENERATE_NEW_DEVICE_FPGA_AUTO
   }
   // FPGA_AUTO device logic --
 
@@ -3656,6 +3896,9 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(m_autoLayoutGenerationMode) {
     Message("Placement is being run with Auto Layout Generated Device!");
   }
+  if(m_customLayoutGenerationMode) {
+    Message("Placement is being run with Custom Layout Generated Device!");
+  }
 
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -3847,6 +4090,9 @@ bool CompilerOpenFPGA_ql::Route() {
 
   if(m_autoLayoutGenerationMode) {
     Message("Route is being run with Auto Layout Generated Device!");
+  }
+  if(m_customLayoutGenerationMode) {
+    Message("Route is being run with Custom Layout Generated Device!");
   }
 
   int status = ExecuteAndMonitorSystemCommand(command->string());
@@ -4343,6 +4589,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   if(m_autoLayoutGenerationMode) {
     Message("Timing Analysis is being run with Auto Layout Generated Device!");
   }
+  if(m_customLayoutGenerationMode) {
+    Message("Timing Analysis is being run with Custom Layout Generated Device!");
+  }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
@@ -4589,9 +4838,13 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    std::string taCommand = BaseVprCommandLEGACY() + " --route --analysis --disp on";
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    std::string taCommand = base_vpr_command + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::string taCommand = BaseVprCommandLEGACY(current_device_sta) + " --analysis --disp on";
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    std::string taCommand = base_vpr_command + " --analysis --disp on";
 #endif // #ifdef _WIN32
 
     if(!profile.empty()){
@@ -4623,7 +4876,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    std::string command = BaseVprCommandLEGACY() + " --gen_post_synthesis_netlist on";
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    std::string command = base_vpr_command + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
     int status = ExecuteAndMonitorSystemCommand(command);
@@ -4672,7 +4927,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     std::string vpr_options;
 
-    taCommand = BaseVprCommandLEGACY(current_device_sta);
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+    taCommand = base_vpr_command;
     if(taCommand.empty()) {
         ErrorMessage("Base VPR Command is empty!");
         return false;
@@ -4745,6 +5002,9 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   if(m_autoLayoutGenerationMode) {
     Message("Power Analysis is being run with Auto Layout Generated Device!");
   }
+  if(m_customLayoutGenerationMode) {
+    Message("Power Analysis is being run with Custom Layout Generated Device!");
+  }
 
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
@@ -4802,19 +5062,6 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 
   // reload QLSettingsManager() to ensure we account for dynamic changes in the settings/power json:
   QLSettingsManager::reloadJSONSettings();
-
-  /// when we restart aurora after complete compilation flow
-  /// and run power_estimation task directly (without previous tasks) the metrics are empty,
-  /// so we restore them (https://github.com/QL-Proprietary/aurora2/issues/1459)
-  if (QLMetricsManager::getInstance()->isEmpty()) {
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
-    QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
-    QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
-  }
-  ///
-
 
   // check if settings were loaded correctly before proceeding:
   if((QLSettingsManager::getInstance()->settings_json).empty()) {
@@ -5314,6 +5561,37 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::error_code ec;
 
 
+  m_architectureFile = 
+      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
+  if(m_architectureFile.empty()) {
+
+    ErrorMessage("Cannot proceed without VPR Architecture file.");
+    return std::string("");
+  }
+
+  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+    
+    std::filesystem::path vpr_xml_en_path = m_architectureFile;
+    m_architectureFile = GenerateTempFilePath();
+
+    m_cryptdbPath = 
+        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
+                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
+
+    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
+      Message("load cryptdb failed!");
+      // empty string returned on error.
+      return std::string("");
+    }
+
+    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+      ErrorMessage("decryption failed!");
+      // empty string returned on error.
+      return std::string("");
+    }
+  }
+
+
   // [required] openfpga architecture file
   m_OpenFpgaArchitectureFile = 
       QLDeviceManager::getInstance()->deviceOpenFPGAArchitectureFile();
@@ -5508,12 +5786,16 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // call vpr to execute analysis
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
 
-  std::string vpr_analysis_command = BaseVprCommandLEGACY();
+  std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
+  std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
+  std::string base_vpr_options = std::get<1>(baseVPRCommandTuple);
+  std::string vpr_analysis_command = base_vpr_command;
   if(vpr_analysis_command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     // empty string returned on error.
     return std::string("");
   }
+
   vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
@@ -5525,6 +5807,20 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
                           std::string("--analysis");
 
   result = ReplaceAll(result, "${VPR_ANALYSIS_COMMAND}", vpr_analysis_command);
+
+
+  // with silicon repo adopted format, use only the vpr standard options:
+  base_vpr_options +=
+#ifdef _WIN32
+// under WIN32, running the analysis stage along causes issues, hence we call the
+// route and analysis stages together
+                          std::string(" ") + 
+                          std::string("--route") +
+#endif // #ifdef _WIN32
+                          std::string(" ") + 
+                          std::string("--analysis");
+  result = ReplaceAll(result, "${VPR_STANDARD_OPTS}", base_vpr_options);
+  result = ReplaceAll(result, "${VPR_OPTS}", std::string(""));
 
   //std::string netlistFilePrefix = m_projManager->projectName() + "_post_synth";
 
@@ -5613,13 +5909,25 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     Message("OpenFPGA script running with Auto Layout Generated Device!\n");
     result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
                         " --device " + m_autoLayoutGeneratedLayoutName);
+    result = ReplaceAll(result, "${LAYOUT}",
+                        m_autoLayoutGeneratedLayoutName);
+  }
+  else if (m_customLayoutGenerationMode) {
+    Message("OpenFPGA script running with Custom Layout Generated Device!\n");
+    result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
+                        " --device " + m_autoLayoutGeneratedLayoutName);
+    result = ReplaceAll(result, "${LAYOUT}",
+                        m_autoLayoutGeneratedLayoutName);
   } 
   else { 
     if (m_deviceSize.size()) {
       result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}",
                           " --device " + m_deviceSize);
+      result = ReplaceAll(result, "${LAYOUT}",
+                          " --device " + m_deviceSize);
     } else {
-      result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}", "");
+      result = ReplaceAll(result, "${OPENFPGA_VPR_DEVICE_LAYOUT}", device_target.device_variant_layout.name);
+      result = ReplaceAll(result, "${LAYOUT}", device_target.device_variant_layout.name);
     }
   }
 
@@ -5641,60 +5949,58 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     read_openfpga_bitstream_setting_command = 
         std::string("read_openfpga_bitstream_setting -f ") + 
         m_OpenFpgaBitstreamSettingFile.string();
+    result = ReplaceAll(result, "${BITSTREAM_ANNOTATION_XML}",
+          m_OpenFpgaBitstreamSettingFile.string());
+  }
+  else {
+    Message("<warning> BITSTREAM_ANNOTATION_XML is not found in the device.\n");
   }
   result = ReplaceAll(result, "${READ_OPENFPGA_BITSTREAM_SETTING_COMMAND}",
                       read_openfpga_bitstream_setting_command);
 
   // repack constraints
-  // 1. pass in the PCF file, if available with '--pcf'
-  // 2. pass in the user provided repack design constraint xml if available with '--design_constraints'
-  // 3. pass in option '--write_design_constraints' to dump constraints to verify
+  // 1. pass in the user provided repack design constraint xml if available with '--design_constraints'
   std::string openfpga_repack_constraints_command = "repack";
-  std::filesystem::path filepath_pcf = QLSettingsManager::getInstance()->getPCFFilePath();
-  if(!filepath_pcf.empty()) {
-    openfpga_repack_constraints_command += 
-        " --pcf " + filepath_pcf.string();
-  }
   if(!m_OpenFpgaRepackConstraintsFile.empty()) {
     openfpga_repack_constraints_command += 
         " --design_constraints " + m_OpenFpgaRepackConstraintsFile.string();
+    result = ReplaceAll(result, "${REPACK_DESIGN_CONSTRAINT_XML}",
+                      m_OpenFpgaRepackConstraintsFile.string());
   }
-  std::string generated_repack_design_constraint_filename =
-      "repack_design_constraint_generated.xml";
-  openfpga_repack_constraints_command += 
-      " --write_design_constraints " + generated_repack_design_constraint_filename;
+  else {
+    Message("<warning> REPACK_DESIGN_CONSTRAINT_XML is not found in the device.\n");
+  }
   result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
                       openfpga_repack_constraints_command);
 
   // fabric_key is optional
   if (m_OpenFpgaFabricKeyFile.empty()) {
     result = ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}", "");
+    Message("<warning> EXTERNAL_FABRIC_KEY_FILE is not found in the device.\n");
   } else {
     result =
         ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}",
                    "--load_fabric_key " + m_OpenFpgaFabricKeyFile.string());
+    result = ReplaceAll(result, "${EXTERNAL_FABRIC_KEY_FILE}",
+                      m_OpenFpgaFabricKeyFile.string());
   }
 
   // bitstream_remapping is optional. and if it exists:
   // build_reordered_fabric_bitstream --reorder_map bitstream_remapping.xml --file reordered_bitstream.bin
-  // write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit
-  // write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml
   if (m_OpenFpgaBitstreamRemappingFile.empty()) {
     result = ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}", std::string("#skipped"));
-    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}",
-                                std::string("write_fabric_bitstream --format plain_text --file fabric_bitstream.bit"));
-    result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}",
-                                std::string("write_fabric_bitstream --format xml --file fabric_bitstream.xml"));
   } else {
     result =
         ReplaceAll(result, "${OPENFPGA_BUILD_REORDERED_FABRIC_BITSTREAM_COMMAND}",
                    std::string("build_reordered_fabric_bitstream --reorder_map ") + m_OpenFpgaBitstreamRemappingFile.string() +
-                   std::string(" --file reordered_bitstream.bin"));
-        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}", 
-                                    std::string("write_fabric_bitstream --reorder --format plain_text --file fabric_bitstream.bit"));
-        result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}", 
-                                    std::string("write_fabric_bitstream --reorder --format xml --file fabric_bitstream.xml"));
+                   std::string(" --file reordered_bitstream.txt"));
+        result = ReplaceAll(result, "${BITSTREAM_REMAPPING}",
+                    m_OpenFpgaBitstreamRemappingFile.string());
   }
+  result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_PLAINTEXT_COMMAND}",
+    std::string("write_fabric_bitstream --format plain_text --file fabric_bitstream.bit"));
+  result = ReplaceAll(result, "${OPENFPGA_WRITE_BITSTREAM_XML_COMMAND}",
+    std::string("write_fabric_bitstream --format xml --file fabric_bitstream.xml"));
 
 
   // call openfpga to output the fpga_io_map XML file *always*
@@ -5728,6 +6034,9 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
 
   if(m_autoLayoutGenerationMode) {
     Message("Generate Biststream is being run with Auto Layout Generated Device!");
+  }
+  if(m_customLayoutGenerationMode) {
+    Message("Generate Biststream is being run with Custom Layout Generated Device!");
   }
   
   if (!ProjManager()->HasDesign()) {
@@ -6247,11 +6556,19 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
-bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
+}
+
+bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
-  if (fs::exists(io_floor_planningpath)){
+  if (!forceOverwrite && fs::exists(io_floor_planningpath)){
     Message(ProjManager()->projectName() + "_constraints.xml" + 
             " Already Exists. Using the Existing Constraint File.");
     return true;
@@ -6301,107 +6618,112 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   m_blifParser.load(netlist_path);
   //m_blifParser.printHierachy(); // debug
   
+  auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
+  if (pinTableFile.empty()) 
+      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
+
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
-  if (!fs::exists(floor_planning_constraint_filepath)){
-    Message("qdc Constraint File Does Not Exist. Skipping IO Floor Plan Constraint Generation.\n");
-    return true;
+  if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
+    ErrorMessage("qdc Constraint File and Pin Table File Does Not Exist. Exiting the Flow.\n");
+    return false;
   }
+  std::string region_groups_str = "";
+  if (fs::exists(floor_planning_constraint_filepath)) {
+    std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
+    std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
+      {"left", &leftSet},
+      {"right", &rightSet},
+      {"top", &topSet},
+      {"bottom", &bottomSet}
+    };
 
-  std::string line;
-  std::ifstream infile(floor_planning_constraint_filepath);
-  std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
-  std::unordered_map<std::string, std::unordered_set<std::string>*> sideMap = {
-    {"left", &leftSet},
-    {"right", &rightSet},
-    {"top", &topSet},
-    {"bottom", &bottomSet}
-  };
+    std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
 
-  std::unordered_map<std::string, std::unordered_set<std::string>> regionMap;
+    std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
+    for (std::string line: lines) {
+      std::istringstream iss(line);
+      std::string token, signalName;
+      iss >> token;
+    
+      static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
+      if (supportedCommands.find(token) == supportedCommands.end()){
+        ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
+        return false;
+      }
 
-  while (std::getline(infile, line)) {
-    line = StringUtils::trim(line);
+      if (token == "set_io_side") {
+        iss >> signalName;
+        std::string side;
+        while (iss >> side) {
+          StringUtils::toLower(side); 
+          auto it = sideMap.find(side);
+          if (it != sideMap.end()) {
+              it->second->insert(signalName); // insert avoids duplicates
+          }
+        }
+        signalName.clear();
+      } else if (token == "set_region") {
+        iss >> signalName;
+        std::vector<std::string> elements;
+        std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
+        for (const std::string& pattern: patterns) {
+          std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
+          if (patternElements.empty()) {
+            ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
+            return false;
+          } else {
+            elements.push_back(pattern);
+          }
+        }
 
-    // drop comment part
-    if (auto pos = line.find("#"); pos != std::string::npos) {
-      line = line.substr(0, pos); // drop commented part of line
+        std::string partition;
+        iss >> partition;
+        bool hasPartition = !iss.fail();
+
+        std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
+        iss >> partitionName;
+        bool hasPartitionName = !iss.fail();
+
+        if (hasPartition) {
+          StringUtils::toLower(partition);
+          std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
+          if (partitionMap.find(partitionKey) == partitionMap.end()) {
+            partitionMap[partitionKey] = {};
+          }
+          for (const std::string& element: elements) {
+            partitionMap[partitionKey].insert(element);
+          }
+        }
+
+        signalName.clear();
+      }
     }
 
-    if (line.empty()){
-      Message("Empty line found in QDC file. Skipping...\n");
-      continue; // Skip empty line
+    std::string leftStr   = StringUtils::toString(leftSet);
+    std::string rightStr  = StringUtils::toString(rightSet);
+    std::string topStr    = StringUtils::toString(topSet);
+    std::string bottomStr = StringUtils::toString(bottomSet);
+
+    std::string partitionStr;
+    for (const auto& [partition, patternsSet]: partitionMap) {
+      partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
     }
 
-    std::istringstream iss(line);
-    std::string token, signalName;
-    iss >> token;
-   
-    static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
-    if (supportedCommands.find(token) == supportedCommands.end()){
-      ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
+    // Output results
+    if (!leftStr.empty())
+      leftStr = std::string("left:"   + leftStr + ";");
+    if (!rightStr.empty())
+      rightStr = std::string("right:"  + rightStr + ";");
+    if (!topStr.empty())
+      topStr = std::string("top:"    + topStr + ";");
+    if (!bottomStr.empty())
+      bottomStr = std::string("bottom:" + bottomStr + ";");
+
+    if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
+      ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
       return false;
     }
-
-    if (token == "set_io_side") {
-      iss >> signalName;
-      std::string side;
-      while (iss >> side) {
-        StringUtils::toLower(side); 
-        auto it = sideMap.find(side);
-        if (it != sideMap.end()) {
-            it->second->insert(signalName); // insert avoids duplicates
-        }
-      }
-    } else if (token == "set_region") {
-      iss >> signalName;
-      std::vector<std::string> elements;
-      std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
-      for (const std::string& pattern: patterns) {
-        std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
-        if (patternElements.empty()) {
-          ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
-          return false;
-        } else {
-          elements.push_back(pattern);
-        }
-      }
-
-      std::string region;
-      while (iss >> region) {
-        StringUtils::toLower(region);
-        if (regionMap.find(region) == regionMap.end()) {
-          regionMap[region] = {};
-        }
-        for (const std::string& element: elements) {
-          regionMap[region].insert(element);
-        }
-      }
-    }
-  }
-
-  std::string leftStr   = StringUtils::toString(leftSet);
-  std::string rightStr  = StringUtils::toString(rightSet);
-  std::string topStr    = StringUtils::toString(topSet);
-  std::string bottomStr = StringUtils::toString(bottomSet);
-
-  std::string regionStr;
-  for (const auto& [region, patternsSet]: regionMap) {
-    regionStr += "region:" + region + "=" + StringUtils::toString(patternsSet) + ";";
-  }
-
-  // Output results
-  if (!leftStr.empty())
-    leftStr = std::string("left:"   + leftStr + ";");
-  if (!rightStr.empty())
-    rightStr = std::string("right:"  + rightStr + ";");
-  if (!topStr.empty())
-    topStr = std::string("top:"    + topStr + ";");
-  if (!bottomStr.empty())
-    bottomStr = std::string("bottom:" + bottomStr + ";");
-
-  if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && regionStr.empty()) {
-    ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
-    return false;
+    region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
   
   std::filesystem::path generate_floorplanning_script_path =
@@ -6411,9 +6733,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  std::string output_path = ProjManager()->projectName() + "_constraints.xml";
-  std::string architectureFile = m_architectureFile.string();
+  std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
   #else // _WIN32
@@ -6432,20 +6753,34 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints() {
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
 
-  std::string command = std::string(python_exec.string() + " " +
-                        generate_floorplanning_script_path.string() + " " +
-                        std::string("--blif_file ") + netlistFile + " " + 
-                        std::string("--arch_file ") + architectureFile + " " +
-                        std::string("--fpga_layout ") + QLSettingsManager::getStringValue("general", "device", "layout") + " " + 
-                        std::string("--region_groups ") + leftStr + rightStr + topStr + bottomStr + regionStr + " " +
-                        std::string("--output_path ") + output_path); 
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(generate_floorplanning_script_path.string());
+  args.push_back("--blif_file");
+  args.push_back(netlistFile.string());
+  args.push_back("--arch_file");
+  args.push_back(m_architectureFile.string());
+  args.push_back("--fpga_layout");
+  args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
+  args.push_back("--output_path");
+  args.push_back(output_path.string());
 
-  std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
-  if (fs::exists(floor_planning_constraint_filepath)) {
-    command += std::string(" --pcf_file ") + pin_constraint_filepath.string();
+  if(fs::exists(pinTableFile)) {
+    args.push_back("--pin_table_file");
+    args.push_back(pinTableFile.string());
+  }                      
+  if(region_groups_str != "") {
+    args.push_back("--region_groups");
+    args.push_back(region_groups_str);
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  std::filesystem::path pin_constraint_filepath = QLSettingsManager::getInstance()->getPCFFilePath();
+  if (fs::exists(pin_constraint_filepath)) {
+    args.push_back("--pcf_file");
+    args.push_back(pin_constraint_filepath.string());
+  }
+
+  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
 
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -6825,35 +7160,12 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const int IO_COLUMNS = 2;
   const int device_clb_rows = device_size_y - EMPTY_ROWS - IO_ROWS;
 
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  /// fetching data from vpr.xml, probably will be replaced with simplier solution, see https://github.com/QL-Proprietary/aurora2/issues/1465
-  std::filesystem::path architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
-  if(architectureFile.empty()) {
-    ErrorMessage("Cannot proceed without VPR Architecture file.");
+  VprArchitectureFileProfider archFileProvider(this);
+  if (archFileProvider.get().empty()) {
     return "";
   }
-
-  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(architectureFile)) {
-
-    std::filesystem::path vpr_xml_en_path = architectureFile;
-    architectureFile = GenerateTempFilePath();
-
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      return "";
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, architectureFile)) {
-      ErrorMessage("decryption failed!");
-      return "";
-    }
-  }
-  TilesCfgResult tiles_cfg_result = parseTilesCfg(architectureFile);
+  TilesCfgResult tiles_cfg_result = parseTilesCfg(archFileProvider.get());
+  archFileProvider.clean();
   if (!tiles_cfg_result.error.empty()) {
     ErrorMessage(tiles_cfg_result.error);
     return "";
@@ -6861,8 +7173,6 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
   const int bram_size_y = tiles_cfg_result.contains("bram") ? tiles_cfg_result.tiles_cfg["bram"].second: 0;
   const int dsp_size_y = tiles_cfg_result.contains("dsp") ? tiles_cfg_result.tiles_cfg["dsp"].second: 0;
-  /// fetching data from vpr.xml
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   const int clb_rows_without_io = device_size_y - 2;
   const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
@@ -8993,6 +9303,12 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
 
+  if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
+    yosys_options += std::string(" -de") + 
+                   std::string(" ") + 
+                   QLSettingsManager::getStringValue("yosys", "general", "de");
+  }
+
   // pass in the path to the device specific yosys libraries directly.
   std::string yosys_modules_dir_path_string = 
       (QLDeviceManager::getInstance()->deviceYosysModulesDirPath()).string();
@@ -9430,3 +9746,54 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 
 // clang-format on
+
+const std::filesystem::path& VprArchitectureFileProfider::get()
+{
+  if (m_architectureFile.empty()) {
+    QLDeviceTarget device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    m_architectureFile = QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
+    if(!std::filesystem::exists(m_architectureFile)) {
+      return error("VPR Architecture file is not available.");
+    }
+
+    if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
+
+      std::filesystem::path vpr_xml_en_path = m_architectureFile;
+      m_architectureFile = m_compiler->GenerateTempFilePath(true);
+      m_isFileTemporary = true;
+
+      std::filesystem::path cryptdbPath = 
+          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
+                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
+
+      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
+        return error("load cryptdb failed!");
+      }
+
+      if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
+        return error("decryption failed!");
+      }
+    }
+  }  
+    
+  return m_architectureFile;
+}
+
+const std::filesystem::path& VprArchitectureFileProfider::error(const std::string& msg)
+{
+  m_compiler->ErrorMessage(msg);
+  m_architectureFile = "";
+  return m_architectureFile;
+}
+
+VprArchitectureFileProfider::~VprArchitectureFileProfider()
+{
+  clean();
+}
+
+void VprArchitectureFileProfider::clean()
+{
+  if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
+    std::filesystem::remove(m_architectureFile);
+  }
+}

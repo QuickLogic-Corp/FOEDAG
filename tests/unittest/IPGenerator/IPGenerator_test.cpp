@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Compiler.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/tcl_command_integration.h"
+#include "Utils/PathUtils.h"
 #include "gtest/gtest.h"
 
 namespace FOEDAG {
@@ -35,7 +36,7 @@ TEST(IPGenerate, IpInstanceDupes) {
 
   IPCatalog* ipCat = new IPCatalog();
   Compiler* compiler = new Compiler();
-  IPGenerator* ipGen = new IPGenerator(ipCat, compiler);
+  IPGenerator* ipGen = new IPGenerator(PathUtils::instance().installDir(), ipCat, compiler);
 
   std::vector<Connector*> connections;
   std::vector<Value*> parameters;
@@ -97,7 +98,7 @@ TEST(IPGenerate, IpInstanceDupes) {
 TEST(IPGenerate, CheckAllIPPath) {
   IPCatalog* ipCat = new IPCatalog();
   Compiler* compiler = new Compiler();
-  IPGenerator* ipGen = new IPGenerator(ipCat, compiler);
+  IPGenerator* ipGen = new IPGenerator(PathUtils::instance().installDir(), ipCat, compiler);
   ProjectManager* pm = new ProjectManager{};
   Project::Instance()->setProjectName("testProject");
   compiler->setGuiTclSync(new TclCommandIntegration{pm, nullptr});

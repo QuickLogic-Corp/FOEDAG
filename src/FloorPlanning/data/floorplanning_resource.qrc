@@ -1,0 +1,23 @@
+<RCC>
+    <qresource prefix="/">
+        <file>down-arrow.png</file>
+        <file>left-arrow.png</file>
+        <file>right-arrow.png</file>
+        <file>up-arrow.png</file>
+        <file>expand.png</file>
+        <file>error.png</file>
+        <file>erase.png</file>
+        <file>add.png</file>
+        <file>minus.png</file>
+        <file>load-action.png</file>
+        <file>save-action.png</file>
+        <file>zoom-in.svg</file>
+        <file>zoom-out.svg</file>
+        <file>zoom-in-area.png</file>
+        <file>selection.png</file>
+        <file>loading.png</file>
+        <file>icons8-color-palette-48.png</file>
+        <file>delete-10402_32.png</file>
+        <file>warning.png</file>
+    </qresource>
+</RCC>

@@ -61,12 +61,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/LogUtils.h"
 #include "Utils/ProcessUtils.h"
 #include "Utils/StringUtils.h"
+#include "Utils/PathUtils.h"
 #include "scope_guard/scope_guard.hpp"
 
 extern FOEDAG::Session* GlobalSession;
 using namespace FOEDAG;
 using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
+
+#define OVERRIDE_WITH_ENV_VAR 1
 
 auto CreateDummyLog =
     [](ProjectManager* projManager,
@@ -217,6 +220,12 @@ void Compiler::Help(std::ostream* out) {
 
 void Compiler::CustomSimulatorSetup(Simulator::SimulationType action) {}
 
+Compiler::Compiler()
+{
+  IPCatalog* catalog = new IPCatalog();
+  SetIPGenerator(new IPGenerator(PathUtils::instance().installDir(), catalog, this));
+}
+
 Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
                    TclInterpreterHandler* tclInterpreterHandler)
     : m_interp(interp),
@@ -225,7 +234,7 @@ Compiler::Compiler(TclInterpreter* interp, std::ostream* out,
   if (m_tclInterpreterHandler) m_tclInterpreterHandler->setCompiler(this);
   SetConstraints(new Constraints{this});
   IPCatalog* catalog = new IPCatalog();
-  SetIPGenerator(new IPGenerator(catalog, this));
+  SetIPGenerator(new IPGenerator(PathUtils::instance().installDir(), catalog, this));
   m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
 }
 
@@ -355,11 +364,6 @@ tcl_interp_clone
 
 bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
                                    bool namesOnly) {
-  if (m_IPGenerator == nullptr) {
-    IPCatalog* catalog = new IPCatalog();
-    SetIPGenerator(new IPGenerator(catalog, this));
-    
-  }
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
   }
@@ -424,10 +428,6 @@ Simulator* Compiler::GetSimulator() {
 }
 
 bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
-  if (m_IPGenerator == nullptr) {
-    IPCatalog* catalog = new IPCatalog();
-    m_IPGenerator = new IPGenerator(catalog, this);
-  }
   // if (m_DesignQuery == nullptr) {
   //   m_DesignQuery = new DesignQuery(this);
   // }
@@ -2630,6 +2630,11 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
   auto path = std::filesystem::current_path();                  // getting path
   std::filesystem::current_path(m_projManager->projectPath());  // setting path
   m_environmentVariableMap["PWD"] = m_projManager->projectPath(); // fix "PWD environment variable doesn't match current directory; pwd = ..." warning
+  if (m_process) {
+    // this error may occur only when ExecuteAndMonitorSystemCommand used inproperly (not in sequence)
+    ErrorMessage("Faulty condition detected, several qprocess from different threads will possible collide.");
+  }
+
   // new QProcess must be created here to avoid issues related to creating
   // QObjects in different threads
   m_process = new QProcess;
@@ -2745,12 +2750,59 @@ QProcess* Compiler::ExecuteCommand(const std::string& command) const {
 
 std::string Compiler::ReplaceAll(std::string_view str, std::string_view from,
                                  std::string_view to) {
+
+#if OVERRIDE_WITH_ENV_VAR
+  // check if the string replacement 'from' is an env variable style definition: '${xxx}'
+  // if so, see if an env variable of the same name is already defined
+  // if so, use the value of the env variable if not empty
+
+  std::string env_var_name;
+  std::string env_var_value;
+  static const QRegularExpression env_var_pattern_re(
+    R"(^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$)"
+  );
+  QRegularExpressionMatch env_var_pattern_match = env_var_pattern_re.match(QString::fromStdString(std::string(from)));
+  if(env_var_pattern_match.hasMatch()){
+    // 'from' has matched expected pattern of ENV variable ${}
+    env_var_name = QString(env_var_pattern_match.captured(1)).toStdString();
+  }
+  // if 'from' has matched ENV variable name pattern ${}
+  if(!env_var_name.empty()) {
+    const char* const env_var_value_str = std::getenv(env_var_name.c_str());
+    // if the ENV variable is defined
+    if (env_var_value_str != nullptr) {
+      env_var_value = std::string(env_var_value_str);
+      // if the value of the ENV variable is not an empty string
+      if(!env_var_value.empty()) {
+        std::cout << std::string("<info> ENV override: ") + std::string(from) + std::string(" with value from ENV!") << std::endl;
+      }
+    }
+  }
+
+  size_t start_pos = 0;
+  std::string result(str);
+  while ((start_pos = result.find(from, start_pos)) != std::string::npos) {
+    if(!env_var_value.empty()) {
+      result.replace(start_pos, from.length(), env_var_value);
+      start_pos += env_var_value.length();  // Handles case where 'env_var_value' is a substr of 'from'
+    }
+    else {
+      result.replace(start_pos, from.length(), to);
+      start_pos += to.length();  // Handles case where 'to' is a substr of 'from'
+    }
+  }
+
+#else //#if OVERRIDE_WITH_ENV_VAR
+
   size_t start_pos = 0;
   std::string result(str);
   while ((start_pos = result.find(from, start_pos)) != std::string::npos) {
     result.replace(start_pos, from.length(), to);
     start_pos += to.length();  // Handles case where 'to' is a substr of 'from'
   }
+
+#endif //#if OVERRIDE_WITH_ENV_VAR
+
   return result;
 }
 

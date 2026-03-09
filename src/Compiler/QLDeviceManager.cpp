@@ -1931,6 +1931,37 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                 std::regex::icase))) {
             continue;
           }
+          // skip any 'design_variables.yml'
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*design_variables\\.yml",
+                                  std::regex::icase))) {
+            continue;
+          }
+          // skip any 'vpr-template.xml'
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*vpr-template\\.xml",
+                                  std::regex::icase))) {
+            continue;
+          }
+          // skip any 'openfpga-template.xml'
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*openfpga-template\\.xml",
+                                  std::regex::icase))) {
+            continue;
+          }
+
+          // include all files in 'CSV/' files for copy, required for RRG generation
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]CSV[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+          // include SB_MAPS.yml file for copy, required for RRG generation
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*SB_MAPS\\.yml",
+                                  std::regex::icase))) {
+              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
 
           // include all files in 'examples/' for copy
           if (std::regex_match(dir_entry.path().string(),
@@ -2699,10 +2730,11 @@ std::filesystem::path QLDeviceManager::deviceVPRArchitectureFile(QLDeviceTarget 
   std::filesystem::path empty_path;
   std::filesystem::path vpr_architecture_file_path;
 
-  // if we are in auto layout generation mode, then return the generated vpr xml filepath here
-  // as we will not be using the (auto) device's own vpr xml.
+  // if we are in auto/custom layout generation mode, then return the generated vpr xml filepath here
+  // as we will not be using the (auto/cuustom) device's own vpr xml.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+     compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedVPRXMLPath)) {
 
       compiler->ErrorMessage("Cannot find generated vpr architecture file: " + compiler->m_autoLayoutGeneratedVPRXMLPath.string());
@@ -3547,6 +3579,128 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAIOMapFile(QLDeviceTarget de
 }
 
 
+std::filesystem::path QLDeviceManager::deviceSBMAPSFile(QLDeviceTarget device_target) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path empty_path;
+  std::filesystem::path sb_maps_yml_file_path;
+
+  // if we are in auto/custom layout generation mode, then return the generated SB_MAPS.yml filepath here
+  // as we will not be using the (auto/custom) device's own SB_MAPS.yml, even if it exists.
+
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
+    if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedSBMapsYMLPath)) {
+
+      compiler->ErrorMessage("Cannot find generated SB_MAPS.yml file: " + compiler->m_autoLayoutGeneratedSBMapsYMLPath.string());
+      return empty_path;
+    }
+    return compiler->m_autoLayoutGeneratedSBMapsYMLPath;
+  }
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // find SB_MAPS.yml as "<device-type-dir>/filename-from-json-value" (use config.json name)
+
+  // check for config.json (it should exist at v2.9.0+)
+  std::filesystem::path device_target_config_json_filepath = 
+      deviceConfigJSONPath(device_target);
+  if(device_target_config_json_filepath.empty()) {
+
+    compiler->ErrorMessage("no compatible 'config.json' found in device data, cannot use this device!");
+    return empty_path;
+  }
+
+
+  // read config JSON and get the value
+  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // get json value
+  std::string json_value;
+  if( device_target_config_json.contains("SB_MAPS") ) {
+
+    json_value = device_target_config_json["SB_MAPS"].get<std::string>();
+  }
+
+
+  // check for filename as in config.json from the device
+  sb_maps_yml_file_path = 
+      deviceTypeDirPath(device_target) / json_value;
+  if(!FileUtils::FileIsRegular(sb_maps_yml_file_path)) {
+      sb_maps_yml_file_path.clear();
+  }
+
+  if(sb_maps_yml_file_path.empty()) {
+    compiler->Message("Cannot find device SB_MAPS file: " + sb_maps_yml_file_path.string());
+  }
+  else {
+    compiler->Message("Using device SB_MAPS file: " + sb_maps_yml_file_path.string());
+  }
+
+  return sb_maps_yml_file_path;
+}
+
+
+std::filesystem::path QLDeviceManager::deviceSBTemplatesDir(QLDeviceTarget device_target) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::filesystem::path empty_path;
+  std::filesystem::path sb_templates_dir_path;
+
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
+    // no change in CSV, we can use the existing device's CSV unless something changes in the future.
+  }
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // find SB_TEMPLATES_DIR as "<devicevariant-dir>/filename-from-json-value" (use config.json name)
+
+  // check for config.json (it should exist at v2.9.0+)
+  std::filesystem::path device_target_config_json_filepath = 
+      deviceConfigJSONPath(device_target);
+  if(device_target_config_json_filepath.empty()) {
+
+    compiler->ErrorMessage("no compatible 'config.json' found in device data, cannot use this device!");
+    return empty_path;
+  }
+
+
+  // read config JSON and get the value
+  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // get json value
+  std::string json_value;
+  if( device_target_config_json.contains("CORNER_SB_TEMPLATE_DIR") ) {
+
+    json_value = device_target_config_json["CORNER_SB_TEMPLATE_DIR"].get<std::string>();
+  }
+
+
+  // check for filename as in config.json from the device
+  sb_templates_dir_path = 
+    deviceVariantDirPath(device_target) / json_value;
+  if(!FileUtils::FileIsDirectory(sb_templates_dir_path)) {
+    sb_templates_dir_path.clear();
+  }
+
+  if(sb_templates_dir_path.empty()) {
+    compiler->Message("Cannot find device SB_TEMPLATES dir: " + sb_templates_dir_path.string());
+  }
+  else {
+    compiler->Message("Using device SB_TEMPLATES dir: " + sb_templates_dir_path.string());
+  }
+
+  return sb_templates_dir_path;
+}
+
+
 std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget device_target) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
@@ -3554,10 +3708,11 @@ std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget devic
   std::filesystem::path empty_path;
   std::filesystem::path vpr_rr_graph_file_path;
 
-  // if we are in auto layout generation mode, then return the generated rr_graph.bin filepath here
-  // as we will not be using the (auto) device's own rr_graph.bin, even if it exists.
+  // if we are in auto/custom layout generation mode, then return the generated rr_graph.bin filepath here
+  // as we will not be using the (auto/custom) device's own rr_graph.bin, even if it exists.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRRGraphBinPath)) {
 
       compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRRGraphBinPath.string());
@@ -3670,10 +3825,11 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
   std::filesystem::path vpr_router_lookahead_file_path;
 
 
-  // if we are in auto layout generation mode, then return the generated router_lookahead.bin filepath here
-  // as we will not be using the (auto) device's own router_lookahead.bin, even if it exists.
+  // if we are in auto/custom layout generation mode, then return the generated router_lookahead.bin filepath here
+  // as we will not be using the (auto/custom) device's own router_lookahead.bin, even if it exists.
 
-  if(compiler->m_autoLayoutGenerationMode){
+  if(compiler->m_autoLayoutGenerationMode ||
+    compiler->m_customLayoutGenerationMode){
     if(!FileUtils::FileExists(compiler->m_autoLayoutGeneratedRouterLookaheadBinPath)) {
 
       compiler->ErrorMessage("Cannot find generated rr_graph file: " + compiler->m_autoLayoutGeneratedRouterLookaheadBinPath.string());

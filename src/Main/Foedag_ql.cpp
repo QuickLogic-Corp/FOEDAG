@@ -63,21 +63,18 @@ extern "C" {
 #include "ProjectFile/ProjectFileLoader.h"
 #include "Tcl/TclInterpreter.h"
 #include "Utils/FileUtils.h"
+#include "Utils/PathUtils.h"
 #include "qttclnotifier.hpp"
-
-#if defined(_MSC_VER)
-#include <direct.h>
-#define PATH_MAX _MAX_PATH
-#else
-#include <sys/param.h>
-#include <unistd.h>
-#endif
 
 #if (defined(__MINGW32__))
 #include <windows.h>  // for FreeConsole()
 #endif
 
 FOEDAG::Session* GlobalSession;
+
+inline void initializeResources() { 
+  Q_INIT_RESOURCE(floorplanning_resource); 
+}
 
 using namespace FOEDAG;
 
@@ -87,65 +84,6 @@ FOEDAG::GUI_TYPE Foedag::getGuiType(const bool& withQt, const bool& withQml) {
     return FOEDAG::GUI_TYPE::GT_QML;
   else
     return FOEDAG::GUI_TYPE::GT_WIDGET;
-}
-
-bool getFullPath(const std::filesystem::path& path,
-                 std::filesystem::path* result) {
-  std::error_code ec;
-  std::filesystem::path fullPath = std::filesystem::canonical(path, ec);
-  bool found = (!ec && std::filesystem::is_regular_file(fullPath));
-  if (result != nullptr) {
-    *result = found ? fullPath : path;
-  }
-  return found;
-}
-
-// Try to find the full absolute path of the program currently running.
-static std::filesystem::path GetProgramNameAbsolutePath(const char* progname) {
-#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__)
-  const char PATH_DELIMITER = ';';
-#else
-  char buf[PATH_MAX];
-  // If the executable is invoked with a path, we can extract it from there,
-  // otherwise, we use some operating system trick to find that path:
-  // In Linux, the current running binary is symbolically linked from
-  // /proc/self/exe which we can resolve.
-  // It won't resolve anything on other platforms, but doesnt harm either.
-  for (const char* testpath : {progname, "/proc/self/exe"}) {
-    const char* const program_name = realpath(testpath, buf);
-    if (program_name != nullptr) return program_name;
-  }
-  const char PATH_DELIMITER = ':';
-#endif
-
-  // Still not found, let's go through the $PATH and see what comes up first.
-  const char* const path = std::getenv("PATH");
-  if (path != nullptr) {
-    std::stringstream search_path(path);
-    std::string path_element;
-    std::filesystem::path program_path;
-    while (std::getline(search_path, path_element, PATH_DELIMITER)) {
-      const std::filesystem::path testpath =
-          path_element / std::filesystem::path(progname);
-      if (getFullPath(testpath, &program_path)) {
-        return program_path;
-      }
-#if _WIN32
-// additional search for cmd.exe, we need to be specific about the program name + extension!
-// TODO: why don't we use the Qt method to get the path definitively?
-      else {
-        std::string progname_exe_str = std::string(progname) + std::string(".exe");
-        const std::filesystem::path testpath_exe =
-          path_element / std::filesystem::path(progname_exe_str);
-        if (getFullPath(testpath_exe, &program_path)) {
-          return program_path;
-        }
-      }
-#endif // #if _WIN32
-    }
-  }
-
-  return progname;  // Didn't find anything, return progname as-is.
 }
 
 void loadTclInitFile(CommandStack* commandStack,
@@ -180,11 +118,8 @@ Foedag::Foedag(FOEDAG::CommandLine* cmdLine, MainWindowBuilder* mainWinBuilder,
   if (context == nullptr)
     m_context = new ToolContext("Aurora", "QuickLogic", "aurora");
   if (m_context->BinaryPath().empty()) {
-    std::filesystem::path exePath =
-        GetProgramNameAbsolutePath(m_cmdLine->Argv()[0]);
-    std::filesystem::path exeDirPath = exePath.parent_path();
-    m_context->BinaryPath(exeDirPath);
-    std::filesystem::path installDir = exeDirPath.parent_path();
+    m_context->BinaryPath(PathUtils::instance().exeDir());
+    std::filesystem::path installDir = PathUtils::instance().installDir();
     
     // for generic usage (not specific to device-data) use the DataPath()
     // API which will always be 'install_dir_path'/device_data/
@@ -231,6 +166,7 @@ Foedag::Foedag(FOEDAG::CommandLine* cmdLine, MainWindowBuilder* mainWinBuilder,
 Foedag::~Foedag() { delete m_tclChannelHandler; }
 
 bool Foedag::initGui() {
+  initializeResources();
   // close the console on Windows, we don't need it
 #if (defined(__MINGW32__))
   FreeConsole();  // Closes the console window, but it still shows for a small instant.
