@@ -6285,10 +6285,16 @@ int status = ExecuteAndMonitorSystemCommand(command);
   ofs << processedScript << std::endl;
   ofs.close();
 
-  Message("bypass LEGACY bitstream command execution, use " + scriptFilePath.string() + " instead");
-  int status = Tcl_EvalFile(TclInterp()->getInterp(), scriptFilePath.string().c_str());
-  //std::string out = TclInterp()->evalFile(scriptFilePath.string());
-  //Message(out);
+  Message("bypass LEGACY bitstream command execution " + scriptFilePath.string() + " will be used instead");
+  std::string out;
+
+  assert(TclInterp());
+  out = TclInterp()->evalFile(scriptFilePath.string());
+
+  if (!out.empty()) {
+    Message(out);
+  }
+  int status = false;
 #endif 
   CleanTempFiles();
   if (status) {
