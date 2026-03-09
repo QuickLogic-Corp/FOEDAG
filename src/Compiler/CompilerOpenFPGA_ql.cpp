@@ -38,7 +38,6 @@
 #include <QJsonArray>
 #include <QDirIterator>
 #include <QTemporaryFile>
-#include <QCoreApplication>
 #include <chrono>
 #include <filesystem>
 #include <sstream>
