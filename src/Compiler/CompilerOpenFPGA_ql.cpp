@@ -91,6 +91,8 @@ using namespace FOEDAG;
 #define GENERATE_NEW_DEVICE_FPGA_AUTO 1
 #define GENERATE_RR_GRAPH_FPGA_AUTO 0
 
+#define BITSTREAM_LEGACY_WAY // not use new template
+
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
 {
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
