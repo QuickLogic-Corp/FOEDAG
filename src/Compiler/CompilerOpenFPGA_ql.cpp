@@ -6631,8 +6631,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
-    ErrorMessage("qdc Constraint File and Pin Table File Does Not Exist. Exiting the Flow.\n");
-    return false;
+    Message("qdc Constraint File and Pin Table File Does Not Exist. Skipping the generate_floorplanning Script.\n");
+    return true;
   }
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
