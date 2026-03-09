@@ -43,7 +43,7 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {
                 elementsStr += ",";
-                elementsStr += lineDelimiter();
+                elementsStr += lfCommandDelimiter();
             }
         }
 
@@ -82,23 +82,23 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             regionCounter++;
             if (regionCounter < partition->regions().size()) {
                 regionsStr += ",";
-                regionsStr += lineDelimiter();
+                regionsStr += lfCommandDelimiter();
             }
         }
 
         // aggregate line
         std::string line = "set_region ";
-        line += lineDelimiter();
+        line += lfCommandDelimiter();
 
         line += elementsStr;
 
         line += " ";
-        line += lineDelimiter();
+        line += lfCommandDelimiter();
 
         line += regionsStr;
 
         line += " ";
-        line += lineDelimiter();
+        line += lfCommandDelimiter();
 
         line += partition->name();
 
@@ -114,7 +114,7 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
 void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
     const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
-    std::vector<std::string> lines = readLines(filePath);
+    std::vector<std::string> lines = readCommands(filePath);
     if (!lines.empty()) {
         load(device, lines);
     }
@@ -215,14 +215,37 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
     }
 }
 
-std::vector<std::string> QdcSerializer::readLines(const std::filesystem::path& overrideFilePath) const
+std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path& filePath)
 {
-    const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
+    std::vector<std::string> commands;
     std::string content = FOEDAG::FileUtils::GetFileContent(filePath);
     FOEDAG::StringUtils::replaceAllInPlace(content, "  ", " ");
-    FOEDAG::StringUtils::replaceAllInPlace(content, lineDelimiter(), "");
+
+    // Fixes CRLF -> LF, valid case for WIN32 platform
+    FOEDAG::StringUtils::replaceAllInPlace(content, "\r", "");
+
+    // remove all command delimiters, 1 line = 1 whole command
+    FOEDAG::StringUtils::replaceAllInPlace(content, lfCommandDelimiter(), "");
+
     FOEDAG::StringUtils::replaceAllInPlace(content, "\n\n", "\n");
-    return FOEDAG::StringUtils::tokenize(content, "\n");
+
+    std::vector<std::string> lines = FOEDAG::StringUtils::tokenize(content, "\n");
+    for (std::string line: lines) {
+      line = FOEDAG::StringUtils::trim(line);
+
+      // drop comment part
+      if (auto pos = line.find("#"); pos != std::string::npos) {
+        line = line.substr(0, pos); // drop commented part of line
+      }
+
+      if (line.empty()){
+        continue; // Skip empty line
+      }
+
+      commands.push_back(line);
+    }
+
+    return commands;
 }
 
 std::optional<TileDescriptor> QdcSerializer::extractGridCoord(const std::string& data)

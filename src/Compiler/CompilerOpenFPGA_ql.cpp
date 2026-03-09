@@ -6589,22 +6589,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
 
     std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
 
-    std::string qdcContent = FileUtils::GetFileContent(floor_planning_constraint_filepath);
-    StringUtils::replaceAllInPlace(qdcContent, fp::QdcSerializer::lineDelimiter(), ""); // remove syntax sugar added by better human readability
-    std::vector<std::string_view> lines = StringUtils::splitLines(qdcContent);
-    for (std::string_view lineView: lines) {
-      std::string line{lineView};
-      line = StringUtils::trim(line);
-
-      // drop comment part
-      if (auto pos = line.find("#"); pos != std::string::npos) {
-        line = line.substr(0, pos); // drop commented part of line
-      }
-
-      if (line.empty()){
-        continue; // Skip empty line
-      }
-
+    std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
+    for (std::string line: lines) {
       std::istringstream iss(line);
       std::string token, signalName;
       iss >> token;

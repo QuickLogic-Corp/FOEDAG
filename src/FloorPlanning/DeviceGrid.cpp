@@ -5,7 +5,14 @@
 
 namespace fp {
 
+DeviceGrid::DeviceGrid()
+: m_issues(std::make_shared<DeviceGrid::Issues>())
+{
+
+}
+
 DeviceGrid::DeviceGrid(const DeviceGridDescriptorPtr& device)
+    : m_issues(std::make_shared<DeviceGrid::Issues>())
 {
     constructTiles(device);
 }
@@ -235,25 +242,25 @@ const TilePtr& DeviceGrid::tile(const Tile::Index& index) const
     return m_nullPtrTile;
 }
 
-const std::unordered_set<std::string>& DeviceGrid::checkErrors()
+const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
 {
-    m_errors.clear();
+    m_issues->clear();
     m_overlappedConflictingIndexes.clear();
     m_overlappedNonConflictingIndexes.clear();
 
     for (const auto& [partitionId, partition]: m_partitions) {
         // element presence
         if (partition->elements().empty()) {
-            m_errors.insert("Partition '" + partition->name() + "' has no elements assigned to it");
+            m_issues->errors.insert({"Partition '" + partition->name() + "' has no elements assigned to it", ""});
         }
         // region presence
         if (partition->regions().empty()) {
-            m_errors.insert("Partition '" + partition->name() + "' has no any region");
+            m_issues->errors.insert({"Partition '" + partition->name() + "' has no any region", ""});
         }
         // tiles presence in region
         for (const auto& [regionId, region]: partition->regions()) {
             if (region->tiles().empty()) {
-                m_errors.insert("Partition '" + partition->name() + "' has region with no any tiles");
+                m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
     }
@@ -277,16 +284,17 @@ const std::unordered_set<std::string>& DeviceGrid::checkErrors()
                     if (r1->rect().intersects(r2->rect())) {
                         std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
                         for (const Tile::Index& index: indexes) {
-                            m_errors.insert("Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
+                            m_issues->warnings.insert({"Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") in partitions: '"+p1->name()+"' and '"+p2->name()+"'",
+                                                      VPR_DOC_FRAGMENT_OVERLAP_IN_DIFFERENT_PARTITIONS});
                         }
-                        m_overlappedConflictingIndexes.insert(indexes.begin(), indexes.end());
+                        m_overlappedNonConflictingIndexes.insert(indexes.begin(), indexes.end());
                     }
                 }
             }
         }
     }
 
-    // tiles overlapping within partition (this is not error case, but we still want just highlight such tiles)
+    // tiles overlapping within partition
     for (auto& [pid, part]: m_partitions) {
         auto& regs = part->regions();
 
@@ -296,14 +304,16 @@ const std::unordered_set<std::string>& DeviceGrid::checkErrors()
                 const RegionPtr& r2 = rit2->second;
                 if (r1->rect().intersects(r2->rect())) {
                     std::unordered_set<Tile::Index> indexes = r1->collectOverlappedIndexes(*r2);
-                    m_overlappedNonConflictingIndexes.insert(indexes.begin(), indexes.end());
+                    for (const Tile::Index& index: indexes) {
+                      m_issues->errors.insert({"Overlapping tile at ("+std::to_string(index.col)+","+std::to_string(index.row)+") between regions belonging to '"+part->name()+"' partition",
+                      VPR_DOC_FRAGMENT_OVERLAP_IN_ONE_PARTITION});
+                    }
+                    m_overlappedConflictingIndexes.insert(indexes.begin(), indexes.end());
                 }
             }
         }
     }
 
-// seems VPR currently support same element be a part of multiple partitions, so deactivate this check case for now
-#ifdef ENABLE_ELEMENTS_OVERLAPPING_CHECK
     // elements overlapping
     for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {
         for (auto pit2 = std::next(pit1); pit2 != m_partitions.end(); ++pit2) {
@@ -312,12 +322,11 @@ const std::unordered_set<std::string>& DeviceGrid::checkErrors()
 
             std::unordered_set<std::string> elements = p1->collectOverlappedElements(*p2);
             for (const std::string& element: elements) {
-                m_errors.insert("Overlapping element '"+element+"' in partitions: '"+p1->name()+"' and '"+p2->name()+"'");
+                m_issues->warnings.insert({"Overlapping element '"+element+"' in partitions: '"+p1->name()+"' and '"+p2->name()+"'", ""});
             }
         }
     }
-#endif
-    return m_errors;
+    return m_issues;
 }
 
 QRectF DeviceGrid::rect() const

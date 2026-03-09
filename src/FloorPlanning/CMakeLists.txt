@@ -33,7 +33,7 @@ set (SRC_LIST
   SynthResourceHierarchyWidget.cpp
   PartitionsListWidget.cpp
   NewUniqueNameDialog.cpp
-  ErrorsListWidget.cpp
+  IssuesListWidget.cpp
   CheckableButton.cpp
   # widgets
   DeviceGridDescriptor.cpp
@@ -53,7 +53,7 @@ set (HDR_LIST
   SynthResourceHierarchyWidget.h
   PartitionsListWidget.h
   NewUniqueNameDialog.h
-  ErrorsListWidget.h
+  IssuesListWidget.h
   CheckableButton.h
   # widgets
   DeviceGridDescriptor.h

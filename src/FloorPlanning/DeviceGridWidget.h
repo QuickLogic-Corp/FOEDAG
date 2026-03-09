@@ -32,8 +32,8 @@ class DeviceGridWidget final : public QWidget {
     const QColor m_editPartitionColor{50, 50, 160}; // blue
     const QColor m_editPartitionTransparentColor{50, 50, 160, 150}; // transparent-blue
     const QColor m_removeHandlerColor{160, 50, 50, 150}; // transparent-red
-    const QColor m_overlappedConflictingTileColor{160, 50, 50, 150}; // transparent-red
-    const QColor m_overlappedNonConflictingTileColor{m_partitionTransparentColor}; // transparent-green
+    const QColor m_overlappedConflictingTileColor{255, 50, 50, 150}; // transparent-red
+    const QColor m_overlappedNonConflictingTileColor{255, 255, 50, 150}; // transparent-yellow
     const int m_tileLineBaseWidth = 3;
 
     double adaptiveTileLineWidthF() const {
@@ -84,7 +84,7 @@ public:
     }
 
 signals:
-    void checkErrorsFinished(std::unordered_set<std::string> errors);
+    void checkIssuesFinished(DeviceGrid::IssuesPtr issues);
     void createFirstPartitionRequested();
     void unselectPartitionRequested();
     void partitionSelected(const PartitionPtr&);
@@ -163,7 +163,7 @@ private:
     QPointF currentWorldCenter() const;
     void setWorldCenter(const QPointF&);
 
-    void checkErrors();
+    void checkIssues();
 
     void zoom(const QPointF& refPoint, double delta);
     void zoomInRect(QRectF&);

@@ -14,8 +14,22 @@ namespace fp {
 class TileDescriptor;
 
 class DeviceGrid {
+  const char* VPR_DOC_FRAGMENT_OVERLAP_IN_ONE_PARTITION = "The regions within one partition must not overlap with each other (in order to ease processing when loading in the file). \nMore information in https://docs.verilogtorouting.org/en/latest/vpr/placement_constraints/";
+  const char* VPR_DOC_FRAGMENT_OVERLAP_IN_DIFFERENT_PARTITIONS = "It is strongly recommended that different partitions do not overlap. The packing algorithm compares the number of clustered blocks and the number of physical blocks in a region to decide if it should pack atoms inside a partition more aggressively when there are not enough resources in a partition. Overlapping partitions cause some physical blocks to be counted in more than one partition, which will degrade the packing algorithm’s ability to create a clustering that can be placed given the floorplan constraints. \nMore information in https://docs.verilogtorouting.org/en/latest/vpr/placement_constraints/";
 public:
-    DeviceGrid()=default;
+  struct Issues {
+    std::unordered_map<std::string, std::string> errors;
+    std::unordered_map<std::string, std::string> warnings;
+    void clear() {
+      errors.clear();
+      warnings.clear();
+    }
+    bool isEmpty() const { return (errors.empty() && warnings.empty()); }
+  };
+  using IssuesPtr = std::shared_ptr<Issues>;
+
+public:
+    DeviceGrid();
     DeviceGrid(const DeviceGridDescriptorPtr& device);
     ~DeviceGrid()=default;
 
@@ -53,8 +67,8 @@ public:
     Tile::Index toBottomLeftGridIndex(const TileDescriptor&) const;
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
-    const std::unordered_set<std::string>& checkErrors();
-    bool hasErrors() const { return !m_errors.empty(); }
+    const IssuesPtr& checkIssues();
+    bool hasErrors() const { return !m_issues->errors.empty(); }
 
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
@@ -64,7 +78,7 @@ public:
 private:
     DeviceGridDescriptorPtr m_descriptor;
 
-    std::unordered_set<std::string> m_errors;
+    IssuesPtr m_issues;
 
     std::unordered_map<Tile::Index, TilePtr> m_tiles;
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;

@@ -180,7 +180,7 @@ bool test_partition(const fp::Tile::Index& bottomLeftIndex, const fp::Tile::Inde
 
     fp::DeviceGrid newDevice(descriptor);
 
-    std::vector<std::string> lines = qdc.readLines(expectedRegionStr+".qdc");
+    std::vector<std::string> lines = qdc.readCommands(expectedRegionStr+".qdc");
     qdc.load(newDevice, lines);
 
     if(1 != lines.size()) {
