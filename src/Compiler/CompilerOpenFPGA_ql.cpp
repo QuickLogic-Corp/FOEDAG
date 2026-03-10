@@ -6670,12 +6670,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       bottomStr = std::string("bottom:" + bottomStr + ";");
 
     if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
-      ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
-      return false;
+      Message("QDC file either does not contain a valid side/region or the side/region is empty.\nSkipping the generate_floorplanning Script.\n");
+      return true;
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
-  
+
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
@@ -6703,13 +6703,16 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
 
+  // sometimes m_architectureFile is set, but file doesn't exists
+  const std::filesystem::path architectureFile = std::filesystem::exists(m_architectureFile) ? m_architectureFile : VprArchitectureFileProfider(this).get();
+
   const std::string command = python_exec.string();
   std::vector<std::string> args;
   args.push_back(generate_floorplanning_script_path.string());
   args.push_back("--blif_file");
   args.push_back(netlistFile.string());
   args.push_back("--arch_file");
-  args.push_back(m_architectureFile.string());
+  args.push_back(architectureFile.string());
   args.push_back("--fpga_layout");
   args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
   args.push_back("--output_path");
