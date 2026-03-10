@@ -6670,12 +6670,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       bottomStr = std::string("bottom:" + bottomStr + ";");
 
     if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
-      Message("QDC file either does not contain a valid side/region or the side/region is empty.\nSkipping the generate_floorplanning Script.\n");
-      return true;
+      Message("Warning: QDC file either does not contain a valid side/region or the side/region is empty.");
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
-
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
