@@ -6702,7 +6702,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
 
   // sometimes m_architectureFile is set, but file doesn't exists
-  const std::filesystem::path architectureFile = std::filesystem::exists(m_architectureFile) ? m_architectureFile : VprArchitectureFileProfider(this).get();
+  VprArchitectureFileProfider archFileProvider(this);
+  const std::filesystem::path architectureFile = std::filesystem::exists(m_architectureFile) ? m_architectureFile : archFileProvider.get();
 
   const std::string command = python_exec.string();
   std::vector<std::string> args;
