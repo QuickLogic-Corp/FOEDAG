@@ -9658,6 +9658,8 @@ void CompilerOpenFPGA_ql::onQdcFileSaved() {
 
 // clang-format on
 
+int VprArchitectureFileProvider::s_tmpFilesCounter = 0;
+
 const std::filesystem::path& VprArchitectureFileProvider::get()
 {
   if (m_architectureFile.empty()) {
@@ -9672,6 +9674,9 @@ const std::filesystem::path& VprArchitectureFileProvider::get()
       std::filesystem::path vpr_xml_en_path = m_architectureFile;
       m_architectureFile = m_compiler->GenerateTempFilePath(true);
       m_isFileTemporary = true;
+      
+      s_tmpFilesCounter++;
+      qInfo() << "~~~ create tmp vpr arch file, existed tmp files num" << s_tmpFilesCounter;
 
       std::filesystem::path cryptdbPath = 
           CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
@@ -9709,5 +9714,7 @@ void VprArchitectureFileProvider::clean()
 {
   if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
     std::filesystem::remove(m_architectureFile);
+    s_tmpFilesCounter--;
+    qInfo() << "~~~ remove tmp vpr arch file, existed tmp files num" << s_tmpFilesCounter;
   }
 }

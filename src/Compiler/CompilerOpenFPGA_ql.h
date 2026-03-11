@@ -287,6 +287,7 @@ private:
 };
 
 class VprArchitectureFileProvider {
+  static int s_tmpFilesCounter;
 public:
   VprArchitectureFileProvider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
   ~VprArchitectureFileProvider();
