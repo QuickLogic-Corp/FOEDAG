@@ -2403,7 +2403,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  vpr_options += " --suppress_warnings vpr_warnings.log,"+StringUtils::join(vprRedirectedWarnings(), ":");
+  vpr_options += " --suppress_warnings vpr_warnings.log," + StringUtils::join(vprRedirectedWarnings(), ":");
 
 
   // construct vpr base command with mandatory args + options:
