@@ -58,6 +58,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
     : QWidget(parent),
       m_compiler(compiler),
       m_profile(profile),
+      m_vprArchFileProvider(static_cast<FOEDAG::CompilerOpenFPGA_ql*>(compiler)),
       m_vprProcess("vpr"),
       m_parameters(
           std::make_shared<NCriticalPathParameters>(settingsFilePath)) {
@@ -100,6 +101,9 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
           [this](bool isRunning) {
             m_bnRunPnRView->setEnabled(!isRunning);
             emit PnRViewRunStatusChanged(isRunning);
+            if (!isRunning) {
+              m_vprArchFileProvider.clean();
+            }
           });
   connect(&m_vprProcess, &Process::innerErrorOccurred, this,
           &NCriticalPathToolsWidget::vprProcessErrorOccured);
@@ -120,7 +124,7 @@ QString NCriticalPathToolsWidget::projectLocation() {
   return m_compiler->ProjManager()->getProjectPath();
 }
 
-QString NCriticalPathToolsWidget::vprBaseCommand() {
+QString NCriticalPathToolsWidget::vprBaseCommand(const std::filesystem::path& vprArchitectureFile) {
   if (m_compiler) {
     FOEDAG::CompilerOpenFPGA_ql* openFpgaCompiler =
         dynamic_cast<FOEDAG::CompilerOpenFPGA_ql*>(m_compiler);
@@ -145,12 +149,12 @@ QString NCriticalPathToolsWidget::vprBaseCommand() {
       }
 #else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
       if (m_profile.isEmpty()) {
-        std::tuple<std::string, std::string> baseVPRCommandTuple = openFpgaCompiler->BaseVprCommandLEGACY();
+        std::tuple<std::string, std::string> baseVPRCommandTuple = openFpgaCompiler->BaseVprCommandLEGACY(vprArchitectureFile);
         std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
         return QString::fromStdString(base_vpr_command);
       } else {
         auto sta_device = openFpgaCompiler->getDeviceByStaProfile(m_profile.toStdString());
-        std::tuple<std::string, std::string> baseVPRCommandTuple = openFpgaCompiler->BaseVprCommandLEGACY(sta_device);
+        std::tuple<std::string, std::string> baseVPRCommandTuple = openFpgaCompiler->BaseVprCommandLEGACY(vprArchitectureFile, sta_device);
         std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
         std::string cmd = base_vpr_command;
         cmd += openFpgaCompiler->uniqueStaVprOptions();
@@ -308,8 +312,8 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
 
   int portNum = client::ServerFreePortDetector().detectAvailablePortNum();
   emit serverPortNumDetected(portNum);
-
-  QString fullCmd = vprBaseCommand();
+  
+  QString fullCmd = vprBaseCommand(m_vprArchFileProvider.get());
   if (!fullCmd.isEmpty()) {
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we
@@ -323,6 +327,7 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
 
     m_vprProcess.start(fullCmd);
   } else {
+    m_vprArchFileProvider.clean();
     emit vprProcessErrorOccured("P&R View is not found");
   }
 }

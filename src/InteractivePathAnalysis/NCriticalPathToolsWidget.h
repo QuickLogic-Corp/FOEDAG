@@ -30,6 +30,7 @@
 #include <QString>
 
 #include "../Compiler/Compiler.h"
+#include "../Compiler/CompilerOpenFPGA_ql.h" // VprArchitectureFileProvider
 #include "NCriticalPathParameters.h"
 #include "VprProcess.h"
 
@@ -74,6 +75,7 @@ class NCriticalPathToolsWidget : public QWidget {
  private:
   FOEDAG::Compiler* m_compiler = nullptr;
   QString m_profile;
+  VprArchitectureFileProfider m_vprArchFileProvider;
 
   QLineEdit* m_leNCriticalPathNum = nullptr;
   QComboBox* m_cbHighlightMode = nullptr;
@@ -93,7 +95,7 @@ class NCriticalPathToolsWidget : public QWidget {
   void setupCriticalPathsOptionsMenu(QPushButton*);
 
   QString projectLocation();
-  QString vprBaseCommand();
+  QString vprBaseCommand(const std::filesystem::path& vprArchitectureFile);
 
   void addRowToFormLayout(QFormLayout* formLayout, const QString& labelText,
                           QWidget* widget) const;

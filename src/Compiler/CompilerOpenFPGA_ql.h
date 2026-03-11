@@ -148,20 +148,15 @@ class CompilerOpenFPGA_ql : public Compiler {
   long double PowerEstimator_Leakage();
 #endif // LEGACY_POWER_CALCULATOR
 
-  virtual std::tuple<std::string, std::string> BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
-  CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
+  virtual std::tuple<std::string, std::string> BaseVprCommandLEGACY(const std::filesystem::path& vprArchitectureFile, QLDeviceTarget device_target = QLDeviceTarget());
+  CommandWrapperPtr BaseVprCommand(const std::filesystem::path& vprArchitectureFile, QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
 
   std::string staProfile(const QLDeviceTarget& device) const;  
   bool collectStaDevices(std::map<std::string, QLDeviceTarget>& devices) const;
   QLDeviceTarget getDeviceByStaProfile(const std::string staProfile) const;
   std::string uniqueStaVprOptions() const;
   
-  void onQdcFileSaved() {
-    // incr compilation itself didn't track qdc file, so we must re-generate xml 
-    // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
-    GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
-    invalidateTaskStatuses();
-  }
+  void onQdcFileSaved();
 
  protected:
   virtual bool IPGenerate();
@@ -173,11 +168,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool ConvertSdcPinConstrainToPcf(std::vector<std::string>&);
   virtual bool Route();
   virtual bool TimingAnalysis();
-  bool TimingAnalysisHelper(const QLDeviceTarget&, const std::string&);
+  bool TimingAnalysisHelper(const std::filesystem::path& vprArchitectureFile, const QLDeviceTarget&, const std::string&);
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
-  bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
+  bool GenerateIOFloorPlanConstraints(const std::filesystem::path& vprArchitectureFile, bool forceOverwrite = false);
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
@@ -191,7 +186,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual std::string InitAnalyzeScript();
   virtual std::string FinishAnalyzeScript(const std::string& script);
   virtual std::string InitOpenFPGAScript();
-  virtual std::string FinishOpenFPGAScript(const std::string& script);
+  virtual std::string FinishOpenFPGAScript(const std::filesystem::path& vprArchitectureFile, const std::string& script);
   std::string GetSynplifyScriptTemplate() const;
   virtual std::filesystem::path FindSynthSDCPaths();
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
@@ -222,9 +217,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_aurora_template_script_synplify_path;
   std::filesystem::path m_aurora_template_script_openfpga_path;
   /*!
-   * \brief m_architectureFile
-   * We required from user explicitly specify architecture file.
-   */
+  * \brief m_architectureFile
+  * We required from user explicitly specify architecture file.
+  */
   std::filesystem::path m_architectureFile = "";
 
   /*!
@@ -264,20 +259,20 @@ private:
   TaskCompilationStateManager m_taskCompilationStateManager;
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
-  CommandWrapperPtr getPackingCommand();
-  CommandWrapperPtr getPlacementCommand();
-  CommandWrapperPtr getRoutingCommand();      
+  CommandWrapperPtr getPackingCommand(const std::filesystem::path& vprArchitectureFile);
+  CommandWrapperPtr getPlacementCommand(const std::filesystem::path& vprArchitectureFile);
+  CommandWrapperPtr getRoutingCommand(const std::filesystem::path& vprArchitectureFile);
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA       
-  CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
+  CommandWrapperPtr getTimingAnalysisCommand(const std::filesystem::path& vprArchitectureFile, const QLDeviceTarget& current_device_sta, const std::string& profile);
 #endif
 
   void invalidateTaskStatuses() override final;
   bool isSynthesisStatusActual();
-  bool isPackingStatusActual();
-  bool isPlacementStatusActual();
-  bool isRoutingStatusActual();
+  bool isPackingStatusActual(const std::filesystem::path& vprArchitectureFile);
+  bool isPlacementStatusActual(const std::filesystem::path& vprArchitectureFile);
+  bool isRoutingStatusActual(const std::filesystem::path& vprArchitectureFile);
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
-  bool isTimingAnalysysStatusActual();
+  bool isTimingAnalysysStatusActual(const std::filesystem::path& vprArchitectureFile);
 #endif
 
   void clearCompilationCache() override final;

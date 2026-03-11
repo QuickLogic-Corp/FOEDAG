@@ -1990,7 +1990,7 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
-std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
+std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(const std::filesystem::path& vprArchitectureFile, QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2391,7 +2391,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints()){
+  if (GenerateIOFloorPlanConstraints(vprArchitectureFile)){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     if (fs::exists(fp_constraint_filepath_absolute)) {
@@ -2419,7 +2419,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   return std::make_tuple(base_vpr_command, vpr_options);
 }
 
-CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target, const VprStageCfg& cfg) {
+CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(const std::filesystem::path& vprArchitectureFile, QLDeviceTarget device_target, const VprStageCfg& cfg) {
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   // note: at this point, the current_path() is the project 'source' directory.
 
@@ -2729,37 +2729,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     }
   }
 
-
-  m_architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
-  if(m_architectureFile.empty()) {
-
-    ErrorMessage("Cannot proceed without VPR Architecture file.");
-    return nullptr;
-  }
-
-  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
-    
-    std::filesystem::path vpr_xml_en_path = m_architectureFile;
-    m_architectureFile = GenerateTempFilePath();
-
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return nullptr;
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
-      // empty string returned on error.
-      return nullptr;
-    }
-  }
-
   Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
 
   // construct the base vpr command with all the options here.
@@ -2775,7 +2744,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints()){
+  if (GenerateIOFloorPlanConstraints(vprArchitectureFile)){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     if (fs::exists(fp_constraint_filepath_absolute)) {
@@ -2793,7 +2762,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   //
 
   command->prependFile(std::filesystem::path{netlistFile});
-  command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
+  command->prependFile(vprArchitectureFile, VPR_ARCH_FILE_MASK);
   command->prepend(m_vprExecutablePath.string());
   
   return command;
@@ -2928,7 +2897,10 @@ bool CompilerOpenFPGA_ql::Packing() {
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
-  CommandWrapperPtr command = getPackingCommand();
+  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
+
+  CommandWrapperPtr command = getPackingCommand(vprArchitectureFile);
   if(!command) {
     return false;
   }
@@ -3870,7 +3842,10 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  CommandWrapperPtr command = getPlacementCommand();
+  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
+
+  CommandWrapperPtr command = getPlacementCommand(vprArchitectureFile);
   if(!command) {
     return false;
   }
@@ -4064,7 +4039,10 @@ bool CompilerOpenFPGA_ql::Route() {
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
 
-  CommandWrapperPtr command = getRoutingCommand();
+  VprArchitectureFileProfider vprArchFileProvider(this);
+  const std::filesystem::path vprArchFile = vprArchFileProvider.get();
+
+  CommandWrapperPtr command = getRoutingCommand(vprArchFile);
   if (!command) {
     return false;
   }
@@ -4762,9 +4740,12 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   }
 
+  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
+
   for (const auto& [profile, device]: devices) {
     if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {
-      if (!TimingAnalysisHelper(device, profile)) {
+      if (!TimingAnalysisHelper(vprArchitectureFile, device, profile)) {
         return false;
       }
     } else {
@@ -4800,7 +4781,7 @@ std::string CompilerOpenFPGA_ql::uniqueStaVprOptions() const
   return sta_vpr_options;
 }
 
-bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_device_sta, const std::string& profile)
+bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const std::filesystem::path& vprArchitectureFile, const QLDeviceTarget& current_device_sta, const std::string& profile)
 {
   std::string sta_suffix{};
   if (!profile.empty()) {
@@ -4841,7 +4822,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
     std::string taCommand = base_vpr_command + " --route --analysis --disp on";
 #else // #ifdef _WIN32
-    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(vprArchitectureFile, current_device_sta);
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
     std::string taCommand = base_vpr_command + " --analysis --disp on";
 #endif // #ifdef _WIN32
@@ -4875,7 +4856,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
-    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(vprArchitectureFile);
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
     std::string command = base_vpr_command + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
@@ -4926,7 +4907,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     std::string vpr_options;
 
-    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
+    std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(vprArchitectureFile, current_device_sta);
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
     taCommand = base_vpr_command;
     if(taCommand.empty()) {
@@ -5522,7 +5503,7 @@ std::string CompilerOpenFPGA_ql::InitOpenFPGAScript() {
   return m_openFPGAScript;
 }
 
-std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script) {
+std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::filesystem::path& vprArchitectureFile, const std::string& script) {
 
   std::string result = script;
 
@@ -5554,42 +5535,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     return std::string("");
   }
 
-
   QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
-
-  std::error_code ec;
-
-
-  m_architectureFile = 
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device_target);
-  if(m_architectureFile.empty()) {
-
-    ErrorMessage("Cannot proceed without VPR Architecture file.");
-    return std::string("");
-  }
-
-  if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
-    
-    std::filesystem::path vpr_xml_en_path = m_architectureFile;
-    m_architectureFile = GenerateTempFilePath();
-
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-  }
-
 
   // [required] openfpga architecture file
   m_OpenFpgaArchitectureFile = 
@@ -5785,7 +5731,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // call vpr to execute analysis
   std::string netlistFilePrefix = ProjManager()->projectName() + "_post_synth";
 
-  std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
+  std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(vprArchitectureFile);
   std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
   std::string base_vpr_options = std::get<1>(baseVPRCommandTuple);
   std::string vpr_analysis_command = base_vpr_command;
@@ -5839,7 +5785,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     }
   }
 
-  result = ReplaceAll(result, "${VPR_ARCH_FILE}", m_architectureFile.string());
+  result = ReplaceAll(result, "${VPR_ARCH_FILE}", vprArchitectureFile.string());
   result = ReplaceAll(result, "${NET_FILE}", netlistFilePrefix + ".net");
   result = ReplaceAll(result, "${PLACE_FILE}", netlistFilePrefix + ".place");
   result = ReplaceAll(result, "${ROUTE_FILE}", netlistFilePrefix + ".route");
@@ -6205,9 +6151,12 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return false;
   }
 
+  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
+
   std::string script = InitOpenFPGAScript();
 
-  script = FinishOpenFPGAScript(script);
+  script = FinishOpenFPGAScript(vprArchitectureFile, script);
   if(script.empty()) {
     ErrorMessage("OpenFPGA Script is empty!");
     return false;
@@ -6514,7 +6463,7 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
 }
 
-bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
+bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(const std::filesystem::path& architectureFile, bool forceOverwrite) {
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
@@ -6709,7 +6658,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   args.push_back("--blif_file");
   args.push_back(netlistFile.string());
   args.push_back("--arch_file");
-  args.push_back(m_architectureFile.string());
+  args.push_back(architectureFile.string());
   args.push_back("--fpga_layout");
   args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
   args.push_back("--output_path");
@@ -9352,7 +9301,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   return commands;
 }
 
-CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
+CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand(const std::filesystem::path& vprArchitectureFile) {
   VprStageCfg cfg;
   cfg.use_place_file = false;
   cfg.use_route_file = false;
@@ -9360,7 +9309,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand(QLDeviceTarget(), cfg) + " --pack";
 #endif // #if UPSTREAM_UNUSED
-  CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
+  CommandWrapperPtr command = BaseVprCommand(vprArchitectureFile, QLDeviceTarget(), cfg);
   if(!command) {
     ErrorMessage("VPR Command is empty!");
     return nullptr;
@@ -9390,7 +9339,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
   return command;
 }
 
-CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
+CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand(const std::filesystem::path& vprArchitectureFile) {
   // generate pin contraints file or use pre-generated .place file, if required.
   // this string should contain the path of the PinConstraints file, if generated correctly.
   // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
@@ -9403,7 +9352,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   cfg.use_place_file = true;
   cfg.use_route_file = false;
 
-  CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
+  CommandWrapperPtr command = BaseVprCommand(vprArchitectureFile, QLDeviceTarget(), cfg);
   if(!command) {
     ErrorMessage("Base VPR Command is empty!");
     return nullptr;
@@ -9438,9 +9387,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   return command;
 }
 
-CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
+CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand(const std::filesystem::path& vprArchitectureFile)
 {
-  CommandWrapperPtr command = BaseVprCommand();
+  CommandWrapperPtr command = BaseVprCommand(vprArchitectureFile);
   if(!command) {
     ErrorMessage("Base VPR Command is empty!");
     return nullptr;
@@ -9471,7 +9420,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
 }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
-CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile)
+CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const std::filesystem::path& vprArchitectureFile, const QLDeviceTarget& current_device_sta, const std::string& profile)
 {
   std::string sta_suffix{};
   if (!profile.empty()) {
@@ -9482,12 +9431,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we call the
     // route and analysis stages together
-    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
+    CommandWrapperPtr taCommand = BaseVprCommand(vprArchitectureFile, current_device_sta);
     taCommand->append("--route");
     taCommand->append("--analysis");
     taCommand->append("--disp", "on");
 #else // #ifdef _WIN32
-    CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
+    CommandWrapperPtr taCommand = BaseVprCommand(vprArchitectureFile, current_device_sta);
     taCommand->append("--analysis");
     taCommand->append("--disp", "on");
     // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
@@ -9580,6 +9529,9 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
   CompilationFilesScopedSession compilationFilesScopedSession;
 
+  VprArchitectureFileProfider vprArchFileProvider(this);
+  const std::filesystem::path vprArchFile = vprArchFileProvider.get();
+
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
     m_state = State::IPGenerated;
@@ -9590,7 +9542,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isPackingStatusActual()) {
+  if (!isPackingStatusActual(vprArchFile)) {
     GetTaskManager()->tryMarkDirtyFrom(PACKING);
     m_state = State::Synthesized;
     return;
@@ -9600,7 +9552,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isPlacementStatusActual()) {
+  if (!isPlacementStatusActual(vprArchFile)) {
     GetTaskManager()->tryMarkDirtyFrom(PLACEMENT);
     m_state = State::Packed;
     return;
@@ -9610,7 +9562,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isRoutingStatusActual()) {
+  if (!isRoutingStatusActual(vprArchFile)) {
     GetTaskManager()->tryMarkDirtyFrom(ROUTING);
     m_state = State::Placed;
     return;
@@ -9621,7 +9573,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
-  if (!isTimingAnalysysStatusActual()) {
+  if (!isTimingAnalysysStatusActual(vprArchFile)) {
     GetTaskManager()->tryMarkDirtyFrom(TIMING_SIGN_OFF);
     m_state = State::Routed;
     return;
@@ -9655,32 +9607,32 @@ bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
   return !commands.empty();  
 }
 
-bool CompilerOpenFPGA_ql::isPackingStatusActual()
+bool CompilerOpenFPGA_ql::isPackingStatusActual(const std::filesystem::path& vprArchitectureFile)
 {
-  CommandWrapperPtr command = getPackingCommand();
+  CommandWrapperPtr command = getPackingCommand(vprArchitectureFile);
   return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command);
 }
 
-bool CompilerOpenFPGA_ql::isPlacementStatusActual()
+bool CompilerOpenFPGA_ql::isPlacementStatusActual(const std::filesystem::path& vprArchitectureFile)
 {
-  CommandWrapperPtr command = getPlacementCommand();
+  CommandWrapperPtr command = getPlacementCommand(vprArchitectureFile);
   return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command);
 }
 
-bool CompilerOpenFPGA_ql::isRoutingStatusActual()
+bool CompilerOpenFPGA_ql::isRoutingStatusActual(const std::filesystem::path& vprArchitectureFile)
 {
-  CommandWrapperPtr command = getRoutingCommand();
+  CommandWrapperPtr command = getRoutingCommand(vprArchitectureFile);
   return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command);
 }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
-bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
+bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual(const std::filesystem::path& vprArchitectureFile)
 {
   std::map<std::string, QLDeviceTarget> devices;
   if (collectStaDevices(devices)) {
     // handle sta multicorner case
     for (const auto& [profile, device]: devices) {
-      CommandWrapperPtr command = getTimingAnalysisCommand(device, "");
+      CommandWrapperPtr command = getTimingAnalysisCommand(vprArchitectureFile, device, "");
       if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
         return false;
       }
@@ -9689,11 +9641,20 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
   } else {
     // regular sta case
     QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
-    CommandWrapperPtr command = getTimingAnalysisCommand(current_device, "");
+    CommandWrapperPtr command = getTimingAnalysisCommand(vprArchitectureFile, current_device, "");
     return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), command);
   }
 }
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
+void CompilerOpenFPGA_ql::onQdcFileSaved() {
+  // incr compilation itself didn't track qdc file, so we must re-generate xml 
+  // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
+  GenerateIOFloorPlanConstraints(vprArchitectureFile, /*forceOverwrite*/true);
+  invalidateTaskStatuses();
+}
 
 // clang-format on
 
@@ -9723,9 +9684,12 @@ const std::filesystem::path& VprArchitectureFileProfider::get()
       if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
         return error("decryption failed!");
       }
+    } else {
+      // we store arch file only if it wasn't initially encrypted, to not have reference to deleted file
+      m_compiler->ArchitectureFile(m_architectureFile);
     }
   }  
-    
+  
   return m_architectureFile;
 }
 
