@@ -2897,7 +2897,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
-  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
   const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
 
   CommandWrapperPtr command = getPackingCommand(vprArchitectureFile);
@@ -3842,7 +3842,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
   const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
 
   CommandWrapperPtr command = getPlacementCommand(vprArchitectureFile);
@@ -4039,7 +4039,7 @@ bool CompilerOpenFPGA_ql::Route() {
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
 
-  VprArchitectureFileProfider vprArchFileProvider(this);
+  VprArchitectureFileProvider vprArchFileProvider(this);
   const std::filesystem::path vprArchFile = vprArchFileProvider.get();
 
   CommandWrapperPtr command = getRoutingCommand(vprArchFile);
@@ -4740,7 +4740,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   }
 
-  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
   const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
 
   for (const auto& [profile, device]: devices) {
@@ -6151,7 +6151,7 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     return false;
   }
 
-  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
   const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
 
   std::string script = InitOpenFPGAScript();
@@ -7059,7 +7059,7 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   const int IO_COLUMNS = 2;
   const int device_clb_rows = device_size_y - EMPTY_ROWS - IO_ROWS;
 
-  VprArchitectureFileProfider archFileProvider(this);
+  VprArchitectureFileProvider archFileProvider(this);
   if (archFileProvider.get().empty()) {
     return "";
   }
@@ -9529,7 +9529,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
   CompilationFilesScopedSession compilationFilesScopedSession;
 
-  VprArchitectureFileProfider vprArchFileProvider(this);
+  VprArchitectureFileProvider vprArchFileProvider(this);
   const std::filesystem::path vprArchFile = vprArchFileProvider.get();
 
   if (!isSynthesisStatusActual()) {
@@ -9650,7 +9650,7 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual(const std::filesystem::pa
 void CompilerOpenFPGA_ql::onQdcFileSaved() {
   // incr compilation itself didn't track qdc file, so we must re-generate xml 
   // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
-  VprArchitectureFileProfider vprArchitectureFileProvider(this);
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
   const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
   GenerateIOFloorPlanConstraints(vprArchitectureFile, /*forceOverwrite*/true);
   invalidateTaskStatuses();
@@ -9658,7 +9658,7 @@ void CompilerOpenFPGA_ql::onQdcFileSaved() {
 
 // clang-format on
 
-const std::filesystem::path& VprArchitectureFileProfider::get()
+const std::filesystem::path& VprArchitectureFileProvider::get()
 {
   if (m_architectureFile.empty()) {
     QLDeviceTarget device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
@@ -9693,19 +9693,19 @@ const std::filesystem::path& VprArchitectureFileProfider::get()
   return m_architectureFile;
 }
 
-const std::filesystem::path& VprArchitectureFileProfider::error(const std::string& msg)
+const std::filesystem::path& VprArchitectureFileProvider::error(const std::string& msg)
 {
   m_compiler->ErrorMessage(msg);
   m_architectureFile = "";
   return m_architectureFile;
 }
 
-VprArchitectureFileProfider::~VprArchitectureFileProfider()
+VprArchitectureFileProvider::~VprArchitectureFileProvider()
 {
   clean();
 }
 
-void VprArchitectureFileProfider::clean()
+void VprArchitectureFileProvider::clean()
 {
   if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
     std::filesystem::remove(m_architectureFile);

@@ -2253,7 +2253,7 @@ void MainWindow::floorPlanningActionTriggered()
     std::filesystem::path postSynthBlifFilePath = compiler->getPostSynthBlifFilePath();
     if (FileUtils::FileExists(postSynthBlifFilePath)) {
 
-      std::shared_ptr<VprArchitectureFileProfider> archFileProviderPtr = std::make_shared<VprArchitectureFileProfider>(compiler);
+      std::shared_ptr<VprArchitectureFileProvider> archFileProviderPtr = std::make_shared<VprArchitectureFileProvider>(compiler);
       if(archFileProviderPtr->get().empty()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", "Cannot proceed without VPR Architecture file.");
         cleanFloorPlanningUI();

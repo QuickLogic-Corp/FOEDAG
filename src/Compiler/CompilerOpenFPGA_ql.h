@@ -286,12 +286,12 @@ private:
   };
 };
 
-class VprArchitectureFileProfider {
+class VprArchitectureFileProvider {
 public:
-  VprArchitectureFileProfider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
-  VprArchitectureFileProfider(const VprArchitectureFileProfider&) = delete;            // disable copy constructor
-  VprArchitectureFileProfider& operator=(const VprArchitectureFileProfider&) = delete; // disable copy assignment
-  ~VprArchitectureFileProfider();
+  VprArchitectureFileProvider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
+  VprArchitectureFileProvider(const VprArchitectureFileProvider&) = delete;            // disable copy constructor
+  VprArchitectureFileProvider& operator=(const VprArchitectureFileProvider&) = delete; // disable copy assignment
+  ~VprArchitectureFileProvider();
 
   const std::filesystem::path& get();
   void clean();
