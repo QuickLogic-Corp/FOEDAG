@@ -58,8 +58,11 @@ class NCriticalPathToolsWidget : public QWidget {
 
   NCriticalPathParametersPtr parameters() const { return m_parameters; }
   void refreshCritPathContextOnSettingsChanged();
-
- public slots:
+  void clearVprArchitectureFile() {
+    m_vprArchitectureFileProvider.clean();
+  }
+ 
+public slots:
   void onConnectionStatusChanged(bool);
   void tryRunPnRView();
   void deactivatePlaceAndRouteViewProcess();
