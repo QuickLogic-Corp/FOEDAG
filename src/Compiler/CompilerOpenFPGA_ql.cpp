@@ -2403,7 +2403,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:load_rr_indexed_data_T_values:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
+  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:"+StringUtils::join(vprRedirectedWarnings(), ":");
 
 
   // construct vpr base command with mandatory args + options:
@@ -2787,9 +2787,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  command->append("--suppress_warnings", 
-  "vpr_warnings.log,xml_read_arch:warn_model_missing_timing:load_rr_indexed_data_T_values:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models"
-  );
+  command->append("--suppress_warnings", "vpr_warnings.log,xml_read_arch:" + StringUtils::join(vprRedirectedWarnings(), ":"));
   //
 
   command->prependFile(std::filesystem::path{netlistFile});
@@ -9694,6 +9692,27 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
   }
 }
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
+const std::vector<std::string>& CompilerOpenFPGA_ql::vprRedirectedWarnings() const
+{
+  static std::vector<std::string> warnings = {
+    "warn_model_missing_timing",
+    "load_rr_indexed_data_T_values",
+    "set_grid_block_type",
+    "set_rr_graph_tool_version",
+    "set_rr_graph_tool_comment",
+    "set_rr_node_prev_node",
+    "build_device_grid",
+    "rec_create_dir_path",
+    "create_dir_path",
+    "sum_pin_class",
+    "add_lb_router_nets",
+    "trans_per_R",
+    "auto_detect_default_models",
+    "set_switch_name"
+  };
+  return warnings;
+}
 
 // clang-format on
 
