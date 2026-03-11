@@ -9676,7 +9676,7 @@ const std::filesystem::path& VprArchitectureFileProvider::get()
       m_isFileTemporary = true;
       
       s_tmpFilesCounter++;
-      qInfo() << "~~~ create tmp vpr arch file" << QString::fromStdString(m_architectureFile.string()) << ", total existed tmp files num" << s_tmpFilesCounter;
+      //qInfo() << "~~~ create tmp vpr arch file" << QString::fromStdString(m_architectureFile.string()) << ", total existed tmp files num" << s_tmpFilesCounter;
 
       std::filesystem::path cryptdbPath = 
           CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
@@ -9715,7 +9715,7 @@ void VprArchitectureFileProvider::clean()
   if (m_isFileTemporary && std::filesystem::exists(m_architectureFile)) {
     std::filesystem::remove(m_architectureFile);
     s_tmpFilesCounter--;
-    qInfo() << "~~~ remove tmp vpr arch file" << QString::fromStdString(m_architectureFile.string()) << ", exists = " << std::filesystem::exists(m_architectureFile) << ", total existed tmp files num" << s_tmpFilesCounter;
+    //qInfo() << "~~~ remove tmp vpr arch file" << QString::fromStdString(m_architectureFile.string()) << ", exists = " << std::filesystem::exists(m_architectureFile) << ", total existed tmp files num" << s_tmpFilesCounter;
     m_architectureFile = "";
   }
 }
