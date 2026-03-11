@@ -58,7 +58,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
     : QWidget(parent),
       m_compiler(compiler),
       m_profile(profile),
-      m_vprArchFileProvider(static_cast<FOEDAG::CompilerOpenFPGA_ql*>(compiler)),
+      m_vprArchitectureFileProvider(static_cast<FOEDAG::CompilerOpenFPGA_ql*>(compiler)),
       m_vprProcess("vpr"),
       m_parameters(
           std::make_shared<NCriticalPathParameters>(settingsFilePath)) {
@@ -102,7 +102,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
             m_bnRunPnRView->setEnabled(!isRunning);
             emit PnRViewRunStatusChanged(isRunning);
             if (!isRunning) {
-              m_vprArchFileProvider.clean();
+              m_vprArchitectureFileProvider.clean();
             }
           });
   connect(&m_vprProcess, &Process::innerErrorOccurred, this,
@@ -313,7 +313,7 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
   int portNum = client::ServerFreePortDetector().detectAvailablePortNum();
   emit serverPortNumDetected(portNum);
   
-  QString fullCmd = vprBaseCommand(m_vprArchFileProvider.get());
+  QString fullCmd = vprBaseCommand(m_vprArchitectureFileProvider.get());
   if (!fullCmd.isEmpty()) {
 #ifdef _WIN32
     // under WIN32, running the analysis stage alone causes issues, hence we
@@ -327,7 +327,7 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
 
     m_vprProcess.start(fullCmd);
   } else {
-    m_vprArchFileProvider.clean();
+    m_vprArchitectureFileProvider.clean();
     emit vprProcessErrorOccured("P&R View is not found");
   }
 }

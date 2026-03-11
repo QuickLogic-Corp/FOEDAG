@@ -4039,10 +4039,10 @@ bool CompilerOpenFPGA_ql::Route() {
   std::string command = BaseVprCommand() + " --route";
 #endif // #if UPSTREAM_UNUSED
 
-  VprArchitectureFileProvider vprArchFileProvider(this);
-  const std::filesystem::path vprArchFile = vprArchFileProvider.get();
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
 
-  CommandWrapperPtr command = getRoutingCommand(vprArchFile);
+  CommandWrapperPtr command = getRoutingCommand(vprArchitectureFile);
   if (!command) {
     return false;
   }
@@ -9529,8 +9529,8 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
   CompilationFilesScopedSession compilationFilesScopedSession;
 
-  VprArchitectureFileProvider vprArchFileProvider(this);
-  const std::filesystem::path vprArchFile = vprArchFileProvider.get();
+  VprArchitectureFileProvider vprArchitectureFileProvider(this);
+  const std::filesystem::path vprArchitectureFile = vprArchitectureFileProvider.get();
 
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
@@ -9542,7 +9542,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isPackingStatusActual(vprArchFile)) {
+  if (!isPackingStatusActual(vprArchitectureFile)) {
     GetTaskManager()->tryMarkDirtyFrom(PACKING);
     m_state = State::Synthesized;
     return;
@@ -9552,7 +9552,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isPlacementStatusActual(vprArchFile)) {
+  if (!isPlacementStatusActual(vprArchitectureFile)) {
     GetTaskManager()->tryMarkDirtyFrom(PLACEMENT);
     m_state = State::Packed;
     return;
@@ -9562,7 +9562,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isRoutingStatusActual(vprArchFile)) {
+  if (!isRoutingStatusActual(vprArchitectureFile)) {
     GetTaskManager()->tryMarkDirtyFrom(ROUTING);
     m_state = State::Placed;
     return;
@@ -9573,7 +9573,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
   }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
-  if (!isTimingAnalysysStatusActual(vprArchFile)) {
+  if (!isTimingAnalysysStatusActual(vprArchitectureFile)) {
     GetTaskManager()->tryMarkDirtyFrom(TIMING_SIGN_OFF);
     m_state = State::Routed;
     return;

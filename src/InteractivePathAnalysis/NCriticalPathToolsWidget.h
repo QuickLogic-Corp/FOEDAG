@@ -75,7 +75,7 @@ class NCriticalPathToolsWidget : public QWidget {
  private:
   FOEDAG::Compiler* m_compiler = nullptr;
   QString m_profile;
-  VprArchitectureFileProvider m_vprArchFileProvider;
+  VprArchitectureFileProvider m_vprArchitectureFileProvider;
 
   QLineEdit* m_leNCriticalPathNum = nullptr;
   QComboBox* m_cbHighlightMode = nullptr;
