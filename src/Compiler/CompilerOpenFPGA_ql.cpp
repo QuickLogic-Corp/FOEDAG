@@ -9696,21 +9696,37 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
 const std::vector<std::string>& CompilerOpenFPGA_ql::vprRedirectedWarnings() const
 {
   static std::vector<std::string> warnings = {
+    /* xml */
     "xml_read_arch",
-    "warn_model_missing_timing",
-    "load_rr_indexed_data_T_values",
+    "check_pb_node_rec",
+    
+    /* grid */
+    "create_device_grid",
+    "build_device_grid",
     "set_grid_block_type",
+    
+    /* rr */
+    "load_rr_indexed_data_T_values",
     "set_rr_graph_tool_version",
     "set_rr_graph_tool_comment",
     "set_rr_node_prev_node",
-    "build_device_grid",
+    "check_rr_graph",
+    "annotate_rr_switch_circuit_models",
+   
+    /* switch */
+    "set_switch_name",
+    "print_switch_usage",
+    "setup_switches",
+
+    /* other */
+    "warn_model_missing_timing",
     "rec_create_dir_path",
     "create_dir_path",
     "sum_pin_class",
     "add_lb_router_nets",
     "trans_per_R",
     "auto_detect_default_models",
-    "set_switch_name"
+    "get_delay_normalization_fac"
   };
   return warnings;
 }
