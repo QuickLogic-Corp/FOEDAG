@@ -289,8 +289,6 @@ private:
 class VprArchitectureFileProvider {
 public:
   VprArchitectureFileProvider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
-  VprArchitectureFileProvider(const VprArchitectureFileProvider&) = delete;            // disable copy constructor
-  VprArchitectureFileProvider& operator=(const VprArchitectureFileProvider&) = delete; // disable copy assignment
   ~VprArchitectureFileProvider();
 
   const std::filesystem::path& get();
@@ -303,8 +301,10 @@ private:
 
   const std::filesystem::path& error(const std::string& msg);
 
-  private:
-    void* operator new(size_t) = delete; // disable heap allocation
+private:
+  VprArchitectureFileProvider(const VprArchitectureFileProvider&) = delete;            // disable copy constructor
+  VprArchitectureFileProvider& operator=(const VprArchitectureFileProvider&) = delete; // disable copy assignment
+  void* operator new(size_t) = delete;                                                 // disable heap allocation
 };
 
 }  // namespace FOEDAG
