@@ -289,6 +289,8 @@ private:
 class VprArchitectureFileProfider {
 public:
   VprArchitectureFileProfider(CompilerOpenFPGA_ql* compiler): m_compiler(compiler) {}
+  VprArchitectureFileProfider(const VprArchitectureFileProfider&) = delete;            // disable copy constructor
+  VprArchitectureFileProfider& operator=(const VprArchitectureFileProfider&) = delete; // disable copy assignment
   ~VprArchitectureFileProfider();
 
   const std::filesystem::path& get();
@@ -300,6 +302,9 @@ private:
   bool m_isFileTemporary = false;
 
   const std::filesystem::path& error(const std::string& msg);
+
+  private:
+    void* operator new(size_t) = delete; // disable heap allocation
 };
 
 }  // namespace FOEDAG
