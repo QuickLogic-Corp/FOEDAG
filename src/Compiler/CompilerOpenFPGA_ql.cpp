@@ -6701,9 +6701,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
 
-  // sometimes m_architectureFile is set, but file doesn't exists
   VprArchitectureFileProfider archFileProvider(this);
-  const std::filesystem::path architectureFile = std::filesystem::exists(m_architectureFile) ? m_architectureFile : archFileProvider.get();
+  const std::filesystem::path architectureFile{archFileProvider.get()};
 
   const std::string command = python_exec.string();
   std::vector<std::string> args;
