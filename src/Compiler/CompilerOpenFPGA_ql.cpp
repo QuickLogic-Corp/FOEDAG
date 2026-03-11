@@ -2403,7 +2403,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:"+StringUtils::join(vprRedirectedWarnings(), ":");
+  vpr_options += " --suppress_warnings vpr_warnings.log,"+StringUtils::join(vprRedirectedWarnings(), ":");
 
 
   // construct vpr base command with mandatory args + options:
@@ -2787,7 +2787,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  command->append("--suppress_warnings", "vpr_warnings.log,xml_read_arch:" + StringUtils::join(vprRedirectedWarnings(), ":"));
+  command->append("--suppress_warnings", "vpr_warnings.log," + StringUtils::join(vprRedirectedWarnings(), ":"));
   //
 
   command->prependFile(std::filesystem::path{netlistFile});
@@ -9696,6 +9696,7 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
 const std::vector<std::string>& CompilerOpenFPGA_ql::vprRedirectedWarnings() const
 {
   static std::vector<std::string> warnings = {
+    "xml_read_arch",
     "warn_model_missing_timing",
     "load_rr_indexed_data_T_values",
     "set_grid_block_type",
