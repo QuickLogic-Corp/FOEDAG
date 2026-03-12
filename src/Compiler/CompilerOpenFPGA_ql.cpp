@@ -6701,16 +6701,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   #endif // USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
   }
 
-  VprArchitectureFileProfider archFileProvider(this);
-  const std::filesystem::path architectureFile{archFileProvider.get()};
-
   const std::string command = python_exec.string();
   std::vector<std::string> args;
   args.push_back(generate_floorplanning_script_path.string());
   args.push_back("--blif_file");
   args.push_back(netlistFile.string());
   args.push_back("--arch_file");
-  args.push_back(architectureFile.string());
+  args.push_back(m_architectureFile.string());
   args.push_back("--fpga_layout");
   args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
   args.push_back("--output_path");
