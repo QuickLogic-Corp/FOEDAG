@@ -120,6 +120,17 @@ QString NCriticalPathToolsWidget::projectLocation() {
   return m_compiler->ProjManager()->getProjectPath();
 }
 
+void NCriticalPathToolsWidget::clearCompilerTmpFiles()
+{
+  if (m_compiler) {
+    FOEDAG::CompilerOpenFPGA_ql* openFpgaCompiler =
+      dynamic_cast<FOEDAG::CompilerOpenFPGA_ql*>(m_compiler);
+    if (openFpgaCompiler) {
+      openFpgaCompiler->CleanTempFiles();
+    }
+  }
+}
+
 QString NCriticalPathToolsWidget::vprBaseCommand() {
   if (m_compiler) {
     FOEDAG::CompilerOpenFPGA_ql* openFpgaCompiler =
