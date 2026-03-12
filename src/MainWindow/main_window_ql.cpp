@@ -2275,9 +2275,6 @@ void MainWindow::floorPlanningActionTriggered()
         connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
           cleanFloorPlanningUI();
         });
-        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::qdcFileSaved, this, [compiler](){
-          compiler->onQdcFileSaved(); 
-        });
       
         m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
