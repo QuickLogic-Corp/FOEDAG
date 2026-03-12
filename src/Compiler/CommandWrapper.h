@@ -607,15 +607,11 @@ private:
 
   void handleFile(const std::filesystem::path& file, const std::string& mask) {
     std::filesystem::path resolvedFilePath(file);
-    bool exists = std::filesystem::exists(file);
-    if (!exists) {
-      if (file.is_relative() && !s_projectPath.empty()) {
-        resolvedFilePath = s_projectPath / file;
-        exists = std::filesystem::exists(resolvedFilePath);
-      }  
+    if (file.is_relative() && !s_projectPath.empty()) {
+      resolvedFilePath = s_projectPath / file;
     }
 
-    if (!exists) {
+    if (!std::filesystem::exists(resolvedFilePath)) {
       return;
     }
 
@@ -674,6 +670,8 @@ private:
       if (itOld != filesOld.end()) {
         const FileIdentityPtr& fileIdentityOld = itOld->second;
         fileIdentityNew->compare(*fileIdentityOld.get(), diff);
+      } else {
+        diff->addGenericMsg("unable to find " + keyNew + " among old files to check");
       }
     }
   }
