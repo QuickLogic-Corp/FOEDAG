@@ -325,7 +325,7 @@ public:
       m_modifiedDateTime = FileUtils::ModifiedTimeStr(filePath);
     } else {
       m_contentHash = FileUtils::calcFileContentHash(filePath);
-      //std::cout << "FileIdentity()" << m_filePath.string() << " " << m_contentHash << std::endl;
+      //std::cout << "FileIdentity()" << m_filePath.string() << m_contentHash << std::endl;
     }
   }
 
@@ -620,8 +620,7 @@ private:
     }
 
     bool skipHashCheck = false;
-    const std::string fileName = resolvedFilePath.filename().string();
-    auto it = s_bigFilesSet.find(fileName);
+    auto it = s_bigFilesSet.find(resolvedFilePath.filename().string());
     if (it != s_bigFilesSet.end()) {
       skipHashCheck = true;
     }
@@ -629,7 +628,7 @@ private:
       skipHashCheck = true; // calc md5 sum for big bin files takes a lot of time
     }
 
-    const std::string key = mask.empty()? fileName: mask;
+    std::string key = mask.empty()? resolvedFilePath.string(): mask;
     if (FilesIdentityCache::instance().isEnabled()) {
       m_files[key] = FilesIdentityCache::instance().get(resolvedFilePath, mask, skipHashCheck);
     } else {
@@ -675,8 +674,6 @@ private:
       if (itOld != filesOld.end()) {
         const FileIdentityPtr& fileIdentityOld = itOld->second;
         fileIdentityNew->compare(*fileIdentityOld.get(), diff);
-      } else {
-        diff->addGenericMsg("unable to find " + keyNew + " among old files to check");
       }
     }
   }
