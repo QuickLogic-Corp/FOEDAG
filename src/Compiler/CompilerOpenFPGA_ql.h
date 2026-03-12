@@ -156,12 +156,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   QLDeviceTarget getDeviceByStaProfile(const std::string staProfile) const;
   std::string uniqueStaVprOptions() const;
   
-  void onQdcFileSaved() {
-    // incr compilation itself didn't track qdc file, so we must re-generate xml 
-    // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
-    GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
-    invalidateTaskStatuses();
-  }
+  void onQdcFileSaved();
 
  protected:
   virtual bool IPGenerate();

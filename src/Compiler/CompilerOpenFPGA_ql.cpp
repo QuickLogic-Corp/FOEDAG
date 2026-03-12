@@ -7013,7 +7013,9 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOuts
     if (!managedOutside) {
       m_TempFileList.push_back(temp_file_path);
     }
-    
+
+    //std::cout << "generate tmp file" << temp_file_path << " managedOutside=" << managedOutside << " total tmp files num=" <<  m_TempFileList.size() << std::endl;
+
     // return the temp file path we obtained
     return temp_file_path;
 }
@@ -9593,6 +9595,21 @@ void CompilerOpenFPGA_ql::clearCompilationCache()
 bool CompilerOpenFPGA_ql::hasCompilationCache() const
 {
   return !m_taskCompilationStateManager.isEmpty();
+}
+
+void CompilerOpenFPGA_ql::onQdcFileSaved() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
+  BaseVprCommand(); // we need this call in order to decrypt arch file and store it as m_architectureFile
+
+  // incr compilation itself didn't track qdc file, so we must re-generate xml 
+  // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+  GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
+  invalidateTaskStatuses();
 }
 
 void CompilerOpenFPGA_ql::invalidateTaskStatuses()
