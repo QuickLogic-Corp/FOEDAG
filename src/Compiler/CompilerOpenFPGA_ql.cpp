@@ -1700,6 +1700,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     copyLog(ProjManager(), ProjManager()->projectName() + "_synth.log",
             SYNTHESIS_LOG);
     QLMetricsManager::getInstance()->parseMetricsForAction(Action::Synthesis);
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+    CleanTempFiles();
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   });
 
   if (SynthOpt() == SynthesisOpt::Clean) {
@@ -2839,6 +2842,12 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 }
 
 bool CompilerOpenFPGA_ql::Packing() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
   if (PackOpt() == PackingOpt::Clean) {
     Message("Cleaning packing results for " + ProjManager()->projectName());
     m_state = State::Synthesized;
@@ -3633,6 +3642,12 @@ bool CompilerOpenFPGA_ql::GlobalPlacement() {
 }
 
 bool CompilerOpenFPGA_ql::Placement() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -3962,6 +3977,12 @@ bool CompilerOpenFPGA_ql::ConvertSdcPinConstrainToPcf(
 }
 
 bool CompilerOpenFPGA_ql::Route() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -4445,6 +4466,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       copyLog(ProjManager(), TA_REPORT_TIMING_SETUP, corner_report_timing_setup);
       removeLog(ProjManager(), TA_REPORT_TIMING_SETUP);
     }
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+    CleanTempFiles();
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   });
 
   std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
@@ -4826,6 +4850,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       copyLog(ProjManager(), TA_REPORT_TIMING_SETUP, corner_report_timing_setup);
       removeLog(ProjManager(), TA_REPORT_TIMING_SETUP);
     }
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+    CleanTempFiles();
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   });
 
   std::filesystem::path sta_cmd_filepath = std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + sta_suffix + "_sta.cmd");
@@ -9570,6 +9597,12 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
 
 void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
   if (ProjManager()) {
     if (ProjManager()->getDesignFiles().empty()) {
       // we skip task status invalidation if project doesn't have any design files yet.
