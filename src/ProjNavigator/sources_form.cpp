@@ -659,11 +659,25 @@ void SourcesForm::CreateFolderHierachyTree() {
   QTreeWidgetItem *parentItem{topitemCS};
   QStringList listConstrFile;
   QString strTarget;
+  // SDC
   std::filesystem::path sdc_file_path = QLSettingsManager::getSDCFilePath();
   if(!sdc_file_path.empty()) {
     listConstrFile.append(QString::fromStdString(sdc_file_path.string()));
     //strTarget = QString::fromStdString(sdc_file_path.filename().string());
   }
+
+  // QDC
+  std::filesystem::path qdc_file_path = QLSettingsManager::getInstance()->getQDCFilePath();
+  if (std::filesystem::exists(qdc_file_path)) {
+    listConstrFile.append(QString::fromStdString(qdc_file_path.string()));
+  }
+
+  // PCF
+  std::filesystem::path pcf_file_path = QLSettingsManager::getInstance()->getPCFFilePath();
+  if (std::filesystem::exists(pcf_file_path)) {
+    listConstrFile.append(QString::fromStdString(pcf_file_path.string()));
+  }
+
   for (auto &strfile : listConstrFile) {
     if (parentItem) {
       QString filename =

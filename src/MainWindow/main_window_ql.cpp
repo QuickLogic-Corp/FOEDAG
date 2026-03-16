@@ -874,6 +874,7 @@ bool MainWindow::saveConstraintFile() {
   if (!m_pinAssignmentCreator) return false;
   auto [pcf, refreshUI] = m_pinAssignmentCreator->generatePcf();
   FileUtils::WriteToFile(m_projectManager->getPcfFilePath().toStdString(), pcf.toStdString());
+  updateSourceTree();
   if (refreshUI) {
     m_pinAssignmentCreator->refresh();
   }
@@ -2275,8 +2276,9 @@ void MainWindow::floorPlanningActionTriggered()
         connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
           cleanFloorPlanningUI();
         });
-        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::qdcFileSaved, this, [compiler](){
-          compiler->onQdcFileSaved(); 
+        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::qdcFileSaved, this, [this, compiler](){
+          compiler->onQdcFileSaved();
+          updateSourceTree();
         });
       
         m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
@@ -2393,7 +2395,7 @@ void MainWindow::newDialogAccepted() {
 
 void MainWindow::updateSourceTree() {
   if (sourcesForm) {
-    sourcesForm->InitSourcesForm();
+    sourcesForm->UpdateSrcHierachyTree();
   }
 }
 
