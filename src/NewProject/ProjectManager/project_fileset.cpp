@@ -1,6 +1,8 @@
 #include "project_fileset.h"
 using namespace FOEDAG;
 
+#include <QDebug>
+
 #define PROJECT_OSRCDIR "$OSRCDIR"
 
 ProjectFileSet::ProjectFileSet(QObject *parent) : ProjectOption(parent) {
@@ -67,6 +69,10 @@ void ProjectFileSet::deleteFile(const QString &strFileName) {
                            [&](const std::pair<QString, QString> &p) {
                              return p.first == strFileName;
                            });
+  qInfo() << "~~~ delete file=" << strFileName << "in fileset: name,type,src_dir:" << m_setName << m_setType << m_relSrcDir;
+  for (const auto& [key, val]: m_mapFiles) {
+    qInfo() << "lookup" << key << val;
+  }
   if (iter != m_mapFiles.end()) {
     const QString file = iter->second;
     m_mapFiles.erase(iter);
@@ -82,11 +88,13 @@ void ProjectFileSet::deleteFile(const QString &strFileName) {
     };
 
     for (auto it = m_langMap.begin(); it != m_langMap.end(); ++it) {
+      qInfo() << "~~~ iterate over" << it->second;
       auto index = searchPath(it->second, file);
       if (index != -1) {
         it->second.removeAt(index);
         if (it->second.isEmpty()) {
           auto dst = std::distance(m_langMap.begin(), it);
+          qInfo() << "~~~ erase" << it->second;
           m_langMap.erase(it);
           m_commandsLibs.erase(m_commandsLibs.begin() + dst);
         }

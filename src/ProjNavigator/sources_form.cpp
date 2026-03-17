@@ -317,11 +317,11 @@ void SourcesForm::SlotRemoveFile() {
   // Use the r-clicked item for determining what item type we are working with
   QTreeWidgetItem *refItem = m_treeSrcHierachy->currentItem();
   auto itemType = refItem->data(0, Qt::WhatsThisPropertyRole);
-
+qInfo() << "~~~000";
   // Bail on no selection
   if (refItem == nullptr) return;
   if (!selectedItems.count()) return;
-
+qInfo() << "~~~111";
   // Track string names for confirmation dialog
   QStringList files;
   // Store filename/fileset pairs for delete option
@@ -356,6 +356,8 @@ void SourcesForm::SlotRemoveFile() {
 
     // Loop through and remove files
     for (const QPair<QString, QVariant> &selection : selections) {
+      qInfo() << "~~~ s.1" << selection.first;
+      qInfo() << "~~~ s.2" << selection.second.toString();
       m_projManager->setCurrentFileSet(selection.second.toString());
       m_projManager->deleteFile(selection.first);
     }
@@ -626,14 +628,45 @@ void SourcesForm::CreateFolderHierachyTree() {
   m_treeSrcHierachy->addTopLevelItem(topitemCS);
   topitemCS->setData(0, Qt::WhatsThisPropertyRole, SRC_TREE_CONSTR_TOP_ITEM);
 
-#ifdef UPSTREAM_UNUSED
+  m_projManager->setCurrentFileSet(DEFAULT_FOLDER_CONSTRS);
+  // SDC
+  std::filesystem::path sdc_file_path = QLSettingsManager::getSDCFilePath();
+  if(!sdc_file_path.empty()) {
+    if (m_projManager->addConstrsFile(QString::fromStdString(sdc_file_path.string())) != 0) {
+      qInfo() << "~~~ cannot add sdc";
+    }
+    //listConstrFile.append(QString::fromStdString(sdc_file_path.string()));
+    //strTarget = QString::fromStdString(sdc_file_path.filename().string());
+  }
+
+  // QDC
+  std::filesystem::path qdc_file_path = QLSettingsManager::getInstance()->getQDCFilePath();
+  if (std::filesystem::exists(qdc_file_path)) {
+    if (m_projManager->addConstrsFile(QString::fromStdString(qdc_file_path.string())) != 0) {
+      qInfo() << "~~~ cannot add qdc";
+    }
+    // listConstrFile.append(QString::fromStdString(qdc_file_path.string()));
+  }
+
+  // PCF
+  std::filesystem::path pcf_file_path = QLSettingsManager::getInstance()->getPCFFilePath();
+  if (std::filesystem::exists(pcf_file_path)) {
+    if (m_projManager->addConstrsFile(QString::fromStdString(pcf_file_path.string())) != 0) {
+      qInfo() << "~~~ cannot add pcf";
+    }
+    // listConstrFile.append(QString::fromStdString(pcf_file_path.string()));
+  }
+
+//#ifdef UPSTREAM_UNUSED
   QStringList listConstrFset = m_projManager->getConstrFileSets();
   iFileSum = 0;
   QTreeWidgetItem *parentItem{topitemCS};
   for (auto &str : listConstrFset) {
+    qDebug() << "~~~ constr set name" << str;
     QStringList listConstrFile = m_projManager->getConstrFiles(str);
     QString strTarget = m_projManager->getConstrTargetFile(str);
     for (auto &strfile : listConstrFile) {
+      qDebug() << "~~~ constr filename" << strfile;
       if (parentItem) {
         QString filename =
             strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
@@ -652,51 +685,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     iFileSum += listConstrFile.size();
   }
   topitemCS->setText(0, tr("Constraints") + QString("(%1)").arg(iFileSum));
-#endif //#ifdef UPSTREAM_UNUSED
-
-
-  iFileSum = 0;
-  QTreeWidgetItem *parentItem{topitemCS};
-  QStringList listConstrFile;
-  QString strTarget;
-  // SDC
-  std::filesystem::path sdc_file_path = QLSettingsManager::getSDCFilePath();
-  if(!sdc_file_path.empty()) {
-    listConstrFile.append(QString::fromStdString(sdc_file_path.string()));
-    //strTarget = QString::fromStdString(sdc_file_path.filename().string());
-  }
-
-  // QDC
-  std::filesystem::path qdc_file_path = QLSettingsManager::getInstance()->getQDCFilePath();
-  if (std::filesystem::exists(qdc_file_path)) {
-    listConstrFile.append(QString::fromStdString(qdc_file_path.string()));
-  }
-
-  // PCF
-  std::filesystem::path pcf_file_path = QLSettingsManager::getInstance()->getPCFFilePath();
-  if (std::filesystem::exists(pcf_file_path)) {
-    listConstrFile.append(QString::fromStdString(pcf_file_path.string()));
-  }
-
-  for (auto &strfile : listConstrFile) {
-    if (parentItem) {
-      QString filename =
-          strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
-      QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
-      if (filename == strTarget) {
-        itemf->setText(0, filename + SRC_TREE_FLG_TARGET);
-      } else {
-        itemf->setText(0, filename);
-      }
-      itemf->setData(0, Qt::UserRole, strfile);
-      itemf->setIcon(0, QIcon(":/img/file.png"));
-      itemf->setData(0, Qt::WhatsThisPropertyRole, SRC_TREE_CONSTR_FILE_ITEM);
-      itemf->setData(0, SetFileDataRole, "constrs_1");
-    }
-  }
-  iFileSum += listConstrFile.size();
-  topitemCS->setText(0, tr("Constraints") + QString("(%1)").arg(iFileSum));
-
+//#endif //#ifdef UPSTREAM_UNUSED
 
   // Initialize simulation sources tree
   QTreeWidgetItem *topitemSS = new QTreeWidgetItem(topItem);
