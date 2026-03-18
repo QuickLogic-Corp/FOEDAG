@@ -1,8 +1,6 @@
 #include "project_fileset.h"
 using namespace FOEDAG;
 
-#include <QDebug>
-
 #define PROJECT_OSRCDIR "$OSRCDIR"
 
 ProjectFileSet::ProjectFileSet(QObject *parent) : ProjectOption(parent) {
