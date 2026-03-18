@@ -321,7 +321,7 @@ void SourcesForm::SlotRemoveFile() {
   // Bail on no selection
   if (refItem == nullptr) return;
   if (!selectedItems.count()) return;
-  
+
   // Track string names for confirmation dialog
   QStringList files;
   // Store filename/fileset pairs for delete option
