@@ -69,10 +69,6 @@ void ProjectFileSet::deleteFile(const QString &strFileName) {
                            [&](const std::pair<QString, QString> &p) {
                              return p.first == strFileName;
                            });
-  qInfo() << "~~~ delete file=" << strFileName << "in fileset: name,type,src_dir:" << m_setName << m_setType << m_relSrcDir;
-  for (const auto& [key, val]: m_mapFiles) {
-    qInfo() << "lookup" << key << val;
-  }
   if (iter != m_mapFiles.end()) {
     const QString file = iter->second;
     m_mapFiles.erase(iter);

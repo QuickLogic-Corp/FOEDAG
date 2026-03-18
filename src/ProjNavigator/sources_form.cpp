@@ -317,9 +317,11 @@ void SourcesForm::SlotRemoveFile() {
   // Use the r-clicked item for determining what item type we are working with
   QTreeWidgetItem *refItem = m_treeSrcHierachy->currentItem();
   auto itemType = refItem->data(0, Qt::WhatsThisPropertyRole);
+
   // Bail on no selection
   if (refItem == nullptr) return;
   if (!selectedItems.count()) return;
+  
   // Track string names for confirmation dialog
   QStringList files;
   // Store filename/fileset pairs for delete option
