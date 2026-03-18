@@ -88,13 +88,11 @@ void ProjectFileSet::deleteFile(const QString &strFileName) {
     };
 
     for (auto it = m_langMap.begin(); it != m_langMap.end(); ++it) {
-      qInfo() << "~~~ iterate over" << it->second;
       auto index = searchPath(it->second, file);
       if (index != -1) {
         it->second.removeAt(index);
         if (it->second.isEmpty()) {
           auto dst = std::distance(m_langMap.begin(), it);
-          qInfo() << "~~~ erase" << it->second;
           m_langMap.erase(it);
           m_commandsLibs.erase(m_commandsLibs.begin() + dst);
         }
