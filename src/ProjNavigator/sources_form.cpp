@@ -150,8 +150,11 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
         // menu->addAction(m_actAddFile);
       } else {
         menu->addAction(m_actOpenFile);
+#ifdef UPSTREAM_UNUSED
         menu->addAction(m_actRemoveFile);
+#endif // UPSTREAM_UNUSED
         menu->addAction(m_actRefresh);
+#ifdef UPSTREAM_UNUSED
         menu->addSeparator();
         menu->addAction(m_actEditConstrsSets);
         menu->addAction(m_actEditSimulSets);
@@ -159,6 +162,7 @@ void SourcesForm::SlotItempressed(QTreeWidgetItem *item, int column) {
         // TODO RG-132 @volodymyrk
         // menu->addAction(m_actAddFile);
         menu->addAction(m_actSetAsTarget);
+#endif // UPSTREAM_UNUSED
       }
     } else if (SRC_TREE_IP_INST_ITEM == strPropertyRole) {
       menu->addAction(m_actRefresh);
