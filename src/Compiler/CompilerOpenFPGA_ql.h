@@ -283,6 +283,8 @@ private:
   void clearCompilationCache() override final;
   bool hasCompilationCache() const override final;
 
+  const std::vector<std::string>& vprRedirectedWarnings() const;
+
   struct Offset {
     Offset() {}
     Offset(int col, int row): col(col), row(row) {}
