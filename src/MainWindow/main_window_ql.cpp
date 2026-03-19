@@ -2395,7 +2395,7 @@ void MainWindow::newDialogAccepted() {
 
 void MainWindow::updateSourceTree() {
   if (sourcesForm) {
-    sourcesForm->UpdateSrcHierachyTree();
+    sourcesForm->InitSourcesForm();
   }
 }
 

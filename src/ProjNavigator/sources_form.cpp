@@ -625,10 +625,6 @@ void SourcesForm::CreateFolderHierachyTree() {
   }
   topitemDS->setText(0, tr("Design Sources") + QString("(%1)").arg(iFileSum));
 
-  // TODO: normally files must be added to project manager and source form should restore file list from proj_manager
-  // but to add it via project_manager requires some refactoring work (related to fileset structure)
-  //m_projManager->setCurrentFileSet(DEFAULT_FOLDER_CONSTRS);
-
   // Initialize Constraints sources tree
   QTreeWidgetItem *topitemCS = new QTreeWidgetItem(topItem);
   m_treeSrcHierachy->addTopLevelItem(topitemCS);
@@ -647,18 +643,12 @@ void SourcesForm::CreateFolderHierachyTree() {
   std::filesystem::path qdc_file_path = QLSettingsManager::getInstance()->getQDCFilePath();
   if (std::filesystem::exists(qdc_file_path)) {
     listConstrFile.append(QString::fromStdString(qdc_file_path.string()));
-    // if (m_projManager->addConstrsFile(QString::fromStdString(qdc_file_path.string())) != 0) {
-    //   qInfo() << "cannot add qdc to proj manager";
-    // }
   }
 
   // PCF
   std::filesystem::path pcf_file_path = QLSettingsManager::getInstance()->getPCFFilePath();
   if (std::filesystem::exists(pcf_file_path)) {
     listConstrFile.append(QString::fromStdString(pcf_file_path.string()));
-    // if (m_projManager->addConstrsFile(QString::fromStdString(pcf_file_path.string())) != 0) {
-    //   qInfo() << "cannot add pcf proj manager";
-    // }
   }
 
 #ifdef UPSTREAM_UNUSED
