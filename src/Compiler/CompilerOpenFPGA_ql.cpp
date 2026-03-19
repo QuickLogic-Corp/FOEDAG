@@ -2406,7 +2406,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  vpr_options += " --suppress_warnings vpr_warnings.log,xml_read_arch:warn_model_missing_timing:load_rr_indexed_data_T_values:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models";
+  vpr_options += " --suppress_warnings vpr_warnings.log," + StringUtils::join(vprRedirectedWarnings(), ":");
 
 
   // construct vpr base command with mandatory args + options:
@@ -2790,9 +2790,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   // #1400 - Excessive warning messages are hidden from the user and redirected to vpr_warnings.log file 
-  command->append("--suppress_warnings", 
-  "vpr_warnings.log,xml_read_arch:warn_model_missing_timing:load_rr_indexed_data_T_values:set_grid_block_type:set_rr_graph_tool_version:set_rr_graph_tool_comment:set_rr_node_prev_node:build_device_grid:rec_create_dir_path:create_dir_path:sum_pin_class:add_lb_router_nets:trans_per_R:auto_detect_default_models"
-  );
+  command->append("--suppress_warnings", "vpr_warnings.log," + StringUtils::join(vprRedirectedWarnings(), ":"));
   //
 
   command->prependFile(std::filesystem::path{netlistFile});
@@ -6599,6 +6597,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   if (pinTableFile.empty()) 
       Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
 
+  std::filesystem::path filepath_fpga_io_map_xml;
+  filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
+  if(filepath_fpga_io_map_xml.empty()) {
+    ErrorMessage(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
+    return false;
+  }
+
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
     Message("qdc Constraint File and Pin Table File Does Not Exist. Skipping the generate_floorplanning Script.\n");
@@ -6746,6 +6751,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--pin_table_file");
     args.push_back(pinTableFile.string());
   }                      
+  if(fs::exists(filepath_fpga_io_map_xml)){
+    args.push_back("--fpga_io_map_xml");
+    args.push_back(filepath_fpga_io_map_xml.string());
+  }
   if(region_groups_str != "") {
     args.push_back("--region_groups");
     args.push_back(region_groups_str);
@@ -9744,6 +9753,44 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
   }
 }
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA
+
+const std::vector<std::string>& CompilerOpenFPGA_ql::vprRedirectedWarnings() const
+{
+  static std::vector<std::string> warnings = {
+    /* xml */
+    "xml_read_arch",
+    "check_pb_node_rec",
+    
+    /* grid */
+    "create_device_grid",
+    "build_device_grid",
+    "set_grid_block_type",
+    
+    /* rr */
+    "load_rr_indexed_data_T_values",
+    "set_rr_graph_tool_version",
+    "set_rr_graph_tool_comment",
+    "set_rr_node_prev_node",
+    "check_rr_graph",
+    "annotate_rr_switch_circuit_models",
+   
+    /* switch */
+    "set_switch_name",
+    "print_switch_usage",
+    "setup_switches",
+
+    /* other */
+    "warn_model_missing_timing",
+    "rec_create_dir_path",
+    "create_dir_path",
+    "sum_pin_class",
+    "add_lb_router_nets",
+    "trans_per_R",
+    "auto_detect_default_models",
+    "get_delay_normalization_fac"
+  };
+  return warnings;
+}
 
 // clang-format on
 
