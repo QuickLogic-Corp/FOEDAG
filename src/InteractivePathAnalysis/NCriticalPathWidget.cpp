@@ -87,6 +87,7 @@ NCriticalPathWidget::NCriticalPathWidget(
     QString durationStr{
         getPrettyDurationStrFromMs(m_fetchPathListTimer.elapsed()).c_str()};
     m_statusBar->setMessage(tr("Got path list (took %1)").arg(durationStr));
+    m_toolsWidget->clearCompilerTmpFiles();
   });
 
   // toolswidget connections

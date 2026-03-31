@@ -54,6 +54,7 @@ class NCriticalPathToolsWidget : public QWidget {
   ~NCriticalPathToolsWidget() = default;
 
   void resetConfigurationUI();
+  void clearCompilerTmpFiles();
 
   NCriticalPathParametersPtr parameters() const { return m_parameters; }
   void refreshCritPathContextOnSettingsChanged();
