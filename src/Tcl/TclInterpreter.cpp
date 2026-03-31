@@ -37,6 +37,12 @@ TclInterpreter::TclInterpreter(const char *argv0) : interp(nullptr) {
   Tcl_Init(interp);
   if (!interp) throw new std::runtime_error("failed to initialise Tcl library");
   evalCmd(TclHistoryScript());
+#ifdef WIN32
+  const std::string_view load_openfpga_shell_cmd{"load $::env(AURORA2_ROOT)/bin/openfpga_shell.dll"};
+#else
+  const std::string_view load_openfpga_shell_cmd{"load $::env(AURORA2_ROOT)/bin/openfpga_shell.so"};
+#endif
+  Tcl_Eval(interp, load_openfpga_shell_cmd.data());
 }
 
 TclInterpreter::~TclInterpreter() {
