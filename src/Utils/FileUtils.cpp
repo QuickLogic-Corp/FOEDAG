@@ -145,12 +145,18 @@ std::vector<std::string> FileUtils::GetFileContentLines(const std::filesystem::p
   return lines;
 }
 
-void FileUtils::WriteToFile(const std::filesystem::path& path,
+bool FileUtils::WriteToFile(const std::filesystem::path& path,
                             const std::string& content, bool newLine) {
   std::ofstream ofs{path};
+  if (!ofs) {
+    return false;
+  }
   ofs << content;
   if (newLine) ofs << std::endl;
+
+  const bool status = !ofs.fail();
   ofs.close();
+  return status;
 }
 
 void FileUtils::moveFile(const std::filesystem::path& src, const std::filesystem::path& dst)

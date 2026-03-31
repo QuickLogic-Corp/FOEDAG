@@ -6627,6 +6627,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   if (pinTableFile.empty()) 
       Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
 
+  std::filesystem::path filepath_fpga_io_map_xml;
+  filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
+  if(filepath_fpga_io_map_xml.empty()) {
+    ErrorMessage(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
+    return false;
+  }
+
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
   if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
     Message("qdc Constraint File and Pin Table File Does Not Exist. Skipping the generate_floorplanning Script.\n");
@@ -6725,12 +6732,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       bottomStr = std::string("bottom:" + bottomStr + ";");
 
     if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
-      ErrorMessage("QDC file either does not contain a valid side/region or the side/region is empty\n");
-      return false;
+      Message("Warning: QDC file either does not contain a valid side/region or the side/region is empty.");
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
-  
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
@@ -6774,6 +6779,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--pin_table_file");
     args.push_back(pinTableFile.string());
   }                      
+  if(fs::exists(filepath_fpga_io_map_xml)){
+    args.push_back("--fpga_io_map_xml");
+    args.push_back(filepath_fpga_io_map_xml.string());
+  }
   if(region_groups_str != "") {
     args.push_back("--region_groups");
     args.push_back(region_groups_str);
