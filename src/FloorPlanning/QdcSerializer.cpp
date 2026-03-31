@@ -12,15 +12,10 @@ bool QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& 
 {
     const std::filesystem::path filePath = overrideFilePath.empty() ? m_path : overrideFilePath;
     std::string content = serialize(device);
-    if (!content.empty()) {
-        if (!m_reservedContent.empty()) {
-            content = m_reservedContent + content;
-        }
-        FOEDAG::FileUtils::WriteToFile(filePath, content);
-        return true;
-    } else {
-        return false;
+    if (!m_reservedContent.empty()) {
+        content = m_reservedContent + content;
     }
+    return FOEDAG::FileUtils::WriteToFile(filePath, content);
 }
 
 std::string QdcSerializer::serialize(const DeviceGrid& device)

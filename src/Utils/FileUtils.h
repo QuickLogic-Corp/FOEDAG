@@ -55,7 +55,7 @@ class FileUtils final {
 
   static std::string GetFileContent(const std::filesystem::path& name, bool* ok = nullptr);
   static std::vector<std::string> GetFileContentLines(const std::filesystem::path& filepath);
-  static void WriteToFile(const std::filesystem::path& path,
+  static bool WriteToFile(const std::filesystem::path& path,
                           const std::string& content, bool newLine = true);
 
   static void moveFile(const std::filesystem::path& src, const std::filesystem::path& dst); // don't use MoveFile it conflicts with min32 macro
