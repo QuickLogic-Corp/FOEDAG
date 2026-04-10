@@ -9489,8 +9489,10 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
   // - there is no pre-generated .place file AND
   // - there is no pcf file in the project.
-  std::string filepath_fpga_fix_pins_place_str;
-  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
+
+  // Bypassing the pcf2place due to generating the pcf constraints using the generate_floorplanning.py script
+  // std::string filepath_fpga_fix_pins_place_str;
+  // if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 
   VprStageCfg cfg;
   cfg.use_place_file = true;
@@ -9520,13 +9522,13 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   }
   
 
-  if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
-  }
-  else
-  {
-    Message("no pcf file found, skipping PinConstraints usage!");
-  }
+  // if (!filepath_fpga_fix_pins_place_str.empty()) {
+  //   command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  // }
+  // else
+  // {
+  //   Message("no pcf file found, skipping PinConstraints usage!");
+  // }
 
   return command;
 }
