@@ -274,7 +274,7 @@ else(MSVC)
     message("MSYS MODE")
     set(TCL_STATIC_LIB libtcl86.dll.a)
     set(TCL_STUBB_LIB libtclstub86.a)
-    set(ZLIB_STATIC_LIB libzlibstatic.a)
+    set(ZLIB_STATIC_LIB libz.a)
 
     add_library(tcl_static STATIC IMPORTED )
     set_target_properties(tcl_static PROPERTIES

@@ -87,6 +87,12 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
+#ifdef HAS_POWER_CALC_RESOURCE
+static inline void initPowerCalcResource() {
+  Q_INIT_RESOURCE(compiler_power_calc_resources);
+}
+#endif
+
 #define USE_INCREMENTAL_COMPILATION
 #define GENERATE_NEW_DEVICE_FPGA_AUTO 1
 #define GENERATE_RR_GRAPH_FPGA_AUTO 0
@@ -5274,6 +5280,9 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
 #endif // _WIN32
 
   // unpack embedded in qrc xlsx file to a temprorary location
+#ifdef HAS_POWER_CALC_RESOURCE
+  initPowerCalcResource();
+#endif
   QFile qrc_xlsx_filepath(":/build/power_calculator/power_calculator.xlsx");
   if (!qrc_xlsx_filepath.open(QIODevice::ReadOnly)) {
     ErrorMessage("Cannot open power calculator data file");

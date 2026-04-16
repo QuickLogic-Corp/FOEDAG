@@ -3,13 +3,6 @@ execute_process(
     ERROR_QUIET
 )
 
-if (DEFINED ENV{MSYSTEM})
-execute_process(
-    COMMAND cmake -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release
-    ERROR_QUIET
-)
-endif()
-
 execute_process(
     COMMAND make
     ERROR_QUIET
