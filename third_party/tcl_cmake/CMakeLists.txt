@@ -57,7 +57,7 @@ elseif(APPLE)
   set(TCL_STATIC_LIB libtcl8.6.dylib)
 elseif (DEFINED ENV{MSYSTEM})
   set(TCL_STATIC_LIB libtcl86.dll.a)
-  set(ZLIB_STATIC_LIB libzlibstatic.a)
+  set(ZLIB_STATIC_LIB libz.a)
   set(TCL_STUBB_LIB libtclstub86.a)
 endif()
 
