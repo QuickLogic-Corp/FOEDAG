@@ -94,14 +94,23 @@ if(MSVC)
   )
 else()
   add_custom_target(zlib_build DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${ZLIB_STATIC_LIB})
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${ZLIB_STATIC_LIB}
-    COMMAND echo "       Compiling Zlib"
-    COMMAND ${CMAKE_COMMAND} -P zlib_make.cmake
-    COMMAND cp ${ZLIB_STATIC_LIB} ${CMAKE_CURRENT_BINARY_DIR}/../../lib/
-    COMMAND echo "       Zlib Compilation completed"
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/../zlib"
-    DEPENDS ../zlib/zlib.h
-  )
+  if (DEFINED ENV{MSYSTEM})
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${ZLIB_STATIC_LIB}
+      COMMAND echo "       Copying system Zlib"
+      COMMAND cp $ENV{MSYSTEM_PREFIX}/lib/${ZLIB_STATIC_LIB} ${CMAKE_CURRENT_BINARY_DIR}/../../lib/
+      COMMAND echo "       Zlib copy completed"
+      DEPENDS ../zlib/zlib.h
+    )
+  else()
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${ZLIB_STATIC_LIB}
+      COMMAND echo "       Compiling Zlib"
+      COMMAND ${CMAKE_COMMAND} -P zlib_make.cmake
+      COMMAND cp ${ZLIB_STATIC_LIB} ${CMAKE_CURRENT_BINARY_DIR}/../../lib/
+      COMMAND echo "       Zlib Compilation completed"
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/../zlib"
+      DEPENDS ../zlib/zlib.h
+    )
+  endif()
   add_custom_target(tcl_build DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/../../lib/${TCL_STATIC_LIB})
 
   if (DEFINED ENV{MSYSTEM})
