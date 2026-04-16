@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <thread>
 
@@ -120,7 +121,31 @@ std::filesystem::path IPCatalog::getPythonPath(const std::filesystem::path& envs
     std::filesystem::path searchPath = envsPath / "litex";
 #endif
     searchPath = FileUtils::GetFullPath(searchPath);
-    s_pythonPath = FileUtils::LocateFileRecursive(searchPath, pythonExecName);
+    auto candidate = FileUtils::LocateFileRecursive(searchPath, pythonExecName);
+    if (!candidate.empty()) {
+      std::error_code ec;
+      auto perms = std::filesystem::status(candidate, ec).permissions();
+      bool isUsable = !ec &&
+          (perms & std::filesystem::perms::owner_exec) !=
+              std::filesystem::perms::none;
+#ifdef __APPLE__
+      // Reject Linux ELF binaries that cannot run on macOS.
+      // The bundled envs/litex/ Python is built for Linux x86-64; on macOS
+      // QProcess would fail with "execve: Exec format error".
+      if (isUsable) {
+        std::ifstream f(candidate, std::ios::binary);
+        char magic[4]{};
+        f.read(magic, 4);
+        if (magic[0] == 0x7f && magic[1] == 'E' &&
+            magic[2] == 'L' && magic[3] == 'F') {
+          isUsable = false;
+        }
+      }
+#endif
+      if (isUsable) {
+        s_pythonPath = candidate;
+      }
+    }
   }
   return s_pythonPath;
 }
