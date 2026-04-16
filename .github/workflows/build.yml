@@ -245,12 +245,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-20.04
-            install_script: install_dependencies_build_ubuntu2004.sh
-            os: linux
-            arch: x86-64
           - runner: ubuntu-22.04
             install_script: install_dependencies_build_ubuntu2204.sh
+            os: linux
+            arch: x86-64
+          - runner: ubuntu-24.04
+            install_script: install_dependencies_build_ubuntu2404.sh
             os: linux
             arch: x86-64
 
