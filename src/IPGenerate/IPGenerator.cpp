@@ -66,13 +66,20 @@ void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::
 }
 
 IPGenerator::IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler): m_installDir(installDir), m_catalog(catalog), m_compiler(compiler) {
-  m_environment["PYTHONHOME"] = (EnvsPath() / "python3.8").string();
+  // Only set PYTHONHOME and LD_LIBRARY_PATH when the bundled envs directory
+  // actually exists.  When it doesn't (e.g. macOS builds without the litex
+  // environment), setting PYTHONHOME to a non-existent path poisons the
+  // fallback to system python3, causing "Failed to import encodings module".
+  auto pythonHome = EnvsPath() / "python3.8";
+  if (std::filesystem::is_directory(pythonHome)) {
+    m_environment["PYTHONHOME"] = pythonHome.string();
 #ifndef __WIN32
-  // IP Generator requires libffi.so.6 which is absent on ubuntu>=20.04
-  std::string ldLibraryPath = qgetenv("LD_LIBRARY_PATH").toStdString();
-  std::string newLdLibraryPath = (EnvsPath() / "python3.8" / "lib" / "os_libs").string();
-  m_environment["LD_LIBRARY_PATH"] = newLdLibraryPath + ":" + ldLibraryPath;
+    // IP Generator requires libffi.so.6 which is absent on ubuntu>=20.04
+    std::string ldLibraryPath = qgetenv("LD_LIBRARY_PATH").toStdString();
+    std::string newLdLibraryPath = (pythonHome / "lib" / "os_libs").string();
+    m_environment["LD_LIBRARY_PATH"] = newLdLibraryPath + ":" + ldLibraryPath;
 #endif
+  }
 }
 
 void IPGenerator::shareContext()
