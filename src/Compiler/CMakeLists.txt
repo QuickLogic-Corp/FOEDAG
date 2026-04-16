@@ -142,6 +142,7 @@ if(POWER_CALCULATOR_XLSX AND EXISTS "${POWER_CALCULATOR_XLSX}")
     "<RCC>\n  <qresource prefix=\"/\">\n    <file alias=\"build/power_calculator/power_calculator.xlsx\">${POWER_CALCULATOR_XLSX}</file>\n  </qresource>\n</RCC>\n"
   )
   list(APPEND res_LIST "${CMAKE_CURRENT_BINARY_DIR}/compiler_power_calc_resources.qrc")
+  set(HAS_POWER_CALC_RESOURCE TRUE)
 endif()
 
 add_library(compiler STATIC
@@ -152,6 +153,9 @@ add_library(compiler STATIC
 
 target_link_libraries(compiler PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml cryptor)
 target_compile_definitions(compiler PRIVATE COMPILER_LIBRARY)
+if(HAS_POWER_CALC_RESOURCE)
+  target_compile_definitions(compiler PUBLIC HAS_POWER_CALC_RESOURCE)
+endif()
 
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:compiler>
