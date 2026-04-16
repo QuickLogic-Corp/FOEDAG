@@ -135,6 +135,15 @@ set (res_LIST
   compiler_resources.qrc
 )
 
+# Conditionally embed power calculator xlsx when built from Aurora2.
+# Aurora2 sets POWER_CALCULATOR_XLSX to the path of the built xlsx file.
+if(POWER_CALCULATOR_XLSX AND EXISTS "${POWER_CALCULATOR_XLSX}")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/compiler_power_calc_resources.qrc"
+    "<RCC>\n  <qresource prefix=\"/\">\n    <file alias=\"build/power_calculator/power_calculator.xlsx\">${POWER_CALCULATOR_XLSX}</file>\n  </qresource>\n</RCC>\n"
+  )
+  list(APPEND res_LIST "${CMAKE_CURRENT_BINARY_DIR}/compiler_power_calc_resources.qrc")
+endif()
+
 add_library(compiler STATIC
   ${SRC_CPP_LIST}
   ${SRC_H_LIST}
