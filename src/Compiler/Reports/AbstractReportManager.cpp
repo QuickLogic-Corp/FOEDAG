@@ -28,6 +28,14 @@ namespace FOEDAG {
 const QRegularExpression AbstractReportManager::FIND_RESOURCES{"Resource usage.*"};
 const QRegularExpression AbstractReportManager::FIND_CIRCUIT_STAT{"Circuit Statistics:.*"};
 
+QRegularExpressionMatch AbstractReportManager::lastMatch(
+    const QRegularExpression& re, const QString& str) {
+  auto it = re.globalMatch(str);
+  QRegularExpressionMatch m;
+  while (it.hasNext()) m = it.next();
+  return m;
+}
+
 AbstractReportManager::AbstractReportManager(const TaskManager &taskManager) {
   // Log files should be re-parsed after starting new compilation
   connect(&taskManager, &TaskManager::started,

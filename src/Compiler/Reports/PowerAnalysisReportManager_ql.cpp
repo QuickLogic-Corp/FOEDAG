@@ -88,40 +88,18 @@ void PowerAnalysisReportManager::parseLogFile() {
 
   QRegularExpression dynamic_power_regex{"Dynamic Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
   QString dynamic_power_value;
-  {
-    auto it = dynamic_power_regex.globalMatch(fileStr);
-    QRegularExpressionMatch lastMatch;
-    while (it.hasNext()) lastMatch = it.next();
-    if (lastMatch.hasMatch()) {
-      dynamic_power_value = lastMatch.captured(1);
-      // std::cout << dynamic_power_value.toStdString() << std::endl;
-    }
-  }
+  if (auto m = lastMatch(dynamic_power_regex, fileStr); m.hasMatch())
+    dynamic_power_value = m.captured(1);
 
   QRegularExpression leakage_power_regex{"Leakage Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
   QString leakage_power_value;
-  {
-    auto it = leakage_power_regex.globalMatch(fileStr);
-    QRegularExpressionMatch lastMatch;
-    while (it.hasNext()) lastMatch = it.next();
-    if (lastMatch.hasMatch()) {
-      leakage_power_value = lastMatch.captured(1);
-      // std::cout << leakage_power_value.toStdString() << std::endl;
-    }
-  }
-
+  if (auto m = lastMatch(leakage_power_regex, fileStr); m.hasMatch())
+    leakage_power_value = m.captured(1);
 
   QRegularExpression total_power_regex{"Total Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
   QString total_power_value;
-  {
-    auto it = total_power_regex.globalMatch(fileStr);
-    QRegularExpressionMatch lastMatch;
-    while (it.hasNext()) lastMatch = it.next();
-    if (lastMatch.hasMatch()) {
-      total_power_value = lastMatch.captured(1);
-      // std::cout << total_power_value.toStdString() << std::endl;
-    }
-  }
+  if (auto m = lastMatch(total_power_regex, fileStr); m.hasMatch())
+    total_power_value = m.captured(1);
 
 
   // create power analysis report

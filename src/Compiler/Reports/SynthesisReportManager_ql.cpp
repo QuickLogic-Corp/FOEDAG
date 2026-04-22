@@ -133,22 +133,12 @@ void SynthesisReportManager::parseLogFile() {
 
   QRegularExpression findStats{"Printing statistics.*\n\n===.*===\n\n.*[^\n{2}]+"};
 
-  {
-    auto it = findStats.globalMatch(fileStr);
-    QRegularExpressionMatch lastMatch;
-    while (it.hasNext()) lastMatch = it.next();
-    if (lastMatch.hasMatch())
-      setResourceData(getStatistics(lastMatch.captured(0)));
-  }
+  if (auto m = lastMatch(findStats, fileStr); m.hasMatch())
+    setResourceData(getStatistics(m.captured(0)));
 
   QRegularExpression findLvls{"DE:([^\n]+)"};
-  {
-    auto it = findLvls.globalMatch(fileStr);
-    QRegularExpressionMatch lastMatch;
-    while (it.hasNext()) lastMatch = it.next();
-    if (lastMatch.hasMatch())
-      fillLevels(lastMatch.captured(0), resourceData());
-  }
+  if (auto m = lastMatch(findLvls, fileStr); m.hasMatch())
+    fillLevels(m.captured(0), resourceData());
 
   auto line = QString{};
   QTextStream in(fileStr.toLatin1());

@@ -94,6 +94,10 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   // Timing data is task specific and can't be split on generic level
   virtual void splitTimingData(const QString &timingStr) = 0;
 
+  // Returns the last match of re in str, or a default (invalid) match if none.
+  static QRegularExpressionMatch lastMatch(const QRegularExpression& re,
+                                           const QString& str);
+
   // Keyword to recognize the start of resource usage section
   static const QRegularExpression FIND_RESOURCES;
   static const QRegularExpression FIND_CIRCUIT_STAT;
