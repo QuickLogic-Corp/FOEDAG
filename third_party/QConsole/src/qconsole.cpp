@@ -21,7 +21,9 @@
 
 #include <QApplication>
 #include <QDebug>
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
+#endif
 #include <QFile>
 #include <QScreen>
 #include <QScrollBar>
@@ -127,12 +129,17 @@ int PopupCompleter::exec(QTextEdit *parent) {
   QSize popupSizeHint = this->sizeHint();
   QRect cursorRect = parent->cursorRect();
   QPoint globalPt = parent->mapToGlobal(cursorRect.bottomRight());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  auto *curScreen = this->screen();
+  QRect screenGeom = curScreen ? curScreen->geometry() : QGuiApplication::primaryScreen()->geometry();
+#else
   QDesktopWidget *dsk = QApplication::desktop();
   int screeNumber = dsk->screenNumber(this);
   auto screens = QApplication::screens();
   QRect screenGeom;
   if (screeNumber < screens.count() && screeNumber >= 0)
     screenGeom = screens.at(screeNumber)->geometry();
+#endif
   if (globalPt.y() + popupSizeHint.height() > screenGeom.height()) {
     globalPt = parent->mapToGlobal(cursorRect.topRight());
     globalPt.setY(globalPt.y() - popupSizeHint.height());
@@ -711,7 +718,11 @@ void QConsole::mousePressEvent(QMouseEvent *event) {
   oldPosition = textCursor().position();
   if (event->button() == Qt::MiddleButton) {
     copy();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QTextCursor cursor = cursorForPosition(event->position().toPoint());
+#else
     QTextCursor cursor = cursorForPosition(event->pos());
+#endif
     setTextCursor(cursor);
     paste();
     return;
@@ -745,10 +756,15 @@ void QConsole::dropEvent(QDropEvent *event) {
 
 void QConsole::dragMoveEvent(QDragMoveEvent *event) {
   // Get a cursor for the actual mouse position
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  const QPoint eventPos = event->position().toPoint();
+#else
+  const QPoint eventPos = event->pos();
+#endif
   QTextCursor cur = textCursor();
-  cur.setPosition(cursorForPosition(event->pos()).position());
+  cur.setPosition(cursorForPosition(eventPos).position());
 
-  if (!isInEditionZone(cursorForPosition(event->pos()).position())) {
+  if (!isInEditionZone(cursorForPosition(eventPos).position())) {
     // Ignore the event if out of the editable zone
     event->ignore(cursorRect(cur));
   } else {

@@ -528,12 +528,15 @@ void QsciScintillaBase::mouseDoubleClickEvent(QMouseEvent *e)
     // Make sure Scintilla will interpret this as a double-click.
     unsigned clickTime = sci->lastClickTime + Scintilla::Platform::DoubleClickTime() - 1;
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    sci->ButtonDownWithModifiers(Scintilla::Point(e->position().x(), e->position().y()), clickTime,
+            eventModifiers(e));
+    triple_click_at = e->globalPosition().toPoint();
+#else
     sci->ButtonDownWithModifiers(Scintilla::Point(e->x(), e->y()), clickTime,
             eventModifiers(e));
-
-    // Remember the current position and time in case it turns into a triple
-    // click.
     triple_click_at = e->globalPos();
+#endif
     triple_click.start(QApplication::doubleClickInterval());
 }
 
@@ -541,8 +544,13 @@ void QsciScintillaBase::mouseDoubleClickEvent(QMouseEvent *e)
 // Handle a mouse move.
 void QsciScintillaBase::mouseMoveEvent(QMouseEvent *e)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    sci->ButtonMoveWithModifiers(Scintilla::Point(e->position().x(), e->position().y()), 0,
+            eventModifiers(e));
+#else
     sci->ButtonMoveWithModifiers(Scintilla::Point(e->x(), e->y()), 0,
             eventModifiers(e));
+#endif
 }
 
 
@@ -551,7 +559,11 @@ void QsciScintillaBase::mousePressEvent(QMouseEvent *e)
 {
     setFocus();
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    Scintilla::Point pt(e->position().x(), e->position().y());
+#else
     Scintilla::Point pt(e->x(), e->y());
+#endif
 
     if (e->button() == Qt::LeftButton || e->button() == Qt::RightButton)
     {
@@ -559,7 +571,11 @@ void QsciScintillaBase::mousePressEvent(QMouseEvent *e)
 
         // It is a triple click if the timer is running and the mouse hasn't
         // moved too much.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (triple_click.isActive() && (e->globalPosition().toPoint() - triple_click_at).manhattanLength() < QApplication::startDragDistance())
+#else
         if (triple_click.isActive() && (e->globalPos() - triple_click_at).manhattanLength() < QApplication::startDragDistance())
+#endif
             clickTime = sci->lastClickTime + Scintilla::Platform::DoubleClickTime() - 1;
         else
             clickTime = sci->lastClickTime + Scintilla::Platform::DoubleClickTime() + 1;
@@ -610,7 +626,11 @@ void QsciScintillaBase::mouseReleaseEvent(QMouseEvent *e)
     if (e->button() != Qt::LeftButton)
         return;
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    Scintilla::Point pt(e->position().x(), e->position().y());
+#else
     Scintilla::Point pt(e->x(), e->y());
+#endif
 
     if (sci->HaveMouseCapture())
     {
@@ -691,10 +711,17 @@ void QsciScintillaBase::dragMoveEvent(QDragMoveEvent *e)
     }
     else
     {
+        {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const QPoint dragPos = e->position().toPoint();
+#else
+        const QPoint dragPos = e->pos();
+#endif
         sci->SetDragPosition(
                 sci->SPositionFromLocation(
-                        Scintilla::Point(e->pos().x(), e->pos().y()), false,
+                        Scintilla::Point(dragPos.x(), dragPos.y()), false,
                         false, sci->UserVirtualSpace()));
+        }
 
         acceptAction(e);
     }

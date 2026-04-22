@@ -94,9 +94,15 @@ NCriticalPathFilterWidget::NCriticalPathFilterWidget(const QString& name,
   connect(m_lineEdit, &QLineEdit::textChanged, this,
           [this](const QString&) { resetComboBoxSilently(); });
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+  connect(
+      m_chUseRegexp, &QCheckBox::checkStateChanged, this,
+      [this](Qt::CheckState state) { m_chUseCaseSensetive->setEnabled(state == Qt::Unchecked); });
+#else
   connect(
       m_chUseRegexp, &QCheckBox::stateChanged, this,
       [this](bool isChecked) { m_chUseCaseSensetive->setEnabled(!isChecked); });
+#endif
 }
 
 void NCriticalPathFilterWidget::onAccepted() { backupUI(); }

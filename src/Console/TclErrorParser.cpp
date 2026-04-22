@@ -42,7 +42,7 @@ LineParser::Result TclErrorParser::handleLine(const QString &message,
     const QFileInfo fileInfo{file};
     const QString line = lineMatch.captured();
     LinkSpec link{
-        regExpMatch.capturedStart(), regExpMatch.capturedLength(),
+        static_cast<int>(regExpMatch.capturedStart()), static_cast<int>(regExpMatch.capturedLength()),
         addLinkSpecForAbsoluteFilePath(fileInfo.absoluteFilePath(), line)};
     return Result{Status::Done, message, {link}};
   }

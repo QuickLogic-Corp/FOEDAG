@@ -39,7 +39,7 @@ LineParser::Result DummyParser::handleLine(const QString &message,
     file = file.trimmed();
     const QFileInfo fileInfo{file};
     LinkSpec link{
-        regExpMatch.capturedStart(), regExpMatch.capturedLength(),
+        static_cast<int>(regExpMatch.capturedStart()), static_cast<int>(regExpMatch.capturedLength()),
         addLinkSpecForAbsoluteFilePath(fileInfo.absoluteFilePath(), "-1")};
     return Result{Status::Done, message, {link}};
   }

@@ -13,12 +13,12 @@
 #define USE_QTREEVIEW (1)
 
 namespace {
-static const QRegExp FIND_INIT_ROUTER{"Initializing router criticalities"};
-static const QRegExp FIND_NET_CONNECTION{
+static const QRegularExpression FIND_INIT_ROUTER{"Initializing router criticalities"};
+static const QRegularExpression FIND_NET_CONNECTION{
     "Final Net Connection Criticality Histogram"};
-static const QRegExp FIND_ROUTING_TIMING{"Final.*(Slack|MHz).*"};
-static const QRegExp ROUTING_SUMMARY{"Circuit successfully routed.*"};
-static const QRegExp TIMING_INFO{"Final hold Worst Negative Slack.*"};
+static const QRegularExpression FIND_ROUTING_TIMING{"Final.*(Slack|MHz).*"};
+static const QRegularExpression ROUTING_SUMMARY{"Circuit successfully routed.*"};
+static const QRegularExpression TIMING_INFO{"Final hold Worst Negative Slack.*"};
 
 static constexpr const char *CIRCUIT_REPORT_NAME{
     "Post routing - Circuit Statistics Report"};
@@ -31,7 +31,7 @@ static const QString LOAD_PLACEMENT_SECTION{"# Load Placement"};
 static const QString COMPUT_ROUTER_SECTION{"# Computing router lookahead map"};
 static const QString ROUTING_SECTION{"# Routing"};
 
-static const QRegExp FIND_HISTOGRAM{"Final.*histogram:"};
+static const QRegularExpression FIND_HISTOGRAM{"Final.*histogram:"};
 
 static const QRegularExpression SPLIT_STAT_TIMING{
     "([-]?(([0-9]*[.])?[0-9]+) (ns?(?=,)|.*|MHz))"};
@@ -53,8 +53,8 @@ RoutingReportManager::RoutingReportManager(const TaskManager &taskManager)
   m_circuitColumns = {ReportColumn{"Block type"},
                       ReportColumn{"Number of blocks", Qt::AlignCenter}};
 
-  m_routingKeys = {QRegExp("Circuit Statistics:.*"),
-                   QRegExp("Final Net Connection Criticality Histogram")};
+  m_routingKeys = {QRegularExpression{"Circuit Statistics:.*"},
+                   QRegularExpression{"Final Net Connection Criticality Histogram"}};
 }
 
 QStringList RoutingReportManager::getAvailableReportIds() const {
@@ -101,9 +101,9 @@ void RoutingReportManager::parseLogFile() {
   auto lineNr = 0;
   QString line;
   while (in.readLineInto(&line)) {
-    if (FIND_RESOURCES.indexIn(line) != -1)
+    if (FIND_RESOURCES.match(line).hasMatch())
       parseResourceUsage(in, lineNr);
-    else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
+    else if (FIND_CIRCUIT_STAT.match(line).hasMatch())
       m_circuitData = parseCircuitStats(in, lineNr);
     else if (line.startsWith(LOAD_PLACEMENT_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_PLACEMENT_SECTION, {});
@@ -112,20 +112,20 @@ void RoutingReportManager::parseLogFile() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      histograms().push_back(std::make_pair(line, parseHistogram(in, lineNr)));
     else if (line.startsWith(ROUTING_SECTION))
       lineNr =
           parseErrorWarningSection(in, lineNr, ROUTING_SECTION, m_routingKeys);
-    else if (ROUTING_SUMMARY.indexIn(line) != -1)
+    else if (auto m = ROUTING_SUMMARY.match(line); m.hasMatch())
       messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
-                                            ROUTING_SUMMARY.cap(),
+                                            m.captured(0),
                                             {}});
-    else if (TIMING_INFO.indexIn(line) != -1)
+    else if (auto m = TIMING_INFO.match(line); m.hasMatch())
       messages().insert(
           lineNr,
           TaskMessage{
-              lineNr, MessageSeverity::INFO_MESSAGE, TIMING_INFO.cap(), {}});
+              lineNr, MessageSeverity::INFO_MESSAGE, m.captured(0), {}});
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
@@ -322,11 +322,11 @@ void RoutingReportManager::reset() {
 }
 
 bool RoutingReportManager::isStatisticalTimingHistogram(const QString &line) {
-  return FIND_HISTOGRAM.indexIn(line) != -1;
+  return FIND_HISTOGRAM.match(line).hasMatch();
 }
 
 bool RoutingReportManager::isStatisticalTimingLine(const QString &line) {
-  return FIND_ROUTING_TIMING.indexIn(line) != -1;
+  return FIND_ROUTING_TIMING.match(line).hasMatch();
 }
 
 void RoutingReportManager::splitTimingData(const QString &timingStr) {

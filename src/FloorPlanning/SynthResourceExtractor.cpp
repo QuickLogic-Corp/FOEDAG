@@ -52,14 +52,21 @@ bool SynthResourceExtractor::parseAtomNamesFromNetFileContent(const std::string&
 
     QDomDocument doc;
 
-    QString errMsg; 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    auto parseResult = doc.setContent(QByteArray::fromStdString(fileContent));
+    if (!parseResult) {
+        m_error = "XML parse error at" + std::to_string(parseResult.errorLine) + ":" + std::to_string(parseResult.errorColumn) + "-" + parseResult.errorMessage.toStdString();
+        return false;
+    }
+#else
+    QString errMsg;
     int errLine = 0;
     int errCol = 0;
-
     if (!doc.setContent(QByteArray::fromStdString(fileContent), &errMsg, &errLine, &errCol)) {
         m_error = "XML parse error at" + std::to_string(errLine) + ":" + std::to_string(errCol) + "-" + errMsg.toStdString();
         return false;
     }
+#endif
 
     static std::function<void(const QDomElement&, std::set<std::string>&)>
         collectLeafBlocksRecursive = [&](const QDomElement& element, std::set<std::string>& atoms)

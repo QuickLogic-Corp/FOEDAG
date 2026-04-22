@@ -122,11 +122,6 @@ add_library(interactive_path_analysis STATIC
   ${SRC_UI_LIST}
 )
 
-find_package(Qt5 COMPONENTS Network REQUIRED)
-if (NOT Qt5Network_FOUND)
-    message(FATAL_ERROR "Failed to find Qt5Network")
-endif()
-
 target_link_libraries(interactive_path_analysis PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Network compiler zlibutils)
 if(MSVC)
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/zlib)

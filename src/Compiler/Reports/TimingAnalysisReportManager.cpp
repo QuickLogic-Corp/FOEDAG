@@ -46,14 +46,14 @@ static const QString CREATE_DEVICE_SECTION{"# Create Device"};
 static const QString LOAD_PLACEMENT_SECTION{"# Load Placement"};
 static const QString LOAD_ROUTING_SECTION{"# Load Routing"};
 
-static const QRegExp VPR_ROUTING_OPT{
+static const QRegularExpression VPR_ROUTING_OPT{
     "VPR was run with the following options.*"};
 
 static const QString BUILD_TIM_GRAPH{"Build Timing Graph"};
 static const QString LOAD_PACKING{"Load packing"};
 
-static const QRegExp FIND_TA_TIMING{"Final.*(Slack|MHz).*"};
-static const QRegExp FIND_HISTOGRAM{"Final.*histogram:"};
+static const QRegularExpression FIND_TA_TIMING{"Final.*(Slack|MHz).*"};
+static const QRegularExpression FIND_HISTOGRAM{"Final.*histogram:"};
 
 static const QRegularExpression SPLIT_STAT_TIMING{
     "([-]?(([0-9]*[.])?[0-9]+) (ns?(?=,)|.*|MHz))"};
@@ -88,8 +88,8 @@ TimingAnalysisReportManager::TimingAnalysisReportManager(
                             ReportColumn{"Time", Qt::AlignCenter},
                             ReportColumn{"Description"}};
 
-  m_createDeviceKeys = {QRegExp("Device Utilization.*"),
-                        QRegExp{"Build tileable routing resource graph"}};
+  m_createDeviceKeys = {QRegularExpression{"Device Utilization.*"},
+                        QRegularExpression{"Build tileable routing resource graph"}};
 }
 
 QStringList TimingAnalysisReportManager::getAvailableReportIds() const {
@@ -143,12 +143,12 @@ bool TimingAnalysisReportManager::isStatisticalTimingLine(const QString &line) {
       m_compiler->TimingAnalysisEngineOpt() == Compiler::STAEngineOpt::Opensta)
     return line.contains("wns") || line.contains("tns");
 
-  return FIND_TA_TIMING.indexIn(line) != -1;
+  return FIND_TA_TIMING.match(line).hasMatch();
 }
 
 bool TimingAnalysisReportManager::isStatisticalTimingHistogram(
     const QString &line) {
-  return FIND_HISTOGRAM.indexIn(line) != -1;
+  return FIND_HISTOGRAM.match(line).hasMatch();
 }
 
 void TimingAnalysisReportManager::splitTimingData(const QString &timingStr) {
@@ -204,12 +204,12 @@ void TimingAnalysisReportManager::parseLogFile() {
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_CIRCUIT_SECTION, {});
     else if (line.startsWith(LOAD_TIM_CONSTR))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_TIM_CONSTR, {});
-    else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
+    else if (FIND_CIRCUIT_STAT.match(line).hasMatch())
       m_circuitData = parseCircuitStats(in, lineNr);
-    else if (VPR_ROUTING_OPT.indexIn(line) != -1)
+    else if (auto m = VPR_ROUTING_OPT.match(line); m.hasMatch())
       m_messages.insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
-                                            VPR_ROUTING_OPT.cap(),
+                                            m.captured(0),
                                             {}});
     else if (line.endsWith(BUILD_TIM_GRAPH))
       m_messages.insert(
@@ -230,7 +230,7 @@ void TimingAnalysisReportManager::parseLogFile() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-      m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      m_histograms.push_back(std::make_pair(line, parseHistogram(in, lineNr)));
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
@@ -255,11 +255,11 @@ void TimingAnalysisReportManager::parseOpenSTALog() {
     if (line.contains(READ_IN_DATA))
       lineNr = parseErrorWarningSection(
           in, lineNr, READ_IN_DATA,
-          {QRegExp("Startpoint:.*"), QRegExp("Endpoint:.*")}, true);
+          {QRegularExpression{"Startpoint:.*"}, QRegularExpression{"Endpoint:.*"}}, true);
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (line.contains(OPENSTA_TIMING))
-      m_histograms.push_back(qMakePair(QString("Timing table"),
+      m_histograms.push_back(std::make_pair(QString("Timing table"),
                                        parseOpenSTATimingTable(in, lineNr)));
     ++lineNr;
   }

@@ -9,10 +9,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-DGTEST_LANGUAGE_CXX20)
 
-find_package(Qt5 COMPONENTS Test REQUIRED)
-if (NOT Qt5Test_FOUND)
-    message(STATUS "Failed to find Qt5Test required (on debian/ubuntu try 'sudo apt install qt5-default')")
-endif()
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Test REQUIRED)
 
 if(MSVC)
   # Microsoft reports the value of __cplusplus wrong and gmock/gtest pulls in the
