@@ -124,10 +124,11 @@ void TclConsoleWidget::handleTerminateCommand() {
 void TclConsoleWidget::mouseReleaseEvent(QMouseEvent *e) {
   if (m_linkActivated && m_mouseButtonPressed == Qt::LeftButton) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    handleLink(e->position().toPoint());
+    const QPoint eventPos = e->position().toPoint();
 #else
-    handleLink(e->pos());
+    const QPoint eventPos = e->pos();
 #endif
+    handleLink(eventPos);
   }
 
   // Mouse was released, activate links again
@@ -148,10 +149,11 @@ void TclConsoleWidget::mouseMoveEvent(QMouseEvent *e) {
     m_linkActivated = false;
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-  if (!m_linkActivated || anchorAt(e->position().toPoint()).isEmpty())
+  const QPoint eventPos = e->position().toPoint();
 #else
-  if (!m_linkActivated || anchorAt(e->pos()).isEmpty())
+  const QPoint eventPos = e->pos();
 #endif
+  if (!m_linkActivated || anchorAt(eventPos).isEmpty())
     viewport()->setCursor(Qt::IBeamCursor);
   else
     viewport()->setCursor(Qt::PointingHandCursor);

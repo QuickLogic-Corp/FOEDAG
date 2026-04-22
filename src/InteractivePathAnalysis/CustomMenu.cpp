@@ -103,10 +103,11 @@ void CustomMenu::popup(QPoint pos) {
 
 void CustomMenu::mousePressEvent(QMouseEvent* event) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-  if (!rect().contains(event->position().toPoint())) {
+  const QPoint eventPos = event->position().toPoint();
 #else
-  if (!rect().contains(event->pos())) {
+  const QPoint eventPos = event->pos();
 #endif
+  if (!rect().contains(eventPos)) {
     hide();
   }
   QWidget::mousePressEvent(event);
