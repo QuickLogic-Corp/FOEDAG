@@ -251,7 +251,11 @@ void TimingAnalysisReportManager::parseLogFileHelper(const QString& logFileName,
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
       histograms().push_back(std::make_pair(line, parseHistogram(in, lineNr)));
+#else
+      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
+#endif
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
@@ -278,8 +282,13 @@ void TimingAnalysisReportManager::parseOpenSTALog(const QString& logFilePath) {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (line.contains(OPENSTA_TIMING))
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
       histograms().push_back(std::make_pair(QString("Timing table"),
                                        parseOpenSTATimingTable(in, lineNr)));
+#else
+      histograms().push_back(qMakePair(QString("Timing table"),
+                                       parseOpenSTATimingTable(in, lineNr)));
+#endif
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);

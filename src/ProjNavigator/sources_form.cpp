@@ -337,7 +337,11 @@ void SourcesForm::SlotRemoveFile() {
     // un-related selections
     if ((item->data(0, Qt::WhatsThisPropertyRole) == itemType) &&
         !fileSet.isNull()) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
       selections.append(std::make_pair(strFileName, fileSet));
+#else
+      selections.append(qMakePair(strFileName, fileSet));
+#endif
       files.append(strFileName);
     }
   }
