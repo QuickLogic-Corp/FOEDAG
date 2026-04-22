@@ -87,7 +87,7 @@ OutputFormatter::FormattedTexts OutputFormatter::parseResults(
     const QString &text, OutputFormat format,
     const LineParser::LinkSpecs &links) const {
   FormattedTexts texts;
-  int totalLength = 0;
+  qsizetype totalLength = 0;
   for (auto const &link : links) {
     QString t = text.mid(totalLength, link.startPos - totalLength);
     texts.push_back(FormattedText{t, m_formats[format]});
