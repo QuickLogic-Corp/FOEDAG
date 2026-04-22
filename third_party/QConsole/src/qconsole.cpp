@@ -719,10 +719,11 @@ void QConsole::mousePressEvent(QMouseEvent *event) {
   if (event->button() == Qt::MiddleButton) {
     copy();
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    QTextCursor cursor = cursorForPosition(event->position().toPoint());
+    const QPoint eventPos = event->position().toPoint();
 #else
-    QTextCursor cursor = cursorForPosition(event->pos());
+    const QPoint eventPos = event->pos();
 #endif
+    QTextCursor cursor = cursorForPosition(eventPos);
     setTextCursor(cursor);
     paste();
     return;

@@ -74,7 +74,6 @@ endif(NOT DEFINED DISABLE_IPA)
 #add_definitions(-DUI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON)
 
 # Find Qt packages - prefer Qt6, fall back to Qt5
-#find_package(Qt5 COMPONENTS Core Gui Widgets Quick Xml REQUIRED)
 find_package(Qt6 COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test QUIET)
 if(Qt6_FOUND)
     set(QT_VERSION_MAJOR 6 CACHE INTERNAL "Qt major version in use")
