@@ -908,7 +908,8 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
 
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
 
-    // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [target_device_data_dir_path]
+    // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path>
+    //                [target_device_data_dir_path] [--customer-id <id>]
     // this will perform the steps:
     // 1. ensure that the structure in the <source_device_data_dir_path> reflects 
     //      required structure, as specified in the document: <TODO>
@@ -922,25 +923,45 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     //    if target path is not specified, default is a new dir created at same level as source_device_data_dir_path
     //    with the same name + "_en" added.
 
-    // check args: 6 or 7(if target is specified)
-    if (argc != 6 && argc != 7) {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [target_device_data_dir_path]");
+    // Separate positional args from "--customer-id <id>" flag (which may appear
+    // anywhere after the fixed prefix).
+    std::vector<std::string> positional;
+    std::string customer_id;
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = argv[i];
+      if (tok == "--customer-id") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("--customer-id requires a value");
+          return TCL_ERROR;
+        }
+        customer_id = argv[++i];
+      } else {
+        positional.push_back(tok);
+      }
+    }
+
+    if (positional.size() != 5 && positional.size() != 6) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    encrypt_device <family> <foundry> <node> <devicename> "
+          "<source_device_data_dir_path> [target_device_data_dir_path] "
+          "[--customer-id <id>]");
       return TCL_ERROR;
     }
 
-    // parse args
-    std::string family = std::string(argv[1]);
-    std::string foundry = std::string(argv[2]);
-    std::string node = std::string(argv[3]);
-    std::string devicename = std::string(argv[4]);
-    std::string source_device_data_dir_path = argv[5];
+    std::string family = positional[0];
+    std::string foundry = positional[1];
+    std::string node = positional[2];
+    std::string devicename = positional[3];
+    std::string source_device_data_dir_path = positional[4];
     std::string target_device_data_dir_path;
-    if(argc == 7) {
-      target_device_data_dir_path = argv[6];
+    if (positional.size() == 6) {
+      target_device_data_dir_path = positional[5];
     }
 
-    int status = QLDeviceManager::getInstance()->encryptDevice(family, foundry, node, devicename, source_device_data_dir_path, target_device_data_dir_path);
+    int status = QLDeviceManager::getInstance()->encryptDevice(
+        family, foundry, node, devicename, source_device_data_dir_path,
+        target_device_data_dir_path, customer_id);
 
     if(status == 0) {
       compiler->Message("\ndevice encrypted ok: " + family + "," + foundry + "," + node + "," + devicename);
