@@ -98,7 +98,8 @@ class QLDeviceManager : public QObject {
   int addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                 std::string device_data_source, bool force);
   int encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
-                    std::string device_data_source, std::string device_data_target);
+                    std::string device_data_source, std::string device_data_target,
+                    std::string customer_id = "");
   std::vector<QLDeviceVariant> listDeviceVariants(std::string family,
                                                  std::string foundry,
                                                  std::string node,

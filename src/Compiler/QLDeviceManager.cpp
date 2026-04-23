@@ -1811,7 +1811,8 @@ std::string QLDeviceManager::convertToDeviceTypeString(QLDeviceTarget device_tar
 // addDevice -> call encryptDevice -> take encrypted version -> copy into aurora installation
 
 int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
-                                     std::string device_data_source, std::string device_data_target) {
+                                     std::string device_data_source, std::string device_data_target,
+                                     std::string customer_id) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
     // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> <target_device_data_dir_path>
@@ -1970,6 +1971,12 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                   std::regex::icase))) {
               source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
               continue;  // prevent matching further copy rules
+          }
+
+          // include config.json for encryption (CRR config contains device IP details)
+          if (dir_entry.path().filename().string() == "config.json") {
+              source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
+              continue;  // prevent matching the generic .json copy rule below
           }
 
           // include all files in 'examples/' for copy
@@ -2310,6 +2317,39 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
       if(ec) {
         // error
         compiler->ErrorMessage(std::string("failed to copy: ") + source_file_path.string());
+        return -1;
+      }
+    }
+
+    // Post-encryption audit: for CRR devices, the target must not contain any
+    // plaintext copies of IP-sensitive files (SB_MAPS.yml, CSV/*.csv, config.json).
+    // This catches classification bugs where a file ends up on both the encrypt
+    // list (producing .en) and the copy list (producing a plaintext).
+    {
+      std::vector<std::string> residual_plaintext;
+      for (const std::filesystem::directory_entry& dir_entry :
+           std::filesystem::recursive_directory_iterator(
+               target_device_data_dir_path,
+               std::filesystem::directory_options::skip_permission_denied, ec)) {
+        if (ec || !dir_entry.is_regular_file(ec)) continue;
+        const std::string fname = dir_entry.path().filename().string();
+        const std::string fullpath = dir_entry.path().string();
+        const bool is_sb_maps =
+            std::regex_match(fname, std::regex(".*SB_MAPS\\.yml",
+                                               std::regex::icase));
+        const bool is_csv_in_csv_dir = std::regex_match(
+            fullpath,
+            std::regex(R"(.+[\/\\]CSV[\/\\].*\.csv)", std::regex::icase));
+        const bool is_config_json = (fname == "config.json");
+        if (is_sb_maps || is_csv_in_csv_dir || is_config_json) {
+          residual_plaintext.push_back(fullpath);
+        }
+      }
+      if (!residual_plaintext.empty()) {
+        std::string msg =
+            "\nPOST-ENCRYPTION AUDIT FAILED: residual plaintext files in target:";
+        for (const auto& p : residual_plaintext) msg += "\n  " + p;
+        compiler->ErrorMessage(msg);
         return -1;
       }
     }
