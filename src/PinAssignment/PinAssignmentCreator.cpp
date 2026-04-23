@@ -389,7 +389,7 @@ void PinAssignmentCreator::refresh(bool isPcfOk) {
     portView->refreshContentFromModel();
   }
 
-  auto ppView = m_packagePinsView->findChild<PackagePinsView *>();
+  auto ppView = m_packagePinsView ? m_packagePinsView->findChild<PackagePinsView *>() : nullptr;
   if (ppView) ppView->cleanTable();
 
   if (isPcfOk) {
