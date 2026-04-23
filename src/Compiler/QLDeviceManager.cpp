@@ -26,8 +26,9 @@
 #include <set>
 #include <regex>
 #include <filesystem>
+#include <fstream>
 
-#include <CRFileCryptProc.hpp>
+#include <qlcrypt/qlcrypt.hpp>
 #include "CompilerOpenFPGA_ql.h"
 #include "Compiler/Compiler.h"
 #include "Utils/FileUtils.h"
@@ -1345,20 +1346,26 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
     // decrypt the encrypted vpr xml file. and then use that:
     vpr_xml_filepath = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath();
 
-    std::filesystem::path m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName(device_data_dir_path.string(),
-                                                           DeviceTypeString(family,foundry,node,devicename));
+    std::filesystem::path m_cryptdbPath =
+        device_data_dir_path / (DeviceTypeString(family, foundry, node, devicename) + "_Supp.db");
 
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      std::cout << "load cryptdb failed!" << std::endl;
+    qlcrypt::KeyDB keys;
+    if (auto s = qlcrypt::KeyDB::load(m_cryptdbPath.string(), keys); !qlcrypt::ok(s)) {
+      std::cout << "load cryptdb failed: " << qlcrypt::toString(s) << std::endl;
       ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
       return device_variant_layouts;
     }
 
-    if (!CRFileCryptProc::getInstance()->decryptFile(source_vpr_xml_filepath, vpr_xml_filepath)) {
-      std::cout << "decryption failed!" << std::endl;
+    qlcrypt::FileCrypt fc(keys);
+    std::string plaintext;
+    if (auto s = fc.decryptFile(source_vpr_xml_filepath.string(), plaintext); !qlcrypt::ok(s)) {
+      std::cout << "decryption failed: " << qlcrypt::toString(s) << std::endl;
       ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
       return device_variant_layouts;
+    }
+    {
+      std::ofstream out(vpr_xml_filepath, std::ios::binary);
+      out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
     }
   }
 
@@ -1950,17 +1957,19 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             continue;
           }
 
-          // include all files in 'CSV/' files for copy, required for RRG generation
+          // include all files in 'CSV/' for encryption, required for RRG generation
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]CSV[\/\\].*)",
                                 std::regex::icase))) {
-            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
+            continue;  // prevent matching further copy rules (e.g. pin_table.csv)
           }
-          // include SB_MAPS.yml file for copy, required for RRG generation
+          // include SB_MAPS.yml file for encryption, required for RRG generation
           if (std::regex_match(dir_entry.path().filename().string(),
                                   std::regex(".*SB_MAPS\\.yml",
                                   std::regex::icase))) {
-              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+              source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
+              continue;  // prevent matching further copy rules
           }
 
           // include all files in 'examples/' for copy
@@ -2108,25 +2117,39 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // for(auto path : source_device_data_file_list_to_encrypt) std::cout << path << std::endl;
     // std::cout << std::endl;
 
-    // encrypt the list of files
-    if (!CRFileCryptProc::getInstance()->encryptFiles(source_device_data_file_list_to_encrypt)) {
-        compiler->ErrorMessage("encrypt files failed!");
-        return -1;
-    } else {
-        compiler->Message("files encrypted ok.");
+    // Generate a fresh key database and encrypt each file in the list.
+    qlcrypt::KeyDB keys;
+    if (auto s = qlcrypt::KeyDB::create(keys,
+                                         DeviceTypeString(family, foundry, node, devicename));
+        !qlcrypt::ok(s)) {
+      compiler->ErrorMessage(std::string("keygen failed: ") + std::string(qlcrypt::toString(s)));
+      return -1;
     }
 
-    // save cryptdb
-    string cryptdb_path_str;
-    if (!CRFileCryptProc::getInstance()->saveCryptKeyDB(source_device_data_dir_path_c.string(), 
-                                                        DeviceTypeString(family,foundry,node,devicename),
-                                                        cryptdb_path_str)) {
-        compiler->ErrorMessage("cryptdb save failed!");
-        return -1;
+    // encrypt the list of files (in place: produces <src>.en; original kept)
+    {
+      qlcrypt::FileCrypt fc(keys);
+      for (const auto& src : source_device_data_file_list_to_encrypt) {
+        const std::string outPath = src.string() + ".en";
+        if (auto s = fc.encryptFile(src.string(), outPath); !qlcrypt::ok(s)) {
+          compiler->ErrorMessage(std::string("encrypt failed: ") + src.string() +
+                                 " -> " + std::string(qlcrypt::toString(s)));
+          return -1;
+        }
+      }
+      compiler->Message("files encrypted ok.");
     }
-    else {
-        compiler->Message("cryptdb saved ok.");
+
+    // save cryptdb as <dir>/<family>_Supp.db
+    const std::filesystem::path cryptdb_path =
+        source_device_data_dir_path_c /
+        (DeviceTypeString(family, foundry, node, devicename) + "_Supp.db");
+    if (auto s = keys.save(cryptdb_path.string()); !qlcrypt::ok(s)) {
+      compiler->ErrorMessage(std::string("cryptdb save failed: ") + std::string(qlcrypt::toString(s)));
+      return -1;
     }
+    compiler->Message("cryptdb saved ok.");
+    const std::string cryptdb_path_str = cryptdb_path.string();
 
     // [4] copy all encrypted files and cryptdb into the installation target_device_data_dir_path
     //     also, cleanup these files in the source_device_data_dir_path
@@ -3630,7 +3653,13 @@ std::filesystem::path QLDeviceManager::deviceSBMAPSFile(QLDeviceTarget device_ta
   sb_maps_yml_file_path = 
       deviceTypeDirPath(device_target) / json_value;
   if(!FileUtils::FileIsRegular(sb_maps_yml_file_path)) {
-      sb_maps_yml_file_path.clear();
+      // Try .en encrypted variant
+      std::filesystem::path en_path(sb_maps_yml_file_path.string() + ".en");
+      if(FileUtils::FileIsRegular(en_path)) {
+          sb_maps_yml_file_path = en_path;
+      } else {
+          sb_maps_yml_file_path.clear();
+      }
   }
 
   if(sb_maps_yml_file_path.empty()) {

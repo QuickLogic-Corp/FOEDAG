@@ -64,7 +64,7 @@
 #include "MainWindow/main_window.h"
 #include "Main/WidgetFactory.h"
 #include "Main/Settings.h"
-#include <CRFileCryptProc.hpp>
+#include <qlcrypt/qlcrypt.hpp>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QStackedWidget>
@@ -2341,8 +2341,19 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
     if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
 
-      vpr_options += " --sb_maps " + sb_maps_file_path.string();
-      vpr_options += " --sb_templates " + sb_templates_dir_path.string();
+      if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(sb_maps_file_path)) {
+        // Encrypted CRR path: pass encrypted file paths + key DB to VPR
+        std::filesystem::path crypt_key_db =
+            (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
+            (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
+
+        vpr_options += " --sb_maps_encrypted " + sb_maps_file_path.string();
+        vpr_options += " --sb_templates_encrypted " + sb_templates_dir_path.string();
+        vpr_options += " --crypt_key_db " + crypt_key_db.string();
+      } else {
+        vpr_options += " --sb_maps " + sb_maps_file_path.string();
+        vpr_options += " --sb_templates " + sb_templates_dir_path.string();
+      }
 
       vpr_options += " --preserve_input_pin_connections off";
       vpr_options += " --preserve_output_pin_connections off";
@@ -2368,18 +2379,9 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     std::filesystem::path vpr_xml_en_path = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::make_tuple(std::string(""), std::string(""));
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
       // empty string returned on error.
       return std::make_tuple(std::string(""), std::string(""));
     }
@@ -2725,8 +2727,19 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
     if(!m_SBMapsFile.empty() && !m_SBTemplatesDir.empty()) {
 
-      command->appendFile("--sb_maps", m_SBMapsFile);
-      command->appendFile("--sb_templates", m_SBTemplatesDir);
+      if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_SBMapsFile)) {
+        // Encrypted CRR path: pass encrypted file paths + key DB to VPR
+        std::filesystem::path crypt_key_db =
+            (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
+            (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
+
+        command->appendFile("--sb_maps_encrypted", m_SBMapsFile);
+        command->appendFile("--sb_templates_encrypted", m_SBTemplatesDir);
+        command->appendFile("--crypt_key_db", crypt_key_db);
+      } else {
+        command->appendFile("--sb_maps", m_SBMapsFile);
+        command->appendFile("--sb_templates", m_SBTemplatesDir);
+      }
 
       command->append("--preserve_input_pin_connections off");
       command->append("--preserve_output_pin_connections off");
@@ -2752,18 +2765,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     std::filesystem::path vpr_xml_en_path = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return nullptr;
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
       // empty string returned on error.
       return nullptr;
     }
@@ -3257,19 +3261,11 @@ bool CompilerOpenFPGA_ql::Packing() {
     
     // encrypt the generated vpr xml with the same key as the current device
     // this will be saved into m_autoLayoutGeneratedVPRXMLPath.
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      ErrorMessage("load cryptdb failed\n");
-      return false;
-    }
-
-    // existing API forces us to use a list of files to be encrypted...
     std::vector<std::filesystem::path> file_list_to_encrypt;
     file_list_to_encrypt.push_back(generated_vpr_xml_path);
-    if (!CRFileCryptProc::getInstance()->encryptFiles(file_list_to_encrypt)) {
-      ErrorMessage("encryption failed!");
+    if (!encryptDeviceFiles(file_list_to_encrypt,
+                            QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                            QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       return false;
     }
     m_autoLayoutGeneratedVPRXMLPath = generated_vpr_xml_path;
@@ -3285,9 +3281,10 @@ bool CompilerOpenFPGA_ql::Packing() {
     // save the path of the previously decrypted architecture file path for easy replacement in command to re-run pack.
     std::filesystem::path old_m_architectureFile = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
-  
-    if (!CRFileCryptProc::getInstance()->decryptFile(m_autoLayoutGeneratedVPRXMLPath, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+
+    if (!decryptDeviceFile(m_autoLayoutGeneratedVPRXMLPath, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       return false;
     }
 
@@ -3431,9 +3428,9 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
       // 4 cryptdb: replace FPGA_AUTO with the generated layout name
-      std::filesystem::path source_device_cryptdb_filepath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString());
+      std::filesystem::path source_device_cryptdb_filepath =
+          (QLDeviceManager::getInstance()->deviceTypeDirPath()) /
+          (QLDeviceManager::getInstance()->convertToDeviceTypeString() + "_Supp.db");
       std::string source_device_cryptdb_filename = 
           source_device_cryptdb_filepath.filename().string();
 
@@ -5607,18 +5604,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path vpr_xml_en_path = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5639,18 +5627,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path openfpga_xml_en_path = m_OpenFpgaArchitectureFile;
     m_OpenFpgaArchitectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(openfpga_xml_en_path, m_OpenFpgaArchitectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(openfpga_xml_en_path, m_OpenFpgaArchitectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5671,18 +5650,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path bitstream_annotation_xml_en_path = m_OpenFpgaBitstreamSettingFile;
     m_OpenFpgaBitstreamSettingFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(bitstream_annotation_xml_en_path, m_OpenFpgaBitstreamSettingFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(bitstream_annotation_xml_en_path, m_OpenFpgaBitstreamSettingFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5703,18 +5673,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       std::filesystem::path repack_design_contraint_xml_en_path = m_OpenFpgaRepackConstraintsFile;
       m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
 
-      m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-        Message("load cryptdb failed!");
-        // empty string returned on error.
-        return std::string("");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile)) {
-        ErrorMessage("decryption failed!");
+      if (!decryptDeviceFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
         return std::string("");
       }
@@ -5736,18 +5697,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path fixed_sim_openfpga_xml_en_path = m_OpenFpgaSimSettingFile;
     m_OpenFpgaSimSettingFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(fixed_sim_openfpga_xml_en_path, m_OpenFpgaSimSettingFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(fixed_sim_openfpga_xml_en_path, m_OpenFpgaSimSettingFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5765,18 +5717,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       std::filesystem::path fabric_key_xml_en_path = m_OpenFpgaFabricKeyFile;
       m_OpenFpgaFabricKeyFile = GenerateTempFilePath();
 
-      m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-        Message("load cryptdb failed!");
-        // empty string returned on error.
-        return std::string("");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(fabric_key_xml_en_path, m_OpenFpgaFabricKeyFile)) {
-        ErrorMessage("decryption failed!");
+      if (!decryptDeviceFile(fabric_key_xml_en_path, m_OpenFpgaFabricKeyFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
         return std::string("");
       }
@@ -5795,18 +5738,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       std::filesystem::path bitstream_remapping_xml_en_path = m_OpenFpgaBitstreamRemappingFile;
       m_OpenFpgaBitstreamRemappingFile = GenerateTempFilePath();
 
-      m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-        Message("load cryptdb failed!");
-        // empty string returned on error.
-        return std::string("");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile)) {
-        ErrorMessage("decryption failed!");
+      if (!decryptDeviceFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
         return std::string("");
       }
@@ -7089,6 +7023,78 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOuts
 
     // return the temp file path we obtained
     return temp_file_path;
+}
+
+
+bool CompilerOpenFPGA_ql::decryptDeviceFile(
+    const std::filesystem::path& src_en,
+    const std::filesystem::path& dst_plain,
+    const std::filesystem::path& deviceTypeDir,
+    const std::string& deviceTypeString) {
+  const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
+  m_cryptdbPath = cryptdb;
+
+  qlcrypt::KeyDB keys;
+  if (auto s = qlcrypt::KeyDB::load(cryptdb.string(), keys); !qlcrypt::ok(s)) {
+    ErrorMessage(std::string("load cryptdb failed: ") + cryptdb.string() +
+                 " -> " + std::string(qlcrypt::toString(s)));
+    return false;
+  }
+
+  qlcrypt::FileCrypt fc(keys);
+  std::string plaintext;
+  if (auto s = fc.decryptFile(src_en.string(), plaintext); !qlcrypt::ok(s)) {
+    ErrorMessage(std::string("decryption failed: ") + src_en.string() +
+                 " -> " + std::string(qlcrypt::toString(s)));
+    return false;
+  }
+
+  std::ofstream out(dst_plain, std::ios::binary);
+  if (!out) {
+    ErrorMessage(std::string("cannot write decrypted output: ") + dst_plain.string());
+    return false;
+  }
+  out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
+  return out.good();
+}
+
+
+bool CompilerOpenFPGA_ql::encryptDeviceFiles(
+    const std::vector<std::filesystem::path>& paths,
+    const std::filesystem::path& deviceTypeDir,
+    const std::string& deviceTypeString) {
+  const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
+  m_cryptdbPath = cryptdb;
+
+  qlcrypt::KeyDB keys;
+  std::error_code ec;
+  if (std::filesystem::exists(cryptdb, ec)) {
+    if (auto s = qlcrypt::KeyDB::load(cryptdb.string(), keys); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("load cryptdb failed: ") + cryptdb.string() +
+                   " -> " + std::string(qlcrypt::toString(s)));
+      return false;
+    }
+  } else {
+    if (auto s = qlcrypt::KeyDB::create(keys, deviceTypeString); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("keygen failed: ") + std::string(qlcrypt::toString(s)));
+      return false;
+    }
+    if (auto s = keys.save(cryptdb.string()); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("cryptdb save failed: ") + std::string(qlcrypt::toString(s)));
+      return false;
+    }
+  }
+
+  qlcrypt::FileCrypt fc(keys);
+  for (const auto& src : paths) {
+    const std::string outPath = src.string() + ".en";
+    if (auto s = fc.encryptFile(src.string(), outPath); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("encrypt failed: ") + src.string() + " -> " +
+                   std::string(qlcrypt::toString(s)));
+      return false;
+    }
+  }
+  return true;
 }
 
 
@@ -9496,10 +9502,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
   // - there is no pre-generated .place file AND
   // - there is no pcf file in the project.
-
-  // Bypassing the pcf2place due to generating the pcf constraints using the generate_floorplanning.py script
-  // std::string filepath_fpga_fix_pins_place_str;
-  // if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
+  std::string filepath_fpga_fix_pins_place_str;
+  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 
   VprStageCfg cfg;
   cfg.use_place_file = true;
@@ -9529,13 +9533,13 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   }
   
 
-  // if (!filepath_fpga_fix_pins_place_str.empty()) {
-  //   command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
-  // }
-  // else
-  // {
-  //   Message("no pcf file found, skipping PinConstraints usage!");
-  // }
+  if (!filepath_fpga_fix_pins_place_str.empty()) {
+    command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  }
+  else
+  {
+    Message("no pcf file found, skipping PinConstraints usage!");
+  }
 
   return command;
 }
@@ -9874,17 +9878,22 @@ const std::filesystem::path& VprArchitectureFileProfider::get()
       m_architectureFile = m_compiler->GenerateTempFilePath(true);
       m_isFileTemporary = true;
 
-      std::filesystem::path cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
-                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
+      const std::filesystem::path cryptdbPath =
+          (QLDeviceManager::getInstance()->deviceTypeDirPath(device)) /
+          (QLDeviceManager::getInstance()->convertToDeviceTypeString(device) + "_Supp.db");
 
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
-        return error("load cryptdb failed!");
+      qlcrypt::KeyDB keys;
+      if (auto s = qlcrypt::KeyDB::load(cryptdbPath.string(), keys); !qlcrypt::ok(s)) {
+        return error(std::string("load cryptdb failed: ") + std::string(qlcrypt::toString(s)));
       }
 
-      if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-        return error("decryption failed!");
+      qlcrypt::FileCrypt fc(keys);
+      std::string plaintext;
+      if (auto s = fc.decryptFile(vpr_xml_en_path.string(), plaintext); !qlcrypt::ok(s)) {
+        return error(std::string("decryption failed: ") + std::string(qlcrypt::toString(s)));
       }
+      std::ofstream out(m_architectureFile, std::ios::binary);
+      out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
     }
   }  
     

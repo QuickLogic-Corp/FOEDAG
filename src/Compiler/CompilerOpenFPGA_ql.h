@@ -139,6 +139,21 @@ class CompilerOpenFPGA_ql : public Compiler {
   int CleanTempFiles();
   void CleanScripts();
 
+  /// Decrypt a device `.en` file to disk using the `<family>_Supp.db` key
+  /// database located in `deviceTypeDir`. On success writes `dst_plain` and
+  /// returns true. On failure logs via ErrorMessage() and returns false.
+  bool decryptDeviceFile(const std::filesystem::path& src_en,
+                         const std::filesystem::path& dst_plain,
+                         const std::filesystem::path& deviceTypeDir,
+                         const std::string& deviceTypeString);
+
+  /// Encrypt each file in `paths` in place (produces `<path>.en`) using a
+  /// key DB at `<deviceTypeDir>/<deviceTypeString>_Supp.db`. If the key DB
+  /// does not exist, one is generated and saved to that path.
+  bool encryptDeviceFiles(const std::vector<std::filesystem::path>& paths,
+                          const std::filesystem::path& deviceTypeDir,
+                          const std::string& deviceTypeString);
+
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
