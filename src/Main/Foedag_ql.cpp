@@ -39,8 +39,10 @@ extern "C" {
 #include <QDir>
 #include <QGuiApplication>
 #include <QLabel>
+#include <QThreadPool>
 //#include <QQmlApplicationEngine>
 //#include <QQmlContext>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -173,8 +175,11 @@ bool Foedag::initGui() {
 #endif
   // Gui mode with Qt Widgets
   int argc = m_cmdLine->Argc();
-  QApplication app(argc, m_cmdLine->Argv());
-  QApplication::setStyle(new FoedagStyle(app.style()));
+  // Heap-allocate so the destructor can be called via std::atexit (registered
+  // in aboutToQuit below). Tcl_MainEx calls C exit() which bypasses stack
+  // unwinding, so a stack-local QApplication would never be destroyed.
+  new QApplication(argc, m_cmdLine->Argv());
+  QApplication::setStyle(new FoedagStyle(QApplication::style()));
   FOEDAG::TclInterpreter* interpreter =
       new FOEDAG::TclInterpreter(m_cmdLine->Argv()[0]);
   Config::Instance()->dataPath(m_context->DataPath());
@@ -233,9 +238,24 @@ bool Foedag::initGui() {
     return 0;
   };
 
-  // exit tcl after last window is closed
-  QObject::connect(qApp, &QApplication::lastWindowClosed, [interpreter]() {
-    Tcl_EvalEx(interpreter->getInterp(), "exit", -1, 0);
+  // aboutToQuit is the last Qt signal fired before exec() returns. We use it
+  // to register two cleanup actions that must complete before C exit() runs:
+  //
+  // 1. std::atexit(delete qApp) — registered here, after all Qt statics have
+  //    been initialized, so C++ guarantees it runs before every one of their
+  //    destructors. QApplication::~QApplication() cleans up the main thread's
+  //    per-thread data, preventing the Qt6 "QThreadStorage: entry N destroyed
+  //    before end of thread" warning that fires when QThreadStorage statics
+  //    destruct while the main thread's slot data is still registered.
+  //    (Tcl_MainEx calls C exit() after exec() returns, bypassing stack
+  //    unwinding, so this destructor would never run without atexit.)
+  //
+  // 2. waitForDone() — joins global thread-pool threads before exit() triggers
+  //    static destructors, preventing the same warning from worker threads.
+  QObject::connect(qApp, &QCoreApplication::aboutToQuit, []() {
+    std::atexit([]() { delete qApp; });
+    QThreadPool::globalInstance()->setExpiryTimeout(0);
+    QThreadPool::globalInstance()->waitForDone();
   });
 
   // Start Loop
