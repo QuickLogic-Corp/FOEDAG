@@ -238,6 +238,16 @@ bool Foedag::initGui() {
     return 0;
   };
 
+  // exit tcl after last window is closed
+  QObject::connect(qApp, &QApplication::lastWindowClosed, [interpreter]() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QThreadPool::globalInstance()->setExpiryTimeout(0);
+    QThreadPool::globalInstance()->waitForDone();
+#endif
+    Tcl_EvalEx(interpreter->getInterp(), "exit", -1, 0);
+  });
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
   // aboutToQuit is the last Qt signal fired before exec() returns. We use it
   // to register two cleanup actions that must complete before C exit() runs:
   //
@@ -257,6 +267,7 @@ bool Foedag::initGui() {
     QThreadPool::globalInstance()->setExpiryTimeout(0);
     QThreadPool::globalInstance()->waitForDone();
   });
+#endif
 
   // Start Loop
   Tcl_MainEx(argc, m_cmdLine->Argv(), tcl_init, interpreter->getInterp());
