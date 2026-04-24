@@ -24,7 +24,6 @@
 #include <regex>
 #include <filesystem>
 
-#include <CRFileCryptProc.hpp>
 #include "CompilerOpenFPGA_ql.h"
 #include "Compiler/Compiler.h"
 #include "Utils/FileUtils.h"
