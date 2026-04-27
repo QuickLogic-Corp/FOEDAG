@@ -106,10 +106,14 @@ add_subdirectory(third_party/QConsole)
 add_subdirectory(third_party/nlohmann_json)
 # qlcrypt: QuickLogic AES-GCM encryption library (replaces in-tree cryptor-gh)
 # Pinned via submodule at third_party/qlcrypt (see .gitmodules).
-set(QLCRYPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(QLCRYPT_BUILD_TOOL OFF CACHE BOOL "" FORCE)
-set(QLCRYPT_INSTALL OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/qlcrypt)
+# Guard: when FOEDAG is built as a sub-project (e.g. aurora2), VTR may have
+# already defined the qlcrypt target.
+if(NOT TARGET qlcrypt)
+  set(QLCRYPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(QLCRYPT_BUILD_TOOL OFF CACHE BOOL "" FORCE)
+  set(QLCRYPT_INSTALL OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/qlcrypt)
+endif()
 add_subdirectory(third_party/gtkwave_cmake)
 add_subdirectory(third_party/scope_guard)
 add_subdirectory(tests/tclutils)
