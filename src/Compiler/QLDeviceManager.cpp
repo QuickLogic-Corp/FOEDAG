@@ -2524,11 +2524,91 @@ std::filesystem::path QLDeviceManager::deviceConfigJSONPath(QLDeviceTarget devic
   }
   else {
 
-    // file does not exist!
-    device_config_json_path.clear();
+    // accept encrypted variant: config.json.en (decryption is performed in-memory
+    // by callers via loadDeviceConfigJSON()).
+    std::filesystem::path device_config_json_en_path = 
+        deviceTypeDirPath(device_target) / std::string("config.json.en");
+    if(FileUtils::FileExists(device_config_json_en_path)) {
+      device_config_json_path = device_config_json_en_path;
+    }
+    else {
+      // file does not exist!
+      device_config_json_path.clear();
+    }
   }
 
   return device_config_json_path;
+}
+
+
+// Load the device's `config.json` (plaintext or encrypted `.en`) into the
+// supplied json object. Returns true on success, false if neither variant
+// exists, decryption fails, or parsing fails.
+bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json) {
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  std::filesystem::path device_type_dir = deviceTypeDirPath(device_target);
+  std::filesystem::path plaintext_path  = device_type_dir / std::string("config.json");
+
+  // 1. Plaintext path: present in dev/source trees and in legacy/unencrypted devices.
+  if(FileUtils::FileExists(plaintext_path)) {
+    try {
+      std::ifstream ifs(plaintext_path.string());
+      out_config_json = json::parse(ifs);
+      return true;
+    }
+    catch(const std::exception& e) {
+      std::cout << "loadDeviceConfigJSON: failed to parse "
+                << plaintext_path.string() << ": " << e.what() << std::endl;
+      return false;
+    }
+  }
+
+  // 2. Encrypted variant: decrypt in-memory using <deviceTypeString>_Supp.db
+  std::filesystem::path encrypted_path = device_type_dir / std::string("config.json.en");
+  if(!FileUtils::FileExists(encrypted_path)) {
+    return false;
+  }
+
+  std::filesystem::path cryptdb_path = device_type_dir /
+      (DeviceTypeString(device_target.device_variant.family,
+                        device_target.device_variant.foundry,
+                        device_target.device_variant.node,
+                        device_target.device_variant.devicename) + "_Supp.db");
+
+  if(!FileUtils::FileExists(cryptdb_path)) {
+    std::cout << "loadDeviceConfigJSON: cryptdb not found alongside encrypted config: "
+              << cryptdb_path.string() << std::endl;
+    return false;
+  }
+
+  qlcrypt::KeyDB keys;
+  if(auto s = qlcrypt::KeyDB::load(cryptdb_path.string(), keys); !qlcrypt::ok(s)) {
+    std::cout << "loadDeviceConfigJSON: load cryptdb failed (" << cryptdb_path.string()
+              << "): " << qlcrypt::toString(s) << std::endl;
+    return false;
+  }
+
+  qlcrypt::FileCrypt fc(keys);
+  std::string plaintext;
+  if(auto s = fc.decryptFile(encrypted_path.string(), plaintext); !qlcrypt::ok(s)) {
+    std::cout << "loadDeviceConfigJSON: decrypt failed (" << encrypted_path.string()
+              << "): " << qlcrypt::toString(s) << std::endl;
+    return false;
+  }
+
+  try {
+    out_config_json = json::parse(plaintext);
+    return true;
+  }
+  catch(const std::exception& e) {
+    std::cout << "loadDeviceConfigJSON: failed to parse decrypted "
+              << encrypted_path.string() << ": " << e.what() << std::endl;
+    return false;
+  }
 }
 
 
@@ -2640,11 +2720,8 @@ std::filesystem::path QLDeviceManager::deviceYosysScriptFile(QLDeviceTarget devi
   // aurora_template_script_yosys_path = 
   //     std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora") / std::string("aurora_template_script.ys"));
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("AURORA_YOSYS_TEMPLATE_SCRIPT")  ) {
@@ -2687,11 +2764,8 @@ std::filesystem::path QLDeviceManager::deviceSynplifyScriptFile(QLDeviceTarget d
   // aurora_template_script_synplify_path = 
   //     std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora") / std::string("aurora_template_script.prj"));
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("AURORA_SYNPLIFY_TEMPLATE_SCRIPT")  ) {
@@ -2752,11 +2826,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAScriptFile(QLDeviceTarget d
   // aurora_template_script_openfpga_path = 
   //     std::filesystem::path(deviceTypeDirPath(device_target) / std::string("aurora") / std::string("aurora_template_script.openfpga"));
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("AURORA_OPENFPGA_TEMPLATE_SCRIPT")  ) {
@@ -2814,11 +2885,8 @@ std::filesystem::path QLDeviceManager::deviceVPRArchitectureFile(QLDeviceTarget 
   // unencrypted (first priority) or encrypted file
 
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("CORNER_VPR_ARCH")  ) {
@@ -2877,11 +2945,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAArchitectureFile(QLDeviceTa
   // unencrypted (first priority) or encrypted file
 
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("CORNER_OPENFPGA_ARCH")  ) {
@@ -2940,11 +3005,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGABitstreamAnnotationFile(QLD
   // unencrypted (first priority) or encrypted file
 
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("BITSTREAM_ANNOTATION")  ) {
@@ -3029,11 +3091,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
   // 3. device data dir path check
   if(repack_design_constraint_file_path.empty()) {
     // use config.json if it exists
-    std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-    if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-      std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-      json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    json device_target_config_json;
+    if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
       // get json value
       std::string json_value;
       if( device_target_config_json.contains("REPACK_DESIGN_CONSTRAINT")  ) {
@@ -3093,11 +3152,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAFixedSimFile(QLDeviceTarget
   // unencrypted (first priority) or encrypted file
 
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("FIXED_SIM_OPENFPGA")  ) {
@@ -3165,11 +3221,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAFabricKeyFile(QLDeviceTarge
 
 
   // check config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("FABRIC_KEY")  ) {
@@ -3262,11 +3315,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGABitstreamRemappingFile(QLDe
   // unencrypted (first priority) or encrypted file
 
   // use config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("BITSTREAM_REMAPPING")  ) {
@@ -3324,11 +3374,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAPinTableFile(QLDeviceTarget
 
 
   // check config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("PIN_TABLE")  ) {
@@ -3498,11 +3545,8 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGAIOMapFile(QLDeviceTarget de
 
 
   // check config.json if it exists
-  std::filesystem::path device_target_config_json_filepath = deviceTypeDirPath(device_target) / std::string("config.json");
-  if(FileUtils::FileExists(device_target_config_json_filepath)) {
-
-    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
     // get json value
     std::string json_value;
     if( device_target_config_json.contains("FPGA_IO_MAP")  ) {
@@ -3678,9 +3722,12 @@ std::filesystem::path QLDeviceManager::deviceSBMAPSFile(QLDeviceTarget device_ta
   }
 
 
-  // read config JSON and get the value
-  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // read config JSON (handles plaintext config.json or encrypted config.json.en)
+  json device_target_config_json;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+    compiler->ErrorMessage("failed to load config.json (or config.json.en) for current device!");
+    return empty_path;
+  }
   // get json value
   std::string json_value;
   if( device_target_config_json.contains("SB_MAPS") ) {
@@ -3741,9 +3788,12 @@ std::filesystem::path QLDeviceManager::deviceSBTemplatesDir(QLDeviceTarget devic
   }
 
 
-  // read config JSON and get the value
-  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // read config JSON (handles plaintext config.json or encrypted config.json.en)
+  json device_target_config_json;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+    compiler->ErrorMessage("failed to load config.json (or config.json.en) for current device!");
+    return empty_path;
+  }
   // get json value
   std::string json_value;
   if( device_target_config_json.contains("CORNER_SB_TEMPLATE_DIR") ) {
@@ -3817,9 +3867,12 @@ std::filesystem::path QLDeviceManager::deviceVPRRRGraphFile(QLDeviceTarget devic
   }
 
 
-  // read config JSON and get the value
-  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // read config JSON (handles plaintext config.json or encrypted config.json.en)
+  json device_target_config_json;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+    compiler->ErrorMessage("failed to load config.json (or config.json.en) for current device!");
+    return empty_path;
+  }
   // get json value
   std::string json_value;
   if( device_target_config_json.contains("CORNER_RRGRAPH_BIN") ) {
@@ -3934,9 +3987,12 @@ std::filesystem::path QLDeviceManager::deviceVPRRouterLookaheadFile(QLDeviceTarg
   }
 
 
-  // read config JSON and get the value
-  std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-  json device_target_config_json = json::parse(device_target_config_json_ifstream);
+  // read config JSON (handles plaintext config.json or encrypted config.json.en)
+  json device_target_config_json;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+    compiler->ErrorMessage("failed to load config.json (or config.json.en) for current device!");
+    return empty_path;
+  }
   // get json value
   std::string json_value;
   if( device_target_config_json.contains("CORNER_ROUTER_LOOKAHEAD_BIN") ) {

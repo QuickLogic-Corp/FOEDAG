@@ -8743,12 +8743,8 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
       std::string bram_type;
 
-      std::filesystem::path device_target_config_json_filepath = 
-          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / std::string("config.json");
-
-      if(FileUtils::FileExists(device_target_config_json_filepath)) {
-          std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-          json device_target_config_json = json::parse(device_target_config_json_ifstream);
+      json device_target_config_json;
+      if(QLDeviceManager::getInstance()->loadDeviceConfigJSON(current_device_target, device_target_config_json)) {
           bram_type = device_target_config_json["BRAM_TYPE"].get<std::string>();
       }
       if(bram_type == "TDP" || bram_type == "TDP_ECC"){

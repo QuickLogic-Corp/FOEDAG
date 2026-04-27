@@ -169,6 +169,14 @@ class QLDeviceManager : public QObject {
 
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
 
+  // Load the device's `config.json`, transparently handling the encrypted
+  // `config.json.en` variant (decrypted in-memory via qlcrypt using the
+  // `<deviceTypeString>_Supp.db` keystore alongside the file).
+  // Returns true on success and populates `out_config_json`.
+  // Returns false if neither plaintext nor `.en` file is present, or if
+  // decryption / JSON parsing fails.
+  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json);
+
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
