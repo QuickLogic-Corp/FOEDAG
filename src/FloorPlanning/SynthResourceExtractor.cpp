@@ -1,5 +1,7 @@
 #include "SynthResourceExtractor.h"
 
+#include <fstream>
+
 #include <QList>
 #include <QDomDocument>
 #include <QDomElement>
@@ -10,6 +12,8 @@
 
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
+
+#define DUMP_NETLIST_ELEMENTS_TO_FILE
 
 namespace fp {
 
@@ -136,6 +140,10 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
     }
   }
 
+#ifdef DUMP_NETLIST_ELEMENTS_TO_FILE
+  dumpElementsToFile("extracted_vpr_netlist.txt");
+#endif
+
   return true;
 }
 
@@ -150,6 +158,18 @@ bool SynthResourceExtractor::parseAtomNamesFromTxtFileContent(const std::string&
   }
 
   return true;
+}
+
+bool SynthResourceExtractor::dumpElementsToFile(const std::filesystem::path& filePath) const
+{
+  std::ofstream out{filePath};
+  if (!out.is_open()) {
+    return false;
+  }
+  for (const auto& element : m_elements) {
+    out << element << '\n';
+  }
+  return out.good();
 }
 
 }  // namespace fp

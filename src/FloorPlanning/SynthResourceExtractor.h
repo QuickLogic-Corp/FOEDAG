@@ -23,6 +23,8 @@ public:
 private:
   std::string m_error;
   std::set<std::string> m_elements;
+
+  bool dumpElementsToFile(const std::filesystem::path&) const;
 };
 
 }  // namespace fp
