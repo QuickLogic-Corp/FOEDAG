@@ -81,6 +81,7 @@ class CompilerOpenFPGA_ql : public Compiler {
     m_architectureFile = path;
   }
 
+  std::filesystem::path getPostSynthVerilogFilePath() const;
   std::filesystem::path getPostSynthNetFilePath() const;
   std::filesystem::path getPostSynthBlifFilePath() const;
 

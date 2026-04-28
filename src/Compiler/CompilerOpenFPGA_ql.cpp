@@ -6597,6 +6597,10 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthVerilogFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.v");
+}
+
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
 }
