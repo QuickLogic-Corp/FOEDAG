@@ -33,7 +33,7 @@ QStringList TclConsole::suggestCommand(const QString &cmd, QString &prefix) {
   QString commandToComplete = cmd;
   QStringList suggestions;
   prefix = QString();
-  int i = cmd.lastIndexOf(QRegularExpression{"[[{;\n]"});
+  int i = cmd.lastIndexOf(QRegularExpression{"[\\[{;\n]"});
   if (i != -1) {
     commandToComplete = cmd.right(cmd.length() - i - 1);
     prefix = cmd.left(i + 1);
