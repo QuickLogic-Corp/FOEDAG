@@ -55,7 +55,7 @@ bool SynthResourceExtractor::parseAtomNamesFromNetFileContent(const std::string&
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     auto parseResult = doc.setContent(QByteArray::fromStdString(fileContent));
     if (!parseResult) {
-        m_error = "XML parse error at" + std::to_string(parseResult.errorLine) + ":" + std::to_string(parseResult.errorColumn) + "-" + parseResult.errorMessage.toStdString();
+        m_error = "XML parse error at " + std::to_string(parseResult.errorLine) + ":" + std::to_string(parseResult.errorColumn) + "-" + parseResult.errorMessage.toStdString();
         return false;
     }
 #else
@@ -63,7 +63,7 @@ bool SynthResourceExtractor::parseAtomNamesFromNetFileContent(const std::string&
     int errLine = 0;
     int errCol = 0;
     if (!doc.setContent(QByteArray::fromStdString(fileContent), &errMsg, &errLine, &errCol)) {
-        m_error = "XML parse error at" + std::to_string(errLine) + ":" + std::to_string(errCol) + "-" + errMsg.toStdString();
+        m_error = "XML parse error at " + std::to_string(errLine) + ":" + std::to_string(errCol) + "-" + errMsg.toStdString();
         return false;
     }
 #endif
