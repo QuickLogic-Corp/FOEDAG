@@ -67,6 +67,78 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
 
   // module name → list of (inst_name, module_type)
   std::map<std::string, std::vector<std::pair<std::string, std::string>>> modules;
+  // module name → set of declared signal/port base names
+  std::map<std::string, std::set<std::string>> moduleSignals;
+
+  // Signal-declaration keywords: when seen as the first token inside a module
+  // body they introduce a port/wire/reg declaration, not a module instantiation.
+  static const std::set<std::string> kDeclKeywords{
+    "input", "output", "inout", "wire", "reg", "logic"
+  };
+
+  // Parse comma-separated signal names from a declaration after the leading
+  // keyword has been consumed.  Expands bus ranges: "reg [63:0] din" adds
+  // din[0]…din[63] individually.  Stops at a port-direction keyword so the
+  // ANSI port list scanner can call this per-port.
+  static const std::set<std::string> kDirKeywords{"input","output","inout"};
+  static const std::set<std::string> kModifiers{"wire","reg","logic","signed","unsigned"};
+
+  auto parseSigNames = [](const std::string& line, size_t pos,
+                           std::set<std::string>& dest) {
+    size_t p = pos;
+    // Skip optional modifier keyword
+    while (p < line.size() && (line[p]==' '||line[p]=='\t')) ++p;
+    if (p < line.size() && std::isalpha(static_cast<unsigned char>(line[p]))) {
+      size_t p2 = p;
+      const std::string mod = parseIdent(line, p2);
+      static const std::set<std::string> kMod{"wire","reg","logic","signed","unsigned"};
+      if (kMod.count(mod)) p = p2;
+    }
+    // Parse optional packed range [hi:lo] — remember the bounds for bus expansion
+    while (p < line.size() && (line[p]==' '||line[p]=='\t')) ++p;
+    int rangeHi = -1, rangeLo = -1;
+    if (p < line.size() && line[p] == '[') {
+      ++p;
+      size_t ns = p;
+      while (p < line.size() && line[p] >= '0' && line[p] <= '9') ++p;
+      if (ns != p && p < line.size() && line[p] == ':') {
+        rangeHi = std::stoi(line.substr(ns, p - ns));
+        ++p;
+        ns = p;
+        while (p < line.size() && line[p] >= '0' && line[p] <= '9') ++p;
+        if (ns != p && p < line.size() && line[p] == ']')
+          rangeLo = std::stoi(line.substr(ns, p - ns));
+      }
+      while (p < line.size() && line[p] != ']') ++p;
+      if (p < line.size()) ++p;
+    }
+    // Comma-separated identifiers until ';', ')', comment, or a direction keyword
+    while (p < line.size()) {
+      while (p < line.size() && (line[p]==' '||line[p]=='\t'||line[p]==',')) ++p;
+      if (p >= line.size() || line[p]==';' || line[p]==')' || line[p]=='/' || line[p]=='*') break;
+      size_t namStart = p;
+      const std::string name = parseIdent(line, p);
+      if (name.empty()) break;
+      // Stop if we hit a direction keyword (ANSI port list boundary)
+      static const std::set<std::string> kStop{"input","output","inout","parameter","module","endmodule"};
+      if (kStop.count(name)) { p = namStart; break; }
+      // Expand bus or add scalar
+      if (rangeHi >= 0 && rangeLo >= 0 && rangeHi != rangeLo) {
+        const int lo = std::min(rangeHi, rangeLo);
+        const int hi = std::max(rangeHi, rangeLo);
+        for (int i = lo; i <= hi; ++i)
+          dest.insert(name + "[" + std::to_string(i) + "]");
+      } else {
+        dest.insert(name);
+      }
+      // Skip optional unpacked range after name
+      while (p < line.size() && (line[p]==' '||line[p]=='\t')) ++p;
+      if (p < line.size() && line[p]=='[') {
+        while (p < line.size() && line[p]!=']') ++p;
+        if (p < line.size()) ++p;
+      }
+    }
+  };
 
   for (const auto& file : files) {
     if (!std::filesystem::exists(file)) {
@@ -94,7 +166,7 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
           if      (line[pos] == '(') ++paramDepth;
           else if (line[pos] == ')') { if (--paramDepth == 0) { ++pos; break; } }
         }
-        if (paramDepth > 0) continue;  // still inside params — keep going
+        if (paramDepth > 0) continue;
         // fall through: params just closed, try inst name on the rest of this line
       }
 
@@ -102,21 +174,19 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
       if (!pendingModuleType.empty() && paramDepth == 0) {
         while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
         if (pos >= line.size() || line[pos] == '/' || line[pos] == '*') continue;
-        // Guard: if we hit a module boundary, abandon pending state
         const size_t savedPos = pos;
         const std::string tok = parseIdent(line, pos);
         if (tok == "module" || tok == "endmodule") {
           pendingModuleType.clear();
-          pos = savedPos;  // reprocess this line in normal state below
+          pos = savedPos;
         } else if (!tok.empty()) {
           while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
-          if (pos < line.size() && (line[pos] == '(' || line[pos] == '#' || line[pos] == ';')) {
+          if (pos < line.size() && (line[pos] == '(' || line[pos] == '#' || line[pos] == ';'))
             modules[currentModule].emplace_back(tok, pendingModuleType);
-          }
           pendingModuleType.clear();
           continue;
         } else {
-          continue;  // nothing yet, wait for next line
+          continue;
         }
       }
 
@@ -129,12 +199,40 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
 
       if (first == "module") {
         currentModule = parseIdent(line, pos);
-        if (!currentModule.empty())
+        if (!currentModule.empty()) {
           modules.emplace(currentModule, std::vector<std::pair<std::string, std::string>>{});
+          moduleSignals.emplace(currentModule, std::set<std::string>{});
+          // Also extract ANSI-style port names from the module header line:
+          // module name ( input wire clk, output wire q, ... );
+          while (pos < line.size() && line[pos] != '(' && line[pos] != ';') ++pos;
+          if (pos < line.size() && line[pos] == '(') {
+            ++pos;
+            while (pos < line.size() && line[pos] != ')' && line[pos] != ';') {
+              while (pos < line.size() && !std::isalpha(static_cast<unsigned char>(line[pos]))
+                     && line[pos] != ')') ++pos;
+              if (pos >= line.size() || line[pos] == ')') break;
+              const std::string tok = parseIdent(line, pos);
+              if (tok == "input" || tok == "output" || tok == "inout")
+                parseSigNames(line, pos, moduleSignals[currentModule]);
+              else {
+                while (pos < line.size() && line[pos] != ',' && line[pos] != ')') ++pos;
+              }
+              if (pos < line.size() && line[pos] == ',') ++pos;
+            }
+          }
+        }
         continue;
       }
       if (first == "endmodule") { currentModule.clear(); continue; }
-      if (currentModule.empty() || kVerilogKeywords.count(first)) continue;
+      if (currentModule.empty()) continue;
+
+      // ── Port/signal declarations inside a module body ──
+      if (kDeclKeywords.count(first)) {
+        parseSigNames(line, pos, moduleSignals[currentModule]);
+        continue;
+      }
+
+      if (kVerilogKeywords.count(first)) continue;
 
       // <ModuleType> [#(...)] <instName>(
       while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
@@ -150,7 +248,6 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
             else if (line[pos] == ')') { if (--paramDepth == 0) { ++pos; break; } }
           }
           if (paramDepth > 0) {
-            // #(...) spans multiple lines — enter SKIP_PARAMS
             pendingModuleType = first;
             continue;
           }
@@ -159,11 +256,7 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
 
       const std::string second = parseIdent(line, pos);
       if (second.empty()) {
-        if (hadParamBlock) {
-          // Params closed on this line but inst name is on the next line
-          pendingModuleType = first;
-          paramDepth = 0;
-        }
+        if (hadParamBlock) { pendingModuleType = first; paramDepth = 0; }
         continue;
       }
 
@@ -175,15 +268,12 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
     }
   }
 
-  // Top module = the one not instantiated by any other
+  // Top module = non-instantiated module with the most direct children.
   std::set<std::string> instantiated;
   for (const auto& [mod, insts] : modules)
     for (const auto& [iname, itype] : insts)
       instantiated.insert(itype);
 
-  // Top module = the non-instantiated module with the most direct children.
-  // Picking alphabetically-first breaks when leaf/utility modules (0 instances)
-  // sort before the real top module.
   std::string topModule;
   int topChildCount = -1;
   for (const auto& [mod, insts] : modules) {
@@ -198,10 +288,42 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
   std::set<std::string> callStack;
   buildInstPaths(topModule, "", modules, callStack);
 
+  // Add top-module port/signal declarations that aren't already covered by an
+  // instance path.  Only RTL-declared names are added — synthesis-generated
+  // names (e.g. reset_$lut_A_Y) are never in moduleSignals and stay unmapped.
+  if (moduleSignals.count(topModule)) {
+    for (const auto& sig : moduleSignals.at(topModule)) {
+      if (!m_instPaths.count(sig) && !kVerilogKeywords.count(sig))
+        m_instPaths.emplace(sig, "");  // empty type = top-level signal
+    }
+  }
+
   fprintf(stderr, "[NameBridge] topModule=%s  modules=%zu  instPaths=%zu\n",
           topModule.c_str(), modules.size(), m_instPaths.size());
   for (const auto& [path, type] : m_instPaths)
     fprintf(stderr, "  instPath: %s  (type: %s)\n", path.c_str(), type.c_str());
+
+  // VPR names not covered by any instPath prefix (unmapped = no RTL counterpart found)
+  auto isMapped = [&](const std::string& vprName) -> bool {
+    if (m_instPaths.count(vprName)) return true;
+    size_t pos = 0;
+    while ((pos = vprName.find('.', pos)) != std::string::npos) {
+      if (m_instPaths.count(vprName.substr(0, pos))) return true;
+      ++pos;
+    }
+    const size_t bracket = vprName.find('[');
+    if (bracket != std::string::npos && m_instPaths.count(vprName.substr(0, bracket))) return true;
+    return false;
+  };
+
+  size_t unmappedCount = 0;
+  for (const auto& name : m_vprNames) {
+    if (!isMapped(name)) {
+      fprintf(stderr, "  unmapped VPR: %s\n", name.c_str());
+      ++unmappedCount;
+    }
+  }
+  fprintf(stderr, "[NameBridge] unmapped VPR names: %zu / %zu\n", unmappedCount, m_vprNames.size());
 
   return true;
 }

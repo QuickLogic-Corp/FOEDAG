@@ -133,14 +133,10 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         onItemChanged(item, /*reportChanges*/true);
     });
 
-    // Returns the full VPR names text for a given tree index.
-    // Prefers the tooltip (which holds the complete list) over the display text
-    // (which may be truncated with "... (N total)").
+    // Returns the VPR name text for a given tree index (leaf items only).
     auto vprCopyText = [this](const QModelIndex& idx) -> QString {
         if (!idx.isValid()) return {};
         const QModelIndex vprIdx = m_model->index(idx.row(), Column::VprNames, idx.parent());
-        const QString tooltip = vprIdx.data(Qt::ToolTipRole).toString().trimmed();
-        if (!tooltip.isEmpty()) return tooltip;
         return vprIdx.data(Qt::DisplayRole).toString();
     };
 
@@ -491,38 +487,27 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
             if (!names.empty()) {
                 const bool isLeaf = (child->rowCount() == 0);
                 if (isLeaf) {
-                    // One child row per VPR name so each can be selected and copied
-                    for (const auto& n : names) {
-                        auto* col0 = new QStandardItem();
-                        col0->setFlags(Qt::ItemIsEnabled);
-                        col0->setData(true, kVprDisplayRowRole);
-                        auto* col1 = new QStandardItem(QString::fromStdString(n));
-                        col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                        if (partitionsVisible)
-                            child->appendRow({col0, col1, new QStandardItem()});
-                        else
-                            child->appendRow({col0, col1});
+                    if (names.size() == 1) {
+                        // Single VPR name: show directly in column 2, no child row
+                        if (QStandardItem* vprItem = item->child(row, Column::VprNames))
+                            vprItem->setText(QString::fromStdString(*names.begin()));
+                    } else {
+                        // Multiple VPR names: one child row each so each can be selected and copied
+                        for (const auto& n : names) {
+                            auto* col0 = new QStandardItem();
+                            col0->setFlags(Qt::ItemIsEnabled);
+                            col0->setData(true, kVprDisplayRowRole);
+                            auto* col1 = new QStandardItem(QString::fromStdString(n));
+                            col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                            if (partitionsVisible)
+                                child->appendRow({col0, col1, new QStandardItem()});
+                            else
+                                child->appendRow({col0, col1});
+                        }
                     }
                 } else {
-                    // Non-leaf: compact summary in the VPR Names cell
-                    if (QStandardItem* vprItem = item->child(row, Column::VprNames)) {
-                        constexpr size_t kMaxPreview = 3;
-                        std::string text;
-                        size_t i = 0;
-                        for (const auto& n : names) {
-                            if (i > 0) text += ", ";
-                            text += n;
-                            if (++i >= kMaxPreview) break;
-                        }
-                        if (names.size() > kMaxPreview)
-                            text += " ... (" + std::to_string(names.size()) + " total)";
-                        vprItem->setText(QString::fromStdString(text));
-                        vprItem->setToolTip(QString::fromStdString([&names]{
-                            std::string tt;
-                            for (const auto& n : names) { tt += n; tt += '\n'; }
-                            return tt;
-                        }()));
-                    }
+                    // Non-leaf: VPR Names cell is intentionally left empty —
+                    // a comma-separated list of all descendant atoms is unreadable.
                 }
             }
             populateRecursive(child, path);
