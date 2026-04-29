@@ -28,8 +28,22 @@ namespace {
 // These rows are non-checkable leaf children of netlist items.
 static constexpr int kVprDisplayRowRole = Qt::UserRole + 100;
 
+// Marks a tree item as a bus-bit child (e.g. "[0]" under "din").
+// Path construction concatenates directly: parent "din" + "[0]" → "din[0]".
+static constexpr int kBusBitRole = Qt::UserRole + 101;
+
 bool isVprDisplayRow(const QStandardItem* item) {
     return item && item->data(kVprDisplayRowRole).toBool();
+}
+
+// Build the full path for `item` given its parent's path.
+// Bus-bit items concatenate directly; regular items are joined with ".".
+std::string buildChildPath(const std::string& prefix, const QStandardItem* item) {
+    if (!item) return prefix;
+    const std::string name = item->text().toStdString();
+    if (item->data(kBusBitRole).toBool())
+        return prefix + name;          // "din" + "[0]"  → "din[0]"
+    return prefix.empty() ? name : (prefix + "." + name);
 }
 
 void uncheckAllRecursive(QStandardItem* item, int col) {
@@ -244,8 +258,7 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
                 continue;
             }
 
-            const std::string name = child->text().toStdString();
-            const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
+            const std::string fullPath = buildChildPath(prefix, child);
 
             if (isPartitionsColumnVisible) {
                 QStandardItem* partitionItem = item->child(row, Column::Partitions);
@@ -310,8 +323,7 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
                 continue;
             }
 
-            const std::string name = child->text().toStdString();
-            const std::string fullPath = prefix.empty() ? name : (prefix + "." + name);
+            const std::string fullPath = buildChildPath(prefix, child);
 
             if (partition->elements().contains(fullPath)) {
                 child->setCheckState(Qt::Checked);
@@ -349,8 +361,7 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
     {
         if (!item) return;
 
-        const std::string name = item->text().toStdString();
-        const std::string path = prefix.empty() ? name : (prefix + "." + name);
+        const std::string path = buildChildPath(prefix, item);
 
         const Qt::CheckState st = item->isCheckable() ? item->checkState() : Qt::Unchecked;
 
@@ -450,15 +461,33 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
     };
 
     QStringList parts = QString::fromStdString(dottedPath).split('.');
-    if (parts.isEmpty()) {
-        return;
+    if (parts.isEmpty()) return;
+
+    // Detect bus-bit path: last component contains "[index]" (e.g. "din[0]").
+    // Group bits under a shared bus parent so the tree shows:
+    //   ▼ din   (bus parent, checkable)
+    //       [0]
+    //       [1]  ...
+    const QString lastPart = parts.last();
+    const int bracketPos = lastPart.indexOf('[');
+    const bool lastIsBusBit = (bracketPos > 0);
+    QString busBase, busBit;
+    if (lastIsBusBit) {
+        busBase = lastPart.left(bracketPos);   // "din"
+        busBit  = lastPart.mid(bracketPos);    // "[0]"
+        parts.last() = busBase;                // navigate to bus parent
     }
 
     QStandardItem* root = m_model->invisibleRootItem();
     QStandardItem* parent = root;
+    for (const QString& part : parts)
+        parent = findOrCreateChild(parent, part);
 
-    for (int i = 0; i < parts.size(); ++i) {
-        parent = findOrCreateChild(parent, parts[i]);
+    if (lastIsBusBit) {
+        QStandardItem* bitItem = findOrCreateChild(parent, busBit);
+        bitItem->setData(true, kBusBitRole);   // mark so path joins without "."
+        // Also register the bus parent path for filtering/completion
+        m_rawElements.insert(parts.join('.').toStdString());
     }
 
     m_rawElements.insert(dottedPath);
@@ -479,9 +508,7 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
             QStandardItem* child = item->child(row, Column::Netlist);
             if (!child || isVprDisplayRow(child)) continue;
 
-            const std::string path = prefix.empty()
-                ? child->text().toStdString()
-                : (prefix + "." + child->text().toStdString());
+            const std::string path = buildChildPath(prefix, child);
 
             const auto names = m_nameBridge->resolveToVprNames(path);
             if (!names.empty()) {
@@ -731,8 +758,7 @@ void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
             }
 
             // child full path
-            const std::string childName = child->text().toStdString();
-            const std::string childPath = itemPath.empty() ? childName : (itemPath + "." + childName);
+            const std::string childPath = buildChildPath(itemPath, child);
 
             const bool childDescVisible = updateVisibility(child, itemPath);
             const bool childSelfVisible = matches.contains(childPath);
