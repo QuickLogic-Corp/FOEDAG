@@ -1,3 +1,67 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// PostSynthVerilogNameBridge — mapping algorithm
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Two independent name spaces must be bridged:
+//
+//   RTL netlist  — names the designer wrote in src/*.v
+//                  (module instances, ports, bus signals)
+//
+//   VPR atoms    — names used internally by VPR after synthesis and
+//                  technology mapping (from atom_netlist.cleaned.echo.blif)
+//
+// The synthesis tool (Yosys) preserves hierarchy in VPR atom names using
+// dot-separated paths, e.g.:
+//   dut.instPerm19977.inCount_sdffre_Q_R
+//   dut.instPerm19977.in_sw_0_0.x0[3]
+//
+// This allows prefix matching: the RTL path "dut.instPerm19977" covers every
+// VPR atom whose name starts with "dut.instPerm19977.".
+//
+// ── Step 1  loadRtlSources() ─────────────────────────────────────────────
+//   Parses src/*.v and builds:
+//     m_instPaths  — all hierarchical instance paths reachable from the top
+//                    module (e.g. "dut", "dut.instPerm19977")
+//     top-module signals — individual port/wire/reg names of the top module,
+//                    bus-expanded (e.g. "din[0]"…"din[63]", "next_out")
+//                    These are merged into m_instPaths with empty module type.
+//
+// ── Step 2  setVprNetlist() ──────────────────────────────────────────────
+//   Stores all VPR atom names in m_vprNames (Yosys constants excluded).
+//
+// ── Step 3  resolveToVprNames(userPath) ──────────────────────────────────
+//   Given one entry from m_instPaths, returns the VPR atoms it covers:
+//     • exact match      "next_out"           → {"next_out"}
+//     • dot prefix       "dut.instPerm19977"  → all atoms starting with
+//                                               "dut.instPerm19977."
+//     • bracket prefix   "din"                → all atoms starting with
+//                                               "din["  (i.e. din[0]…din[63])
+//
+// ── What is shown in the UI ──────────────────────────────────────────────
+//   Column 1 (Netlist)   — every entry in m_instPaths; bus signals are
+//                          grouped under a collapsible parent (e.g. din →
+//                          [0], [1], …) so each bit is checkable individually.
+//   Column 2 (VPR Names) — filled only for LEAF netlist items (instances or
+//                          bus bits with no RTL children).  Non-leaf items
+//                          leave column 2 empty to avoid unreadable lists.
+//
+// ── Unmapped cases ───────────────────────────────────────────────────────
+//   Unmapped VPR atom — a VPR name that is not reachable via any prefix in
+//                       m_instPaths.  Typical cause: synthesis-generated
+//                       internal net (e.g. "reset_$lut_A_Y").  These atoms
+//                       are never added to m_instPaths and therefore never
+//                       appear in column 1.  Logged to stderr as:
+//                         [unmapped VPR] reset_$lut_A_Y
+//
+//   Unmapped netlist  — an RTL leaf whose resolveToVprNames() returns empty.
+//                       Typical cause: the signal was optimised away during
+//                       synthesis (constant folded, dead logic removed) or
+//                       was renamed in a way the prefix rule cannot follow.
+//                       The row is hidden from the UI so the user only sees
+//                       placeable items.  Logged to stderr as:
+//                         [unmapped netlist] some_signal
+// ═══════════════════════════════════════════════════════════════════════════
+
 #include "PostSynthVerilogNameBridge.h"
 
 #include <cctype>
@@ -61,6 +125,54 @@ bool PostSynthVerilogNameBridge::loadVprNetlist(const std::filesystem::path& fil
   return true;
 }
 
+// loadRtlSources — RTL name extraction
+//
+// Goal: build two tables from the user's Verilog source files:
+//   m_instPaths  — hierarchical instance paths (e.g. "dut", "dut.instPerm19977")
+//   top-module signals — port/wire/reg names of the top module
+//                        (e.g. "clk", "din[0]"…"din[63]", "next_out")
+//
+// These become the items shown in column 1 of the floor-planning netlist view.
+// Only names that appear in BOTH the RTL source and the VPR netlist are
+// ultimately displayed; synthesis-generated names (e.g. "reset_$lut_A_Y")
+// never end up in these tables.
+//
+// ── Pattern 1: module instantiation (plain) ──────────────────────────────
+//   ModuleType InstName ( ...
+//   e.g.  statementList19975 dut ( .clk(clk), ... );
+//   Produces instPath "dut" → type "statementList19975".
+//
+// ── Pattern 2: module instantiation (parameterised, single-line) ─────────
+//   ModuleType #( .P(v) ) InstName ( ...
+//   e.g.  MyFifo #(.DEPTH(16)) fifo0 ( ... );
+//   The #(…) block is skipped; "fifo0" is extracted as the instance name.
+//
+// ── Pattern 3: module instantiation (parameterised, multi-line) ──────────
+//   ModuleType #(          ← line ends inside #(…)
+//       .P(v)
+//   ) InstName (           ← ) closes the param block; InstName follows
+//   A stateful SKIP_PARAMS / EXPECT_INST_NAME scanner tracks depth across
+//   lines so the instance name is found even when spread over many lines.
+//
+// ── Pattern 4: ANSI port list in module header ───────────────────────────
+//   module top ( input wire clk, output wire [63:0] dout, ... );
+//   Each "input / output / inout" token in the header's ( … ) is parsed for
+//   an optional modifier (wire/reg/logic), an optional range [hi:lo], and
+//   then the port name.  Bus ranges are expanded: [63:0] → [0]…[63].
+//
+// ── Pattern 5: non-ANSI port / signal declarations in module body ─────────
+//   input  clk, reset;
+//   output reg next_out;
+//   wire   [63:0] din;
+//   reg    [7:0]  addr;
+//   The leading keyword (input/output/inout/wire/reg/logic) is consumed,
+//   followed by an optional modifier, an optional range, and then one or
+//   more comma-separated identifiers.  Bus ranges expand as in Pattern 4.
+//
+// Only signals belonging to the TOP module (the one not instantiated by any
+// other parsed module) are promoted to m_instPaths.  Signals of sub-modules
+// are already covered by their parent's instPath prefix matching in
+// resolveToVprNames().
 bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesystem::path>& files)
 {
   m_instPaths.clear();
