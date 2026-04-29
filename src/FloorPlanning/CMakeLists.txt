@@ -39,6 +39,7 @@ set (SRC_LIST
   DeviceGridDescriptor.cpp
   SynthResourceExtractor.cpp
   PostSynthVerilogResourceExtractor.cpp
+  PostSynthVerilogNameBridge.cpp
   QdcSerializer.cpp
   DeviceGrid.cpp
   Tile.cpp
@@ -61,6 +62,7 @@ set (HDR_LIST
   TileDescriptor.h
   SynthResourceExtractor.h
   PostSynthVerilogResourceExtractor.h
+  PostSynthVerilogNameBridge.h
   QdcSerializer.h
   DeviceGrid.h
   Tile.h

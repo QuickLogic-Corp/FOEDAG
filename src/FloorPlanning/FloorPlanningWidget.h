@@ -5,8 +5,10 @@
 #include "DeviceGridDescriptor.h"
 #include "DeviceGrid.h"
 #include "Partition.h"
+#include "PostSynthVerilogNameBridge.h"
 
 #include <map>
+#include <memory>
 #include <set>
 
 class QPushButton;
@@ -30,6 +32,7 @@ public:
     ~FloorPlanningWidget();
 
     void loadNetList(const std::set<std::string>& elements);
+    void setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge);
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 

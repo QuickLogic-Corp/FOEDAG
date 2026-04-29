@@ -81,6 +81,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "FloorPlanning/FloorPlanningWidget.h"
 #include "FloorPlanning/SynthResourceExtractor.h"
+#include "FloorPlanning/PostSynthVerilogNameBridge.h"
 
 using namespace FOEDAG;
 extern const char* foedag_version_number;
@@ -2313,11 +2314,12 @@ void MainWindow::floorPlanningActionTriggered()
     QProcess* process = new QProcess;
     const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
     std::filesystem::current_path(projectPath);
+
     process->start(vpr_program, args);
     //qDebug() << "run" << vpr_program << args.join(" ");
 
     // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
-    QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr](int exitCode) {
+    QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr, compiler](int exitCode) {
       //QDebug() << "vpr netlist dump proc finished" << exitCode;
       if (m_floorPlanningWidget) {
         if (exitCode != 0) {
@@ -2329,6 +2331,13 @@ void MainWindow::floorPlanningActionTriggered()
           resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
 
           if (!resourceExtractor.elements().empty()) {
+            std::vector<std::filesystem::path> rtlSourceFiles;
+            for (const auto& f : compiler->ProjManager()->getDesignFiles())
+              rtlSourceFiles.emplace_back(f.toStdString());
+            auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
+            nameBridge->setVprNetlist(resourceExtractor.elements());
+            nameBridge->loadRtlSources(rtlSourceFiles);
+            m_floorPlanningWidget->setNameBridge(nameBridge);
             m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
             // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
             // so we construct path based on json settings location file.

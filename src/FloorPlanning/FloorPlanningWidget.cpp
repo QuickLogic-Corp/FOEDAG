@@ -320,6 +320,12 @@ void FloorPlanningWidget::loadNetList(const std::set<std::string>& elements)
     m_busyOverlayWidget->hide();
 }
 
+void FloorPlanningWidget::setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge)
+{
+    m_synthResourcesWidget->setNameBridge(bridge);
+    m_partitionResourcesWidget->setNameBridge(bridge);
+}
+
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)
 {
     m_deviceWidget->constructTiles(descriptor);
