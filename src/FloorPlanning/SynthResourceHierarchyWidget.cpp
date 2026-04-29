@@ -513,8 +513,18 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
             const std::string path = buildChildPath(prefix, child);
 
             const auto names = m_nameBridge->resolveToVprNames(path);
-            if (!names.empty()) {
-                const bool isLeaf = (child->rowCount() == 0);
+            const bool isLeaf = (child->rowCount() == 0);
+
+            if (isLeaf && names.empty()) {
+                // This RTL leaf has no matching VPR atom — it exists in the source
+                // but was optimised away or renamed by synthesis.  Hide it so the
+                // user only sees items that can actually be placed, and log it for
+                // debugging so the gap is visible in the build output.
+                const QModelIndex parentIdx = (item == m_model->invisibleRootItem())
+                    ? QModelIndex() : item->index();
+                m_view->setRowHidden(row, parentIdx, true);
+                fprintf(stderr, "  [unmapped netlist] %s\n", path.c_str());
+            } else if (!names.empty()) {
                 if (isLeaf) {
                     if (names.size() == 1) {
                         // Single VPR name: show directly in column 2, no child row
@@ -534,10 +544,9 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
                                 child->appendRow({col0, col1});
                         }
                     }
-                } else {
-                    // Non-leaf: VPR Names cell is intentionally left empty —
-                    // a comma-separated list of all descendant atoms is unreadable.
                 }
+                // Non-leaf: VPR Names cell is intentionally left empty —
+                // a comma-separated list of all descendant atoms is unreadable.
             }
             populateRecursive(child, path);
         }
