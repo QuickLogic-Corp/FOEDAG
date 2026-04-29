@@ -42,7 +42,7 @@ public:
         m_lbView->setVisible(true);
         updateViewLabel();
     }
-    void build(const std::set<std::string>& elements);
+    void build(const PostSynthVerilogNameBridge::NaturalStringSet& elements);
     void setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge) { m_nameBridge = std::move(bridge); }
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);

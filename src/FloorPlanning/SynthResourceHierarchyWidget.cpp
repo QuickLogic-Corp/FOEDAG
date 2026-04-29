@@ -177,7 +177,7 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     setEnabled(false);
 }
 
-void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
+void SynthResourceHierarchyWidget::build(const PostSynthVerilogNameBridge::NaturalStringSet& elements)
 {
     m_model->clear();
     if (!isPartitionsColumnHidden()) {
@@ -377,7 +377,9 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
         }
 
         auto vprNames = [bridge](const std::string& p) -> std::set<std::string> {
-            return bridge ? bridge->resolveToVprNames(p) : std::set<std::string>{};
+            if (!bridge) return {};
+            const auto r = bridge->resolveToVprNames(p);
+            return {r.begin(), r.end()};
         };
 
         if (isLeaf) {
@@ -485,7 +487,7 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 
     if (lastIsBusBit) {
         QStandardItem* bitItem = findOrCreateChild(parent, busBit);
-        bitItem->setData(true, kBusBitRole);   // mark so path joins without "."
+        bitItem->setData(true, kBusBitRole);
         // Also register the bus parent path for filtering/completion
         m_rawElements.insert(parts.join('.').toStdString());
     }

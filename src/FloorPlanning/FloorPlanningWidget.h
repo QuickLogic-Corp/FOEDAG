@@ -31,7 +31,7 @@ public:
     explicit FloorPlanningWidget(const QString& projectName, QWidget* parent = nullptr);
     ~FloorPlanningWidget();
 
-    void loadNetList(const std::set<std::string>& elements);
+    void loadNetList(const PostSynthVerilogNameBridge::NaturalStringSet& elements);
     void setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge);
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);

@@ -350,9 +350,10 @@ void PostSynthVerilogNameBridge::buildInstPaths(
   callStack.erase(moduleName);
 }
 
-std::set<std::string> PostSynthVerilogNameBridge::resolveToVprNames(const std::string& userPath) const
+PostSynthVerilogNameBridge::NaturalStringSet
+PostSynthVerilogNameBridge::resolveToVprNames(const std::string& userPath) const
 {
-  std::set<std::string> result;
+  NaturalStringSet result;
 
   auto addWithPrefix = [&](const std::string& prefix) {
     for (auto it = m_vprNames.lower_bound(prefix);

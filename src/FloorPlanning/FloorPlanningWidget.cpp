@@ -313,7 +313,7 @@ void FloorPlanningWidget::updateSaveQdcButtonEnability()
     m_bnSaveQdc->setEnabled(m_deviceWidget->isSaveQdcAllowed());
 }
 
-void FloorPlanningWidget::loadNetList(const std::set<std::string>& elements)
+void FloorPlanningWidget::loadNetList(const PostSynthVerilogNameBridge::NaturalStringSet& elements)
 {
     m_synthResourcesWidget->build(elements);
     m_partitionResourcesWidget->build(elements);
