@@ -19,6 +19,7 @@
 
 #include "qttclnotifier.hpp"
 
+#include <QAbstractEventDispatcher>
 #include <QCoreApplication>
 
 using namespace QtTclNotify;
@@ -127,10 +128,11 @@ int QtTclNotifier::WaitForEvent(Tcl_Time const* timePtr) {
     timeout = timePtr->sec * 1000 + timePtr->usec / 1000;
     if (timeout == 0) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-      // hasPendingEvents() removed in Qt 6; process available events without
-      // blocking and return immediately
-      QCoreApplication::processEvents(QEventLoop::AllEvents);
-      return 0;
+      // hasPendingEvents() removed in Qt 6. Use the event dispatcher directly:
+      // processEvents() returns true if any events were dispatched, giving an
+      // accurate return value instead of always returning 0 or 1.
+      auto* dispatcher = QAbstractEventDispatcher::instance();
+      return (dispatcher && dispatcher->processEvents(QEventLoop::AllEvents)) ? 1 : 0;
 #else
       if (!QCoreApplication::hasPendingEvents()) {
         // timeout 0 means "do not block". There are no events, so return
