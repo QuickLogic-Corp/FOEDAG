@@ -39,6 +39,7 @@ static constexpr const char *TIMING_REPORT_NAME{
 // Messages regexps
 static const QRegularExpression FIND_PLACEMENT_TIMINGS{
     "Placement estimated.*(Slack|MHz).*"};
+// Anchors replace QRegExp::exactMatch (removed in Qt6): matches full line only.
 static const QRegularExpression LOAD_PACKING_REGEXP{"^# Load packing$"};
 static const QRegularExpression DEVICE_UTIL_REGEXP{"Device Utilization.*"};
 static const QRegularExpression TILEABLE_GRAPH_REGEXP{
