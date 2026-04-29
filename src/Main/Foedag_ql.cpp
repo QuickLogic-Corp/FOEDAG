@@ -245,6 +245,11 @@ bool Foedag::initGui() {
   // exit tcl after last window is closed
   QObject::connect(qApp, &QApplication::lastWindowClosed, [interpreter]() {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // NOTE: waitForDone() here is intentionally duplicated from the aboutToQuit
+    // handler below. Tcl_EvalEx("exit") calls Tcl_Exit() -> C exit() directly,
+    // which bypasses exec() returning and therefore bypasses aboutToQuit
+    // entirely. Without this, the Qt6 "QThreadStorage: entry N destroyed before
+    // end of thread" warning fires on the window-close exit path.
     QThreadPool::globalInstance()->setExpiryTimeout(0);
     QThreadPool::globalInstance()->waitForDone();
 #endif
