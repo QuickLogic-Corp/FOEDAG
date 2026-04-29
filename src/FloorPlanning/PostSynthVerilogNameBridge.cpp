@@ -147,7 +147,7 @@ void PostSynthVerilogNameBridge::buildInstPaths(
   callStack.erase(moduleName);
 }
 
-std::set<std::string> PostSynthVerilogNameBridge::resolve(const std::string& userPath) const
+std::set<std::string> PostSynthVerilogNameBridge::resolveToVprNames(const std::string& userPath) const
 {
   std::set<std::string> result;
 

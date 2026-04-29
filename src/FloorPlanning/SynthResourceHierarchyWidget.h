@@ -25,7 +25,8 @@ class SynthResourceHierarchyWidget : public QWidget {
 
     enum Column {
       Netlist = 0,
-      Partitions
+      VprNames = 1,
+      Partitions = 2
     };
 public:
     enum Flag {
@@ -66,6 +67,7 @@ private:
 
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
+    void populateVprNamesColumn();
 
     void addPath(const std::string&);
     void onItemChanged(QStandardItem*, bool reportChanges);

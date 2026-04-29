@@ -17,7 +17,7 @@ public:
   // Expand a user RTL name/path to all matching VPR atom names.
   // Matches: exact, "path." prefix (instance), "name[" prefix (bus).
   // Returns empty set if nothing matched.
-  std::set<std::string> resolve(const std::string& userPath) const;
+  std::set<std::string> resolveToVprNames(const std::string& userPath) const;
 
   // Returns true if userPath is a known instance path from the RTL hierarchy.
   bool isKnownInstPath(const std::string& path) const { return m_instPaths.count(path) > 0; }

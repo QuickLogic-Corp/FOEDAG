@@ -128,15 +128,16 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
 {
     m_model->clear();
     if (!isPartitionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Netlist" << "Partitions");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Netlist" << "VPR Names" << "Partitions");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition netlist");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition netlist" << "VPR Names");
         m_view->header()->setVisible(false);
     }
 
     QHeaderView* header = m_view->header();
     header->setStretchLastSection(true);
     header->setSectionResizeMode(Column::Netlist, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(Column::VprNames, QHeaderView::Stretch);
     if (!isPartitionsColumnHidden()) {
         header->setSectionResizeMode(Column::Partitions, QHeaderView::Stretch);
     }
@@ -145,6 +146,7 @@ void SynthResourceHierarchyWidget::build(const std::set<std::string>& elements)
     for (const std::string& element: elements) {
         addPath(element);
     }
+    populateVprNamesColumn();
     blocker.unblock();
 
     // completer
@@ -301,12 +303,12 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
 
 void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const PartitionPtr& partition) const
 {
-    static std::function<void(QStandardItem*, const std::string&, const PartitionPtr&)> fillPartitionSelectedElementsRecursive =
-        [](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
+    const PostSynthVerilogNameBridge* bridge = m_nameBridge.get();
+
+    std::function<void(QStandardItem*, const std::string&, const PartitionPtr&)> fillPartitionSelectedElementsRecursive =
+        [&fillPartitionSelectedElementsRecursive, bridge](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
     {
-        if (!item) {
-            return;
-        }
+        if (!item) return;
 
         const std::string name = item->text().toStdString();
         const std::string path = prefix.empty() ? name : (prefix + "." + name);
@@ -316,51 +318,45 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
         const int rows = item->rowCount();
         const bool isLeaf = (rows == 0);
 
+        auto vprNames = [bridge](const std::string& p) -> std::set<std::string> {
+            return bridge ? bridge->resolveToVprNames(p) : std::set<std::string>{};
+        };
+
         if (isLeaf) {
             if (st == Qt::Checked) {
-                partition->addElement(HierarhyElement{path, true});
+                partition->addElement(HierarhyElement{path, true, vprNames(path)});
             }
         } else {
             if (st == Qt::Checked) {
-                // if parent is checked, check whether all children are checked
                 bool allChildrenChecked = true;
-
                 for (int row = 0; row < rows; ++row) {
                     QStandardItem* child = item->child(row, Column::Netlist);
-                    if (child && child->isCheckable()) {
-                        if (child->checkState() != Qt::Checked) {
-                            allChildrenChecked = false;
-                            break;
-                        }
+                    if (child && child->isCheckable() && child->checkState() != Qt::Checked) {
+                        allChildrenChecked = false;
+                        break;
                     }
                 }
-
                 if (allChildrenChecked) {
                     // collapse to parent path with wildcard
-                    partition->addElement(HierarhyElement{path, false});
+                    partition->addElement(HierarhyElement{path, false, vprNames(path)});
                 } else {
                     // not all children checked -> collect deeper
-                    for (int row = 0; row < rows; ++row) {
+                    for (int row = 0; row < rows; ++row)
                         fillPartitionSelectedElementsRecursive(item->child(row, Column::Netlist), path, partition);
-                    }
                 }
             } else {
                 // collect deeper
-                for (int row = 0; row < rows; ++row) {
+                for (int row = 0; row < rows; ++row)
                     fillPartitionSelectedElementsRecursive(item->child(row, Column::Netlist), path, partition);
-                }
             }
         }
     };
 
     partition->clearElemenets();
     QStandardItem* root = m_model->invisibleRootItem();
-    int rows = root->rowCount();
-    for (int row=0; row<rows; ++row) {
-        QStandardItem* child = root->child(row, Column::Netlist);
-        if (child) {
+    for (int row = 0; row < root->rowCount(); ++row) {
+        if (QStandardItem* child = root->child(row, Column::Netlist))
             fillPartitionSelectedElementsRecursive(child, "", partition);
-        }
     }
 }
 
@@ -392,11 +388,13 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 
         QStandardItem* item = new QStandardItem(text);
         applyFlags(item);
+        QStandardItem* vprNamesItem = new QStandardItem("");
+        vprNamesItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         if (isPartitionColumnVisible) {
             QStandardItem* partitionItem = new QStandardItem("");
-            parent->appendRow({item, partitionItem});
+            parent->appendRow({item, vprNamesItem, partitionItem});
         } else {
-            parent->appendRow(item);
+            parent->appendRow({item, vprNamesItem});
         }
         return item;
     };
@@ -414,6 +412,51 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
     }
 
     m_rawElements.insert(dottedPath);
+}
+
+void SynthResourceHierarchyWidget::populateVprNamesColumn()
+{
+    if (!m_nameBridge) return;
+
+    std::function<void(QStandardItem*, const std::string&)> populateRecursive =
+        [&populateRecursive, this](QStandardItem* item, const std::string& prefix)
+    {
+        if (!item) return;
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, Column::Netlist);
+            if (!child) continue;
+
+            const std::string path = prefix.empty()
+                ? child->text().toStdString()
+                : (prefix + "." + child->text().toStdString());
+
+            const auto names = m_nameBridge->resolveToVprNames(path);
+            if (QStandardItem* vprItem = item->child(row, Column::VprNames)) {
+                if (!names.empty()) {
+                    constexpr size_t kMaxPreview = 3;
+                    std::string text;
+                    size_t i = 0;
+                    for (const auto& n : names) {
+                        if (i > 0) text += ", ";
+                        text += n;
+                        if (++i >= kMaxPreview) break;
+                    }
+                    if (names.size() > kMaxPreview)
+                        text += " ... (" + std::to_string(names.size()) + " total)";
+                    vprItem->setText(QString::fromStdString(text));
+                    vprItem->setToolTip(QString::fromStdString([&names]{
+                        std::string tt;
+                        for (const auto& n : names) { tt += n; tt += '\n'; }
+                        return tt;
+                    }()));
+                }
+            }
+            populateRecursive(child, path);
+        }
+    };
+
+    populateRecursive(m_model->invisibleRootItem(), "");
 }
 
 void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool reportChanges)

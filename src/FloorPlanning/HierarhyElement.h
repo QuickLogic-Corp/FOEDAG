@@ -11,13 +11,16 @@ class HierarhyElement {
 public:
     HierarhyElement(const std::string& path): path(path) {}
     HierarhyElement(const std::string& path, bool isLeaf): path(path), isLeaf(isLeaf) {}
+    HierarhyElement(const std::string& path, bool isLeaf, std::set<std::string> vprNames)
+        : path(path), isLeaf(isLeaf), vprNames(std::move(vprNames)) {}
 
     bool operator==(const HierarhyElement& rhs) const {
         return ((path == rhs.path) && (isLeaf == rhs.isLeaf));
     }
 
-    std::string path;
+    std::string path;          // user RTL name
     bool isLeaf = true;
+    std::set<std::string> vprNames;  // resolved VPR atom names
 
     bool operator<(const HierarhyElement& rhs) const { return path < rhs.path; }
 };

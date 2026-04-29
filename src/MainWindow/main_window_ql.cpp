@@ -2350,7 +2350,7 @@ void MainWindow::floorPlanningActionTriggered()
           }
         }
       }
-      archFileProviderPtr->reset(); // only now we don't need vpr arch file
+      archFileProviderPtr->clean();
       process->deleteLater();
     });
   

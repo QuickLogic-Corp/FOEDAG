@@ -26,14 +26,27 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             continue;
         }
 
-        // collect netlist elements
+        // collect netlist elements — prefer resolved VPR names when available
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
-            if (element.isLeaf) {
-                elementsStr += element.path;
+            if (!element.vprNames.empty()) {
+                // write each resolved VPR atom name directly
+                size_t vprCounter = 0;
+                for (const auto& vprName : element.vprNames) {
+                    elementsStr += vprName;
+                    if (++vprCounter < element.vprNames.size()) {
+                        elementsStr += ",";
+                        elementsStr += lfCommandDelimiter();
+                    }
+                }
             } else {
-                elementsStr += element.path + ".*";
+                // fallback: user RTL path (bridge not available or no match)
+                if (element.isLeaf) {
+                    elementsStr += element.path;
+                } else {
+                    elementsStr += element.path + ".*";
+                }
             }
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {
