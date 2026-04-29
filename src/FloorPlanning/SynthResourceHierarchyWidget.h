@@ -1,12 +1,14 @@
 #pragma once
 
 #include "Partition.h"
+#include "PostSynthVerilogNameBridge.h"
 
 #include <QWidget>
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QLabel>
 
+#include <memory>
 #include <set>
 #include <unordered_set>
 #include <string>
@@ -40,6 +42,7 @@ public:
         updateViewLabel();
     }
     void build(const std::set<std::string>& elements);
+    void setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge) { m_nameBridge = std::move(bridge); }
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void selectPartition(const PartitionPtr&);
@@ -59,6 +62,7 @@ private:
 
     PartitionPtr m_selectedPartition;
     std::unordered_set<std::string> m_rawElements;
+    std::shared_ptr<PostSynthVerilogNameBridge> m_nameBridge;
 
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
