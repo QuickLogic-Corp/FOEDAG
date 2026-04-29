@@ -11,6 +11,10 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QCompleter>
+#include <QApplication>
+#include <QClipboard>
+#include <QMenu>
+#include <QShortcut>
 
 #include <QDebug>
 
@@ -19,6 +23,14 @@
 namespace fp {
 
 namespace {
+
+// Marks rows that exist solely to display individual VPR names (not RTL instances).
+// These rows are non-checkable leaf children of netlist items.
+static constexpr int kVprDisplayRowRole = Qt::UserRole + 100;
+
+bool isVprDisplayRow(const QStandardItem* item) {
+    return item && item->data(kVprDisplayRowRole).toBool();
+}
 
 void uncheckAllRecursive(QStandardItem* item, int col) {
     if (!item) {
@@ -121,6 +133,37 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         onItemChanged(item, /*reportChanges*/true);
     });
 
+    // Returns the full VPR names text for a given tree index.
+    // Prefers the tooltip (which holds the complete list) over the display text
+    // (which may be truncated with "... (N total)").
+    auto vprCopyText = [this](const QModelIndex& idx) -> QString {
+        if (!idx.isValid()) return {};
+        const QModelIndex vprIdx = m_model->index(idx.row(), Column::VprNames, idx.parent());
+        const QString tooltip = vprIdx.data(Qt::ToolTipRole).toString().trimmed();
+        if (!tooltip.isEmpty()) return tooltip;
+        return vprIdx.data(Qt::DisplayRole).toString();
+    };
+
+    // Right-click context menu: copy VPR name(s) of the hovered row
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_view, &QTreeView::customContextMenuRequested, this, [this, vprCopyText](const QPoint& pos) {
+        const QModelIndex idx = m_view->indexAt(pos);
+        const QString text = vprCopyText(idx);
+        if (text.isEmpty()) return;
+        QMenu menu;
+        QAction* act = menu.addAction(tr("Copy VPR Name"));
+        if (menu.exec(m_view->viewport()->mapToGlobal(pos)) == act)
+            QApplication::clipboard()->setText(text);
+    });
+
+    // Ctrl+C: copy VPR name(s) of the current row
+    auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_view);
+    connect(copyShortcut, &QShortcut::activated, this, [this, vprCopyText]() {
+        const QString text = vprCopyText(m_view->currentIndex());
+        if (!text.isEmpty())
+            QApplication::clipboard()->setText(text);
+    });
+
     setEnabled(false);
 }
 
@@ -201,7 +244,7 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
         const int rows = item->rowCount();
         for (int row = 0; row < rows; ++row) {
             QStandardItem* child = item->child(row, Column::Netlist);
-            if (!child) {
+            if (!child || isVprDisplayRow(child)) {
                 continue;
             }
 
@@ -267,7 +310,7 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
         const int rows = item->rowCount();
         for (int row = 0; row < rows; ++row) {
             QStandardItem* child = item->child(row, Column::Netlist);
-            if (!child) {
+            if (!child || isVprDisplayRow(child)) {
                 continue;
             }
 
@@ -316,7 +359,15 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
         const Qt::CheckState st = item->isCheckable() ? item->checkState() : Qt::Unchecked;
 
         const int rows = item->rowCount();
-        const bool isLeaf = (rows == 0);
+        // VPR display child rows don't count — an item with only those children is still a leaf
+        bool isLeaf = (rows == 0);
+        if (!isLeaf) {
+            isLeaf = true;
+            for (int r = 0; r < rows; ++r) {
+                QStandardItem* c = item->child(r, Column::Netlist);
+                if (c && !isVprDisplayRow(c)) { isLeaf = false; break; }
+            }
+        }
 
         auto vprNames = [bridge](const std::string& p) -> std::set<std::string> {
             return bridge ? bridge->resolveToVprNames(p) : std::set<std::string>{};
@@ -331,23 +382,26 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
                 bool allChildrenChecked = true;
                 for (int row = 0; row < rows; ++row) {
                     QStandardItem* child = item->child(row, Column::Netlist);
-                    if (child && child->isCheckable() && child->checkState() != Qt::Checked) {
+                    if (child && !isVprDisplayRow(child) && child->isCheckable() && child->checkState() != Qt::Checked) {
                         allChildrenChecked = false;
                         break;
                     }
                 }
                 if (allChildrenChecked) {
-                    // collapse to parent path with wildcard
                     partition->addElement(HierarhyElement{path, false, vprNames(path)});
                 } else {
-                    // not all children checked -> collect deeper
-                    for (int row = 0; row < rows; ++row)
-                        fillPartitionSelectedElementsRecursive(item->child(row, Column::Netlist), path, partition);
+                    for (int row = 0; row < rows; ++row) {
+                        QStandardItem* child = item->child(row, Column::Netlist);
+                        if (!isVprDisplayRow(child))
+                            fillPartitionSelectedElementsRecursive(child, path, partition);
+                    }
                 }
             } else {
-                // collect deeper
-                for (int row = 0; row < rows; ++row)
-                    fillPartitionSelectedElementsRecursive(item->child(row, Column::Netlist), path, partition);
+                for (int row = 0; row < rows; ++row) {
+                    QStandardItem* child = item->child(row, Column::Netlist);
+                    if (!isVprDisplayRow(child))
+                        fillPartitionSelectedElementsRecursive(child, path, partition);
+                }
             }
         }
     };
@@ -418,38 +472,57 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
 {
     if (!m_nameBridge) return;
 
+    const bool partitionsVisible = !isPartitionsColumnHidden();
+
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this](QStandardItem* item, const std::string& prefix)
+        [&populateRecursive, this, partitionsVisible](QStandardItem* item, const std::string& prefix)
     {
         if (!item) return;
         const int rows = item->rowCount();
         for (int row = 0; row < rows; ++row) {
             QStandardItem* child = item->child(row, Column::Netlist);
-            if (!child) continue;
+            if (!child || isVprDisplayRow(child)) continue;
 
             const std::string path = prefix.empty()
                 ? child->text().toStdString()
                 : (prefix + "." + child->text().toStdString());
 
             const auto names = m_nameBridge->resolveToVprNames(path);
-            if (QStandardItem* vprItem = item->child(row, Column::VprNames)) {
-                if (!names.empty()) {
-                    constexpr size_t kMaxPreview = 3;
-                    std::string text;
-                    size_t i = 0;
+            if (!names.empty()) {
+                const bool isLeaf = (child->rowCount() == 0);
+                if (isLeaf) {
+                    // One child row per VPR name so each can be selected and copied
                     for (const auto& n : names) {
-                        if (i > 0) text += ", ";
-                        text += n;
-                        if (++i >= kMaxPreview) break;
+                        auto* col0 = new QStandardItem();
+                        col0->setFlags(Qt::ItemIsEnabled);
+                        col0->setData(true, kVprDisplayRowRole);
+                        auto* col1 = new QStandardItem(QString::fromStdString(n));
+                        col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                        if (partitionsVisible)
+                            child->appendRow({col0, col1, new QStandardItem()});
+                        else
+                            child->appendRow({col0, col1});
                     }
-                    if (names.size() > kMaxPreview)
-                        text += " ... (" + std::to_string(names.size()) + " total)";
-                    vprItem->setText(QString::fromStdString(text));
-                    vprItem->setToolTip(QString::fromStdString([&names]{
-                        std::string tt;
-                        for (const auto& n : names) { tt += n; tt += '\n'; }
-                        return tt;
-                    }()));
+                } else {
+                    // Non-leaf: compact summary in the VPR Names cell
+                    if (QStandardItem* vprItem = item->child(row, Column::VprNames)) {
+                        constexpr size_t kMaxPreview = 3;
+                        std::string text;
+                        size_t i = 0;
+                        for (const auto& n : names) {
+                            if (i > 0) text += ", ";
+                            text += n;
+                            if (++i >= kMaxPreview) break;
+                        }
+                        if (names.size() > kMaxPreview)
+                            text += " ... (" + std::to_string(names.size()) + " total)";
+                        vprItem->setText(QString::fromStdString(text));
+                        vprItem->setToolTip(QString::fromStdString([&names]{
+                            std::string tt;
+                            for (const auto& n : names) { tt += n; tt += '\n'; }
+                            return tt;
+                        }()));
+                    }
                 }
             }
             populateRecursive(child, path);
@@ -610,6 +683,10 @@ void SynthResourceHierarchyWidget::showOnlyCheckedItems()
             if (!child) {
                 continue;
             }
+            // VPR display rows are not checkable; skip them and let them follow parent visibility
+            if (isVprDisplayRow(child)) {
+                continue;
+            }
 
             const bool descVisible = showOnlyCheckedRecursive(view, child, child->index());
             const bool selfVisible = isMarkedVisible(child);
@@ -660,6 +737,11 @@ void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
         for (int row = 0; row < rows; ++row) {
             QStandardItem* child = item->child(row, Column::Netlist);
             if (!child) {
+                continue;
+            }
+            // VPR display rows are not RTL paths; skip them and let them follow parent visibility
+            if (isVprDisplayRow(child)) {
+                m_view->setRowHidden(row, isRoot ? QModelIndex() : item->index(), false);
                 continue;
             }
 
