@@ -22,6 +22,14 @@ public:
   // Returns true if userPath is a known instance path from the RTL hierarchy.
   bool isKnownInstPath(const std::string& path) const { return m_instPaths.count(path) > 0; }
 
+  // Returns all RTL instance paths built from loadRtlSources().
+  std::set<std::string> instPaths() const {
+    std::set<std::string> result;
+    for (const auto& [path, _] : m_instPaths)
+      result.insert(path);
+    return result;
+  }
+
   std::string error() const { return m_error; }
 
 private:

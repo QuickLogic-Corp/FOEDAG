@@ -2338,7 +2338,7 @@ void MainWindow::floorPlanningActionTriggered()
             nameBridge->setVprNetlist(resourceExtractor.elements());
             nameBridge->loadRtlSources(rtlSourceFiles);
             m_floorPlanningWidget->setNameBridge(nameBridge);
-            m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
+            m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
             // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
             // so we construct path based on json settings location file.
             std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc"); 

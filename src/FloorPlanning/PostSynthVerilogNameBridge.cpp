@@ -78,8 +78,49 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
     FOEDAG::StringUtils::replaceAllInPlace(content, "\r", "\n");
 
     std::string currentModule;
+    // State for multi-line instantiation patterns:
+    //   pendingModuleType non-empty  →  we saw "ModType" but haven't found inst name yet
+    //   paramDepth > 0               →  still inside the #(...) parameter block
+    //   paramDepth == 0              →  parameter block closed, looking for inst name
+    std::string pendingModuleType;
+    int paramDepth = 0;
+
     for (const auto& line : FOEDAG::StringUtils::tokenize(content, "\n")) {
       size_t pos = 0;
+
+      // ── SKIP_PARAMS state: scan for the closing ) of a multi-line #(…) ──
+      if (!pendingModuleType.empty() && paramDepth > 0) {
+        for (; pos < line.size(); ++pos) {
+          if      (line[pos] == '(') ++paramDepth;
+          else if (line[pos] == ')') { if (--paramDepth == 0) { ++pos; break; } }
+        }
+        if (paramDepth > 0) continue;  // still inside params — keep going
+        // fall through: params just closed, try inst name on the rest of this line
+      }
+
+      // ── EXPECT_INST_NAME state: param block done, look for "InstName (" ──
+      if (!pendingModuleType.empty() && paramDepth == 0) {
+        while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+        if (pos >= line.size() || line[pos] == '/' || line[pos] == '*') continue;
+        // Guard: if we hit a module boundary, abandon pending state
+        const size_t savedPos = pos;
+        const std::string tok = parseIdent(line, pos);
+        if (tok == "module" || tok == "endmodule") {
+          pendingModuleType.clear();
+          pos = savedPos;  // reprocess this line in normal state below
+        } else if (!tok.empty()) {
+          while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+          if (pos < line.size() && (line[pos] == '(' || line[pos] == '#' || line[pos] == ';')) {
+            modules[currentModule].emplace_back(tok, pendingModuleType);
+          }
+          pendingModuleType.clear();
+          continue;
+        } else {
+          continue;  // nothing yet, wait for next line
+        }
+      }
+
+      // ── NORMAL state ──
       while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
       if (pos >= line.size() || line[pos] == '/' || line[pos] == '*') continue;
 
@@ -95,9 +136,36 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
       if (first == "endmodule") { currentModule.clear(); continue; }
       if (currentModule.empty() || kVerilogKeywords.count(first)) continue;
 
-      // <ModuleType> <instName>( or <ModuleType> #(
+      // <ModuleType> [#(...)] <instName>(
+      while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+      bool hadParamBlock = false;
+      if (pos < line.size() && line[pos] == '#') {
+        hadParamBlock = true;
+        ++pos;
+        while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+        if (pos < line.size() && line[pos] == '(') {
+          paramDepth = 0;
+          for (; pos < line.size(); ++pos) {
+            if      (line[pos] == '(') ++paramDepth;
+            else if (line[pos] == ')') { if (--paramDepth == 0) { ++pos; break; } }
+          }
+          if (paramDepth > 0) {
+            // #(...) spans multiple lines — enter SKIP_PARAMS
+            pendingModuleType = first;
+            continue;
+          }
+        }
+      }
+
       const std::string second = parseIdent(line, pos);
-      if (second.empty()) continue;
+      if (second.empty()) {
+        if (hadParamBlock) {
+          // Params closed on this line but inst name is on the next line
+          pendingModuleType = first;
+          paramDepth = 0;
+        }
+        continue;
+      }
 
       while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
       if (pos >= line.size()) continue;
@@ -113,15 +181,28 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
     for (const auto& [iname, itype] : insts)
       instantiated.insert(itype);
 
+  // Top module = the non-instantiated module with the most direct children.
+  // Picking alphabetically-first breaks when leaf/utility modules (0 instances)
+  // sort before the real top module.
   std::string topModule;
-  for (const auto& [mod, _] : modules) {
-    if (!instantiated.count(mod)) { topModule = mod; break; }
+  int topChildCount = -1;
+  for (const auto& [mod, insts] : modules) {
+    if (!instantiated.count(mod)) {
+      const int n = static_cast<int>(insts.size());
+      if (n > topChildCount) { topChildCount = n; topModule = mod; }
+    }
   }
   if (topModule.empty() && !modules.empty())
     topModule = modules.begin()->first;
 
   std::set<std::string> callStack;
   buildInstPaths(topModule, "", modules, callStack);
+
+  fprintf(stderr, "[NameBridge] topModule=%s  modules=%zu  instPaths=%zu\n",
+          topModule.c_str(), modules.size(), m_instPaths.size());
+  for (const auto& [path, type] : m_instPaths)
+    fprintf(stderr, "  instPath: %s  (type: %s)\n", path.c_str(), type.c_str());
+
   return true;
 }
 
