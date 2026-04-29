@@ -95,7 +95,7 @@ NCriticalPathFilterWidget::NCriticalPathFilterWidget(const QString& name,
           [this](const QString&) { resetComboBoxSilently(); });
 
   connect(
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)  // stateChanged(int) deprecated in Qt 6.7
     m_chUseRegexp, &QCheckBox::checkStateChanged, this,
     [this](Qt::CheckState state) { m_chUseCaseSensetive->setEnabled(state == Qt::Unchecked); }
 #else
