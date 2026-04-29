@@ -112,11 +112,7 @@ void RoutingReportManager::parseLogFile() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-      histograms().push_back(std::make_pair(line, parseHistogram(in, lineNr)));
-#else
-      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
-#endif
+      histograms().push_back({line, parseHistogram(in, lineNr)});
     else if (line.startsWith(ROUTING_SECTION))
       lineNr =
           parseErrorWarningSection(in, lineNr, ROUTING_SECTION, m_routingKeys);

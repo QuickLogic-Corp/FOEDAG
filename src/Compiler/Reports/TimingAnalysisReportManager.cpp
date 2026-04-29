@@ -230,11 +230,7 @@ void TimingAnalysisReportManager::parseLogFile() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (isStatisticalTimingHistogram(line))
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-      m_histograms.push_back(std::make_pair(line, parseHistogram(in, lineNr)));
-#else
-      m_histograms.push_back(qMakePair(line, parseHistogram(in, lineNr)));
-#endif
+      m_histograms.push_back({line, parseHistogram(in, lineNr)});
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
@@ -263,13 +259,8 @@ void TimingAnalysisReportManager::parseOpenSTALog() {
     else if (isStatisticalTimingLine(line))
       timings << line + "\n";
     else if (line.contains(OPENSTA_TIMING))
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-      m_histograms.push_back(std::make_pair(QString("Timing table"),
-                                       parseOpenSTATimingTable(in, lineNr)));
-#else
-      m_histograms.push_back(qMakePair(QString("Timing table"),
-                                       parseOpenSTATimingTable(in, lineNr)));
-#endif
+      m_histograms.push_back({QString("Timing table"),
+                                       parseOpenSTATimingTable(in, lineNr)});
     ++lineNr;
   }
   if (!timings.isEmpty()) fillTimingData(timings);
