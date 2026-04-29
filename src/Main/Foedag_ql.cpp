@@ -175,10 +175,14 @@ bool Foedag::initGui() {
 #endif
   // Gui mode with Qt Widgets
   int argc = m_cmdLine->Argc();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
   // Heap-allocate so the destructor can be called via std::atexit (registered
   // in aboutToQuit below). Tcl_MainEx calls C exit() which bypasses stack
   // unwinding, so a stack-local QApplication would never be destroyed.
   new QApplication(argc, m_cmdLine->Argv());
+#else
+  QApplication app(argc, m_cmdLine->Argv());
+#endif
   QApplication::setStyle(new FoedagStyle(QApplication::style()));
   FOEDAG::TclInterpreter* interpreter =
       new FOEDAG::TclInterpreter(m_cmdLine->Argv()[0]);
