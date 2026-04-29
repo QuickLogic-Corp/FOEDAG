@@ -137,10 +137,6 @@ void PowerAnalysisReportManager::parseLogFile() {
       auto m = it.next();
       QStringList user_input;
 
-      // std::cout << "1: " << m.captured(1).toStdString() << std::endl;
-      // std::cout << "2: " << m.captured(2).toStdString() << std::endl;
-      // std::cout << "3: "<< m.captured(3).toStdString() << std::endl;
-
       user_input << m.captured(1);
       user_input << m.captured(2);
       user_input << m.captured(3);
@@ -156,10 +152,6 @@ void PowerAnalysisReportManager::parseLogFile() {
     while (it.hasNext()) {
       auto m = it.next();
       QStringList user_input;
-
-      // std::cout << "1: " << m.captured(1).toStdString() << std::endl;
-      // std::cout << "2: " << m.captured(2).toStdString() << std::endl;
-      // std::cout << "3: "<< m.captured(3).toStdString() << std::endl;
 
       user_input << m.captured(1);
       user_input << m.captured(2) + " " + m.captured(3);
