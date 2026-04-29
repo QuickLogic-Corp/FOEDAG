@@ -714,7 +714,6 @@ void QsciScintillaBase::dragMoveEvent(QDragMoveEvent *e)
     }
     else
     {
-        {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         const QPoint dragPos = e->position().toPoint();
 #else
@@ -724,8 +723,6 @@ void QsciScintillaBase::dragMoveEvent(QDragMoveEvent *e)
                 sci->SPositionFromLocation(
                         Scintilla::Point(dragPos.x(), dragPos.y()), false,
                         false, sci->UserVirtualSpace()));
-        }
-
         acceptAction(e);
     }
 }
