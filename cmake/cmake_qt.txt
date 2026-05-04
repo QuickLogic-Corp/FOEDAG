@@ -19,6 +19,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# If the QT_DIR environment variable is set (e.g., to C:/Qt/6.9.3/mingw_64
+# on Windows MSYS2), prepend it to CMAKE_PREFIX_PATH so find_package(Qt6)
+# can locate it. Stored as a CACHE variable with FORCE so nested CMake
+# invocations (subdirectories, ExternalProject, etc.) see the same value.
+# Guarded with _QT_DIR_PROCESSED so the message prints once even though this
+# file is included from many subdirectory CMakeLists.txt files.
+if(DEFINED ENV{QT_DIR} AND NOT "$ENV{QT_DIR}" STREQUAL "" AND NOT _QT_DIR_PROCESSED)
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_DIR}")
+    set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}" CACHE STRING
+        "Search prefixes for find_package" FORCE)
+    set(_QT_DIR_PROCESSED 1 CACHE INTERNAL "")
+    message(STATUS "QT_DIR=$ENV{QT_DIR} added to CMAKE_PREFIX_PATH")
+endif()
+
 if(NOT DEFINED QT_VERSION_MAJOR)
     find_package(Qt6 COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test QUIET)
     if(Qt6_FOUND)
