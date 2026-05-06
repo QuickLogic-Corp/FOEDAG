@@ -36,6 +36,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "gtest/gtest.h"
 #include "qttclnotifier.hpp"
 
+// On Windows + Qt6, Qt propagates -DUNICODE via INTERFACE_COMPILE_DEFINITIONS,
+// which makes tcl.h alias Tcl_MainEx -> Tcl_MainExW (wchar_t**). Pull in the
+// Win32 headers needed to convert the command line to wide chars.
+#if defined(_WIN32) && (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+#include <windows.h>
+#include <shellapi.h>  // for CommandLineToArgvW
+#endif
+
 FOEDAG::Session* GlobalSession;
 
 void registerTclCommands(FOEDAG::Session* session) {
@@ -110,7 +118,16 @@ TEST(GuiMain, GuiOpenClose) {
   };
 
   // Start Loop
+#if defined(_WIN32) && (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+  // tcl.h aliases Tcl_MainEx to Tcl_MainExW (wchar_t**) under -DUNICODE
+  // (propagated by Qt6 on Windows). Get a wide-char argv from Win32 directly.
+  int wargc = 0;
+  LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+  Tcl_MainExW(wargc, wargv, tcl_init, interpreter->getInterp());
+  LocalFree(wargv);
+#else
   Tcl_MainEx(argc, (char**)argv, tcl_init, interpreter->getInterp());
+#endif
   // Never ends, executable exits with the Tcl_exit call.
   // Google test cannot tear down the test, so no reporting happens
 }

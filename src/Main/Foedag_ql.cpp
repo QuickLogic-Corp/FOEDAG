@@ -72,6 +72,14 @@ extern "C" {
 #include <windows.h>  // for FreeConsole()
 #endif
 
+// On Windows + Qt6, Qt propagates -DUNICODE via INTERFACE_COMPILE_DEFINITIONS,
+// which makes tcl.h alias Tcl_MainEx -> Tcl_MainExW (wchar_t**). Pull in the
+// Win32 headers needed to convert the command line to wide chars.
+#if defined(_WIN32) && (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+#include <windows.h>
+#include <shellapi.h>  // for CommandLineToArgvW
+#endif
+
 FOEDAG::Session* GlobalSession;
 
 inline void initializeResources() { 
@@ -279,7 +287,16 @@ bool Foedag::initGui() {
 #endif
 
   // Start Loop
+#if defined(_WIN32) && (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+  // tcl.h aliases Tcl_MainEx to Tcl_MainExW (wchar_t**) under -DUNICODE
+  // (propagated by Qt6 on Windows). Get a wide-char argv from Win32 directly.
+  int wargc = 0;
+  LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+  Tcl_MainExW(wargc, wargv, tcl_init, interpreter->getInterp());
+  LocalFree(wargv);
+#else
   Tcl_MainEx(argc, m_cmdLine->Argv(), tcl_init, interpreter->getInterp());
+#endif
 
   delete GlobalSession;
   return 0;
@@ -477,9 +494,18 @@ bool Foedag::initBatch() {
   };
 
   // Start Loop
+#if defined(_WIN32) && (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+  // tcl.h aliases Tcl_MainEx to Tcl_MainExW (wchar_t**) under -DUNICODE.
+  int wargc = 0;
+  LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+  // Pass argc=1 so Tcl scripts only see the program name (mirrors char path).
+  Tcl_MainExW(1, wargv, tcl_init, interpreter->getInterp());
+  LocalFree(wargv);
+#else
   char** argv = new char*[1];
   argv[0] = strdup(m_cmdLine->Argv()[0]);
   Tcl_MainEx(1, argv, tcl_init, interpreter->getInterp());
+#endif
   int returnStatus = GlobalSession->ReturnStatus();
   delete GlobalSession;
   return returnStatus;
