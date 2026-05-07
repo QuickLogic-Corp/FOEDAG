@@ -9338,6 +9338,8 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // use settings to populate yosys_options
   std::string yosys_options;
 
+  yosys_options += " -clocks_file " + std::string(ProjManager()->projectName()) + ".clocks"; 
+
   if( QLSettingsManager::getStringValue("yosys", "general", "verilog") == "checked" ) {
 
     yosys_options += " -verilog " + std::string(m_projManager->projectName() + "_post_synth.v");
