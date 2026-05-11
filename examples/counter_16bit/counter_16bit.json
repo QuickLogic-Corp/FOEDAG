@@ -153,6 +153,13 @@
                 "widgetType": "checkbox",
                 "default": "unchecked",
                 "visible": true
+            },
+            "dspv2": {
+                "label": "Use DSPv2 Inference",
+                "text" : "dspv2",
+                "widgetType": "checkbox",
+                "default": "unchecked",
+                "visible": true
             }
         },
         "plugin": {}
