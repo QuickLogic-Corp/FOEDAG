@@ -162,6 +162,11 @@
                 "widgetType": "checkbox",
                 "arg": "no_bram"
             },
+            "dspv2_checkbox": {
+                "label": "Use DSPv2 Inference",
+                "widgetType": "checkbox",
+                "arg": "dspv2"
+            },
             "_META_": {
                 "hidden": false,
                 "isSetting": true,
