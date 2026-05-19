@@ -2348,7 +2348,6 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       vpr_options += " --preserve_output_pin_connections off";
       vpr_options += " --annotated_rr_graph on";
       vpr_options += " --remove_dangling_nodes off";
-      vpr_options += " --sb_count_dir sb_count";
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // vpr_options += " --allow_dangling_combinational_nodes on";
@@ -2733,7 +2732,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       command->append("--preserve_output_pin_connections off");
       command->append("--annotated_rr_graph on");
       command->append("--remove_dangling_nodes off");
-      command->append("--sb_count_dir sb_count");
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // command->append("--allow_dangling_combinational_nodes on");
@@ -9569,6 +9567,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
   }
 
+  command->append("--skip_sync_clustering_and_routing_results on");
   command->append("--route");
 
   return command;
