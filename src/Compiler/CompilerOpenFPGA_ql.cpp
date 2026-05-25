@@ -6559,7 +6559,7 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   auto [filepath_pin_table_csv, error] = findCurrentDevicePinTableCsv();
   if (filepath_pin_table_csv.empty()) {
       // no pin table csv available, we cannot proceed with the pcf flow!
-      ErrorMessage(std::string(__func__) + ": pin table csv not found, cannot continue with pcf flow!");
+      Message(std::string(__func__) + ": pin table csv not found, cannot continue with pcf flow!");
       return false;
   }
   ///////////////////////////////////////////////////////////////// PIN TABLE CSV --
@@ -6725,8 +6725,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
   if(filepath_fpga_io_map_xml.empty()) {
-    ErrorMessage(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
-    return false;
+    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
   }
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
