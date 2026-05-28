@@ -2491,13 +2491,28 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
 
 bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
 
+  // Extension-based shortcut: files ending in .en are always encrypted.
   if(filepath.extension() == ".en") {
     return true;
   }
-  else {
+
+  // Content-based detection: some files (e.g. sb_maps_generated.yml produced
+  // by the AUTO/CUSTOM layout generator) carry the qlcrypt 'QLEN' magic but
+  // use a regular extension. Peek the first 4 bytes for the magic header so
+  // we still construct --sb_maps_encrypted instead of --sb_maps for them.
+  if(!FileUtils::FileExists(filepath)) {
     return false;
   }
-
+  std::ifstream ifs(filepath, std::ios::binary);
+  if(!ifs) {
+    return false;
+  }
+  char buf[4] = {0};
+  ifs.read(buf, 4);
+  if(ifs.gcount() != 4) {
+    return false;
+  }
+  return buf[0] == 'Q' && buf[1] == 'L' && buf[2] == 'E' && buf[3] == 'N';
 }
 
 
