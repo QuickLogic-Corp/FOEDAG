@@ -9746,8 +9746,23 @@ void CompilerOpenFPGA_ql::onQdcFileSaved() {
 
   BaseVprCommand(); // we need this call in order to decrypt arch file and store it as m_architectureFile
 
-  // incr compilation itself didn't track qdc file, so we must re-generate xml 
+  // incr compilation itself didn't track qdc file, so we must re-generate xml
   // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+  GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
+  invalidateTaskStatuses();
+}
+
+void CompilerOpenFPGA_ql::onPcfFileSaved() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
+  BaseVprCommand(); // decrypt arch file -> m_architectureFile
+
+  // incr compilation itself didn't track pcf file, so we must re-generate xml
+  // in order to incr compilation refresh compile statuses accordingly each time we save pcf file
   GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
   invalidateTaskStatuses();
 }
