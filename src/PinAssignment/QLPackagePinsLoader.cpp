@@ -43,7 +43,7 @@ void QLPackagePinsLoader::parseHeader(const QString &header)
   m_header.clear();
   const QStringList columns = header.split(",");
   for (const QString& column: columns) {
-    m_header[column.toLower()] = m_header.size();
+    m_header[column.trimmed().toLower()] = m_header.size();
   }
 
   m_format = (m_header.contains(COLUMN_CUSTOMER_PIN_ALIAS) ||
