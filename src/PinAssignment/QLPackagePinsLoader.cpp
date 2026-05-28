@@ -9,6 +9,8 @@
 #include <QXmlStreamReader>
 #include <QDebug>
 
+#include <algorithm>
+
 extern FOEDAG::Session* GlobalSession;
 
 namespace FOEDAG {
@@ -43,22 +45,38 @@ void QLPackagePinsLoader::parseHeader(const QString &header)
   for (const QString& column: columns) {
     m_header[column.toLower()] = m_header.size();
   }
+
+  m_format = (m_header.contains(COLUMN_CUSTOMER_PIN_ALIAS) ||
+              m_header.contains(COLUMN_PIN_DIRECTION))
+             ? Format::New
+             : Format::Old;
 }
 
 std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePath) {
   m_portToPinMap.clear();
+  m_pinToLocationMap.clear();
 
   initHeader();
 
   const auto &[success, content] = getFileContent(pinTableFilePath);
   if (!success) return std::make_pair(success, content);
 
+  QStringList lines = QtUtils::StringSplit(content, '\n');
+  if (lines.isEmpty()) {
+    return std::make_pair(false, QString("empty file: %1").arg(pinTableFilePath));
+  }
+  parseHeader(lines.takeFirst());
+
+  if (m_format == Format::New) {
+    return loadNew(lines, pinTableFilePath);
+  }
+  return loadOld(lines, pinTableFilePath);
+}
+
+std::pair<bool, QString> QLPackagePinsLoader::loadOld(const QStringList &lines, const QString &pinTableFilePath) {
 #ifdef UPSTREAM_PINPLANNER
   InternalPins &internalPins = m_model->internalPinsRef();
 #endif
-
-  QStringList lines = QtUtils::StringSplit(content, '\n');
-  parseHeader(lines.takeFirst());
 
   if (!m_header.contains(COLUMN_ORIENTATION)) {
     return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(COLUMN_ORIENTATION).arg(pinTableFilePath));
@@ -156,15 +174,136 @@ std::pair<bool, QString> QLPackagePinsLoader::load(const QString& pinTableFilePa
   return std::make_pair(true, QString{});
 }
 
-LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& ioMapFilePath)
+std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, const QString &pinTableFilePath) {
+  for (const QString &required : {COLUMN_NETLIST_NAME, COLUMN_PIN_TYPE,
+                                  COLUMN_CUSTOMER_PIN_ALIAS, COLUMN_PIN_DIRECTION,
+                                  COLUMN_ROW, COLUMN_COL, COLUMN_SUBTILE}) {
+    if (!m_header.contains(required)) {
+      return std::make_pair(false, QString("column %1 is missing, abort loading %2").arg(required).arg(pinTableFilePath));
+    }
+  }
+
+  const int idxNetlist = m_header.value(COLUMN_NETLIST_NAME);
+  const int idxPinType = m_header.value(COLUMN_PIN_TYPE);
+  const int idxAlias   = m_header.value(COLUMN_CUSTOMER_PIN_ALIAS);
+  const int idxDir     = m_header.value(COLUMN_PIN_DIRECTION);
+  const int idxRow     = m_header.value(COLUMN_ROW);
+  const int idxCol     = m_header.value(COLUMN_COL);
+  const int idxSubtile = m_header.value(COLUMN_SUBTILE);
+
+  const int neededMax = std::max({idxNetlist, idxPinType, idxAlias, idxDir, idxRow, idxCol, idxSubtile});
+
+  struct ParsedRow { QString pinName; QString dir; int row; int col; int subtile; };
+  QVector<ParsedRow> rows;
+  int maxRow = 0, maxCol = 0;
+
+  for (const auto &line: lines) {
+    const QStringList data = line.split(",");
+    if (data.size() <= neededMax) {
+      continue;
+    }
+
+    if (data.at(idxPinType).trimmed() != QStringLiteral("GPIO")) {
+      continue;
+    }
+
+    const QString netlistName = data.at(idxNetlist).trimmed();
+    if (netlistName.isEmpty()) {
+      continue;
+    }
+
+    const QString alias = data.at(idxAlias).trimmed();
+    const QString pinName = alias.isEmpty() ? netlistName : alias;
+
+    const QString dirStr = data.at(idxDir).trimmed().toLower();
+    QString dir;
+    if (dirStr == QStringLiteral("input"))       dir = IODirection::INPUT;
+    else if (dirStr == QStringLiteral("output")) dir = IODirection::OUTPUT;
+    else continue;
+
+    bool okRow=false, okCol=false, okSub=false;
+    const int r = data.at(idxRow).trimmed().toInt(&okRow);
+    const int c = data.at(idxCol).trimmed().toInt(&okCol);
+    const int s = data.at(idxSubtile).trimmed().toInt(&okSub);
+    if (!okRow || !okCol || !okSub) {
+      logWarning(QString("line [%1] has non-integer row/col/subtile").arg(line));
+      continue;
+    }
+
+    if (r > maxRow) maxRow = r;
+    if (c > maxCol) maxCol = c;
+
+    rows.push_back({pinName, dir, r, c, s});
+  }
+
+  // Vertical sides win on corners
+  auto classify = [maxRow, maxCol](int r, int c) -> QString {
+    if (c == 0)      return QStringLiteral("LEFT");
+    if (c == maxCol) return QStringLiteral("RIGHT");
+    if (r == 0)      return QStringLiteral("BOTTOM");
+    if (r == maxRow) return QStringLiteral("TOP");
+    return QString();
+  };
+
+  QSet<QString> uniquePins;
+  QMap<QString, PackagePinGroup> groupsBySide;
+  QStringList sideOrder;
+
+  for (const auto &row : rows) {
+    const QString side = classify(row.row, row.col);
+    if (side.isEmpty()) {
+      logWarning(QString("pin %1 at (col=%2,row=%3) is not on any device edge, skipping").arg(row.pinName).arg(row.col).arg(row.row));
+      continue;
+    }
+    if (uniquePins.contains(row.pinName)) {
+      continue;
+    }
+    uniquePins.insert(row.pinName);
+
+    QStringList dataMod;
+    for (int i=0; i<=InternalPinName; ++i) {
+      dataMod.append("");
+    }
+    dataMod[PinName] = row.pinName;
+    dataMod[BallName] = row.pinName;
+    dataMod[BallId] = row.pinName;
+    dataMod[Direction] = row.dir;
+
+    if (!groupsBySide.contains(side)) {
+      groupsBySide[side].name = side;
+      sideOrder.append(side);
+    }
+    groupsBySide[side].pinData.append({dataMod});
+
+    m_pinToLocationMap[row.pinName] = QString("%1:%2:%3").arg(row.col).arg(row.row).arg(row.subtile);
+  }
+
+  for (const QString &side : sideOrder) {
+    const PackagePinGroup &g = groupsBySide.value(side);
+    const bool acceptGroup = m_model->userGroups().empty() ||
+                             m_model->userGroups().contains(g.name);
+    if (acceptGroup) {
+      m_model->append(g);
+    }
+  }
+
+  m_model->initListModel();
+  return std::make_pair(true, QString{});
+}
+
+bool QLPackagePinsLoader::loadIOMap(const QString& ioMapFilePath)
 {
+  if (m_format == Format::New) {
+    // m_pinToLocationMap is already populated by loadNew() from CSV columns;
+    // no XML lookup is required.
+    return true;
+  }
+
   QFile file(ioMapFilePath);
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
     logWarning(QString("Failed to open the file %1").arg(ioMapFilePath));
-    return nullptr;
+    return false;
   }
-
-  QMap<QString, QString> pinToLocationMap;
 
   QXmlStreamReader xmlReader(&file);
 
@@ -180,9 +319,7 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
         if (m_portToPinMap.contains(port)) {
           QString location = QString("%1:%2:%3").arg(x).arg(y).arg(z);
           QString pin{m_portToPinMap.value(port)};
-          pinToLocationMap[pin] = location;
-        } else {
-          //qInfo() << "port" << port << "is not in m_portToPinMap" << m_portToPinMap.size();
+          m_pinToLocationMap[pin] = location;
         }
       }
     }
@@ -193,13 +330,16 @@ LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap(const QString& i
   }
 
   file.close();
+  return true;
+}
 
-  LocationCollisionDetectorPtr collisionDetector = std::make_shared<LocationCollisionDetector>(pinToLocationMap);
+LocationCollisionDetectorPtr QLPackagePinsLoader::validateIOMap()
+{
+  LocationCollisionDetectorPtr collisionDetector = std::make_shared<LocationCollisionDetector>(m_pinToLocationMap);
   QMap<QString, QSet<QString>> overlappedLocationToPinsMap = collisionDetector->overlappedLocationToPinsMap();
   if (!overlappedLocationToPinsMap.isEmpty()) {
-    logWarning(QString("%1 physical locations point to more than one pin in file %2.\nThese collisions are handled by the Pin Planner UI").arg(overlappedLocationToPinsMap.size()).arg(ioMapFilePath));
+    logWarning(QString("%1 physical locations point to more than one pin.\nThese collisions are handled by the Pin Planner UI").arg(overlappedLocationToPinsMap.size()));
   }
-
   return collisionDetector;
 }
 
