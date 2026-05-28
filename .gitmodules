@@ -7,4 +7,4 @@
 [submodule "third_party/qlcrypt"]
 	path = third_party/qlcrypt
 	url = git@github.com:QL-Proprietary/qlcrypt.git
-        branch = v0.1.1
+        branch = qlcrypt-crr-e2e
