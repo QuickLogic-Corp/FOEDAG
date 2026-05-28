@@ -175,7 +175,7 @@ std::pair<bool, QString> QLPackagePinsLoader::loadOld(const QStringList &lines, 
 }
 
 std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, const QString &pinTableFilePath) {
-  for (const QString &required : {COLUMN_NETLIST_NAME, COLUMN_PIN_TYPE,
+  for (const QString &required : {COLUMN_SIDE, COLUMN_NETLIST_NAME, COLUMN_PIN_TYPE,
                                   COLUMN_CUSTOMER_PIN_ALIAS, COLUMN_PIN_DIRECTION,
                                   COLUMN_ROW, COLUMN_COL, COLUMN_SUBTILE}) {
     if (!m_header.contains(required)) {
@@ -183,6 +183,7 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
     }
   }
 
+  const int idxSide    = m_header.value(COLUMN_SIDE);
   const int idxNetlist = m_header.value(COLUMN_NETLIST_NAME);
   const int idxPinType = m_header.value(COLUMN_PIN_TYPE);
   const int idxAlias   = m_header.value(COLUMN_CUSTOMER_PIN_ALIAS);
@@ -191,11 +192,15 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
   const int idxCol     = m_header.value(COLUMN_COL);
   const int idxSubtile = m_header.value(COLUMN_SUBTILE);
 
-  const int neededMax = std::max({idxNetlist, idxPinType, idxAlias, idxDir, idxRow, idxCol, idxSubtile});
+  const int neededMax = std::max({idxSide, idxNetlist, idxPinType, idxAlias, idxDir, idxRow, idxCol, idxSubtile});
 
-  struct ParsedRow { QString pinName; QString dir; int row; int col; int subtile; };
-  QVector<ParsedRow> rows;
-  int maxRow = 0, maxCol = 0;
+  static const QSet<QString> validSides{
+      QStringLiteral("TOP"), QStringLiteral("BOTTOM"),
+      QStringLiteral("LEFT"), QStringLiteral("RIGHT")};
+
+  QSet<QString> uniquePins;
+  QMap<QString, PackagePinGroup> groupsBySide;
+  QStringList sideOrder;
 
   for (const auto &line: lines) {
     const QStringList data = line.split(",");
@@ -209,6 +214,12 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
 
     const QString netlistName = data.at(idxNetlist).trimmed();
     if (netlistName.isEmpty()) {
+      continue;
+    }
+
+    const QString side = data.at(idxSide).trimmed().toUpper();
+    if (!validSides.contains(side)) {
+      logWarning(QString("line [%1] has invalid side [%2]").arg(line).arg(side));
       continue;
     }
 
@@ -230,44 +241,19 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
       continue;
     }
 
-    if (r > maxRow) maxRow = r;
-    if (c > maxCol) maxCol = c;
-
-    rows.push_back({pinName, dir, r, c, s});
-  }
-
-  // Vertical sides win on corners
-  auto classify = [maxRow, maxCol](int r, int c) -> QString {
-    if (c == 0)      return QStringLiteral("LEFT");
-    if (c == maxCol) return QStringLiteral("RIGHT");
-    if (r == 0)      return QStringLiteral("BOTTOM");
-    if (r == maxRow) return QStringLiteral("TOP");
-    return QString();
-  };
-
-  QSet<QString> uniquePins;
-  QMap<QString, PackagePinGroup> groupsBySide;
-  QStringList sideOrder;
-
-  for (const auto &row : rows) {
-    const QString side = classify(row.row, row.col);
-    if (side.isEmpty()) {
-      logWarning(QString("pin %1 at (col=%2,row=%3) is not on any device edge, skipping").arg(row.pinName).arg(row.col).arg(row.row));
+    if (uniquePins.contains(pinName)) {
       continue;
     }
-    if (uniquePins.contains(row.pinName)) {
-      continue;
-    }
-    uniquePins.insert(row.pinName);
+    uniquePins.insert(pinName);
 
     QStringList dataMod;
     for (int i=0; i<=InternalPinName; ++i) {
       dataMod.append("");
     }
-    dataMod[PinName] = row.pinName;
-    dataMod[BallName] = row.pinName;
-    dataMod[BallId] = row.pinName;
-    dataMod[Direction] = row.dir;
+    dataMod[PinName] = pinName;
+    dataMod[BallName] = pinName;
+    dataMod[BallId] = pinName;
+    dataMod[Direction] = dir;
 
     if (!groupsBySide.contains(side)) {
       groupsBySide[side].name = side;
@@ -275,7 +261,7 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
     }
     groupsBySide[side].pinData.append({dataMod});
 
-    m_pinToLocationMap[row.pinName] = QString("%1:%2:%3").arg(row.col).arg(row.row).arg(row.subtile);
+    m_pinToLocationMap[pinName] = QString("%1:%2:%3").arg(c).arg(r).arg(s);
   }
 
   for (const QString &side : sideOrder) {

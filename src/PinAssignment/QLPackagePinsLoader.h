@@ -19,6 +19,7 @@ class QLPackagePinsLoader : public PackagePinsLoader {
   const QString COLUMN_MAPPED_PIN = "mapped_pin";
 
   // New-format columns
+  const QString COLUMN_SIDE = "side";
   const QString COLUMN_NETLIST_NAME = "netlist_name";
   const QString COLUMN_PIN_TYPE = "pin_type";
   const QString COLUMN_CUSTOMER_PIN_ALIAS = "customer_pin_alias";
