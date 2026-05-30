@@ -9315,6 +9315,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosys_options += " -no_dsp";
   }
 
+  if( QLSettingsManager::getStringValue("yosys", "general", "dspv2") == "checked" ) {
+
+    yosys_options += " -dspv2";
+  }
+
   if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {
 
     yosys_options += " -no_bram";
