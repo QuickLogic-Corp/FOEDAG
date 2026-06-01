@@ -45,6 +45,10 @@ class QLPackagePinsLoader : public PackagePinsLoader {
   // populates m_pinToLocationMap during load().
   LocationCollisionDetectorPtr validateIOMap();
 
+  // pin -> "x:y:z" physical location. For the new format this is filled by
+  // load(); for the old format it requires a prior loadIOMap() call.
+  const QMap<QString, QString>& pinToLocationMap() const { return m_pinToLocationMap; }
+
 private:
   void initHeader();
   void parseHeader(const QString &header);

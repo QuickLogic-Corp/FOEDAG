@@ -8,6 +8,8 @@
         <file>Settings/settings_tclExample_userVals.json</file>
         <file>PinAssignment/package_pin_info.json</file>
         <file>PinAssignment/corrupted.json</file>
+        <file>PinAssignment/qlpin_table_old_sample.csv</file>
+        <file>PinAssignment/qlpin_table_new_sample.csv</file>
         <file>InteractivePathAnalysis/data/report_timing.setup.rpt.sample</file>
     </qresource>
 </RCC>

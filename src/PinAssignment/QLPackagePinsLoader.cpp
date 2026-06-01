@@ -128,12 +128,21 @@ std::pair<bool, QString> QLPackagePinsLoader::loadOld(const QStringList &lines, 
 
     if (data.size() >= columnMappedPinIndex) {
       pinName = data.at(columnMappedPinIndex);
-      dataMod[PinName] = pinName;
-      dataMod[BallName] = pinName;
-      dataMod[BallId] = pinName;
     } else {
       logWarning(QString("line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_MAPPED_PIN));
     }
+
+    // Fall back to netlist_name when mapped_pin is empty (mirrors loadNew()).
+    if (pinName.isEmpty() && m_header.contains(COLUMN_NETLIST_NAME)) {
+      const int columnNetlistNameIndex = m_header.value(COLUMN_NETLIST_NAME);
+      if (data.size() > columnNetlistNameIndex) {
+        pinName = data.at(columnNetlistNameIndex);
+      }
+    }
+
+    dataMod[PinName] = pinName;
+    dataMod[BallName] = pinName;
+    dataMod[BallId] = pinName;
 
     if (!pinName.isEmpty()) {
       if (uniquePins.contains(pinName)) {
