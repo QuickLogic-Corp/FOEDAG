@@ -6360,6 +6360,9 @@ int status = ExecuteAndMonitorSystemCommand(command);
       return true;
   }
 
+  std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+
   std::filesystem::path output_pcf_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_PinMapping.pcf");
 
   #ifdef _WIN32
@@ -6391,7 +6394,9 @@ int status = ExecuteAndMonitorSystemCommand(command);
     args.push_back(pinTableFile.string());
   }          
   args.push_back("--pcf_file");
-  args.push_back(output_pcf_path.string());            
+  args.push_back(output_pcf_path.string());        
+   args.push_back("--place_file");
+  args.push_back(place_file_path.string());       
 
   int pinmapping2pcf_status = FileUtils::ExecuteSystemCommand(pinmapping2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
 
