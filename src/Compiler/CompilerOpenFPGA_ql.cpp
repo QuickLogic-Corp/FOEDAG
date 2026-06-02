@@ -2363,13 +2363,24 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
 
       if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(sb_maps_file_path)) {
-        // Encrypted CRR path: pass encrypted file paths + key DB to VPR
+        // Encrypted CRR path: VPR detects encryption from the ".en" suffix on
+        // --sb_maps and decrypts in-memory using --crypt_key_db. There are no
+        // separate --sb_maps_encrypted/--sb_templates_encrypted flags; the
+        // encrypted sb_maps file (and the ".en" CSVs under --sb_templates) are
+        // passed through the same options as the plaintext flow.
         std::filesystem::path crypt_key_db =
             (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
             (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
 
-        vpr_options += " --sb_maps_encrypted " + sb_maps_file_path.string();
-        vpr_options += " --sb_templates_encrypted " + sb_templates_dir_path.string();
+        if(!FileUtils::FileExists(crypt_key_db)) {
+          ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
+        }
+        if(sb_maps_file_path.extension() != ".en") {
+          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + sb_maps_file_path.string());
+        }
+
+        vpr_options += " --sb_maps " + sb_maps_file_path.string();
+        vpr_options += " --sb_templates " + sb_templates_dir_path.string();
         vpr_options += " --crypt_key_db " + crypt_key_db.string();
       } else {
         vpr_options += " --sb_maps " + sb_maps_file_path.string();
@@ -2749,13 +2760,24 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     if(!m_SBMapsFile.empty() && !m_SBTemplatesDir.empty()) {
 
       if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_SBMapsFile)) {
-        // Encrypted CRR path: pass encrypted file paths + key DB to VPR
+        // Encrypted CRR path: VPR detects encryption from the ".en" suffix on
+        // --sb_maps and decrypts in-memory using --crypt_key_db. There are no
+        // separate --sb_maps_encrypted/--sb_templates_encrypted flags; the
+        // encrypted sb_maps file (and the ".en" CSVs under --sb_templates) are
+        // passed through the same options as the plaintext flow.
         std::filesystem::path crypt_key_db =
             (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
             (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
 
-        command->appendFile("--sb_maps_encrypted", m_SBMapsFile);
-        command->appendFile("--sb_templates_encrypted", m_SBTemplatesDir);
+        if(!FileUtils::FileExists(crypt_key_db)) {
+          ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
+        }
+        if(m_SBMapsFile.extension() != ".en") {
+          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + m_SBMapsFile.string());
+        }
+
+        command->appendFile("--sb_maps", m_SBMapsFile);
+        command->appendFile("--sb_templates", m_SBTemplatesDir);
         command->appendFile("--crypt_key_db", crypt_key_db);
       } else {
         command->appendFile("--sb_maps", m_SBMapsFile);
@@ -3109,7 +3131,14 @@ bool CompilerOpenFPGA_ql::Packing() {
       int overhead_percentage = 0;
       if(FileUtils::FileExists(add_layout_params_json_filepath)) {
         std::ifstream add_layout_params_json_ifstream(add_layout_params_json_filepath.string());
-        add_layout_params_json = json::parse(add_layout_params_json_ifstream);
+        try {
+          add_layout_params_json = json::parse(add_layout_params_json_ifstream);
+        }
+        catch (const json::exception& e) {
+          ErrorMessage("Failed to parse '" + add_layout_params_json_filepath.string() +
+                       "': " + e.what());
+          return false;
+        }
         if(!add_layout_params_json.empty()) {
           if(add_layout_params_json.contains("overhead_percentage")){
             overhead_percentage = add_layout_params_json["overhead_percentage"].get<int>();
@@ -7054,6 +7083,15 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
     const std::string& deviceTypeString) {
   const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
   m_cryptdbPath = cryptdb;
+
+  if (!FileUtils::FileExists(cryptdb)) {
+    ErrorMessage(std::string("cannot find key database for decryption: ") + cryptdb.string());
+    return false;
+  }
+  if (!FileUtils::FileExists(src_en)) {
+    ErrorMessage(std::string("cannot find encrypted device file: ") + src_en.string());
+    return false;
+  }
 
   qlcrypt::KeyDB keys;
   if (auto s = qlcrypt::KeyDB::load(cryptdb.string(), keys); !qlcrypt::ok(s)) {

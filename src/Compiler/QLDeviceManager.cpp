@@ -2125,9 +2125,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // std::cout << std::endl;
 
     // Generate a fresh key database and encrypt each file in the list.
+    // Use the caller-supplied customer id (from "--customer-id") when provided;
+    // otherwise fall back to the device type string as the stored metadata.
+    const std::string key_customer_id =
+        customer_id.empty() ? DeviceTypeString(family, foundry, node, devicename)
+                            : customer_id;
     qlcrypt::KeyDB keys;
-    if (auto s = qlcrypt::KeyDB::create(keys,
-                                         DeviceTypeString(family, foundry, node, devicename));
+    if (auto s = qlcrypt::KeyDB::create(keys, key_customer_id);
         !qlcrypt::ok(s)) {
       compiler->ErrorMessage(std::string("keygen failed: ") + std::string(qlcrypt::toString(s)));
       return -1;
