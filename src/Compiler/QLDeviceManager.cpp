@@ -2019,7 +2019,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           }
 
           // include pin_table csv files for copy
-          std::filesystem::path device_target_config_json_filepath = source_device_data_dir_path / std::string("config.json");
+          std::filesystem::path device_target_config_json_filepath = dir_entry.path() / std::string("config.json");
           std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
           json device_target_config_json = json::parse(device_target_config_json_ifstream);
           // get json value
