@@ -2503,7 +2503,7 @@ bool QLDeviceManager::deviceFileIsEncrypted(std::filesystem::path filepath) {
   // Content-based detection: some files (e.g. sb_maps_generated.yml produced
   // by the AUTO/CUSTOM layout generator) carry the qlcrypt 'QLEN' magic but
   // use a regular extension. Peek the first 4 bytes for the magic header so
-  // we still construct --sb_maps_encrypted instead of --sb_maps for them.
+  // we still take the encrypted (--crypt_key_db) path for them.
   if(!FileUtils::FileExists(filepath)) {
     return false;
   }
