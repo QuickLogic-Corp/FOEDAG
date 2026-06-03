@@ -2751,6 +2751,13 @@ QProcess* Compiler::ExecuteCommand(const std::string& command) const {
 std::string Compiler::ReplaceAll(std::string_view str, std::string_view from,
                                  std::string_view to) {
 
+  // An empty 'from' would match at every position and loop forever (growing the
+  // result until std::bad_alloc). It is never a meaningful search target, so
+  // return the input unchanged.
+  if (from.empty()) {
+    return std::string(str);
+  }
+
 #if OVERRIDE_WITH_ENV_VAR
   // check if the string replacement 'from' is an env variable style definition: '${xxx}'
   // if so, see if an env variable of the same name is already defined
