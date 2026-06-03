@@ -2019,25 +2019,21 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           }
 
           // include pin_table csv files for copy
-          std::filesystem::path device_target_config_json_filepath = dir_entry.path() / std::string("config.json");
+          std::filesystem::path device_target_config_json_filepath = source_device_data_dir_path / std::string("config.json");
           std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
           json device_target_config_json = json::parse(device_target_config_json_ifstream);
           // get json value
           std::string pin_table_value;
           if( device_target_config_json.contains("PIN_TABLE")  ) {
-            pin_table_value = device_target_config_json["PIN_TABLE"].get<std::string>();
-            std::filesystem::path pin_table_file_path = 
-            source_device_data_dir_path /
-            std::filesystem::path(pin_table_value);
-            if(!pin_table_file_path.empty())
-              source_device_data_file_list_to_copy.push_back(pin_table_file_path);
+              pin_table_value = device_target_config_json["PIN_TABLE"].get<std::string>();
           }
          
-          // if (std::regex_match(dir_entry.path().filename().string(),
-          //                       std::regex(".*efpga_pinmap\\.csv",
-          //                       std::regex::icase))) {
-          //   source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
-          // }
+          if (!pin_table_value.empty()) {
+              std::filesystem::path pin_table_path = source_device_data_dir_path / pin_table_value;
+              if (dir_entry.path() == pin_table_path) {
+                  source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+              }
+          }
 
           // include template json files for copy
           if (std::regex_match(dir_entry.path().filename().string(),
