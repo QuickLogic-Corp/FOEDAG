@@ -3938,56 +3938,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
-  return true;
-}
-
-bool CompilerOpenFPGA_ql::ConvertSdcPinConstrainToPcf(
-    std::vector<std::string>& constraints) {
-  // do some simple sanity check during conversion
-  std::vector<std::string> constraint_and_mode;
-  std::map<std::string, std::string> pin_mode_map;
-  // capture pin and mode map
-  for (unsigned int i = 0; i < constraints.size(); i++) {
-    if (constraints[i].find("set_mode") != std::string::npos) {
-      std::vector<std::string> tokens;
-      StringUtils::tokenize(constraints[i], " ", tokens);
-      if (tokens.size() != 3) {
-        ErrorMessage("Invalid set_mode command: <" + constraints[i] + ">");
-        return false;
-      }
-      pin_mode_map.insert(
-          std::pair<std::string, std::string>(tokens[2], tokens[1]));
-    }
-  }
-  for (unsigned int i = 0; i < constraints.size(); i++) {
-    if (constraints[i].find("set_io") != std::string::npos) {
-      std::vector<std::string> tokens;
-      StringUtils::tokenize(constraints[i], " ", tokens);
-      if ((tokens.size() != 3) && (tokens.size() != 4)) {
-        ErrorMessage("Invalid set_pin_loc command: <" + constraints[i] + ">");
-        return false;
-      }
-      std::string constraint_with_mode = tokens[0] + std::string(" ") +
-                                         tokens[1] + std::string(" ") +
-                                         tokens[2];
-      if (pin_mode_map.find(tokens[2]) != pin_mode_map.end()) {
-        constraint_with_mode +=
-            std::string(" -mode ") + pin_mode_map[tokens[2]];
-      } else {
-        constraint_with_mode += std::string(" -mode Mode_GPIO");
-      }
-      if (tokens.size() == 4) {
-        constraint_with_mode += std::string(" -internal_pin ") + tokens[3];
-      }
-      constraint_and_mode.push_back(constraint_with_mode);
-    }
-  }
-  constraints.clear();
-  for (unsigned int i = 0; i < constraint_and_mode.size(); i++) {
-    constraints.push_back(constraint_and_mode[i]);
-  }
-
-  std::filesystem::path pinmapping2pcf_script_path =
+   std::filesystem::path pinmapping2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /
     std::filesystem::path("scripts") /
@@ -4050,6 +4001,54 @@ bool CompilerOpenFPGA_ql::ConvertSdcPinConstrainToPcf(
     ErrorMessage("Design " + ProjManager()->projectName() +
                 " PinMapping2PCF Failed!");
     return false;
+  }
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::ConvertSdcPinConstrainToPcf(
+    std::vector<std::string>& constraints) {
+  // do some simple sanity check during conversion
+  std::vector<std::string> constraint_and_mode;
+  std::map<std::string, std::string> pin_mode_map;
+  // capture pin and mode map
+  for (unsigned int i = 0; i < constraints.size(); i++) {
+    if (constraints[i].find("set_mode") != std::string::npos) {
+      std::vector<std::string> tokens;
+      StringUtils::tokenize(constraints[i], " ", tokens);
+      if (tokens.size() != 3) {
+        ErrorMessage("Invalid set_mode command: <" + constraints[i] + ">");
+        return false;
+      }
+      pin_mode_map.insert(
+          std::pair<std::string, std::string>(tokens[2], tokens[1]));
+    }
+  }
+  for (unsigned int i = 0; i < constraints.size(); i++) {
+    if (constraints[i].find("set_io") != std::string::npos) {
+      std::vector<std::string> tokens;
+      StringUtils::tokenize(constraints[i], " ", tokens);
+      if ((tokens.size() != 3) && (tokens.size() != 4)) {
+        ErrorMessage("Invalid set_pin_loc command: <" + constraints[i] + ">");
+        return false;
+      }
+      std::string constraint_with_mode = tokens[0] + std::string(" ") +
+                                         tokens[1] + std::string(" ") +
+                                         tokens[2];
+      if (pin_mode_map.find(tokens[2]) != pin_mode_map.end()) {
+        constraint_with_mode +=
+            std::string(" -mode ") + pin_mode_map[tokens[2]];
+      } else {
+        constraint_with_mode += std::string(" -mode Mode_GPIO");
+      }
+      if (tokens.size() == 4) {
+        constraint_with_mode += std::string(" -internal_pin ") + tokens[3];
+      }
+      constraint_and_mode.push_back(constraint_with_mode);
+    }
+  }
+  constraints.clear();
+  for (unsigned int i = 0; i < constraint_and_mode.size(); i++) {
+    constraints.push_back(constraint_and_mode[i]);
   }
   return true;
 }
