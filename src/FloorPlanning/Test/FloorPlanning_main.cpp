@@ -5,6 +5,9 @@
 
 #include "SynthResourceExtractor.h"
 
+#include <filesystem>
+#include <fstream>
+
 std::set<std::string> genTestElements()
 {
   std::set<std::string> elements = {"dut.prism.el00.sub001",
@@ -21,19 +24,30 @@ std::set<std::string> genTestElements()
 
 fp::DeviceGridDescriptorPtr genTestDeviceDescriptor()
 {
-  const int columns = 32;
-  const int rows = 32;
-  const std::set<int> dspColumns{6,19};
-  const std::set<int> bramColumns{12,25};
-  const QSize dspSize{1, 3};
-  const QSize bramSize{1, 6};
+  // Minimal device config.json: a 30x30 core (-> 32x32 grid) with the DSP/BRAM
+  // layout this test used to hard-code. DSP_COLS/BRAM_COLS are 1-based core
+  // columns (grid column minus the IO border).
+  const std::string configJson = R"({
+    "DEVICE_SIZE": "30x30",
+    "DSP_SIZE": "1x3",
+    "BRAM_SIZE": "1x6",
+    "DSP_COLS": "5,18",
+    "BRAM_COLS": "11,24"
+})";
 
-  fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(columns,
-                                                                                      rows,
-                                                                                      dspColumns,
-                                                                                      bramColumns,
-                                                                                      dspSize,
-                                                                                      bramSize);
+  const std::filesystem::path configPath =
+      std::filesystem::temp_directory_path() / "fp_test_device_config.json";
+
+  {
+    std::ofstream out(configPath);
+    out << configJson;
+  }
+
+  fp::DeviceGridDescriptorPtr descriptor =
+      std::make_shared<fp::DeviceGridDescriptor>(configPath);
+
+  std::filesystem::remove(configPath);
+
   return descriptor;
 }
 

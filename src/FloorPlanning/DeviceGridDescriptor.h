@@ -15,18 +15,6 @@ namespace fp {
 class DeviceGridDescriptor {
 public:
     DeviceGridDescriptor(const std::filesystem::path& deviceConfigFile);
-    DeviceGridDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
-        :
-        m_columns(columns)
-        , m_rows(rows)
-        , m_dspColumns(dspColumns)
-        , m_bramColumns(bramColumns)
-        , m_dspSize(dspSize)
-        , m_bramSize(bramSize)
-    {
-        Tile::setDeviceRowsNum(m_rows);
-        validateFit();
-    }
 
     bool hasError() const { return !m_error.isEmpty(); }
     const QString& error() const { return m_error; }
