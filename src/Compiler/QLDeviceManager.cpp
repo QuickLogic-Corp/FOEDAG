@@ -1344,28 +1344,15 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
     }
 
     // decrypt the encrypted vpr xml file. and then use that:
-    vpr_xml_filepath = ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->GenerateTempFilePath();
+    CompilerOpenFPGA_ql* compiler =
+        (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
+    vpr_xml_filepath = compiler->GenerateTempFilePath();
 
-    std::filesystem::path m_cryptdbPath =
-        device_data_dir_path / (DeviceTypeString(family, foundry, node, devicename) + "_Supp.db");
-
-    qlcrypt::KeyDB keys;
-    if (auto s = qlcrypt::KeyDB::load(m_cryptdbPath.string(), keys); !qlcrypt::ok(s)) {
-      std::cout << "load cryptdb failed: " << qlcrypt::toString(s) << std::endl;
-      ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
+    if (!compiler->decryptDeviceFile(
+            source_vpr_xml_filepath, vpr_xml_filepath, device_data_dir_path,
+            DeviceTypeString(family, foundry, node, devicename))) {
+      compiler->CleanTempFiles();
       return device_variant_layouts;
-    }
-
-    qlcrypt::FileCrypt fc(keys);
-    std::string plaintext;
-    if (auto s = fc.decryptFile(source_vpr_xml_filepath.string(), plaintext); !qlcrypt::ok(s)) {
-      std::cout << "decryption failed: " << qlcrypt::toString(s) << std::endl;
-      ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
-      return device_variant_layouts;
-    }
-    {
-      std::ofstream out(vpr_xml_filepath, std::ios::binary);
-      out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
     }
   }
 
@@ -2331,11 +2318,23 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // list (producing .en) and the copy list (producing a plaintext).
     {
       std::vector<std::string> residual_plaintext;
-      for (const std::filesystem::directory_entry& dir_entry :
-           std::filesystem::recursive_directory_iterator(
-               target_device_data_dir_path,
-               std::filesystem::directory_options::skip_permission_denied, ec)) {
-        if (ec || !dir_entry.is_regular_file(ec)) continue;
+      std::error_code walk_ec;
+      auto walk_it = std::filesystem::recursive_directory_iterator(
+          target_device_data_dir_path,
+          std::filesystem::directory_options::skip_permission_denied, walk_ec);
+      if (walk_ec) {
+        // Fail closed: if we cannot even start walking the target tree we
+        // cannot prove the absence of plaintext, so treat it as a leak.
+        compiler->ErrorMessage(
+            std::string("POST-ENCRYPTION AUDIT FAILED: cannot scan target tree: ") +
+            walk_ec.message());
+        return -1;
+      }
+      for (const std::filesystem::directory_entry& dir_entry : walk_it) {
+        // Reset per-iteration so a stale error from a previous entry does not
+        // short-circuit (and silently skip) the rest of the tree.
+        std::error_code entry_ec;
+        if (!dir_entry.is_regular_file(entry_ec) || entry_ec) continue;
         const std::string fname = dir_entry.path().filename().string();
         const std::string fullpath = dir_entry.path().string();
         const bool is_sb_maps =

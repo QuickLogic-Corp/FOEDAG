@@ -2362,29 +2362,30 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
     if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
 
+      // Plaintext and encrypted CRR flows pass --sb_maps/--sb_templates
+      // identically; encryption only adds --crypt_key_db.
+      vpr_options += " --sb_maps " + sb_maps_file_path.string();
+      vpr_options += " --sb_templates " + sb_templates_dir_path.string();
+
+      // VPR keys CRR encryption solely off the ".en" suffix on --sb_maps and
+      // then requires --crypt_key_db (see VTR read_options.cpp). Keep FOEDAG in
+      // lock-step with that single source of truth. If a file is detected as
+      // encrypted (e.g. carries the QLEN magic) but lacks the ".en" suffix VPR
+      // would silently treat it as plaintext, so fail loudly here rather than
+      // emit an opaque VPR error downstream.
       if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(sb_maps_file_path)) {
-        // Encrypted CRR path: VPR detects encryption from the ".en" suffix on
-        // --sb_maps and decrypts in-memory using --crypt_key_db. There are no
-        // separate --sb_maps_encrypted/--sb_templates_encrypted flags; the
-        // encrypted sb_maps file (and the ".en" CSVs under --sb_templates) are
-        // passed through the same options as the plaintext flow.
+        if(sb_maps_file_path.extension() != ".en") {
+          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + sb_maps_file_path.string());
+          return std::make_tuple(std::string(""), std::string(""));
+        }
         std::filesystem::path crypt_key_db =
             (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
             (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
-
         if(!FileUtils::FileExists(crypt_key_db)) {
           ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
+          return std::make_tuple(std::string(""), std::string(""));
         }
-        if(sb_maps_file_path.extension() != ".en") {
-          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + sb_maps_file_path.string());
-        }
-
-        vpr_options += " --sb_maps " + sb_maps_file_path.string();
-        vpr_options += " --sb_templates " + sb_templates_dir_path.string();
         vpr_options += " --crypt_key_db " + crypt_key_db.string();
-      } else {
-        vpr_options += " --sb_maps " + sb_maps_file_path.string();
-        vpr_options += " --sb_templates " + sb_templates_dir_path.string();
       }
 
       vpr_options += " --preserve_input_pin_connections off";
@@ -2759,29 +2760,30 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
     if(!m_SBMapsFile.empty() && !m_SBTemplatesDir.empty()) {
 
+      // Plaintext and encrypted CRR flows pass --sb_maps/--sb_templates
+      // identically; encryption only adds --crypt_key_db.
+      command->appendFile("--sb_maps", m_SBMapsFile);
+      command->appendFile("--sb_templates", m_SBTemplatesDir);
+
+      // VPR keys CRR encryption solely off the ".en" suffix on --sb_maps and
+      // then requires --crypt_key_db (see VTR read_options.cpp). Keep FOEDAG in
+      // lock-step with that single source of truth. If a file is detected as
+      // encrypted (e.g. carries the QLEN magic) but lacks the ".en" suffix VPR
+      // would silently treat it as plaintext, so fail loudly here rather than
+      // emit an opaque VPR error downstream.
       if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_SBMapsFile)) {
-        // Encrypted CRR path: VPR detects encryption from the ".en" suffix on
-        // --sb_maps and decrypts in-memory using --crypt_key_db. There are no
-        // separate --sb_maps_encrypted/--sb_templates_encrypted flags; the
-        // encrypted sb_maps file (and the ".en" CSVs under --sb_templates) are
-        // passed through the same options as the plaintext flow.
+        if(m_SBMapsFile.extension() != ".en") {
+          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + m_SBMapsFile.string());
+          return nullptr;
+        }
         std::filesystem::path crypt_key_db =
             (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
             (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
-
         if(!FileUtils::FileExists(crypt_key_db)) {
           ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
+          return nullptr;
         }
-        if(m_SBMapsFile.extension() != ".en") {
-          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + m_SBMapsFile.string());
-        }
-
-        command->appendFile("--sb_maps", m_SBMapsFile);
-        command->appendFile("--sb_templates", m_SBTemplatesDir);
         command->appendFile("--crypt_key_db", crypt_key_db);
-      } else {
-        command->appendFile("--sb_maps", m_SBMapsFile);
-        command->appendFile("--sb_templates", m_SBTemplatesDir);
       }
 
       command->append("--preserve_input_pin_connections off");
@@ -9571,8 +9573,10 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // the "filepath_fpga_fix_pins_place_str" variable will be empty if:
   // - there is no pre-generated .place file AND
   // - there is no pcf file in the project.
-  std::string filepath_fpga_fix_pins_place_str;
-  if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
+
+  // Bypassing the pcf2place due to generating the pcf constraints using the generate_floorplanning.py script
+  // std::string filepath_fpga_fix_pins_place_str;
+  // if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 
   VprStageCfg cfg;
   cfg.use_place_file = true;
@@ -9602,13 +9606,13 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   }
   
 
-  if (!filepath_fpga_fix_pins_place_str.empty()) {
-    command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
-  }
-  else
-  {
-    Message("no pcf file found, skipping PinConstraints usage!");
-  }
+  // if (!filepath_fpga_fix_pins_place_str.empty()) {
+  //   command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  // }
+  // else
+  // {
+  //   Message("no pcf file found, skipping PinConstraints usage!");
+  // }
 
   return command;
 }
@@ -9947,22 +9951,12 @@ const std::filesystem::path& VprArchitectureFileProfider::get()
       m_architectureFile = m_compiler->GenerateTempFilePath(true);
       m_isFileTemporary = true;
 
-      const std::filesystem::path cryptdbPath =
-          (QLDeviceManager::getInstance()->deviceTypeDirPath(device)) /
-          (QLDeviceManager::getInstance()->convertToDeviceTypeString(device) + "_Supp.db");
-
-      qlcrypt::KeyDB keys;
-      if (auto s = qlcrypt::KeyDB::load(cryptdbPath.string(), keys); !qlcrypt::ok(s)) {
-        return error(std::string("load cryptdb failed: ") + std::string(qlcrypt::toString(s)));
+      if (!m_compiler->decryptDeviceFile(
+              vpr_xml_en_path, m_architectureFile,
+              QLDeviceManager::getInstance()->deviceTypeDirPath(device),
+              QLDeviceManager::getInstance()->convertToDeviceTypeString(device))) {
+        return error(std::string("Failed to decrypt VPR architecture file: ") + vpr_xml_en_path.string());
       }
-
-      qlcrypt::FileCrypt fc(keys);
-      std::string plaintext;
-      if (auto s = fc.decryptFile(vpr_xml_en_path.string(), plaintext); !qlcrypt::ok(s)) {
-        return error(std::string("decryption failed: ") + std::string(qlcrypt::toString(s)));
-      }
-      std::ofstream out(m_architectureFile, std::ios::binary);
-      out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
     }
   }  
     
