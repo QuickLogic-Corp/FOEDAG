@@ -156,6 +156,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   QLDeviceTarget getDeviceByStaProfile(const std::string staProfile) const;
   std::string uniqueStaVprOptions() const;
   
+  std::filesystem::path deviceConfigFilePath(const QLDeviceTarget& device) const;
+
   void onQdcFileSaved();
 
  protected:

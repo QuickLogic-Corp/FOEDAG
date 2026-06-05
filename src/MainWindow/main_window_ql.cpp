@@ -2261,8 +2261,13 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
-      const std::string layoutName = QLSettingsManager::getStringValue("general", "device", "layout");
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(archFileProviderPtr->get(), layoutName);
+      const std::filesystem::path deviceConfigFile = QLDeviceManager::getInstance()->deviceConfigJSONPath();
+      if (deviceConfigFile.empty()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", "Cannot proceed without device config.json file.");
+        cleanFloorPlanningUI();
+        return;
+      }
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceConfigFile);
 
       if (descriptor->hasError()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());

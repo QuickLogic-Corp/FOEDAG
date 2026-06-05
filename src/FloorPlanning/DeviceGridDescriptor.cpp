@@ -1,151 +1,127 @@
 #include "DeviceGridDescriptor.h"
 #include "Utils/FileUtils.h"
 
-#include <QDomDocument>
-#include <QDomElement>
-#include <QDomNodeList>
-#include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
+#include <QStringList>
 
 namespace fp {
 
-DeviceGridDescriptor::DeviceGridDescriptor(const std::filesystem::path& architectureFile, const std::string& targetLayoutName)
+DeviceGridDescriptor::DeviceGridDescriptor(const std::filesystem::path& deviceConfigFile)
 {
-    parse(architectureFile, targetLayoutName);
-    validateFit();
+    if (parse(deviceConfigFile)) {
+        validateFit();
+    }
     Tile::setDeviceRowsNum(m_rows);
 }
 
-bool DeviceGridDescriptor::parse(const std::filesystem::path& architectureFile, const std::string& targetLayoutName)
+bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
 {
     m_error = "";
 
-    QDomDocument doc;
+    const QByteArray content = QByteArray::fromStdString(
+        FOEDAG::FileUtils::GetFileContent(deviceConfigFile));
 
-    QString errMsg;
-    int errLine = 0;
-    int errCol = 0;
-
-    if (!doc.setContent(QByteArray::fromStdString(FOEDAG::FileUtils::GetFileContent(architectureFile)), &errMsg, &errLine, &errCol)) {
-        m_error = "XML parse error at" + QString::number(errLine) + ":" + QString::number(errCol) + "-" + errMsg;
+    QJsonParseError jsonError;
+    const QJsonDocument doc = QJsonDocument::fromJson(content, &jsonError);
+    if (doc.isNull() || !doc.isObject()) {
+        m_error = "config.json parse error: " + jsonError.errorString();
         return false;
     }
+    const QJsonObject config = doc.object();
 
-    if (!parseLayout(doc, targetLayoutName)) {
-        return false;
-    }
-
-    if (!parseTileSizes(doc)) {
-        return false;
-    }
-
-    return true;
-}
-
-bool DeviceGridDescriptor::parseLayout(const QDomDocument& doc, const std::string& targetLayoutName)
-{
-    QDomElement layout = doc.documentElement().firstChildElement("layout");
-    if (layout.isNull()) {
-        m_error = "<layout></layout> element is not found";
-        return false;
-    }
-
-    const int borderColumn = 1;
-    const int borderRow = 1;
-
-    for (QDomElement fixedLayout = layout.firstChildElement("fixed_layout");
-         !fixedLayout.isNull();
-         fixedLayout = fixedLayout.nextSiblingElement("fixed_layout"))
-    {
-        const QString layoutName = fixedLayout.attribute("name");
-        if (layoutName.toStdString() == targetLayoutName) {
-            std::optional<QSize> size = parseSize(fixedLayout.attribute("width"), fixedLayout.attribute("height"));
-            if (!size) {
-                return false;
-            }
-            m_columns = size->width() - 2*borderColumn;
-            m_rows = size->height() - 2*borderRow;
-
-            for (QDomElement region = fixedLayout.firstChildElement("region");
-                 !region.isNull();
-                 region = region.nextSiblingElement("region"))
-            {
-                const QString regionType = region.attribute("type");
-                if ((regionType != "dsp") && (regionType != "bram")) {
-                    continue;
-                }
-                const QString startx = region.attribute("startx");
-                const QString endx = region.attribute("endx");
-                //const QString starty = region.attribute("starty");
-                //const QString endy = region.attribute("endy");
-
-                bool ok = false;
-                if (startx == endx) {
-                    int column = startx.toInt(&ok);
-                    if (ok) {
-                        if (regionType == "dsp") {
-                            m_dspColumns.insert(column);
-                        } if (regionType == "bram") {
-                            m_bramColumns.insert(column);
-                        }
-                    } else {
-                        m_error = "startx attribute is not a numeric";
-                        return false;
-                    }
-                } else {
-                    m_error = "dsp and bram expected to be column aligned, not row aligned";
-                    return false;
-                }
-            }
-        }
-    }
-
-    return true;
-}
-
-
-bool DeviceGridDescriptor::parseTileSizes(const QDomDocument& doc)
-{
-    QDomElement tiles = doc.documentElement().firstChildElement("tiles");
-    if (tiles.isNull()) {
-        m_error = "<tiles>...</tiles> element is not found";
-        return false;
-    }
-
-    for (QDomElement tile = tiles.firstChildElement("tile");
-         !tile.isNull();
-         tile = tile.nextSiblingElement("tile"))
-    {
-        QString name = tile.attribute("name");
-        if ((name != "dsp") && (name != "bram")) {
-            continue;
-        }
-        std::optional<QSize> size = parseSize(tile.attribute("width"), tile.attribute("height"));
-        if (!size) {
+    auto stringValue = [&](const QString& key, QString& out) -> bool {
+        const QJsonValue value = config.value(key);
+        if (!value.isString()) {
+            m_error = QString("`%1` string key not found in config.json").arg(key);
             return false;
         }
-        if (name == "dsp") {
-            m_dspSize = size.value();
-        } else if (name == "bram") {
-            m_bramSize = size.value();
-        }
+        out = value.toString();
+        return true;
+    };
+
+    QString deviceSizeStr;
+    QString dspSizeStr;
+    QString bramSizeStr;
+    QString dspColsStr;
+    QString bramColsStr;
+    if (!stringValue("DEVICE_SIZE", deviceSizeStr)) return false;
+    if (!stringValue("DSP_SIZE", dspSizeStr)) return false;
+    if (!stringValue("BRAM_SIZE", bramSizeStr)) return false;
+    if (!stringValue("DSP_COLS", dspColsStr)) return false;
+    if (!stringValue("BRAM_COLS", bramColsStr)) return false;
+
+    // DEVICE_SIZE is the core grid; the displayed grid wraps it with one IO
+    // ring on each side.
+    const std::optional<QSize> coreSize = parseSize(deviceSizeStr);
+    if (!coreSize) {
+        return false;
     }
+    m_columns = coreSize->width() + 2 * kBorder;
+    m_rows = coreSize->height() + 2 * kBorder;
+
+    const std::optional<QSize> dspSize = parseSize(dspSizeStr);
+    if (!dspSize) {
+        return false;
+    }
+    m_dspSize = dspSize.value();
+
+    const std::optional<QSize> bramSize = parseSize(bramSizeStr);
+    if (!bramSize) {
+        return false;
+    }
+    m_bramSize = bramSize.value();
+
+    if (!parseColumns(dspColsStr, m_dspColumns)) {
+        return false;
+    }
+    if (!parseColumns(bramColsStr, m_bramColumns)) {
+        return false;
+    }
+
     return true;
 }
 
-std::optional<QSize> DeviceGridDescriptor::parseSize(const QString& width, const QString& height)
+std::optional<QSize> DeviceGridDescriptor::parseSize(const QString& sizeStr)
 {
-    bool ok = false;
-    int w = width.toInt(&ok);
-    if (!ok) {
-        m_error = QString("cannot parse int width from str %1").arg(width);
+    const QStringList parts = sizeStr.split("x");
+    if (parts.size() != 2) {
+        m_error = QString("cannot parse size from `%1`").arg(sizeStr);
         return std::nullopt;
     }
-    int h = height.toInt(&ok);
-    if (!ok) {
-        m_error = QString("cannot parse int height from str %1").arg(width);
+
+    bool okWidth = false;
+    bool okHeight = false;
+    const int width = parts.at(0).trimmed().toInt(&okWidth);
+    const int height = parts.at(1).trimmed().toInt(&okHeight);
+    if (!okWidth || !okHeight) {
+        m_error = QString("cannot parse size from `%1`").arg(sizeStr);
         return std::nullopt;
     }
-    return QSize(w, h);
+
+    return QSize(width, height);
+}
+
+bool DeviceGridDescriptor::parseColumns(const QString& csv, std::set<int>& columns)
+{
+    const QStringList parts = csv.split(",");
+    for (const QString& rawPart : parts) {
+        const QString part = rawPart.trimmed();
+        if (part.isEmpty()) {
+            continue;
+        }
+        bool ok = false;
+        const int column = part.toInt(&ok);
+        if (!ok) {
+            m_error = QString("cannot parse column index from `%1`").arg(part);
+            return false;
+        }
+        // DSP_COLS/BRAM_COLS are 1-based core columns; shift into grid
+        // coordinates which include the leading IO border column.
+        columns.insert(column + kBorder);
+    }
+    return true;
 }
 
 bool DeviceGridDescriptor::validateFit()

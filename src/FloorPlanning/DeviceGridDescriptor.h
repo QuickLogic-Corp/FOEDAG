@@ -3,7 +3,7 @@
 #include "Tile.h"
 
 #include <QSize>
-#include <QDomDocument>
+#include <QString>
 
 #include <set>
 #include <memory>
@@ -14,7 +14,7 @@ namespace fp {
 
 class DeviceGridDescriptor {
 public:
-    DeviceGridDescriptor(const std::filesystem::path& architectureFile, const std::string& layoutName);
+    DeviceGridDescriptor(const std::filesystem::path& deviceConfigFile);
     DeviceGridDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
         :
         m_columns(columns)
@@ -54,6 +54,13 @@ public:
 
     bool validateFit();
 
+    // Number of border (IO) cells the displayed grid adds around the device
+    // core on each side. config.json's DEVICE_SIZE is the core grid; the grid
+    // wraps it with one IO ring, so columns()/rows() = core + 2*kBorder and the
+    // 1-based DSP_COLS/BRAM_COLS core columns are shifted by kBorder into grid
+    // coordinates.
+    static constexpr int kBorder = 1;
+
 private:
     QString m_error;
     int m_columns = -1;
@@ -63,11 +70,10 @@ private:
     QSize m_dspSize;
     QSize m_bramSize;
 
-    bool parse(const std::filesystem::path& architectureFile, const std::string& targetLayoutName);
-    bool parseLayout(const QDomDocument&, const std::string& targetLayoutName);
-    bool parseTileSizes(const QDomDocument&);
+    bool parse(const std::filesystem::path& deviceConfigFile);
 
-    std::optional<QSize> parseSize(const QString&, const QString&);
+    std::optional<QSize> parseSize(const QString& sizeStr);
+    bool parseColumns(const QString& csv, std::set<int>& columns);
 };
 using DeviceGridDescriptorPtr = std::shared_ptr<DeviceGridDescriptor>;
 

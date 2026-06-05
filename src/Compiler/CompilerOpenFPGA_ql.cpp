@@ -6635,7 +6635,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+  auto current_device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_target) ) {
     ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
@@ -6653,6 +6654,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     Message("layout: " + layout);
     return false;
   }
+
+  const std::filesystem::path device_target_config_json_filepath = deviceConfigFilePath(current_device_target);
 
   std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) / 
                                       std::string(ProjManager()->projectName() + "_post_synth.blif");
@@ -6811,10 +6814,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   args.push_back(generate_floorplanning_script_path.string());
   args.push_back("--blif_file");
   args.push_back(netlistFile.string());
-  args.push_back("--arch_file");
-  args.push_back(m_architectureFile.string());
-  args.push_back("--fpga_layout");
-  args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
+  args.push_back("--device_config_file");
+  args.push_back(device_target_config_json_filepath.string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
 
@@ -8725,8 +8726,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
       std::string bram_type;
 
-      std::filesystem::path device_target_config_json_filepath = 
-          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / std::string("config.json");
+      std::filesystem::path device_target_config_json_filepath = deviceConfigFilePath(current_device_target);
 
       if(FileUtils::FileExists(device_target_config_json_filepath)) {
           std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
@@ -9685,15 +9685,12 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
   return !m_taskCompilationStateManager.isEmpty();
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::deviceConfigFilePath(const QLDeviceTarget& device) const
+{
+  return QLDeviceManager::getInstance()->deviceTypeDirPath(device) / std::string("config.json");
+}
+
 void CompilerOpenFPGA_ql::onQdcFileSaved() {
-#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
-  auto tmpFilesGuard = sg::make_scope_guard([this] {
-    CleanTempFiles();
-  });
-#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
-
-  BaseVprCommand(); // we need this call in order to decrypt arch file and store it as m_architectureFile
-
   // incr compilation itself didn't track qdc file, so we must re-generate xml 
   // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
   GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
