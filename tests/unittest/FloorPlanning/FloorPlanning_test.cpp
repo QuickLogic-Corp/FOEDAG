@@ -6,19 +6,38 @@
 
 #include <QPoint>
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 
 #include "gtest/gtest.h"
 
 fp::DeviceGridDescriptorPtr genTestDescriptor()
 {
-    int deviceCols = 32;
-    int deviceRows = 32;
-    std::set<int> dspColumns = {7, 20};
-    std::set<int> bramColumns = {13, 26};
-    fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceCols, deviceRows,
-                                                                                dspColumns, bramColumns,
-                                                                                QSize{1, 3}, QSize{1, 6});
+    // Minimal device config.json: a 30x30 core (-> 32x32 grid) with DSP columns
+    // at grid {7,20} and BRAM columns at grid {13,26}. DSP_COLS/BRAM_COLS are
+    // 1-based core columns (grid column minus the IO border).
+    const std::string configJson = R"({
+    "DEVICE_SIZE": "30x30",
+    "DSP_SIZE": "1x3",
+    "BRAM_SIZE": "1x6",
+    "DSP_COLS": "6,19",
+    "BRAM_COLS": "12,25"
+})";
+
+    const std::filesystem::path configPath =
+        std::filesystem::temp_directory_path() / "fp_unittest_device_config.json";
+
+    {
+        std::ofstream out(configPath);
+        out << configJson;
+    }
+
+    fp::DeviceGridDescriptorPtr descriptor =
+        std::make_shared<fp::DeviceGridDescriptor>(configPath);
+
+    std::filesystem::remove(configPath);
+
     return descriptor;
 }
 
