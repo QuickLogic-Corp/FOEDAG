@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/CompilerOpenFPGA_ql.h"
+#include "Compiler/DeviceConfig.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TaskManager.h"
@@ -2261,13 +2262,16 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
+      // Validate the device config.json; if it is missing or malfunctioning a
+      // fallback is generated from `vpr --show_arch_resources`.
       const std::filesystem::path deviceConfigFile = QLDeviceManager::getInstance()->deviceConfigJSONPath();
-      if (deviceConfigFile.empty()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", "Cannot proceed without device config.json file.");
+      DeviceConfig deviceConfig(deviceConfigFile);
+      if (!deviceConfig.isValid()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", QString::fromStdString(deviceConfig.error()));
         cleanFloorPlanningUI();
         return;
       }
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceConfigFile);
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceConfig.effectiveConfigPath());
 
       if (descriptor->hasError()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
