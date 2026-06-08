@@ -234,10 +234,6 @@ MainWindow::MainWindow(Session* session)
 
   connect(this, &MainWindow::projectOpened, this,
           &MainWindow::handleProjectOpened);
-  // Re-validate the device floorplanning config once when the device changes
-  // (regenerates the vpr fallback if config.json is missing/malfunctioning).
-  connect(QLDeviceManager::getInstance(), &QLDeviceManager::devicenameChanged,
-          this, []() { DeviceFloorplanningConfig::instance().refresh(); });
   connect(this, &MainWindow::runProjectRequested, this,
           &MainWindow::onRunProjectRequested, Qt::QueuedConnection);
   connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designFilesChanged,

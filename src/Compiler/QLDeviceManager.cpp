@@ -30,6 +30,7 @@
 #include <CRFileCryptProc.hpp>
 #include "CompilerOpenFPGA_ql.h"
 #include "Compiler/Compiler.h"
+#include "Compiler/DeviceFloorplanningConfig.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
 #include "Utils/StringUtils.h"
@@ -1619,6 +1620,11 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
     QLDeviceTarget empty_device_target;
     this->device_target = empty_device_target;
   }
+
+  // Device changed: re-validate the floorplanning config (regenerates the vpr
+  // fallback if config.json is missing/malfunctioning) so consumers can read it
+  // later without re-running vpr.
+  DeviceFloorplanningConfig::instance().refresh();
 }
 
 
