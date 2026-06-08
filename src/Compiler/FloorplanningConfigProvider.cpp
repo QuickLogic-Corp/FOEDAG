@@ -31,6 +31,9 @@ namespace {
 //   <col in cfg> = grid column - (ring - 1)     (1-based core column)
 constexpr int kGridRingPerSide = 2;
 
+// config.json uses 1-based core columns (the first core column is 1).
+constexpr int kFirstCoreColumn = 1;
+
 // The keys DeviceGridDescriptor / generate_floorplanning need.
 const std::vector<std::string>& requiredKeys() {
   static const std::vector<std::string> keys = {
@@ -49,7 +52,7 @@ bool parseWxH(const QString& value, int& w, int& h) {
 }
 
 // Parse "a,b,c" into integers. Empty string yields an empty list.
-bool parseCsvInts(const QString& value, std::vector<int>& out) {
+bool parseColumnList(const QString& value, std::vector<int>& out) {
   const QStringList parts = value.trimmed().split(",");
   for (const QString& rawPart : parts) {
     const QString part = rawPart.trimmed();
@@ -62,11 +65,12 @@ bool parseCsvInts(const QString& value, std::vector<int>& out) {
   return true;
 }
 
-// Shift raw grid columns into config (1-based core) columns and join as CSV.
+// Shift raw grid columns into config (1-based core) columns and join as CSV:
+// drop the leading IO ring (-> 0-based core), then make it 1-based.
 std::string toConfigColumns(const std::vector<int>& gridColumns) {
   std::vector<std::string> shifted;
   for (int col : gridColumns) {
-    shifted.push_back(std::to_string(col - (kGridRingPerSide - 1)));
+    shifted.push_back(std::to_string(col - kGridRingPerSide + kFirstCoreColumn));
   }
   return StringUtils::join(shifted, ",");
 }
@@ -175,9 +179,9 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
     if (line.startsWith("FLOORPLAN_DEVICE_GRID ")) {
       haveGrid = parseWxH(line.section(' ', 1), gridW, gridH);
     } else if (line.startsWith("FLOORPLAN_DSP_COLUMNS ")) {
-      parseCsvInts(line.section(' ', 1), dspGridCols);
+      parseColumnList(line.section(' ', 1), dspGridCols);
     } else if (line.startsWith("FLOORPLAN_BRAM_COLUMNS ")) {
-      parseCsvInts(line.section(' ', 1), bramGridCols);
+      parseColumnList(line.section(' ', 1), bramGridCols);
     } else if (line.startsWith("FLOORPLAN_DSP_TILE_SIZE ")) {
       haveDspSize = parseWxH(line.section(' ', 1), dspW, dspH);
     } else if (line.startsWith("FLOORPLAN_BRAM_TILE_SIZE ")) {

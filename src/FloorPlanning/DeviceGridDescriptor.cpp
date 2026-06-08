@@ -58,8 +58,9 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
     if (!coreSize) {
         return false;
     }
-    m_columns = coreSize->width() + 2 * kBorder;
-    m_rows = coreSize->height() + 2 * kBorder;
+    // Add the IO border on each side (low + core + high).
+    m_columns = kBorder + coreSize->width() + kBorder;
+    m_rows = kBorder + coreSize->height() + kBorder;
 
     const std::optional<QSize> dspSize = parseSize(dspSizeStr);
     if (!dspSize) {
