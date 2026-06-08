@@ -87,6 +87,9 @@ void DeviceFloorplanningConfig::reset() {
 void DeviceFloorplanningConfig::refresh() {
   reset();
 
+  Compiler* compiler =
+      (GlobalSession != nullptr) ? GlobalSession->GetCompiler() : nullptr;
+
   const std::filesystem::path configFile =
       QLDeviceManager::getInstance()->deviceConfigJSONPath();
 
@@ -97,16 +100,31 @@ void DeviceFloorplanningConfig::refresh() {
     return;
   }
 
-  // 2. Missing/malfunctioning: generate a fallback from vpr and validate it.
+  // 2. Missing/malfunctioning: announce why and generate a fallback from vpr.
+  if (compiler) {
+    compiler->Message(
+        "Floorplanning: device config.json cannot be used (" + m_error +
+        "). Falling back to 'vpr --show_arch_resources' to generate "
+        "failback_floorplanning_config.json.");
+  }
+
   if (generateFallbackConfig()) {
     m_fallbackUsed = true;
     if (load(m_fallbackConfigPath) && validate(floorplanningRequiredKeys())) {
       m_valid = true;
       m_effectiveConfigPath = m_fallbackConfigPath;
+      if (compiler) {
+        compiler->Message("Floorplanning: using fallback device config " +
+                          m_fallbackConfigPath.string() + ".");
+      }
       return;
     }
   }
   // Otherwise m_valid stays false and m_error describes the failure.
+  if (compiler) {
+    compiler->ErrorMessage("Floorplanning: fallback config generation failed (" +
+                           m_error + ").");
+  }
 }
 
 bool DeviceFloorplanningConfig::load(const std::filesystem::path& configFile) {
