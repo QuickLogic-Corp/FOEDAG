@@ -7,20 +7,21 @@
 
 namespace FOEDAG {
 
-// Loads a device config.json and ensures it can drive floorplanning.
+// Provides the device config.json used by floorplanning, with a vpr-based
+// fallback when it is missing or malfunctioning.
 //
-// On construction it loads the given config.json and checks the floorplanning
-// required keys. If the file is missing/malfunctioning or any required key is
-// absent, it runs `vpr --show_arch_resources` (serial/blocking), parses the
-// resource report and writes a fallback config to the project folder
-// (failback_floorplanning_config.json), then validates that instead.
-//
-// After construction: isValid() tells whether a usable config exists (original
-// or fallback); effectiveConfigPath() is the file the caller should consume;
-// fallbackUsed()/fallbackConfigPath() expose whether/where a fallback was made.
-class DeviceConfig {
+// Validation is expensive only in the fallback case (it runs
+// `vpr --show_arch_resources`), so it is computed once per device context:
+// call refresh() on project open and on device change. Consumers then read the
+// cached effectiveConfigPath() on demand without re-running vpr.
+class DeviceFloorplanningConfig {
  public:
-  explicit DeviceConfig(const std::filesystem::path& configFile);
+  static DeviceFloorplanningConfig& instance();
+
+  // Re-validate the current device's config.json and, if needed, regenerate the
+  // fallback (failback_floorplanning_config.json) from vpr. Call on project
+  // open and on device change.
+  void refresh();
 
   bool isValid() const { return m_valid; }
   const std::string& error() const { return m_error; }
@@ -31,23 +32,29 @@ class DeviceConfig {
     return m_fallbackConfigPath;
   }
 
-  // The config file the caller should use: the original when it is valid,
-  // otherwise the generated fallback. Empty if neither is usable.
+  // The config file consumers should use: the original when valid, otherwise
+  // the generated fallback. Empty if neither is usable.
   const std::filesystem::path& effectiveConfigPath() const {
     return m_effectiveConfigPath;
   }
 
-  // Validate the currently loaded config against an arbitrary key list. Returns
-  // true on success; on failure sets error()/missingKeys().
-  bool validate(const std::vector<std::string>& requiredKeys);
-
   // The keys DeviceGridDescriptor / generate_floorplanning need.
   static const std::vector<std::string>& floorplanningRequiredKeys();
 
+  DeviceFloorplanningConfig(const DeviceFloorplanningConfig&) = delete;
+  DeviceFloorplanningConfig& operator=(const DeviceFloorplanningConfig&) = delete;
+
  private:
+  DeviceFloorplanningConfig() = default;
+
+  void reset();
+
   // Load + collect top-level keys from configFile. Returns false (and sets
   // error()) if the file is missing or not a JSON object.
   bool load(const std::filesystem::path& configFile);
+
+  // Check that every key in requiredKeys is present in the loaded config.
+  bool validate(const std::vector<std::string>& requiredKeys);
 
   // Run `vpr --show_arch_resources`, parse it and write the fallback config to
   // the project folder. On success sets m_fallbackConfigPath. Inputs (arch,

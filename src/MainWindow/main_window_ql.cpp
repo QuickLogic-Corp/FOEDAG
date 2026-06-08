@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/CompilerOpenFPGA_ql.h"
-#include "Compiler/DeviceConfig.h"
+#include "Compiler/DeviceFloorplanningConfig.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TaskManager.h"
@@ -234,6 +234,10 @@ MainWindow::MainWindow(Session* session)
 
   connect(this, &MainWindow::projectOpened, this,
           &MainWindow::handleProjectOpened);
+  // Re-validate the device floorplanning config once when the device changes
+  // (regenerates the vpr fallback if config.json is missing/malfunctioning).
+  connect(QLDeviceManager::getInstance(), &QLDeviceManager::devicenameChanged,
+          this, []() { DeviceFloorplanningConfig::instance().refresh(); });
   connect(this, &MainWindow::runProjectRequested, this,
           &MainWindow::onRunProjectRequested, Qt::QueuedConnection);
   connect(DesignFileWatcher::Instance(), &DesignFileWatcher::designFilesChanged,
@@ -2262,10 +2266,11 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
-      // Validate the device config.json; if it is missing or malfunctioning a
-      // fallback is generated from `vpr --show_arch_resources`.
-      const std::filesystem::path deviceConfigFile = QLDeviceManager::getInstance()->deviceConfigJSONPath();
-      DeviceConfig deviceConfig(deviceConfigFile);
+      // The device config.json is validated once on project open / device
+      // change (see the DeviceFloorplanningConfig::refresh() hooks); here we
+      // just consume the cached result so vpr is not re-run each time
+      // floorplanning opens.
+      const DeviceFloorplanningConfig& deviceConfig = DeviceFloorplanningConfig::instance();
       if (!deviceConfig.isValid()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", QString::fromStdString(deviceConfig.error()));
         cleanFloorPlanningUI();
@@ -2608,6 +2613,9 @@ void MainWindow::handleProjectOpened() {
   updateSourceTree();
   // Update watcher files
   DesignFileWatcher::Instance()->updateDesignFileWatchers(m_projectManager);
+  // Validate the device floorplanning config once for the opened project
+  // (regenerates the vpr fallback if config.json is missing/malfunctioning).
+  DeviceFloorplanningConfig::instance().refresh();
 }
 
 void MainWindow::saveWelcomePageConfig() {

@@ -1,4 +1,4 @@
-#include "Compiler/DeviceConfig.h"
+#include "Compiler/DeviceFloorplanningConfig.h"
 
 #include <QProcess>
 #include <QString>
@@ -63,14 +63,34 @@ std::string toConfigColumns(const std::vector<int>& gridColumns) {
 
 }  // namespace
 
-const std::vector<std::string>& DeviceConfig::floorplanningRequiredKeys() {
+const std::vector<std::string>& DeviceFloorplanningConfig::floorplanningRequiredKeys() {
   static const std::vector<std::string> keys = {
       "DEVICE_SIZE", "DSP_COLS", "BRAM_COLS", "DSP_SIZE", "BRAM_SIZE"};
   return keys;
 }
 
-DeviceConfig::DeviceConfig(const std::filesystem::path& configFile) {
-  // 1. Try the provided config.json as-is.
+DeviceFloorplanningConfig& DeviceFloorplanningConfig::instance() {
+  static DeviceFloorplanningConfig s_instance;
+  return s_instance;
+}
+
+void DeviceFloorplanningConfig::reset() {
+  m_valid = false;
+  m_fallbackUsed = false;
+  m_error.clear();
+  m_missingKeys.clear();
+  m_keys.clear();
+  m_fallbackConfigPath.clear();
+  m_effectiveConfigPath.clear();
+}
+
+void DeviceFloorplanningConfig::refresh() {
+  reset();
+
+  const std::filesystem::path configFile =
+      QLDeviceManager::getInstance()->deviceConfigJSONPath();
+
+  // 1. Try the current device's config.json as-is.
   if (load(configFile) && validate(floorplanningRequiredKeys())) {
     m_valid = true;
     m_effectiveConfigPath = configFile;
@@ -89,7 +109,7 @@ DeviceConfig::DeviceConfig(const std::filesystem::path& configFile) {
   // Otherwise m_valid stays false and m_error describes the failure.
 }
 
-bool DeviceConfig::load(const std::filesystem::path& configFile) {
+bool DeviceFloorplanningConfig::load(const std::filesystem::path& configFile) {
   m_keys.clear();
 
   if (!FileUtils::FileExists(configFile)) {
@@ -116,7 +136,7 @@ bool DeviceConfig::load(const std::filesystem::path& configFile) {
   return true;
 }
 
-bool DeviceConfig::validate(const std::vector<std::string>& requiredKeys) {
+bool DeviceFloorplanningConfig::validate(const std::vector<std::string>& requiredKeys) {
   m_missingKeys.clear();
 
   for (const std::string& key : requiredKeys) {
@@ -135,7 +155,7 @@ bool DeviceConfig::validate(const std::vector<std::string>& requiredKeys) {
   return true;
 }
 
-bool DeviceConfig::generateFallbackConfig() {
+bool DeviceFloorplanningConfig::generateFallbackConfig() {
   if (GlobalSession == nullptr || GlobalSession->GetCompiler() == nullptr) {
     m_error = "cannot generate fallback config: no active compiler session";
     return false;
