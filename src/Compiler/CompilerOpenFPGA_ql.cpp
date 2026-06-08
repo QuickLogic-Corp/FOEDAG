@@ -6882,8 +6882,6 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--clocks_file");
     args.push_back(clocksFile.string());
   }
-  // Resolve the config to use: device config.json when valid, otherwise a
-  // vpr-generated fallback (empty if neither is usable; details in Messages).
   args.push_back("--device_config_file");
   args.push_back(FloorplanningConfigProvider::getEffectiveConfig().string());
   args.push_back("--output_path");
