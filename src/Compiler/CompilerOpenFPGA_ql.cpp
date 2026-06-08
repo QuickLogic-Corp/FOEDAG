@@ -53,6 +53,7 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/FloorplanningConfigProvider.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -6720,9 +6721,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  const std::filesystem::path device_target_config_json_filepath = deviceConfigFilePath(current_device_target);
-
-  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) / 
+  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) /
                                       std::string(ProjManager()->projectName() + "_post_synth.blif");
 
   if (!fs::exists(netlist_path)){
@@ -6883,8 +6882,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--clocks_file");
     args.push_back(clocksFile.string());
   }
+  // Resolve the config to use: device config.json when valid, otherwise a
+  // vpr-generated fallback (empty if neither is usable; details in Messages).
   args.push_back("--device_config_file");
-  args.push_back(device_target_config_json_filepath.string());
+  args.push_back(FloorplanningConfigProvider::getEffectiveConfig().string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
 

@@ -81,7 +81,7 @@ set (SRC_CPP_LIST
   Reports/TimingAnalysisReportManager_ql.cpp
   Reports/PowerAnalysisReportManager_ql.cpp
   QLDeviceManager.cpp
-  DeviceFloorplanningConfig.cpp
+  FloorplanningConfigProvider.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   BlifParser.cpp

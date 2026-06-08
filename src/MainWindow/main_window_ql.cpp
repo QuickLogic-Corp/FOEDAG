@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/CompilerOpenFPGA_ql.h"
-#include "Compiler/DeviceFloorplanningConfig.h"
+#include "Compiler/FloorplanningConfigProvider.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TaskManager.h"
@@ -2262,17 +2262,15 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
-      // The device config.json is validated once on project open / device
-      // change (see the DeviceFloorplanningConfig::refresh() hooks); here we
-      // just consume the cached result so vpr is not re-run each time
-      // floorplanning opens.
-      const DeviceFloorplanningConfig& deviceConfig = DeviceFloorplanningConfig::instance();
-      if (!deviceConfig.isValid()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", QString::fromStdString(deviceConfig.error()));
+      // Resolve the device config.json right before we use it (regenerates the
+      // vpr fallback if it is missing/malfunctioning; details go to Messages).
+      const std::filesystem::path deviceConfigFile = FloorplanningConfigProvider::getEffectiveConfig();
+      if (deviceConfigFile.empty()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", "Could not resolve the device floorplanning config. See the Messages panel for details.");
         cleanFloorPlanningUI();
         return;
       }
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceConfig.effectiveConfigPath());
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceConfigFile);
 
       if (descriptor->hasError()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
@@ -2609,9 +2607,6 @@ void MainWindow::handleProjectOpened() {
   updateSourceTree();
   // Update watcher files
   DesignFileWatcher::Instance()->updateDesignFileWatchers(m_projectManager);
-  // Validate the device floorplanning config once for the opened project
-  // (regenerates the vpr fallback if config.json is missing/malfunctioning).
-  DeviceFloorplanningConfig::instance().refresh();
 }
 
 void MainWindow::saveWelcomePageConfig() {

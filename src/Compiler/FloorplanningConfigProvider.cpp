@@ -1,10 +1,13 @@
-#include "Compiler/DeviceFloorplanningConfig.h"
+#include "Compiler/FloorplanningConfigProvider.h"
 
 #include <QProcess>
 #include <QString>
 #include <QStringList>
 
 #include <fstream>
+#include <set>
+#include <string>
+#include <vector>
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/QLDeviceManager.h"
@@ -27,6 +30,13 @@ namespace {
 //   DEVICE_SIZE  = grid - 2*ring                (both sides)
 //   <col in cfg> = grid column - (ring - 1)     (1-based core column)
 constexpr int kGridRingPerSide = 2;
+
+// The keys DeviceGridDescriptor / generate_floorplanning need.
+const std::vector<std::string>& requiredKeys() {
+  static const std::vector<std::string> keys = {
+      "DEVICE_SIZE", "DSP_COLS", "BRAM_COLS", "DSP_SIZE", "BRAM_SIZE"};
+  return keys;
+}
 
 // Parse "<w>x<h>" into a pair. Returns false on malformed input.
 bool parseWxH(const QString& value, int& w, int& h) {
@@ -61,77 +71,14 @@ std::string toConfigColumns(const std::vector<int>& gridColumns) {
   return StringUtils::join(shifted, ",");
 }
 
-}  // namespace
-
-const std::vector<std::string>& DeviceFloorplanningConfig::floorplanningRequiredKeys() {
-  static const std::vector<std::string> keys = {
-      "DEVICE_SIZE", "DSP_COLS", "BRAM_COLS", "DSP_SIZE", "BRAM_SIZE"};
-  return keys;
-}
-
-DeviceFloorplanningConfig& DeviceFloorplanningConfig::instance() {
-  static DeviceFloorplanningConfig s_instance;
-  return s_instance;
-}
-
-void DeviceFloorplanningConfig::reset() {
-  m_valid = false;
-  m_fallbackUsed = false;
-  m_error.clear();
-  m_missingKeys.clear();
-  m_keys.clear();
-  m_fallbackConfigPath.clear();
-  m_effectiveConfigPath.clear();
-}
-
-void DeviceFloorplanningConfig::refresh() {
-  reset();
-
-  Compiler* compiler =
-      (GlobalSession != nullptr) ? GlobalSession->GetCompiler() : nullptr;
-
-  const std::filesystem::path configFile =
-      QLDeviceManager::getInstance()->deviceConfigJSONPath();
-
-  // 1. Try the current device's config.json as-is.
-  if (load(configFile) && validate(floorplanningRequiredKeys())) {
-    m_valid = true;
-    m_effectiveConfigPath = configFile;
-    return;
-  }
-
-  // 2. Missing/malfunctioning: announce why and generate a fallback from vpr.
-  if (compiler) {
-    compiler->Message(
-        "Floorplanning: device config.json cannot be used (" + m_error +
-        "). Falling back to 'vpr --show_arch_resources' to generate "
-        "failback_floorplanning_config.json.");
-  }
-
-  if (generateFallbackConfig()) {
-    m_fallbackUsed = true;
-    if (load(m_fallbackConfigPath) && validate(floorplanningRequiredKeys())) {
-      m_valid = true;
-      m_effectiveConfigPath = m_fallbackConfigPath;
-      if (compiler) {
-        compiler->Message("Floorplanning: using fallback device config " +
-                          m_fallbackConfigPath.string() + ".");
-      }
-      return;
-    }
-  }
-  // Otherwise m_valid stays false and m_error describes the failure.
-  if (compiler) {
-    compiler->ErrorMessage("Floorplanning: fallback config generation failed (" +
-                           m_error + ").");
-  }
-}
-
-bool DeviceFloorplanningConfig::load(const std::filesystem::path& configFile) {
-  m_keys.clear();
+// Load configFile and return the set of missing required keys. On a load/parse
+// failure returns false and sets error (the keys set is then meaningless).
+bool checkConfig(const std::filesystem::path& configFile,
+                 std::vector<std::string>& missing, std::string& error) {
+  missing.clear();
 
   if (!FileUtils::FileExists(configFile)) {
-    m_error = "config.json not found: " + configFile.string();
+    error = "config.json not found: " + configFile.string();
     return false;
   }
 
@@ -139,64 +86,55 @@ bool DeviceFloorplanningConfig::load(const std::filesystem::path& configFile) {
   try {
     config = json::parse(FileUtils::GetFileContent(configFile));
   } catch (const json::parse_error& e) {
-    m_error = "config.json parse error: " + std::string(e.what());
+    error = "config.json parse error: " + std::string(e.what());
     return false;
   }
-
   if (!config.is_object()) {
-    m_error = "config.json root is not a JSON object";
+    error = "config.json root is not a JSON object";
     return false;
   }
 
-  for (const auto& item : config.items()) {
-    m_keys.insert(item.key());
-  }
-  return true;
-}
-
-bool DeviceFloorplanningConfig::validate(const std::vector<std::string>& requiredKeys) {
-  m_missingKeys.clear();
-
-  for (const std::string& key : requiredKeys) {
-    if (m_keys.find(key) == m_keys.end()) {
-      m_missingKeys.push_back(key);
+  for (const std::string& key : requiredKeys()) {
+    if (!config.contains(key)) {
+      missing.push_back(key);
     }
   }
-
-  if (!m_missingKeys.empty()) {
-    m_error = "config.json is missing required key(s): " +
-              StringUtils::join(m_missingKeys, ", ");
-    return false;
+  if (!missing.empty()) {
+    error = "config.json is missing required key(s): " +
+            StringUtils::join(missing, ", ");
   }
-
-  m_error.clear();
   return true;
 }
 
-bool DeviceFloorplanningConfig::generateFallbackConfig() {
+// Run `vpr --show_arch_resources`, parse it and write the fallback config to
+// the project folder. Returns the written path, or empty (with error set).
+std::filesystem::path generateFallbackConfig(std::string& error) {
   if (GlobalSession == nullptr || GlobalSession->GetCompiler() == nullptr) {
-    m_error = "cannot generate fallback config: no active compiler session";
-    return false;
+    error = "no active compiler session";
+    return {};
   }
   CompilerOpenFPGA_ql* compiler =
       dynamic_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
   if (compiler == nullptr || compiler->ProjManager() == nullptr) {
-    m_error = "cannot generate fallback config: no project/compiler available";
-    return false;
+    error = "no project/compiler available";
+    return {};
   }
 
-  const std::filesystem::path archFile =
-      QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
+  // The device VPR arch is shipped encrypted (vpr.xml.en); this provider
+  // decrypts it to a temp file (cleaned up when archProvider goes out of scope,
+  // i.e. after the vpr run below). Use it instead of the raw arch path.
+  VprArchitectureFileProfider archProvider(compiler);
+  const std::filesystem::path archFile = archProvider.get();
   const std::filesystem::path blifFile = compiler->getPostSynthBlifFilePath();
   const std::filesystem::path projectDir = compiler->ProjManager()->projectPath();
 
-  if (!FileUtils::FileExists(archFile)) {
-    m_error = "fallback: VPR architecture file not found: " + archFile.string();
-    return false;
+  if (archFile.empty() || !FileUtils::FileExists(archFile)) {
+    error = "VPR architecture file not available";
+    return {};
   }
   if (!FileUtils::FileExists(blifFile)) {
-    m_error = "fallback: post-synthesis blif not found: " + blifFile.string();
-    return false;
+    error = "post-synthesis blif not found: " + blifFile.string();
+    return {};
   }
 
   // Run vpr --show_arch_resources serially and capture its stdout.
@@ -210,17 +148,19 @@ bool DeviceFloorplanningConfig::generateFallbackConfig() {
        << "--show_arch_resources";
   vpr.start("vpr", args);
   if (!vpr.waitForStarted(30000)) {
-    m_error = "fallback: failed to start vpr";
-    return false;
+    error = "failed to start vpr";
+    return {};
   }
   if (!vpr.waitForFinished(-1)) {
-    m_error = "fallback: vpr --show_arch_resources did not finish";
-    return false;
+    error = "vpr --show_arch_resources did not finish";
+    return {};
   }
   if (vpr.exitStatus() != QProcess::NormalExit || vpr.exitCode() != 0) {
-    m_error = "fallback: vpr --show_arch_resources failed (exit code " +
-              std::to_string(vpr.exitCode()) + ")";
-    return false;
+    const QString stderrTail =
+        QString::fromUtf8(vpr.readAllStandardError()).trimmed().right(500);
+    error = "vpr --show_arch_resources failed (exit code " +
+            std::to_string(vpr.exitCode()) + "): " + stderrTail.toStdString();
+    return {};
   }
 
   // Parse the FLOORPLAN_* block (raw grid coordinates).
@@ -246,16 +186,16 @@ bool DeviceFloorplanningConfig::generateFallbackConfig() {
   }
 
   if (!haveGrid || !haveDspSize || !haveBramSize) {
-    m_error = "fallback: could not parse vpr resource report";
-    return false;
+    error = "could not parse vpr resource report";
+    return {};
   }
 
   // Convert raw grid coordinates into config (core) coordinates.
   const int deviceW = gridW - 2 * kGridRingPerSide;
   const int deviceH = gridH - 2 * kGridRingPerSide;
   if (deviceW <= 0 || deviceH <= 0) {
-    m_error = "fallback: implausible device grid size from vpr";
-    return false;
+    error = "implausible device grid size from vpr";
+    return {};
   }
 
   json cfg;
@@ -269,14 +209,57 @@ bool DeviceFloorplanningConfig::generateFallbackConfig() {
       projectDir / "failback_floorplanning_config.json";
   std::ofstream out(outPath);
   if (!out) {
-    m_error = "fallback: cannot write " + outPath.string();
-    return false;
+    error = "cannot write " + outPath.string();
+    return {};
   }
   out << cfg.dump(2) << "\n";
   out.close();
 
-  m_fallbackConfigPath = outPath;
-  return true;
+  return outPath;
+}
+
+}  // namespace
+
+std::filesystem::path FloorplanningConfigProvider::getEffectiveConfig() {
+  Compiler* compiler =
+      (GlobalSession != nullptr) ? GlobalSession->GetCompiler() : nullptr;
+
+  const std::filesystem::path configFile =
+      QLDeviceManager::getInstance()->deviceConfigJSONPath();
+
+  // 1. Use the current device's config.json as-is when it is valid.
+  std::vector<std::string> missing;
+  std::string error;
+  if (checkConfig(configFile, missing, error) && missing.empty()) {
+    return configFile;
+  }
+
+  // 2. Missing/malfunctioning: announce why and generate a fallback from vpr.
+  if (compiler) {
+    compiler->Message(
+        "Floorplanning: device config.json cannot be used (" + error +
+        "). Falling back to 'vpr --show_arch_resources' to generate "
+        "failback_floorplanning_config.json.");
+  }
+
+  std::string fallbackError;
+  const std::filesystem::path fallbackConfig =
+      generateFallbackConfig(fallbackError);
+  if (!fallbackConfig.empty() &&
+      checkConfig(fallbackConfig, missing, fallbackError) && missing.empty()) {
+    if (compiler) {
+      compiler->Message("Floorplanning: using fallback device config " +
+                        fallbackConfig.string() + ".");
+    }
+    return fallbackConfig;
+  }
+
+  if (compiler) {
+    compiler->ErrorMessage(
+        "Floorplanning: fallback config generation failed (" + fallbackError +
+        ").");
+  }
+  return {};
 }
 
 }  // namespace FOEDAG
