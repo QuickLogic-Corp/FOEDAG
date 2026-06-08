@@ -3938,6 +3938,70 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
+   std::filesystem::path pinmapping2pcf_script_path =
+    GetSession()->Context()->DataPath() /
+    std::filesystem::path("..") /
+    std::filesystem::path("scripts") /
+    std::filesystem::path("pinmapping2pcf.py");
+
+  auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
+  if (pinTableFile.empty()){
+      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the pinmapping2pcf.py. Skipping pinmapping2pcf.py.\n");
+      return true;
+  }
+
+  std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+
+  std::filesystem::path output_pcf_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_PinMapping.pcf");
+
+  #ifdef _WIN32
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+  #ifdef USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+    // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
+    pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
+  #else // USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+    ErrorMessage("System " + python_exec.string() +
+                " is not found, Please install " + python_exec.string() + " and make sure it's in the PATH variable."
+                " PinMapping2PCF Generation Failed!");
+    return false;
+  #endif // USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  
+  }
+  
+  std::filesystem::path filepath_fpga_io_map_xml;
+  filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
+  if(filepath_fpga_io_map_xml.empty()) {
+    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the pinmapping2pcf.py. Skipping pinmapping2pcf.py.");
+    return true;
+  }
+  
+  const std::string pinmapping2pcf_command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(pinmapping2pcf_script_path.string());
+  args.push_back("--fpga_io_map");
+  args.push_back(filepath_fpga_io_map_xml.string());
+  if(fs::exists(pinTableFile)) {
+    args.push_back("--pin_table");
+    args.push_back(pinTableFile.string());
+  }          
+  args.push_back("--pcf_file");
+  args.push_back(output_pcf_path.string());        
+   args.push_back("--place_file");
+  args.push_back(place_file_path.string());       
+
+  int pinmapping2pcf_status = FileUtils::ExecuteSystemCommand(pinmapping2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
+
+  if (pinmapping2pcf_status == 1) { //Failure
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                " PinMapping2PCF Failed!");
+    return false;
+  }
   return true;
 }
 
@@ -6347,7 +6411,8 @@ int status = ExecuteAndMonitorSystemCommand(command);
   }
   m_state = State::BistreamGenerated;
 
-  Message("Design " + ProjManager()->projectName() + " bitstream is generated");
+  Message("Design " + ProjManager()->projectName() + " bitstream is generated.\n");
+  
   return true;
 }
 
@@ -6507,7 +6572,7 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   auto [filepath_pin_table_csv, error] = findCurrentDevicePinTableCsv();
   if (filepath_pin_table_csv.empty()) {
       // no pin table csv available, we cannot proceed with the pcf flow!
-      ErrorMessage(std::string(__func__) + ": pin table csv not found, cannot continue with pcf flow!");
+      Message(std::string(__func__) + ": pin table csv not found, cannot continue with pcf flow!");
       return false;
   }
   ///////////////////////////////////////////////////////////////// PIN TABLE CSV --
@@ -6676,8 +6741,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
   if(filepath_fpga_io_map_xml.empty()) {
-    ErrorMessage(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
-    return false;
+    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
   }
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
@@ -6790,6 +6854,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       
       
   std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path clocksFile  = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + ".clocks");
   std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
@@ -6814,6 +6879,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   args.push_back(generate_floorplanning_script_path.string());
   args.push_back("--blif_file");
   args.push_back(netlistFile.string());
+  if (fs::exists(clocksFile.string())) {
+    args.push_back("--clocks_file");
+    args.push_back(clocksFile.string());
+  }
   args.push_back("--device_config_file");
   args.push_back(device_target_config_json_filepath.string());
   args.push_back("--output_path");
@@ -9281,6 +9350,8 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // use settings to populate yosys_options
   std::string yosys_options;
 
+  yosys_options += " -clocks_file " + std::string(ProjManager()->projectName()) + ".clocks"; 
+
   if( QLSettingsManager::getStringValue("yosys", "general", "verilog") == "checked" ) {
 
     yosys_options += " -verilog " + std::string(m_projManager->projectName() + "_post_synth.v");
@@ -9322,11 +9393,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   if( QLSettingsManager::getStringValue("yosys", "general", "no_dsp") == "checked" ) {
 
     yosys_options += " -no_dsp";
-  }
-
-  if( QLSettingsManager::getStringValue("yosys", "general", "dspv2") == "checked" ) {
-
-    yosys_options += " -dspv2";
   }
 
   if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {

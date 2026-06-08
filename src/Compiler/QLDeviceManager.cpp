@@ -1911,6 +1911,22 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     // collect the list of every filepath in the source_device_data_dir that we want to encrypt.
     std::vector<std::filesystem::path> source_device_data_file_list_to_encrypt;
     std::vector<std::filesystem::path> source_device_data_file_list_to_copy;
+
+    // include pin_table csv files for copy
+    std::filesystem::path device_target_config_json_filepath = source_device_data_dir_path / std::string("config.json");
+    std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
+    json device_target_config_json = json::parse(device_target_config_json_ifstream);
+    // get json value
+    std::string pin_table_value;
+    std::filesystem::path pin_table_path; 
+    if( device_target_config_json.contains("PIN_TABLE")  ) {
+      pin_table_value = device_target_config_json["PIN_TABLE"].get<std::string>();
+    }
+    if (!pin_table_value.empty()) {
+      if (std::filesystem::is_regular_file(source_device_data_dir_path / pin_table_value)) {
+        pin_table_path = source_device_data_dir_path / pin_table_value;
+      }
+    }
     for (const std::filesystem::directory_entry& dir_entry :
         std::filesystem::recursive_directory_iterator(source_device_data_dir_path_c,
                                                       std::filesystem::directory_options::skip_permission_denied,
@@ -2018,10 +2034,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
           }
 
-          // include pin_table csv files for copy
-          if (std::regex_match(dir_entry.path().filename().string(),
-                                std::regex(".*pin_table\\.csv",
-                                std::regex::icase))) {
+          if (!pin_table_path.empty() && std::filesystem::equivalent(dir_entry.path(), pin_table_path)) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
