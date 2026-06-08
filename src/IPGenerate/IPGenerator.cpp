@@ -65,7 +65,7 @@ void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::
   m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
 }
 
-IPGenerator::IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler): m_installDir(installDir), m_catalog(catalog), m_compiler(compiler) {
+IPGenerator::IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler), m_installDir(installDir) {
   // Only set PYTHONHOME and LD_LIBRARY_PATH when the bundled envs directory
   // actually exists.  When it doesn't (e.g. macOS builds without the litex
   // environment), setting PYTHONHOME to a non-existent path poisons the
