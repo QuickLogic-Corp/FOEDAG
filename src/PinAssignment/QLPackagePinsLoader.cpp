@@ -218,7 +218,7 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
       continue;
     }
 
-    if (data.at(idxPinType).trimmed() != QStringLiteral("GPIO")) {
+    if (data.at(idxPinType).trimmed().toUpper() != QStringLiteral("GPIO")) {
       continue;
     }
 
