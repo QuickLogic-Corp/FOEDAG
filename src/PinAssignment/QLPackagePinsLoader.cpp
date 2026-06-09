@@ -214,6 +214,7 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
   for (const auto &line: lines) {
     const QStringList data = line.split(",");
     if (data.size() <= neededMax) {
+      logWarning(QString("line [%1] has too few columns (expected at least %2, got %3)").arg(line).arg(neededMax + 1).arg(data.size()));
       continue;
     }
 
