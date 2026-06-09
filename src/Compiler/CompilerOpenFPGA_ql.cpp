@@ -9710,7 +9710,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
   }
 
-  command->append("--skip_sync_clustering_and_routing_results on");
   command->append("--route");
 
   return command;
