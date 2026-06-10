@@ -128,21 +128,12 @@ std::pair<bool, QString> QLPackagePinsLoader::loadOld(const QStringList &lines, 
 
     if (data.size() >= columnMappedPinIndex) {
       pinName = data.at(columnMappedPinIndex);
+      dataMod[PinName] = pinName;
+      dataMod[BallName] = pinName;
+      dataMod[BallId] = pinName;
     } else {
       logWarning(QString("line [%1] doesn't contain column [%2]").arg(line).arg(COLUMN_MAPPED_PIN));
     }
-
-    // Fall back to netlist_name when mapped_pin is empty (mirrors loadNew()).
-    if (pinName.isEmpty() && m_header.contains(COLUMN_NETLIST_NAME)) {
-      const int columnNetlistNameIndex = m_header.value(COLUMN_NETLIST_NAME);
-      if (data.size() > columnNetlistNameIndex) {
-        pinName = data.at(columnNetlistNameIndex);
-      }
-    }
-
-    dataMod[PinName] = pinName;
-    dataMod[BallName] = pinName;
-    dataMod[BallId] = pinName;
 
     if (!pinName.isEmpty()) {
       if (uniquePins.contains(pinName)) {
@@ -211,6 +202,18 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
   QMap<QString, PackagePinGroup> groupsBySide;
   QStringList sideOrder;
 
+  // Design decision: if the customer_pin_alias column is populated on at least
+  // one row, the alias column becomes the baseline for the whole table and the
+  // netlist_name column is ignored; otherwise netlist_name is used.
+  bool useAlias = false;
+  for (const auto &line: lines) {
+    const QStringList data = line.split(",");
+    if (data.size() > idxAlias && !data.at(idxAlias).trimmed().isEmpty()) {
+      useAlias = true;
+      break;
+    }
+  }
+
   for (const auto &line: lines) {
     const QStringList data = line.split(",");
     if (data.size() <= neededMax) {
@@ -222,8 +225,13 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
       continue;
     }
 
-    const QString netlistName = data.at(idxNetlist).trimmed();
-    if (netlistName.isEmpty()) {
+    // Name the pin from the baseline column chosen for the whole table: the
+    // alias when useAlias is set, otherwise netlist_name. A row whose selected
+    // column is empty is dropped below.
+    const QString& netName = data.at(idxNetlist).trimmed();
+    const QString& alias = data.at(idxAlias).trimmed();
+    const QString pinName = useAlias ? alias : netName;
+    if (pinName.isEmpty()) {
       continue;
     }
 
@@ -232,9 +240,6 @@ std::pair<bool, QString> QLPackagePinsLoader::loadNew(const QStringList &lines, 
       logWarning(QString("line [%1] has invalid side [%2]").arg(line).arg(side));
       continue;
     }
-
-    const QString alias = data.at(idxAlias).trimmed();
-    const QString pinName = alias.isEmpty() ? netlistName : alias;
 
     const QString dirStr = data.at(idxDir).trimmed().toLower();
     QString dir;

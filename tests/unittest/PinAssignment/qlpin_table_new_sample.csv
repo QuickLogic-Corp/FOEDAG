@@ -1,9 +1,9 @@
 side,pin_direction,pin_type,row,col,subtile,physical_offset,customer_pin_alias,netlist_name
 BOTTOM,input,GPIO,0,3,0,,b_in,io_a2f_b0
-BOTTOM,output,GPIO,0,4,1,,,io_f2a_b0
+BOTTOM,output,GPIO,0,4,1,,b_out,io_f2a_b0
 TOP,input,GPIO,18,3,0,,,io_a2f_t0
 TOP,output,GPIO,18,4,1,,t_out,io_f2a_t0
-LEFT,input,GPIO,5,0,0,,,io_a2f_l0
-LEFT,output,GPIO,6,0,1,,,io_f2a_l0
-RIGHT,input,GPIO,5,20,0,,,io_a2f_r0
+LEFT,input,GPIO,5,0,0,,l_in,io_a2f_l0
+LEFT,output,GPIO,6,0,1,,l_out,io_f2a_l0
+RIGHT,input,GPIO,5,20,0,,r_in,io_a2f_r0
 RIGHT,output,GPIO,6,20,1,,,io_f2a_r0

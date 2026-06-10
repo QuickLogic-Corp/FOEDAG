@@ -34,9 +34,12 @@ using namespace FOEDAG;
 // otherwise the old "orientation"/"port_name"/"mapped_pin" format is used.
 //
 // Both fixtures describe two pins per side (one input, one output). In the new
-// fixture a couple of pins (b_in, t_out) take their name from
-// "customer_pin_alias" and the rest from "netlist_name"; in the old fixture a
-// couple of rows leave "mapped_pin" empty and so take their name from
+// format the naming column is selected for the whole table at once: if
+// "customer_pin_alias" is populated on at least one row, that column becomes the
+// baseline and rows that leave it empty are dropped; otherwise every pin is
+// named from "netlist_name". The partial-alias fixture (qlpin_table_new_sample)
+// exercises the former, qlpin_table_new_no_alias_sample the latter. In the old
+// fixture a couple of rows leave "mapped_pin" empty and so take their name from
 // "netlist_name". Each format has its own expected model below.
 
 namespace {
@@ -100,8 +103,9 @@ TEST(QLPackagePinsLoader, NewFixtureHeader) {
 }
 
 // Old format: groups come from the "orientation" column, the pin name is the
-// "mapped_pin" value (falling back to "netlist_name" when empty) and the
-// direction is derived from the A2F/F2A pattern in "port_name".
+// "mapped_pin" value and the direction is derived from the A2F/F2A pattern in
+// "port_name". The old loader has no name fallback: a row with an empty
+// "mapped_pin" is dropped.
 TEST(QLPackagePinsLoader, LoadOldFormat) {
   PackagePinsModel model;
   QLPackagePinsLoader loader{&model};
@@ -109,20 +113,19 @@ TEST(QLPackagePinsLoader, LoadOldFormat) {
   auto [res, error] = loader.load(":/PinAssignment/qlpin_table_old_sample.csv");
   EXPECT_EQ(res, true) << error.toStdString();
 
-  // The TOP input and RIGHT output rows leave "mapped_pin" empty, so they are
-  // named after their "netlist_name" column instead.
   const QVector<GroupExp> expected = {
       {"BOTTOM", {{"b_in", IODirection::INPUT}, {"b_out", IODirection::OUTPUT}}},
-      {"TOP", {{"A2F_T_i[2]", IODirection::INPUT}, {"t_out", IODirection::OUTPUT}}},
+      {"TOP", {{"t_out", IODirection::OUTPUT}}},
       {"LEFT", {{"l_in", IODirection::INPUT}, {"l_out", IODirection::OUTPUT}}},
-      {"RIGHT", {{"r_in", IODirection::INPUT}, {"F2A_R_o[3]", IODirection::OUTPUT}}},
+      {"RIGHT", {{"r_in", IODirection::INPUT}}},
   };
   checkPinoutsMatchExpected(model, expected);
 }
 
-// New format: groups come from the "side" column, the pin name is the
-// "customer_pin_alias" when present and falls back to "netlist_name" otherwise,
-// and the direction is read directly from "pin_direction".
+// New format: groups come from the "side" column and the direction is read
+// directly from "pin_direction". The naming column is chosen once for the whole
+// table: since this fixture populates "customer_pin_alias" on at least one row,
+// the alias column is the baseline and every row that leaves it empty is dropped.
 TEST(QLPackagePinsLoader, LoadNewFormat) {
   PackagePinsModel model;
   QLPackagePinsLoader loader{&model};
@@ -130,13 +133,30 @@ TEST(QLPackagePinsLoader, LoadNewFormat) {
   auto [res, error] = loader.load(":/PinAssignment/qlpin_table_new_sample.csv");
   EXPECT_EQ(res, true) << error.toStdString();
 
-  // Pins are named after "netlist_name" except where a "customer_pin_alias" is
-  // given (b_in on BOTTOM, t_out on TOP).
+  const QVector<GroupExp> expected = {
+      {"BOTTOM", {{"b_in", IODirection::INPUT}, {"b_out", IODirection::OUTPUT}}},
+      {"TOP", {{"t_out", IODirection::OUTPUT}}},
+      {"LEFT", {{"l_in", IODirection::INPUT}, {"l_out", IODirection::OUTPUT}}},
+      {"RIGHT", {{"r_in", IODirection::INPUT}}},
+  };
+  checkPinoutsMatchExpected(model, expected);
+}
+
+// When no row populates "customer_pin_alias", the whole table falls back to
+// naming pins from "netlist_name".
+TEST(QLPackagePinsLoader, LoadNewFormatNoAlias) {
+  PackagePinsModel model;
+  QLPackagePinsLoader loader{&model};
+
+  auto [res, error] =
+      loader.load(":/PinAssignment/qlpin_table_new_no_alias_sample.csv");
+  EXPECT_EQ(res, true) << error.toStdString();
+
   const QVector<GroupExp> expected = {
       {"BOTTOM",
-       {{"b_in", IODirection::INPUT}, {"io_f2a_b0", IODirection::OUTPUT}}},
+       {{"io_a2f_b0", IODirection::INPUT}, {"io_f2a_b0", IODirection::OUTPUT}}},
       {"TOP",
-       {{"io_a2f_t0", IODirection::INPUT}, {"t_out", IODirection::OUTPUT}}},
+       {{"io_a2f_t0", IODirection::INPUT}, {"io_f2a_t0", IODirection::OUTPUT}}},
       {"LEFT",
        {{"io_a2f_l0", IODirection::INPUT}, {"io_f2a_l0", IODirection::OUTPUT}}},
       {"RIGHT",
@@ -147,6 +167,7 @@ TEST(QLPackagePinsLoader, LoadNewFormat) {
 
 // The new format carries the physical pin location in the row/col/subtile
 // columns. load() records it in pinToLocationMap() as "x:y:z" == "col:row:sub".
+// With the alias column as the table baseline, only the aliased rows are kept.
 TEST(QLPackagePinsLoader, LoadNewFormatPinLocations) {
   PackagePinsModel model;
   QLPackagePinsLoader loader{&model};
@@ -155,15 +176,13 @@ TEST(QLPackagePinsLoader, LoadNewFormatPinLocations) {
   EXPECT_EQ(res, true) << error.toStdString();
 
   const auto &loc = loader.pinToLocationMap();
-  EXPECT_EQ(loc.size(), 8);
+  EXPECT_EQ(loc.size(), 6);
   EXPECT_EQ(loc.value("b_in"), "3:0:0");
-  EXPECT_EQ(loc.value("io_f2a_b0"), "4:0:1");
-  EXPECT_EQ(loc.value("io_a2f_t0"), "3:18:0");
+  EXPECT_EQ(loc.value("b_out"), "4:0:1");
   EXPECT_EQ(loc.value("t_out"), "4:18:1");
-  EXPECT_EQ(loc.value("io_a2f_l0"), "0:5:0");
-  EXPECT_EQ(loc.value("io_f2a_l0"), "0:6:1");
-  EXPECT_EQ(loc.value("io_a2f_r0"), "20:5:0");
-  EXPECT_EQ(loc.value("io_f2a_r0"), "20:6:1");
+  EXPECT_EQ(loc.value("l_in"), "0:5:0");
+  EXPECT_EQ(loc.value("l_out"), "0:6:1");
+  EXPECT_EQ(loc.value("r_in"), "20:5:0");
 }
 
 TEST(QLPackagePinsLoader, LoadWrongFilePath) {

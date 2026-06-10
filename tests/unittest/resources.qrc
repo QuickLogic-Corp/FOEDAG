@@ -10,6 +10,7 @@
         <file>PinAssignment/corrupted.json</file>
         <file>PinAssignment/qlpin_table_old_sample.csv</file>
         <file>PinAssignment/qlpin_table_new_sample.csv</file>
+        <file>PinAssignment/qlpin_table_new_no_alias_sample.csv</file>
         <file>InteractivePathAnalysis/data/report_timing.setup.rpt.sample</file>
     </qresource>
 </RCC>
