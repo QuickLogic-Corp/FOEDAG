@@ -37,6 +37,7 @@ set (CPP_LIST
 #    PinAssignment/PinsBaseModel_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/PortsLoader_test.cpp
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
+    PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
 #    IPGenerator/IPGenerator_test.cpp // TODO @wOlek, fix crash
     FloorPlanning/FloorPlanning_test.cpp

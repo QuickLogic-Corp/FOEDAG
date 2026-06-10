@@ -172,6 +172,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string uniqueStaVprOptions() const;
   
   void onQdcFileSaved();
+  void onPcfFileSaved();
 
  protected:
   virtual bool IPGenerate();

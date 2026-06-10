@@ -6718,20 +6718,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   //m_blifParser.printHierachy(); // debug
   
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
-  if (pinTableFile.empty()) 
-      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
 
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
-  if(filepath_fpga_io_map_xml.empty()) {
-    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
-  }
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
-  if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
-    Message("qdc Constraint File and Pin Table File Does Not Exist. Skipping the generate_floorplanning Script.\n");
-    return true;
-  }
+
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
@@ -6900,7 +6892,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
   else if (status == 2){ //Skipped
-    Message("All of the atoms on the QDC have been overwritten by PCF file; Thus, no partition has been created!");
+    Message("IO Floor Plan Generation Skipped!");
     return true;
   }
   else { //Success
@@ -9822,8 +9814,23 @@ void CompilerOpenFPGA_ql::onQdcFileSaved() {
 
   BaseVprCommand(); // we need this call in order to decrypt arch file and store it as m_architectureFile
 
-  // incr compilation itself didn't track qdc file, so we must re-generate xml 
+  // incr compilation itself didn't track qdc file, so we must re-generate xml
   // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+  GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
+  invalidateTaskStatuses();
+}
+
+void CompilerOpenFPGA_ql::onPcfFileSaved() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
+  BaseVprCommand(); // decrypt arch file -> m_architectureFile
+
+  // incr compilation itself didn't track pcf file, so we must re-generate xml
+  // in order to incr compilation refresh compile statuses accordingly each time we save pcf file
   GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
   invalidateTaskStatuses();
 }
