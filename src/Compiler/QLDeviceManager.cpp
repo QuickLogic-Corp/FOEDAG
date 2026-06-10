@@ -2576,24 +2576,17 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   // Default to DSPv1 when the device does not specify a DSP version.
   std::string dsp_version = "1";
 
-  std::filesystem::path device_config_json_path = deviceConfigJSONPath(device_target);
+  // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
-  if(FileUtils::FileExists(device_config_json_path)) {
-
-    try {
-      std::ifstream device_config_json_ifstream(device_config_json_path.string());
-      json device_config_json = json::parse(device_config_json_ifstream);
-
-      if( device_config_json.contains("DSPv") ) {
-        const auto& dspv = device_config_json["DSPv"];
-        if( dspv.is_string() ) {
-          dsp_version = dspv.get<std::string>();
-        } else if( dspv.is_number_integer() ) {
-          dsp_version = std::to_string(dspv.get<int>());
-        }
+    if( device_target_config_json.contains("DSPv") ) {
+      const auto& dspv = device_target_config_json["DSPv"];
+      if( dspv.is_string() ) {
+        dsp_version = dspv.get<std::string>();
+      } else if( dspv.is_number_integer() ) {
+        dsp_version = std::to_string(dspv.get<int>());
       }
-    } catch (const json::exception&) {
-      // Malformed config.json: fall back to the DSPv1 default.
     }
   }
 
