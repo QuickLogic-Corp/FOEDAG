@@ -38,6 +38,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Log.h"
 #include "Compiler/WorkerThread.h"
 #include "Compiler/QLSettingsManager.h"
+#include "Compiler/QLDeviceManager.h"
 #include "IPGenerate/IPCatalog.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -229,10 +230,23 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
 
     bool status = true;
     if (argc == 1) {
-      // List all IPs
+      // List all IPs. The DSP generator ships multiple versions
+      // (dsp_generator_v1_0, dsp_generator_v2_0, ...); show only the instance
+      // matching the DSP version supported by the current device (config.json
+      // "DSPv", default "1"). Other DSP versions are hidden.
+      const std::string dspVersion =
+          QLDeviceManager::getInstance()->deviceDSPVersion();
+      const std::string dspKeep = "dsp_generator_v" + dspVersion + "_0";
+      static const std::string dspPrefix = "dsp_generator_v";
+
       std::string ips;
       for (auto def : generator->Catalog()->Definitions()) {
-        ips += def->Name() + " ";
+        const std::string& name = def->Name();
+        const bool isDsp = name.rfind(dspPrefix, 0) == 0;
+        if (isDsp && name != dspKeep) {
+          continue;  // hide DSP versions other than the device-supported one
+        }
+        ips += name + " ";
       }
       compiler->TclInterp()->setResult(ips);
     } else if (argc == 2) {

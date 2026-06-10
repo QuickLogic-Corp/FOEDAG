@@ -169,6 +169,9 @@ class QLDeviceManager : public QObject {
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
 
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
+  // DSP version supported by the device, from the "DSPv" entry in config.json.
+  // Defaults to "1" (DSPv1) when not specified.
+  std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
