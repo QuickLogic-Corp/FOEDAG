@@ -99,6 +99,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+if(APPLE)
+  # macOS toolchains (AppleClang) are newer/stricter than the supported
+  # Linux/Windows build toolchains and emit on-by-default warnings the
+  # project's per-subdirectory -Werror does not anticipate (e.g.
+  # -Winconsistent-missing-override, -Wmismatched-tags,
+  # -Wdeprecated-literal-operator). The per-subdirectory -Werror flags live
+  # in CMAKE_CXX_FLAGS_<CONFIG>, so the only place a suppression is
+  # guaranteed to land last (and win) is a directory compile option, which
+  # the compiler sees after those flag variables. Demote warnings to
+  # non-fatal on macOS only; warnings stay visible. Placed before the
+  # add_subdirectory() calls so it propagates to every target. APPLE-only:
+  # no effect on Linux or Windows builds.
+  add_compile_options(-Wno-error)
+endif()
+
 add_subdirectory(third_party/tcl_cmake EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/QScintilla-2.13.1)
