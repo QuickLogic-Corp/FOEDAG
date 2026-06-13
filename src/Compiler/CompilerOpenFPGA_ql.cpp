@@ -3354,12 +3354,19 @@ bool CompilerOpenFPGA_ql::Packing() {
     // - replace the layout name
     std::string command_rerun = command->string();
 
-    // ensure that 'FPGA_AUTO' replacement is done first!!
+    // Replace ONLY the '--device <layout>' token, not every occurrence of the
+    // layout name. The command also embeds device-data PATHS such as
+    // '.../TURNKEY-FPGA_AUTO/.../vpr.xml' and the sdc/net file paths, which must
+    // keep pointing at the original device directory. A blunt ReplaceAll on the
+    // bare layout name rewrote those paths to a non-existent
+    // 'TURNKEY-AUTOFPGA<w><h>' directory (in plaintext mode the arch path is the
+    // on-disk device file), so the architecture-file swap below could no longer
+    // match old_m_architectureFile and VPR failed to open the arch file.
     if(m_autoLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+      command_rerun = ReplaceAll(command_rerun, "--device FPGA_AUTO", "--device " + m_autoLayoutGeneratedLayoutName);
     }
     if(m_customLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+      command_rerun = ReplaceAll(command_rerun, "--device FPGA_CUSTOM", "--device " + m_autoLayoutGeneratedLayoutName);
     }
     command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
     // generator devices (AUTO/CUSTOM) may not ship a static SB_MAPS.yml, so the
