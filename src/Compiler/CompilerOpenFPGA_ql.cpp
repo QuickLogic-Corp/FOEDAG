@@ -3374,7 +3374,12 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
         }
       }
-      if (csv_templates_encrypted) {
+      // Only encrypt when a generated SB_MAPS actually exists. Some paths (e.g.
+      // the auto-layout "design fits the base layout" case) may not produce a
+      // generated SB_MAPS; encrypting a missing file would hard-fail here. A
+      // missing SB_MAPS is handled (and reported) by the downstream stages.
+      if (csv_templates_encrypted &&
+          FileUtils::FileExists(generated_sb_maps_yml_path)) {
         std::vector<std::filesystem::path> sbmaps_to_encrypt;
         sbmaps_to_encrypt.push_back(generated_sb_maps_yml_path);
         if (!encryptDeviceFiles(
