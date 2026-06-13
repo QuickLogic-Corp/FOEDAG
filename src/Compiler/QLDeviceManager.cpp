@@ -3742,7 +3742,13 @@ std::filesystem::path QLDeviceManager::deviceSBTemplatesDir(QLDeviceTarget devic
 
   if(compiler->m_autoLayoutGenerationMode ||
     compiler->m_customLayoutGenerationMode){
-    // no change in CSV, we can use the existing device's CSV unless something changes in the future.
+    // The CSV switchbox templates are reused unchanged from the source device,
+    // so we return its CSV directory as-is (encrypted or plaintext). To keep the
+    // generated routing-graph set consistent, the freshly generated SB_MAPS is
+    // encrypted to match these templates when they are encrypted -- see the
+    // generated-SB_MAPS handling in CompilerOpenFPGA_ql::Packing(). VPR selects
+    // CRR encrypted-vs-plaintext decoding off the --sb_maps '.en' suffix, so
+    // SB_MAPS and these templates must share the same encryption state.
   }
 
   if( !isDeviceTargetValid(device_target) ) {
