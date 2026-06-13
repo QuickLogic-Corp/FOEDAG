@@ -2557,7 +2557,7 @@ std::filesystem::path QLDeviceManager::deviceConfigJSONPath(QLDeviceTarget devic
 
 std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
 
-  // Default DSP version when the device does not specify one (DSPv1.0).
+  // Default DSP version when the device does not specify one (DSPV1.0).
   // The returned form is "<major>_<minor>" (e.g. "1_0", "2_0", "1_1"), which
   // maps directly onto the dsp_generator_v<major>_<minor> catalog directories.
   static const std::string DEFAULT_MAJOR_VERSION = "1";
@@ -2572,7 +2572,7 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
     if( device_target_config_json.contains("DSP_TYPE") ) {
       const auto& dsp_type = device_target_config_json["DSP_TYPE"];
       if( dsp_type.is_string() ) {
-        // Skip the leading "DSPV"/"DSPv" prefix and capture the version:
+        // Skip the leading "DSPV" prefix and capture the version:
         // group 1 = major, group 2 = optional minor (after a '.' or '_').
         // e.g. "DSPV2" -> 2 / (default), "DSPV1.1" -> 1 / 1, "DSPV1_1" -> 1 / 1.
         static const std::regex dsp_re(R"(^\D*(\d+)(?:[._](\d+))?)");
