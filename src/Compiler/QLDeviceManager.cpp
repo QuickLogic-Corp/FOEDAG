@@ -2557,24 +2557,36 @@ std::filesystem::path QLDeviceManager::deviceConfigJSONPath(QLDeviceTarget devic
 
 std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
 
-  // Default to DSPv1 when the device does not specify a DSP version.
-  std::string dsp_version = "1";
+  // Default DSP version when the device does not specify one (DSPv1.0).
+  // The returned form is "<major>_<minor>" (e.g. "1_0", "2_0", "1_1"), which
+  // maps directly onto the dsp_generator_v<major>_<minor> catalog directories.
+  static const std::string DEFAULT_MAJOR_VERSION = "1";
+  static const std::string DEFAULT_MINOR_VERSION = "0";
+  std::string major = DEFAULT_MAJOR_VERSION;
+  std::string minor = DEFAULT_MINOR_VERSION;
 
   // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
-    if( device_target_config_json.contains("DSPv") ) {
-      const auto& dspv = device_target_config_json["DSPv"];
-      if( dspv.is_string() ) {
-        dsp_version = dspv.get<std::string>();
-      } else if( dspv.is_number_integer() ) {
-        dsp_version = std::to_string(dspv.get<int>());
+    if( device_target_config_json.contains("DSP_TYPE") ) {
+      const auto& dsp_type = device_target_config_json["DSP_TYPE"];
+      if( dsp_type.is_string() ) {
+        // Skip the leading "DSPV"/"DSPv" prefix and capture the version:
+        // group 1 = major, group 2 = optional minor (after a '.' or '_').
+        // e.g. "DSPV2" -> 2 / (default), "DSPV1.1" -> 1 / 1, "DSPV1_1" -> 1 / 1.
+        static const std::regex dsp_re(R"(^\D*(\d+)(?:[._](\d+))?)");
+        const std::string type = dsp_type.get<std::string>();
+        std::smatch m;
+        if( std::regex_search(type, m, dsp_re) ) {
+          major = m[1].str();
+          minor = m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION;
+        }
       }
     }
   }
 
-  return dsp_version;
+  return major + "_" + minor;
 }
 
 // Load the device's `config.json` into the supplied json object.

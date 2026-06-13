@@ -233,10 +233,11 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       // List all IPs. The DSP generator ships multiple versions
       // (dsp_generator_v1_0, dsp_generator_v2_0, ...); show only the instance
       // matching the DSP version supported by the current device (config.json
-      // "DSPv", default "1"). Other DSP versions are hidden.
+      // "DSP_TYPE", e.g. "DSPV2"; default "1.0"). Other DSP versions are hidden.
+      // deviceDSPVersion() returns "<major>_<minor>" (e.g. "2_0", "1_1").
       const std::string dspVersion =
           QLDeviceManager::getInstance()->deviceDSPVersion();
-      const std::string dspKeep = "dsp_generator_v" + dspVersion + "_0";
+      const std::string dspKeep = "dsp_generator_v" + dspVersion;
       static const std::string dspPrefix = "dsp_generator_v";
 
       std::string ips;

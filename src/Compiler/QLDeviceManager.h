@@ -175,8 +175,9 @@ class QLDeviceManager : public QObject {
   bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json);
 
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
-  // DSP version supported by the device, from the "DSPv" entry in config.json.
-  // Defaults to "1" (DSPv1) when not specified.
+  // DSP version supported by the device, derived from the "DSP_TYPE" entry in
+  // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
+  // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPv1.0) when not specified.
   std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
