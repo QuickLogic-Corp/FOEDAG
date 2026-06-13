@@ -1976,12 +1976,6 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
               continue;  // prevent matching further copy rules
           }
 
-          // include config.json for encryption (CRR config contains device IP details)
-          if (dir_entry.path().filename().string() == "config.json") {
-              source_device_data_file_list_to_encrypt.push_back(dir_entry.path().string());
-              continue;  // prevent matching the generic .json copy rule below
-          }
-
           // include all files in 'examples/' for copy
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]examples[\/\\].*)",
@@ -2326,7 +2320,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     }
 
     // Post-encryption audit: for CRR devices, the target must not contain any
-    // plaintext copies of IP-sensitive files (SB_MAPS.yml, CSV/*.csv, config.json).
+    // plaintext copies of IP-sensitive files (SB_MAPS.yml, CSV/*.csv).
     // This catches classification bugs where a file ends up on both the encrypt
     // list (producing .en) and the copy list (producing a plaintext).
     {
@@ -2356,8 +2350,7 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
         const bool is_csv_in_csv_dir = std::regex_match(
             fullpath,
             std::regex(R"(.+[\/\\]CSV[\/\\].*\.csv)", std::regex::icase));
-        const bool is_config_json = (fname == "config.json");
-        if (is_sb_maps || is_csv_in_csv_dir || is_config_json) {
+        if (is_sb_maps || is_csv_in_csv_dir) {
           residual_plaintext.push_back(fullpath);
         }
       }
@@ -2555,17 +2548,8 @@ std::filesystem::path QLDeviceManager::deviceConfigJSONPath(QLDeviceTarget devic
   }
   else {
 
-    // accept encrypted variant: config.json.en (decryption is performed in-memory
-    // by callers via loadDeviceConfigJSON()).
-    std::filesystem::path device_config_json_en_path = 
-        deviceTypeDirPath(device_target) / std::string("config.json.en");
-    if(FileUtils::FileExists(device_config_json_en_path)) {
-      device_config_json_path = device_config_json_en_path;
-    }
-    else {
-      // file does not exist!
-      device_config_json_path.clear();
-    }
+    // file does not exist!
+    device_config_json_path.clear();
   }
 
   return device_config_json_path;
@@ -2593,9 +2577,9 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   return dsp_version;
 }
 
-// Load the device's `config.json` (plaintext or encrypted `.en`) into the
-// supplied json object. Returns true on success, false if neither variant
-// exists, decryption fails, or parsing fails.
+// Load the device's `config.json` into the supplied json object.
+// Returns true on success, false if the file does not exist or parsing fails.
+// config.json is always plaintext device data; it is never encrypted.
 bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json) {
 
   if( !isDeviceTargetValid(device_target) ) {
@@ -2603,62 +2587,20 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
   }
 
   std::filesystem::path device_type_dir = deviceTypeDirPath(device_target);
-  std::filesystem::path plaintext_path  = device_type_dir / std::string("config.json");
+  std::filesystem::path config_json_path = device_type_dir / std::string("config.json");
 
-  // 1. Plaintext path: present in dev/source trees and in legacy/unencrypted devices.
-  if(FileUtils::FileExists(plaintext_path)) {
-    try {
-      std::ifstream ifs(plaintext_path.string());
-      out_config_json = json::parse(ifs);
-      return true;
-    }
-    catch(const std::exception& e) {
-      std::cout << "loadDeviceConfigJSON: failed to parse "
-                << plaintext_path.string() << ": " << e.what() << std::endl;
-      return false;
-    }
-  }
-
-  // 2. Encrypted variant: decrypt in-memory using <deviceTypeString>_Supp.db
-  std::filesystem::path encrypted_path = device_type_dir / std::string("config.json.en");
-  if(!FileUtils::FileExists(encrypted_path)) {
-    return false;
-  }
-
-  std::filesystem::path cryptdb_path = device_type_dir /
-      (DeviceTypeString(device_target.device_variant.family,
-                        device_target.device_variant.foundry,
-                        device_target.device_variant.node,
-                        device_target.device_variant.devicename) + "_Supp.db");
-
-  if(!FileUtils::FileExists(cryptdb_path)) {
-    std::cout << "loadDeviceConfigJSON: cryptdb not found alongside encrypted config: "
-              << cryptdb_path.string() << std::endl;
-    return false;
-  }
-
-  qlcrypt::KeyDB keys;
-  if(auto s = qlcrypt::KeyDB::load(cryptdb_path.string(), keys); !qlcrypt::ok(s)) {
-    std::cout << "loadDeviceConfigJSON: load cryptdb failed (" << cryptdb_path.string()
-              << "): " << qlcrypt::toString(s) << std::endl;
-    return false;
-  }
-
-  qlcrypt::FileCrypt fc(keys);
-  std::string plaintext;
-  if(auto s = fc.decryptFile(encrypted_path.string(), plaintext); !qlcrypt::ok(s)) {
-    std::cout << "loadDeviceConfigJSON: decrypt failed (" << encrypted_path.string()
-              << "): " << qlcrypt::toString(s) << std::endl;
+  if(!FileUtils::FileExists(config_json_path)) {
     return false;
   }
 
   try {
-    out_config_json = json::parse(plaintext);
+    std::ifstream ifs(config_json_path.string());
+    out_config_json = json::parse(ifs);
     return true;
   }
   catch(const std::exception& e) {
-    std::cout << "loadDeviceConfigJSON: failed to parse decrypted "
-              << encrypted_path.string() << ": " << e.what() << std::endl;
+    std::cout << "loadDeviceConfigJSON: failed to parse "
+              << config_json_path.string() << ": " << e.what() << std::endl;
     return false;
   }
 }
@@ -3821,7 +3763,13 @@ std::filesystem::path QLDeviceManager::deviceSBTemplatesDir(QLDeviceTarget devic
 
   if(compiler->m_autoLayoutGenerationMode ||
     compiler->m_customLayoutGenerationMode){
-    // no change in CSV, we can use the existing device's CSV unless something changes in the future.
+    // The CSV switchbox templates are reused unchanged from the source device,
+    // so we return its CSV directory as-is (encrypted or plaintext). To keep the
+    // generated routing-graph set consistent, the freshly generated SB_MAPS is
+    // encrypted to match these templates when they are encrypted -- see the
+    // generated-SB_MAPS handling in CompilerOpenFPGA_ql::Packing(). VPR selects
+    // CRR encrypted-vs-plaintext decoding off the --sb_maps '.en' suffix, so
+    // SB_MAPS and these templates must share the same encryption state.
   }
 
   if( !isDeviceTargetValid(device_target) ) {

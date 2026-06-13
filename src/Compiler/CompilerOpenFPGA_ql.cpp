@@ -3347,6 +3347,55 @@ bool CompilerOpenFPGA_ql::Packing() {
     // Deal with the generated SB_MAPS yml:
     m_autoLayoutGeneratedSBMapsYMLPath = generated_sb_maps_yml_path;
 
+    // Keep the generated routing-graph set (SB_MAPS + CSV switchbox templates)
+    // internally consistent. The CSV templates are reused unchanged from the
+    // source device, so when they are encrypted (.en) the freshly generated
+    // SB_MAPS -- written in plaintext by add_layout.py -- must be encrypted to
+    // match. VPR selects CRR encrypted-vs-plaintext decoding solely off the
+    // '.en' suffix of --sb_maps; a plaintext --sb_maps would make VPR read the
+    // encrypted 'switchbox_*.csv.en' templates as plaintext and fail with
+    // "Required switch template file not found". Encrypting the generated
+    // SB_MAPS lets VPR decrypt SB_MAPS + CSV in-memory (keyed off the .en
+    // suffix + --crypt_key_db). Pin-table data is unrelated to CRR routing-graph
+    // encryption and is intentionally left untouched.
+    {
+      std::filesystem::path sb_templates_dir =
+          QLDeviceManager::getInstance()->deviceSBTemplatesDir();
+      bool csv_templates_encrypted = false;
+      std::error_code ec_csv;
+      if (!sb_templates_dir.empty() &&
+          std::filesystem::is_directory(sb_templates_dir, ec_csv)) {
+        for (const auto& entry :
+             std::filesystem::directory_iterator(sb_templates_dir, ec_csv)) {
+          if (entry.is_regular_file(ec_csv) &&
+              entry.path().extension() == ".en") {
+            csv_templates_encrypted = true;
+            break;
+          }
+        }
+      }
+      // Only encrypt when a generated SB_MAPS actually exists. Some paths (e.g.
+      // the auto-layout "design fits the base layout" case) may not produce a
+      // generated SB_MAPS; encrypting a missing file would hard-fail here. A
+      // missing SB_MAPS is handled (and reported) by the downstream stages.
+      if (csv_templates_encrypted &&
+          FileUtils::FileExists(generated_sb_maps_yml_path)) {
+        std::vector<std::filesystem::path> sbmaps_to_encrypt;
+        sbmaps_to_encrypt.push_back(generated_sb_maps_yml_path);
+        if (!encryptDeviceFiles(
+                sbmaps_to_encrypt,
+                QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
+          return false;
+        }
+        // Drop the plaintext generated SB_MAPS; downstream stages use the
+        // encrypted variant so VPR decrypts it (and the CSV templates) in-memory.
+        FileUtils::removeFile(generated_sb_maps_yml_path);
+        m_autoLayoutGeneratedSBMapsYMLPath = generated_sb_maps_yml_path;
+        m_autoLayoutGeneratedSBMapsYMLPath += ".en";
+      }
+    }
+
 
     // re-run packing with the generated vpr xml now.
     // easiest way is to take the previous command as is, and 
@@ -3354,12 +3403,19 @@ bool CompilerOpenFPGA_ql::Packing() {
     // - replace the layout name
     std::string command_rerun = command->string();
 
-    // ensure that 'FPGA_AUTO' replacement is done first!!
+    // Replace ONLY the '--device <layout>' token, not every occurrence of the
+    // layout name. The command also embeds device-data PATHS such as
+    // '.../TURNKEY-FPGA_AUTO/.../vpr.xml' and the sdc/net file paths, which must
+    // keep pointing at the original device directory. A blunt ReplaceAll on the
+    // bare layout name rewrote those paths to a non-existent
+    // 'TURNKEY-AUTOFPGA<w><h>' directory (in plaintext mode the arch path is the
+    // on-disk device file), so the architecture-file swap below could no longer
+    // match old_m_architectureFile and VPR failed to open the arch file.
     if(m_autoLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+      command_rerun = ReplaceAll(command_rerun, "--device FPGA_AUTO", "--device " + m_autoLayoutGeneratedLayoutName);
     }
     if(m_customLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+      command_rerun = ReplaceAll(command_rerun, "--device FPGA_CUSTOM", "--device " + m_autoLayoutGeneratedLayoutName);
     }
     command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
     // generator devices (AUTO/CUSTOM) may not ship a static SB_MAPS.yml, so the
@@ -3486,6 +3542,16 @@ bool CompilerOpenFPGA_ql::Packing() {
       // SB_TEMPLATES dir is copied parallel to the vpr.xml.en (this is probably not required at all!, as it will remain same as current device.)
       std::filesystem::path target_device_sb_maps_yml_filepath =
           target_device_copy_dirpath / "aurora" / "SB_MAPS.yml";
+      // The generated SB_MAPS may have been encrypted (.en) to stay consistent
+      // with the device's encrypted CSV switchbox templates. Preserve that
+      // suffix on the copy so the regenerated device's SB_MAPS file name matches
+      // its (encrypted) content; deviceSBMAPSFile() resolves the '.en' variant
+      // and VPR keys CRR decryption off that suffix. Without this the cached
+      // device would carry encrypted bytes under a plaintext '.yml' name and
+      // fail to decrypt on reuse.
+      if(m_autoLayoutGeneratedSBMapsYMLPath.extension() == ".en") {
+        target_device_sb_maps_yml_filepath += ".en";
+      }
       FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
       // 4 cryptdb: replace FPGA_AUTO with the generated layout name
