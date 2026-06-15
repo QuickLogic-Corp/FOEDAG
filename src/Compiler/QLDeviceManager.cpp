@@ -1913,10 +1913,15 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     json device_target_config_json = json::parse(device_target_config_json_ifstream);
     // get json value
     std::string pin_table_value;
-    std::filesystem::path pin_table_path; 
+    std::filesystem::path pin_table_path;
     if( device_target_config_json.contains("PIN_TABLE")  ) {
       pin_table_value = device_target_config_json["PIN_TABLE"].get<std::string>();
     }
+    // CRR devices ship SB_MAPS + switchbox-template CSVs instead of a pre-built
+    // rr_graph.  Including rr_graph.bin / router_lookahead.bin in the encrypted
+    // package would cause VPR to use the pre-built graph and completely bypass the
+    // encrypted --sb_maps path, defeating in-memory CRR decryption.
+    const bool is_crr_device = device_target_config_json.contains("SB_MAPS");
     if (!pin_table_value.empty()) {
       if (std::filesystem::is_regular_file(source_device_data_dir_path / pin_table_value)) {
         pin_table_path = source_device_data_dir_path / pin_table_value;
@@ -1983,16 +1988,21 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
-          // include rr_graph.bin and router_lookahead.bin files for copy
-          if (std::regex_match(dir_entry.path().filename().string(),
-                                  std::regex(".*rr_graph\\.bin",
-                                  std::regex::icase))) {
-              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
-          }
-          if (std::regex_match(dir_entry.path().filename().string(),
-                                  std::regex(".*router_lookahead\\.bin",
-                                  std::regex::icase))) {
-              source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          // include rr_graph.bin and router_lookahead.bin files for copy,
+          // but only for non-CRR devices.  CRR devices generate the rr_graph
+          // dynamically from encrypted SB_MAPS + switchbox templates at runtime;
+          // including a pre-built rr_graph.bin would cause VPR to skip that path.
+          if (!is_crr_device) {
+            if (std::regex_match(dir_entry.path().filename().string(),
+                                    std::regex(".*rr_graph\\.bin",
+                                    std::regex::icase))) {
+                source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            }
+            if (std::regex_match(dir_entry.path().filename().string(),
+                                    std::regex(".*router_lookahead\\.bin",
+                                    std::regex::icase))) {
+                source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            }
           }
 
           // include any python scripts to copy
