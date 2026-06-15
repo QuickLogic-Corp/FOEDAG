@@ -9553,12 +9553,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
-
+  
+  #ifdef __linux__
   if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
     yosys_options += std::string(" -de") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("yosys", "general", "de");
+    std::string(" ") + 
+    QLSettingsManager::getStringValue("yosys", "general", "de");
   }
+  #endif
 
   // pass in the path to the device specific yosys libraries directly.
   std::string yosys_modules_dir_path_string = 
