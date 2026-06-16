@@ -85,6 +85,20 @@ bool parseFullDouble(const std::string& s, double& out) {
     return false;
   }
 }
+
+// True if `s` is a recognized boolean literal (case-insensitive):
+// 0 / 1 / true / false.
+bool isBool(const std::string& s) {
+  const std::string v = StringUtils::toLower(s);
+  return v == "0" || v == "1" || v == "true" || v == "false";
+}
+
+// Interpret a boolean-ish string: true for "1" / "true" (case-insensitive),
+// false for anything else (including unrecognized values).
+bool toBool(const std::string& s) {
+  const std::string v = StringUtils::toLower(s);
+  return v == "1" || v == "true";
+}
 }  // namespace
 
 bool IPParameter::Validate(const std::string& value,
@@ -101,10 +115,7 @@ bool IPParameter::Validate(const std::string& value,
 
   // Bool: accept common boolean literals only.
   if (m_paramType == ParamType::Bool) {
-    std::string v = value;
-    std::transform(v.begin(), v.end(), v.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    if (v == "0" || v == "1" || v == "true" || v == "false") return true;
+    if (isBool(value)) return true;
     errorMsg =
         "'" + value + "' is not a valid boolean (expected 0/1/true/false)";
     return false;
@@ -179,6 +190,22 @@ bool IPParameter::Validate(const std::string& value,
     }
   }
 
+  return true;
+}
+
+bool IPParameter::IsActive(
+    const std::map<std::string, std::string>& paramValues) const {
+  // Statically disabled fields are never editable.
+  if (toBool(m_disable)) return false;
+
+  // A dependency-gated field is active only when ALL of its controlling boolean
+  // parameters are true. (The catalog "dependency" key lists those bools; e.g.
+  // field_with_dep depends on bool_for_dep.) A dependency missing from the map
+  // is treated as false.
+  for (const auto& depName : m_dependencies) {
+    auto it = paramValues.find(depName);
+    if (it == paramValues.end() || !toBool(it->second)) return false;
+  }
   return true;
 }
 

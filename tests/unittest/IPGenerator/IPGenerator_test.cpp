@@ -222,4 +222,45 @@ TEST(IPParameterValidate, PlainTypes) {
   EXPECT_TRUE(f.Validate("/no/such/path", err)) << err;
 }
 
+TEST(IPParameterValidate, DependencyGating) {
+  // field_with_dep depends on the boolean bool_for_dep, and has a [1,10] range.
+  IPParameter dep("field_with_dep", "field_with_dep", "27",
+                  IPParameter::ParamType::Int);
+  dep.SetRange({"1", "10"});
+  dep.SetDependencies({"bool_for_dep"});
+
+  // Dependency off -> inactive (so its out-of-range default 27 is ignored);
+  // dependency on -> active.
+  EXPECT_FALSE(dep.IsActive({{"bool_for_dep", "0"}}));
+  EXPECT_TRUE(dep.IsActive({{"bool_for_dep", "1"}}));
+
+  // A dependency missing from the map is treated as false -> inactive.
+  EXPECT_FALSE(dep.IsActive({}));
+
+  // Statically disabled fields are inactive regardless of dependencies.
+  IPParameter sd("x", "x", "5", IPParameter::ParamType::Int);
+  sd.SetRange({"1", "10"});
+  sd.SetDisable("true");
+  EXPECT_FALSE(sd.IsActive({{"bool_for_dep", "1"}}));
+
+  // "1" is treated as disabled too (same boolean interpretation as deps).
+  IPParameter sd1("x1", "x1", "5", IPParameter::ParamType::Int);
+  sd1.SetDisable("1");
+  EXPECT_FALSE(sd1.IsActive({{"bool_for_dep", "1"}}));
+
+  IPParameter en("y", "y", "5", IPParameter::ParamType::Int);
+  en.SetDisable("false");
+  EXPECT_TRUE(en.IsActive({{"bool_for_dep", "1"}}));
+
+  // A field with no dependencies and no static disable is always active.
+  IPParameter plain("z", "z", "5", IPParameter::ParamType::Int);
+  EXPECT_TRUE(plain.IsActive({}));
+
+  // Multiple dependencies: active only when ALL controlling bools are true.
+  IPParameter md("multi_dep", "multi_dep", "0", IPParameter::ParamType::Int);
+  md.SetDependencies({"a", "b"});
+  EXPECT_FALSE(md.IsActive({{"a", "1"}, {"b", "0"}}));
+  EXPECT_TRUE(md.IsActive({{"a", "1"}, {"b", "true"}}));  // case-insensitive
+}
+
 }  // namespace FOEDAG

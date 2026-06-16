@@ -241,6 +241,17 @@ class IPParameter : public Value {
   // same rules.
   bool Validate(const std::string& value, std::string& errorMsg) const;
 
+  // Returns true if this parameter is currently "active" (editable, and thus
+  // should be validated). A parameter is inactive when it is statically
+  // disabled (disable == "true") or when any boolean parameter it depends on
+  // ("dependency" in the catalog) resolves to false. `paramValues` maps
+  // parameter name -> current string value (supplied value or catalog default);
+  // a dependency missing from the map is treated as false. Inactive fields keep
+  // their default in the GUI and are never user-edited, so the batch path skips
+  // validating them.
+  bool IsActive(
+      const std::map<std::string, std::string>& paramValues) const;
+
   void SetDisable(const std::string& d) { m_disable = d; }
   std::string Disabled() const { return m_disable; }
 

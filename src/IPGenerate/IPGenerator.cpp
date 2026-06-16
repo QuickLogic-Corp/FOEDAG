@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <map>
 #include <queue>
 #include <sstream>
 #include <thread>
@@ -410,6 +411,17 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     // (Qt validators / comboboxes); the batch (Tcl) path had no equivalent, so
     // an out-of-range or otherwise invalid value silently reached generation.
     const auto defParams = def->Parameters();
+    // Effective value of every parameter (catalog default, overridden by any
+    // supplied value) — used to evaluate dependency gating below.
+    std::map<std::string, std::string> paramValues;
+    for (auto* p : defParams) {
+      if (p->GetType() == Value::Type::ParamIpVal) {
+        paramValues[p->Name()] = static_cast<IPParameter*>(p)->GetSValue();
+      }
+    }
+    for (const auto& sp : parameters) {
+      paramValues[sp.Name()] = sp.GetSValue();
+    }
     for (const auto& sparam : parameters) {
       FOEDAG::Value* catVal = nullptr;
       for (auto* p : defParams) {
@@ -423,9 +435,12 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
                                    "' for IP " + ip_name);
         return TCL_ERROR;
       }
+      auto* ipParam = static_cast<IPParameter*>(catVal);
+      // Skip inactive fields (statically disabled, or gated off by a dependency
+      // bool). The GUI keeps these at their default and never validates them.
+      if (!ipParam->IsActive(paramValues)) continue;
       std::string err;
-      if (!static_cast<IPParameter*>(catVal)->Validate(sparam.GetSValue(),
-                                                       err)) {
+      if (!ipParam->Validate(sparam.GetSValue(), err)) {
         compiler->ErrorMessage("Invalid value for parameter '" +
                                sparam.Name() + "': " + err);
         return TCL_ERROR;
