@@ -149,4 +149,77 @@ TEST(IPGenerate, CheckAllIPPath) {
   EXPECT_EQ(ipGen->GetProjectIPsPath(), "run_1/IPs");
 }
 
+TEST(IPParameterValidate, IntRange) {
+  IPParameter p("Width", "Width", "8", IPParameter::ParamType::Int);
+  p.SetRange({"1", "16"});
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("8", err)) << err;
+  EXPECT_TRUE(p.Validate("1", err)) << err;   // inclusive lower bound
+  EXPECT_TRUE(p.Validate("16", err)) << err;  // inclusive upper bound
+  EXPECT_TRUE(p.Validate("", err)) << err;    // empty -> default
+
+  EXPECT_FALSE(p.Validate("0", err));
+  EXPECT_FALSE(p.Validate("17", err));
+  EXPECT_FALSE(p.Validate("abc", err));
+  EXPECT_FALSE(p.Validate("8.5", err));  // not an integer
+}
+
+TEST(IPParameterValidate, FloatRange) {
+  IPParameter p("Freq", "Freq", "1.0", IPParameter::ParamType::Float);
+  p.SetRange({"0.5", "2.5"});
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("1.5", err)) << err;
+  EXPECT_TRUE(p.Validate("0.5", err)) << err;
+  EXPECT_TRUE(p.Validate("2.5", err)) << err;
+
+  EXPECT_FALSE(p.Validate("0.4", err));
+  EXPECT_FALSE(p.Validate("2.6", err));
+  EXPECT_FALSE(p.Validate("notanumber", err));
+}
+
+TEST(IPParameterValidate, Bool) {
+  IPParameter p("Enable", "Enable", "0", IPParameter::ParamType::Bool);
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("0", err)) << err;
+  EXPECT_TRUE(p.Validate("1", err)) << err;
+  EXPECT_TRUE(p.Validate("true", err)) << err;
+  EXPECT_TRUE(p.Validate("False", err)) << err;  // case-insensitive
+
+  EXPECT_FALSE(p.Validate("2", err));
+  EXPECT_FALSE(p.Validate("yes", err));
+}
+
+TEST(IPParameterValidate, Options) {
+  IPParameter p("Mode", "Mode", "fast", IPParameter::ParamType::String);
+  p.SetOptions({"fast", "slow", "auto"});
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("fast", err)) << err;
+  EXPECT_TRUE(p.Validate("auto", err)) << err;
+
+  EXPECT_FALSE(p.Validate("turbo", err));
+  EXPECT_FALSE(p.Validate("FAST", err));  // options are case-sensitive
+}
+
+TEST(IPParameterValidate, PlainTypes) {
+  std::string err;
+
+  // Int without a range still must be numeric.
+  IPParameter i("Count", "Count", "0", IPParameter::ParamType::Int);
+  EXPECT_TRUE(i.Validate("42", err)) << err;
+  EXPECT_TRUE(i.Validate("-7", err)) << err;
+  EXPECT_FALSE(i.Validate("x", err));
+
+  // String accepts anything.
+  IPParameter s("Label", "Label", "", IPParameter::ParamType::String);
+  EXPECT_TRUE(s.Validate("anything goes", err)) << err;
+
+  // FilePath content is not validated (mirrors the GUI).
+  IPParameter f("File", "File", "", IPParameter::ParamType::FilePath);
+  EXPECT_TRUE(f.Validate("/no/such/path", err)) << err;
+}
+
 }  // namespace FOEDAG

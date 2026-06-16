@@ -27,6 +27,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #include <QFile>
 #include <QProcess>
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -48,6 +50,137 @@ using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
 
 std::string Constant::m_name;
+
+namespace {
+// Parse the entire string as a base-10 integer (optional sign, trailing
+// whitespace allowed). Returns true only if the whole string is consumed.
+bool parseFullInt(const std::string& s, long long& out) {
+  if (s.empty()) return false;
+  try {
+    size_t pos = 0;
+    out = std::stoll(s, &pos, 10);
+    while (pos < s.size() &&
+           std::isspace(static_cast<unsigned char>(s[pos]))) {
+      ++pos;
+    }
+    return pos == s.size();
+  } catch (...) {
+    return false;
+  }
+}
+
+// Parse the entire string as a floating point value (trailing whitespace
+// allowed). Returns true only if the whole string is consumed.
+bool parseFullDouble(const std::string& s, double& out) {
+  if (s.empty()) return false;
+  try {
+    size_t pos = 0;
+    out = std::stod(s, &pos);
+    while (pos < s.size() &&
+           std::isspace(static_cast<unsigned char>(s[pos]))) {
+      ++pos;
+    }
+    return pos == s.size();
+  } catch (...) {
+    return false;
+  }
+}
+}  // namespace
+
+bool IPParameter::Validate(const std::string& value,
+                           std::string& errorMsg) const {
+  errorMsg.clear();
+
+  // An empty value means "fall back to the parameter default", which is assumed
+  // valid (the same way the GUI leaves an untouched field at its default).
+  if (value.empty()) return true;
+
+  // Mirror the GUI widget-selection precedence in
+  // IPDialogBox::CreateParamFields():
+  //   Bool -> FilePath -> options (combobox) -> range (validated input) -> input
+
+  // Bool: accept common boolean literals only.
+  if (m_paramType == ParamType::Bool) {
+    std::string v = value;
+    std::transform(v.begin(), v.end(), v.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (v == "0" || v == "1" || v == "true" || v == "false") return true;
+    errorMsg =
+        "'" + value + "' is not a valid boolean (expected 0/1/true/false)";
+    return false;
+  }
+
+  // FilePath: the GUI does not validate path contents, so neither do we.
+  if (m_paramType == ParamType::FilePath) return true;
+
+  // Enum (combobox): value must be one of the declared options.
+  if (!m_options.empty()) {
+    if (std::find(m_options.begin(), m_options.end(), value) !=
+        m_options.end()) {
+      return true;
+    }
+    std::string opts;
+    for (size_t i = 0; i < m_options.size(); ++i) {
+      opts += (i ? ", " : "") + m_options[i];
+    }
+    errorMsg = "'" + value +
+               "' is not a valid option (expected one of: " + opts + ")";
+    return false;
+  }
+
+  // Ranged numeric input: must be numeric AND within [min, max]. Range option
+  // only applies to Int/Float (matching the GUI, which ignores it otherwise).
+  if (m_range.size() == 2 &&
+      (m_paramType == ParamType::Int || m_paramType == ParamType::Float)) {
+    if (m_paramType == ParamType::Int) {
+      long long v{};
+      if (!parseFullInt(value, v)) {
+        errorMsg = "'" + value + "' is not a valid integer";
+        return false;
+      }
+      long long lo{}, hi{};
+      // If the catalog range metadata itself doesn't parse, skip the bounds
+      // check rather than rejecting the value over bad metadata.
+      if (parseFullInt(m_range[0], lo) && parseFullInt(m_range[1], hi) &&
+          (v < lo || v > hi)) {
+        errorMsg = "value " + value + " is out of range [" + m_range[0] + ", " +
+                   m_range[1] + "]";
+        return false;
+      }
+      return true;
+    }
+    double v{};
+    if (!parseFullDouble(value, v)) {
+      errorMsg = "'" + value + "' is not a valid number";
+      return false;
+    }
+    double lo{}, hi{};
+    if (parseFullDouble(m_range[0], lo) && parseFullDouble(m_range[1], hi) &&
+        (v < lo || v > hi)) {
+      errorMsg = "value " + value + " is out of range [" + m_range[0] + ", " +
+                 m_range[1] + "]";
+      return false;
+    }
+    return true;
+  }
+
+  // Plain input: numeric types must still parse; strings accept anything.
+  if (m_paramType == ParamType::Int) {
+    long long v{};
+    if (!parseFullInt(value, v)) {
+      errorMsg = "'" + value + "' is not a valid integer";
+      return false;
+    }
+  } else if (m_paramType == ParamType::Float) {
+    double v{};
+    if (!parseFullDouble(value, v)) {
+      errorMsg = "'" + value + "' is not a valid number";
+      return false;
+    }
+  }
+
+  return true;
+}
 
 bool IPCatalog::addIP(IPDefinition* def) {
   if (m_definitionMap.find(def->Name()) == m_definitionMap.end()) {

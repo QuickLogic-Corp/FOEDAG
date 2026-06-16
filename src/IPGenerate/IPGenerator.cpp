@@ -405,6 +405,33 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       return TCL_ERROR;
     }
 
+    // Validate each supplied parameter against the catalog definition before
+    // building the instance. The GUI enforces these constraints interactively
+    // (Qt validators / comboboxes); the batch (Tcl) path had no equivalent, so
+    // an out-of-range or otherwise invalid value silently reached generation.
+    const auto defParams = def->Parameters();
+    for (const auto& sparam : parameters) {
+      FOEDAG::Value* catVal = nullptr;
+      for (auto* p : defParams) {
+        if (p->Name() == sparam.Name()) {
+          catVal = p;
+          break;
+        }
+      }
+      if (catVal == nullptr || catVal->GetType() != Value::Type::ParamIpVal) {
+        printWrongUsageMsgHelperFn("Unknown parameter '-P" + sparam.Name() +
+                                   "' for IP " + ip_name);
+        return TCL_ERROR;
+      }
+      std::string err;
+      if (!static_cast<IPParameter*>(catVal)->Validate(sparam.GetSValue(),
+                                                       err)) {
+        compiler->ErrorMessage("Invalid value for parameter '" +
+                               sparam.Name() + "': " + err);
+        return TCL_ERROR;
+      }
+    }
+
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_location);
     instance->Generated(generated);

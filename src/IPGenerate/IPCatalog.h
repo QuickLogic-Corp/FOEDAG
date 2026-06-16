@@ -233,6 +233,14 @@ class IPParameter : public Value {
   Type GetType() const { return Type::ParamIpVal; }
   ParamType GetParamType() const { return m_paramType; }
 
+  // Validates a candidate string value against this parameter's catalog
+  // constraints (type, enum options, numeric range). Returns true if valid; on
+  // failure returns false and sets `errorMsg` to a human-readable reason.
+  // Mirrors the interactive validation the GUI performs via Qt validators /
+  // comboboxes, so the non-GUI (batch / Tcl configure_ip) path enforces the
+  // same rules.
+  bool Validate(const std::string& value, std::string& errorMsg) const;
+
   void SetDisable(const std::string& d) { m_disable = d; }
   std::string Disabled() const { return m_disable; }
 
