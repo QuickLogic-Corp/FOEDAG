@@ -21,6 +21,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IPGenerate/IPGenerator.h"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "Compiler/Compiler.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/tcl_command_integration.h"
@@ -261,6 +265,31 @@ TEST(IPParameterValidate, DependencyGating) {
   md.SetDependencies({"a", "b"});
   EXPECT_FALSE(md.IsActive({{"a", "1"}, {"b", "0"}}));
   EXPECT_TRUE(md.IsActive({{"a", "1"}, {"b", "true"}}));  // case-insensitive
+}
+
+TEST(IPParameterValidate, Describe) {
+  IPParameter eq("equation", "Equation", "AxB", IPParameter::ParamType::String);
+  eq.SetOptions({"AxB", "AxB+CxD"});
+  IPParameter aw("a_width", "A width", "32", IPParameter::ParamType::Int);
+  aw.SetRange({"1", "32"});
+  IPParameter rin("reg_in", "Reg In", "0", IPParameter::ParamType::Bool);
+
+  EXPECT_EQ(eq.ParamTypeStr(), "string");
+  EXPECT_EQ(aw.ParamTypeStr(), "int");
+  EXPECT_EQ(rin.ParamTypeStr(), "bool");
+
+  EXPECT_EQ(eq.ConstraintStr(), "choices: AxB, AxB+CxD");
+  EXPECT_EQ(aw.ConstraintStr(), "range: [1, 32]");
+  EXPECT_EQ(rin.ConstraintStr(), "");  // unconstrained bool
+
+  std::vector<Value*> params{&eq, &aw, &rin};
+  const std::string table = DescribeIPParameters(params);
+  EXPECT_NE(table.find("equation"), std::string::npos);
+  EXPECT_NE(table.find("(default: 32)"), std::string::npos);
+  EXPECT_NE(table.find("range: [1, 32]"), std::string::npos);
+  EXPECT_NE(table.find("choices: AxB, AxB+CxD"), std::string::npos);
+  // One line per parameter (3 params -> 2 newline separators).
+  EXPECT_EQ(std::count(table.begin(), table.end(), '\n'), 2);
 }
 
 }  // namespace FOEDAG

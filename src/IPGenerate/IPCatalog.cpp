@@ -209,6 +209,54 @@ bool IPParameter::IsActive(
   return true;
 }
 
+std::string IPParameter::ParamTypeStr() const {
+  switch (m_paramType) {
+    case ParamType::Int: return "int";
+    case ParamType::Float: return "float";
+    case ParamType::Bool: return "bool";
+    case ParamType::String: return "string";
+    case ParamType::FilePath: return "filepath";
+  }
+  return "string";
+}
+
+std::string IPParameter::ConstraintStr() const {
+  if (!m_options.empty()) {
+    std::string s = "choices: ";
+    for (size_t i = 0; i < m_options.size(); ++i) {
+      s += (i ? ", " : "") + m_options[i];
+    }
+    return s;
+  }
+  if (m_range.size() == 2) {
+    return "range: [" + m_range[0] + ", " + m_range[1] + "]";
+  }
+  return {};
+}
+
+std::string FOEDAG::DescribeIPParameters(const std::vector<Value*>& params) {
+  size_t nameW = 0;
+  const size_t typeW = 8;  // widest type name: "filepath"
+  for (auto* p : params) {
+    if (p->GetType() == Value::Type::ParamIpVal && p->Name().size() > nameW) {
+      nameW = p->Name().size();
+    }
+  }
+  std::string out;
+  for (auto* p : params) {
+    if (p->GetType() != Value::Type::ParamIpVal) continue;
+    auto* ip = static_cast<IPParameter*>(p);
+    const std::string type = ip->ParamTypeStr();
+    if (!out.empty()) out += "\n";
+    out += "  " + ip->Name() + std::string(nameW - ip->Name().size(), ' ') +
+           "  " + type + std::string(typeW - type.size(), ' ') +
+           "  (default: " + ip->GetSValue() + ")";
+    const std::string constraint = ip->ConstraintStr();
+    if (!constraint.empty()) out += "  " + constraint;
+  }
+  return out;
+}
+
 bool IPCatalog::addIP(IPDefinition* def) {
   if (m_definitionMap.find(def->Name()) == m_definitionMap.end()) {
     m_definitionMap.emplace(def->Name(), def);

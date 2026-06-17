@@ -431,8 +431,10 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
         }
       }
       if (catVal == nullptr || catVal->GetType() != Value::Type::ParamIpVal) {
-        printWrongUsageMsgHelperFn("Unknown parameter '-P" + sparam.Name() +
-                                   "' for IP " + ip_name);
+        compiler->ErrorMessage(
+            "Unknown parameter '-P" + sparam.Name() + "' for IP " + ip_name +
+                ".\nKnown parameters:\n" + DescribeIPParameters(defParams),
+            false);
         return TCL_ERROR;
       }
       auto* ipParam = static_cast<IPParameter*>(catVal);
