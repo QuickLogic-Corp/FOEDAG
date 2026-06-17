@@ -441,8 +441,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       if (!ipParam->IsActive(paramValues)) continue;
       std::string err;
       if (!ipParam->Validate(sparam.GetSValue(), err)) {
-        compiler->ErrorMessage("Invalid value for parameter '" +
-                               sparam.Name() + "': " + err);
+        compiler->ErrorMessage(
+            "Invalid value for parameter '" + sparam.Name() + "': " + err,
+            false);
         return TCL_ERROR;
       }
     }
