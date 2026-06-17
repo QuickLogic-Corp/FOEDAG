@@ -4053,22 +4053,22 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
-   std::filesystem::path pinmapping2pcf_script_path =
+   std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /
     std::filesystem::path("scripts") /
-    std::filesystem::path("pinmapping2pcf.py");
+    std::filesystem::path("place2pcf.py");
 
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
   if (pinTableFile.empty()){
-      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the pinmapping2pcf.py. Skipping pinmapping2pcf.py.\n");
+      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the place2pcf.py. Skipping place2pcf.py.\n");
       return true;
   }
 
   std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.place");
 
-  std::filesystem::path output_pcf_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_PinMapping.pcf");
+  std::filesystem::path output_pcf_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place2pcf.pcf");
 
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
@@ -4077,28 +4077,30 @@ bool CompilerOpenFPGA_ql::Placement() {
   #endif // _WIN32
 
   if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-  #ifdef USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  #ifdef USE_IPGENERATOR_PYTHON_FOR_PLACE2PCF
     // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
     pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
-  #else // USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  #else // USE_IPGENERATOR_PYTHON_FOR_PLACE2PCF
     ErrorMessage("System " + python_exec.string() +
                 " is not found, Please install " + python_exec.string() + " and make sure it's in the PATH variable."
-                " PinMapping2PCF Generation Failed!");
+                " Place2PCF Generation Failed!");
     return false;
-  #endif // USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  #endif // USE_IPGENERATOR_PYTHON_FOR_PLACE2PCF
   
   }
   
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
   if(filepath_fpga_io_map_xml.empty()) {
-    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the pinmapping2pcf.py. Skipping pinmapping2pcf.py.");
+    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the place2pcf.py. Skipping place2pcf.py.");
     return true;
   }
   
-  const std::string pinmapping2pcf_command = python_exec.string();
+  std::filesystem::path clocksFile  = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + ".clocks");
+
+  const std::string place2pcf_command = python_exec.string();
   std::vector<std::string> args;
-  args.push_back(pinmapping2pcf_script_path.string());
+  args.push_back(place2pcf_script_path.string());
   args.push_back("--fpga_io_map");
   args.push_back(filepath_fpga_io_map_xml.string());
   if(fs::exists(pinTableFile)) {
@@ -4107,14 +4109,19 @@ bool CompilerOpenFPGA_ql::Placement() {
   }          
   args.push_back("--pcf_file");
   args.push_back(output_pcf_path.string());        
-   args.push_back("--place_file");
-  args.push_back(place_file_path.string());       
+  args.push_back("--place_file");
+  args.push_back(place_file_path.string());  
+  
+  if (fs::exists(clocksFile.string())) {
+    args.push_back("--clocks_file");
+    args.push_back(clocksFile.string());
+  }
 
-  int pinmapping2pcf_status = FileUtils::ExecuteSystemCommand(pinmapping2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
+  int place2pcf_status = FileUtils::ExecuteSystemCommand(place2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
 
-  if (pinmapping2pcf_status == 1) { //Failure
+  if (place2pcf_status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
-                " PinMapping2PCF Failed!");
+                " Place2PCF Failed!");
     return false;
   }
   return true;
@@ -9770,6 +9777,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
   }
 
+  command->append("--skip_sync_clustering_and_routing_results on");
+  command->append("--analysis");
   command->append("--route");
 
   return command;
