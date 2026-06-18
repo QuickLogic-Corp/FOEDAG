@@ -187,6 +187,13 @@ class CompilerOpenFPGA_ql : public Compiler {
   bool TimingAnalysisHelper(const QLDeviceTarget&, const std::string&);
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
+  // Secure bitstream post-process (checksum -> ASCON -> BCH). Resolve which
+  // stages to run from the settings JSON toggles and the `bitstream encode`
+  // Tcl verb; run the vendored scripts/bitstream/aurora_bitstream_encode.py.
+  // A post-process failure is logged but does not fail GenerateBitstream
+  // (REQUIREMENTS.md §4.5). Returns false only on a hard invocation error.
+  uint32_t ResolveBitstreamEncodeStages() const;
+  [[nodiscard]] bool RunBitstreamEncode(uint32_t stages);
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
   bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
   virtual bool LoadDeviceData(const std::string& deviceName);
