@@ -2237,7 +2237,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      vpr_options += std::string(" --max_router_iterations 100");
+      vpr_options += std::string(" --max_router_iterations 300");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
@@ -2646,7 +2646,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      command->append("--max_router_iterations",  "100");
+      command->append("--max_router_iterations",  "300");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
