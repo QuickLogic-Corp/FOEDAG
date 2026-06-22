@@ -6588,7 +6588,18 @@ bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
       projectPath / (projectName + "_fabric_bitstream.ascon");
   const std::filesystem::path tagFile =
       projectPath / (projectName + "_fabric_bitstream.tag");
-  std::filesystem::path xml = projectPath / "bitstream_distribution.xml";
+  // The distribution XML filename defaults to "bitstream_distribution.xml" but
+  // a user-supplied value in settings supersedes it. An absolute path is used
+  // as-is; a bare filename is resolved against the project output dir (and the
+  // device data copy in the fallback below).
+  const std::string xmlSetting = QLSettingsManager::getStringValue(
+      "openfpga", "general", "bitstream_distribution_xml");
+  const std::string xmlName = xmlSetting.empty()
+                                  ? std::string("bitstream_distribution.xml")
+                                  : xmlSetting;
+  std::filesystem::path xml = std::filesystem::path(xmlName).is_absolute()
+                                  ? std::filesystem::path(xmlName)
+                                  : projectPath / xmlName;
   const std::filesystem::path log =
       projectPath / (projectName + "_bitstream_encode.log");
 
@@ -6608,10 +6619,11 @@ bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
         QLDeviceManager::getInstance()->getCurrentDeviceTarget();
     const std::filesystem::path deviceXml =
         QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
-        "bitstream_distribution.xml";
+        std::filesystem::path(xmlName).filename();
     if (std::filesystem::exists(deviceXml)) {
-      Message("bitstream encode: bitstream_distribution.xml not in project "
-              "dir; using device data copy.");
+      Message("bitstream encode: " +
+              std::filesystem::path(xmlName).filename().string() +
+              " not in project dir; using device data copy.");
       xml = deviceXml;
     }
   }
