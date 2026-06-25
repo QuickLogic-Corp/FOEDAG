@@ -115,15 +115,35 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
 
   constexpr const char* keySubckt = ".subckt";
   constexpr const char* keyNames = ".names";
+
+  // The atom-netlist echo blif emits the instance/atom name in a comment line
+  // "# Subckt <N>: <name>" placed right before each .subckt; the .subckt line
+  // itself carries the model name (e.g. "adder_carry", "dffre"), which we
+  // ignore. Remember the most recent such comment and attach it to the next
+  // .subckt.
+  std::string pendingSubcktName;
+
   for (const auto& line : lines) {
+    if (FOEDAG::StringUtils::startsWith(line, "#")) {
+      // Capture the atom name from a "# Subckt <N>: <name>" comment.
+      const size_t kw = line.find("Subckt");
+      if (kw != std::string::npos) {
+        const size_t colon = line.find(':', kw);
+        if (colon != std::string::npos) {
+          const size_t start = line.find_first_not_of(" \t", colon + 1);
+          if (start != std::string::npos) {
+            const size_t end = line.find_last_not_of(" \t");
+            pendingSubcktName.assign(line, start, end - start + 1);
+          }
+        }
+      }
+      continue;
+    }
     if (FOEDAG::StringUtils::startsWith(line, keySubckt)) {
-      // extract token right after token ".subckt" if line starts with ".subckt"
-      const size_t base = strlen(keySubckt);
-      const size_t start = line.find_first_not_of(" \t", base);
-      if (start != std::string::npos) {
-        const size_t end = line.find_first_of(" \t", start);
-        const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
-        m_elements.emplace(line.data() + start, len);
+      // Instance name comes from the preceding "# Subckt <N>:" comment.
+      if (!pendingSubcktName.empty()) {
+        m_elements.emplace(pendingSubcktName);
+        pendingSubcktName.clear();
       }
     } else if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
       // extract last token in line which starts with ".names"
