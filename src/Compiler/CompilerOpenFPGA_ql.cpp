@@ -2392,8 +2392,6 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
         vpr_options += " --crypt_key_db " + crypt_key_db.string();
       }
 
-      vpr_options += " --preserve_input_pin_connections off";
-      vpr_options += " --preserve_output_pin_connections off";
       vpr_options += " --annotated_rr_graph on";
       vpr_options += " --remove_dangling_nodes off";
       // this is always enabled in the default Aurora flow, so don't add here.
@@ -2790,8 +2788,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
         command->appendFile("--crypt_key_db", crypt_key_db);
       }
 
-      command->append("--preserve_input_pin_connections off");
-      command->append("--preserve_output_pin_connections off");
       command->append("--annotated_rr_graph on");
       command->append("--remove_dangling_nodes off");
       // this is always enabled in the default Aurora flow, so don't add here.
