@@ -294,3 +294,35 @@ TEST(SynthResourceExtractor, BlifSubcktNames)
     EXPECT_EQ(e.count("adder_carry"), 0u);
     EXPECT_EQ(e.count("dffre"), 0u);
 }
+
+// Fallback: a blif WITHOUT the "# Subckt <N>:" echo comments (hand-written,
+// Yosys/ABC output, older VPR). With no comment to supply the instance name,
+// the token right after ".subckt" (the model/instance name) is used instead, so
+// atoms are not silently lost.
+TEST(SynthResourceExtractor, BlifSubcktNamesFallbackNoComment)
+{
+    const std::string blif =
+        ".names out_net\n"
+        "\n"
+        ".subckt my_adder \\\n"
+        "    a=n1 \\\n"
+        "    b=n2 \\\n"
+        "    y=sum\n"
+        "\n"
+        ".subckt my_dff \\\n"
+        "    D=d0 \\\n"
+        "    Q=q0\n";
+
+    fp::SynthResourceExtractor extractor;
+    ASSERT_TRUE(extractor.parseAtomNamesFromBlifFileContent(blif));
+    const auto& e = extractor.elements();
+
+    // no comment present -> token right after ".subckt" is taken
+    EXPECT_EQ(e.count("my_adder"), 1u);
+    EXPECT_EQ(e.count("my_dff"), 1u);
+    // .names output (last token)
+    EXPECT_EQ(e.count("out_net"), 1u);
+    // connection nets must not be collected from .subckt lines
+    EXPECT_EQ(e.count("n1"), 0u);
+    EXPECT_EQ(e.count("sum"), 0u);
+}

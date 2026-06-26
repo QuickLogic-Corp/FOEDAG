@@ -6,6 +6,7 @@
 #include <QDomNodeList>
 #include <QString>
 
+#include <cstring>
 #include <functional>
 
 #include "Utils/FileUtils.h"
@@ -120,7 +121,8 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
   // "# Subckt <N>: <name>" placed right before each .subckt; the .subckt line
   // itself carries the model name (e.g. "adder_carry", "dffre"), which we
   // ignore. Remember the most recent such comment and attach it to the next
-  // .subckt.
+  // .subckt. When that comment is absent (non-echo blif), fall back to the
+  // token right after ".subckt".
   std::string pendingSubcktName;
 
   for (const auto& line : lines) {
@@ -140,10 +142,20 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
       continue;
     }
     if (FOEDAG::StringUtils::startsWith(line, keySubckt)) {
-      // Instance name comes from the preceding "# Subckt <N>:" comment.
       if (!pendingSubcktName.empty()) {
+        // Preferred: instance name from the preceding "# Subckt <N>:" comment.
         m_elements.emplace(pendingSubcktName);
         pendingSubcktName.clear();
+      } else {
+        // Fallback for BLIF without the echo comments (hand-written,
+        // Yosys/ABC output, older VPR): use the token right after ".subckt".
+        const size_t base = strlen(keySubckt);
+        const size_t start = line.find_first_not_of(" \t", base);
+        if (start != std::string::npos) {
+          const size_t end = line.find_first_of(" \t", start);
+          const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
+          m_elements.emplace(line.data() + start, len);
+        }
       }
     } else if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
       // extract last token in line which starts with ".names"
