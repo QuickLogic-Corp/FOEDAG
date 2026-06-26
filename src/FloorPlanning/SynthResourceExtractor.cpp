@@ -159,7 +159,15 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
           m_elements.emplace(line.data() + start, len);
         }
       }
-    } else if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
+      continue;
+    }
+
+    // Any other line (.names, .latch, .model, blank, ...) breaks the
+    // comment -> .subckt adjacency, so a pending name from an earlier
+    // "# Subckt <N>:" comment is stale and must be dropped.
+    pendingSubcktName.clear();
+
+    if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
       // extract last token in line which starts with ".names"
       const size_t end = line.find_last_not_of(" \t");
       if (end != std::string::npos) {
