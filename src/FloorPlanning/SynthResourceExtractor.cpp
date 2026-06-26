@@ -126,17 +126,19 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
   std::string pendingSubcktName;
 
   for (const auto& line : lines) {
-    if (FOEDAG::StringUtils::startsWith(line, "#")) {
-      // Capture the atom name from a "# Subckt <N>: <name>" comment.
-      const size_t kw = line.find("Subckt");
-      if (kw != std::string::npos) {
-        const size_t colon = line.find(':', kw);
-        if (colon != std::string::npos) {
-          const size_t start = line.find_first_not_of(" \t", colon + 1);
-          if (start != std::string::npos) {
-            const size_t end = line.find_last_not_of(" \t");
-            pendingSubcktName.assign(line, start, end - start + 1);
-          }
+    // Capture the atom name from VPR's "# Subckt <N>: <name>" echo comment
+    // (exact fprintf format: "# Subckt %zu: %s"). The anchored prefix avoids
+    // false positives on other comments that merely contain "Subckt".
+    if (FOEDAG::StringUtils::startsWith(line, "# Subckt ")) {
+      const size_t colon = line.find(':');
+      if (colon != std::string::npos) {
+        const size_t start = line.find_first_not_of(" \t", colon + 1);
+        if (start != std::string::npos) {
+          // Name is a single token (BLIF names never contain spaces); stop at
+          // the first trailing whitespace so any annotation after it is ignored.
+          const size_t end = line.find_first_of(" \t", start);
+          const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
+          pendingSubcktName.assign(line, start, len);
         }
       }
       continue;
