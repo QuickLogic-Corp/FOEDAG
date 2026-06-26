@@ -833,50 +833,29 @@ void QLSettingsManager::populateSettingsWidget() {
               continue;
           }
 
-          // Auto-populate sta_p_v_t_corner / sta_voltage_threshold options from
-          // the current device's variants. These widgets always reflect the
-          // device, so we override their "options" here. Because rootJson is a
-          // local copy of settings_json (see above), this affects only the GUI
-          // and is never written back to the project JSON.
-          if (categoryId == "vpr" && subcategoryId == "analysis" &&
-              (widgetId == "sta_p_v_t_corner" ||
-               widgetId == "sta_voltage_threshold")) {
-            const bool isCorner = (widgetId == "sta_p_v_t_corner");
-
-            std::vector<std::string> options;
-            std::set<std::string> seen;
-            if (device_manager != nullptr) {
-              const QLDeviceVariant& current =
-                  device_manager->device_target.device_variant;
-              for (const QLDeviceVariant& variant :
-                   device_manager->listDeviceVariants(current.family,
-                                                      current.foundry,
-                                                      current.node,
-                                                      current.devicename)) {
-                const std::string& value =
-                    isCorner ? variant.p_v_t_corner : variant.voltage_threshold;
-                if (!value.empty() && seen.insert(value).second) {
-                  options.push_back(value);
-                }
-              }
-            }
-            widgetJson["options"] = options;
-
-            // Drop any userValue entries (comma-separated for multidropdown)
-            // that are not valid options for the current device.
-            if (widgetJson.contains("userValue") &&
-                widgetJson["userValue"].is_string()) {
-              std::vector<std::string> kept;
-              for (std::string token : StringUtils::tokenize(
-                       widgetJson["userValue"].get<std::string>(), ",")) {
-                StringUtils::trim(token);
-                if (!token.empty() && seen.count(token)) {
-                  kept.push_back(token);
-                }
-              }
-              widgetJson["userValue"] = StringUtils::join(kept, ",");
-            }
-          }
+          // TODO: auto-populate sta_p_v_t_corner, and sta_voltage_threshold in GUI mode.
+          // if(categoryId == "vpr" && subcategoryId == "analysis" && widgetId == "sta_p_v_t_corner") {
+          //   // std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+          //   //   foundry,
+          //   //   node,
+          //   //   devicename);
+          //   // loop through, and set the values for the p_v_t corner from the device information.
+          //   // widgetJsonObj.value("options", json::array())
+          //   // check if current userValue exists in these options, if not, make it empty (default)
+          //   // also add this combo to ignore list for 'saving JSON' or isJSONUpdated as we don't
+          //   // want to "save" these options to JSON file, it will always be autopopulated.
+          // }
+          // if(categoryId == "vpr" && subcategoryId == "analysis" && widgetId == "sta_voltage_threshold") {
+          //   // std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+          //   //   foundry,
+          //   //   node,
+          //   //   devicename);
+          //   // loop through, and set the values for the vt from the device information.
+          //   // widgetJsonObj.value("options", json::array())
+          //   // check if current userValue exists in these options, if not, make it empty (default)
+          //   // also add this combo to ignore list for 'saving JSON' or isJSONUpdated as we don't
+          //   // want to "save" these options to JSON file, it will always be autopopulated.
+          // }
 
           std::string widgetType = widgetJson["widgetType"].get<std::string>();
           
