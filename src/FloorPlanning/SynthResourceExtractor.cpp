@@ -6,6 +6,7 @@
 #include <QDomNodeList>
 #include <QString>
 
+#include <cstring>
 #include <functional>
 
 #include "Utils/FileUtils.h"
@@ -115,17 +116,58 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
 
   constexpr const char* keySubckt = ".subckt";
   constexpr const char* keyNames = ".names";
+
+  // The atom-netlist echo blif emits the instance/atom name in a comment line
+  // "# Subckt <N>: <name>" placed right before each .subckt; the .subckt line
+  // itself carries the model name (e.g. "adder_carry", "dffre"), which we
+  // ignore. Remember the most recent such comment and attach it to the next
+  // .subckt. When that comment is absent (non-echo blif), fall back to the
+  // token right after ".subckt".
+  std::string pendingSubcktName;
+
   for (const auto& line : lines) {
-    if (FOEDAG::StringUtils::startsWith(line, keySubckt)) {
-      // extract token right after token ".subckt" if line starts with ".subckt"
-      const size_t base = strlen(keySubckt);
-      const size_t start = line.find_first_not_of(" \t", base);
-      if (start != std::string::npos) {
-        const size_t end = line.find_first_of(" \t", start);
-        const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
-        m_elements.emplace(line.data() + start, len);
+    // Capture the atom name from VPR's "# Subckt <N>: <name>" echo comment
+    // (exact fprintf format: "# Subckt %zu: %s"). The anchored prefix avoids
+    // false positives on other comments that merely contain "Subckt".
+    if (FOEDAG::StringUtils::startsWith(line, "# Subckt ")) {
+      const size_t colon = line.find(':');
+      if (colon != std::string::npos) {
+        const size_t start = line.find_first_not_of(" \t", colon + 1);
+        if (start != std::string::npos) {
+          // Name is a single token (BLIF names never contain spaces); stop at
+          // the first trailing whitespace so any annotation after it is ignored.
+          const size_t end = line.find_first_of(" \t", start);
+          const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
+          pendingSubcktName.assign(line, start, len);
+        }
       }
-    } else if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
+      continue;
+    }
+    if (FOEDAG::StringUtils::startsWith(line, keySubckt)) {
+      if (!pendingSubcktName.empty()) {
+        // Preferred: instance name from the preceding "# Subckt <N>:" comment.
+        m_elements.emplace(pendingSubcktName);
+        pendingSubcktName.clear();
+      } else {
+        // Fallback for BLIF without the echo comments (hand-written,
+        // Yosys/ABC output, older VPR): use the token right after ".subckt".
+        const size_t base = strlen(keySubckt);
+        const size_t start = line.find_first_not_of(" \t", base);
+        if (start != std::string::npos) {
+          const size_t end = line.find_first_of(" \t", start);
+          const size_t len = (end == std::string::npos) ? (line.size() - start) : (end - start);
+          m_elements.emplace(line.data() + start, len);
+        }
+      }
+      continue;
+    }
+
+    // Any other line (.names, .latch, .model, blank, ...) breaks the
+    // comment -> .subckt adjacency, so a pending name from an earlier
+    // "# Subckt <N>:" comment is stale and must be dropped.
+    pendingSubcktName.clear();
+
+    if (FOEDAG::StringUtils::startsWith(line, keyNames)) {
       // extract last token in line which starts with ".names"
       const size_t end = line.find_last_not_of(" \t");
       if (end != std::string::npos) {
