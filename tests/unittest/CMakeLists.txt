@@ -61,6 +61,7 @@ if (USE_IPA)
     InteractivePathAnalysis/TelegramParser_test.cpp
     InteractivePathAnalysis/TelegramBuffer_test.cpp
     InteractivePathAnalysis/NCriticalPathModel_test.cpp
+    InteractivePathAnalysis/VprProcess_test.cpp
   )
 endif()
 
