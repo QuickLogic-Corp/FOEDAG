@@ -96,7 +96,6 @@ public:
   }
 
 private:
-  bool m_isLogEnabled = true;
   Compiler* m_compiler = nullptr; // used for log messages
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
@@ -123,7 +122,7 @@ private:
 
     auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
-      if (m_isLogEnabled) {
+      if (CommandWrapper::isLogEnabled()) {
         m_compiler->Message(logPrefix() + "task [" + id + "] wasn't previously compiled");
       }
       return true;
@@ -131,7 +130,7 @@ private:
     const CommandWrapper& commandOld = *it->second;
     DiffCommandPtr diff = command->collectDiff(commandOld);
     if (!diff->isEmpty()) {
-      if (m_isLogEnabled) {
+      if (CommandWrapper::isLogEnabled()) {
         for (const std::string& msg: diff->messages()) {
           m_compiler->Message(logPrefix() + "task(" + id + "), detects " + msg);
         }
