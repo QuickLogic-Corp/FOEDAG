@@ -34,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
+#include <QDebug>
 // #include <iostream>
 
 // #define DEBUG_ENABLE_PARANOIC_CHECK
@@ -514,12 +515,12 @@ public:
   void appendFile(const std::string& filePath)=delete;
   void appendFile(const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(file.string(), "", mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
   void appendFile(const std::string& parameter, const std::string& file)=delete;
   void appendFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(parameter, file.string(), mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
 
   void prepend(const std::string& parameter, const std::string& value = "") {
@@ -529,13 +530,13 @@ public:
   void prependFile(const std::string& file)=delete;
   void prependFile(const std::filesystem::path& file, const std::string& mask = "") {
     prependArgument(file.string(), "", mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
 
   void prependFile(const std::string& parameter, const std::string& file)=delete;
   void prependFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask) {
     prependArgument(parameter, file.string(), mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
 
 private:
@@ -605,7 +606,24 @@ private:
     }
   }
 
+  void handlePath(const std::filesystem::path& file, const std::string& mask) {
+    if (std::filesystem::is_directory(file)) {
+      handeDir(file);
+    } else {
+      handleFile(file, mask);
+    }
+  }
+
+  void handeDir(const std::filesystem::path& file) {
+    std::vector<std::filesystem::path> files = FileUtils::FindFilesRecursively(file);
+    for (const auto& file: files) {
+      handleFile(file);
+    }
+  }
+
   void handleFile(const std::filesystem::path& file, const std::string& mask) {
+    qInfo() << "~~~" << "commandwrapper::handleFile" << file.string().c_str();
+
     std::filesystem::path resolvedFilePath(file);
     if (file.is_relative() && !s_projectPath.empty()) {
       resolvedFilePath = s_projectPath / file;
@@ -614,7 +632,7 @@ private:
     if (!std::filesystem::exists(resolvedFilePath)) {
       return;
     }
-
+  
     bool skipHashCheck = false;
     auto it = s_bigFilesSet.find(resolvedFilePath.filename().string());
     if (it != s_bigFilesSet.end()) {
