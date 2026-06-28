@@ -88,19 +88,6 @@ protected:
     return m_projectDir / name;
   }
 
-  // Builds a representative task command: a couple of plain arguments plus two
-  // source files referenced by absolute path.
-  CommandWrapperPtr makeCommand(const std::filesystem::path& src1,
-                                const std::filesystem::path& src2,
-                                const std::string& effort = "high") {
-    auto cmd = std::make_shared<CommandWrapper>("synth");
-    cmd->append("--top", "top_module");
-    cmd->append("--effort", effort);
-    cmd->appendPath("--src1", src1);
-    cmd->appendPath("--src2", src2);
-    return cmd;
-  }
-
   SilentCompiler m_compiler;
   std::filesystem::path m_projectDir;
 };
@@ -115,7 +102,13 @@ TEST_F(TaskCompilationStateManagerTest, never_compiled_task_requires_compilation
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  EXPECT_TRUE(mgr.isCompilationRequired(1, makeCommand(src1.filePath(), src2.filePath())));
+  auto command = std::make_shared<CommandWrapper>("synth");
+  command->append("--top", "top_module");
+  command->append("--effort", "high");
+  command->appendPath("--src1", src1.filePath());
+  command->appendPath("--src2", src2.filePath());
+
+  EXPECT_TRUE(mgr.isCompilationRequired(1, command));
 }
 
 // Storing a task and re-checking it with an identical command (files untouched)
@@ -127,9 +120,20 @@ TEST_F(TaskCompilationStateManagerTest, unchanged_task_does_not_require_recompil
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath()));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, stored);
 
-  EXPECT_FALSE(mgr.isCompilationRequired(1, makeCommand(src1.filePath(), src2.filePath())));
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->append("--effort", "high");
+  recheck->appendPath("--src1", src1.filePath());
+  recheck->appendPath("--src2", src2.filePath());
+
+  EXPECT_FALSE(mgr.isCompilationRequired(1, recheck));
 }
 
 // Editing the content of an input file must mark the task dirty.
@@ -140,11 +144,22 @@ TEST_F(TaskCompilationStateManagerTest, changed_file_content_marks_task_dirty) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath()));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, stored);
 
   src1.appendContent("\n// touched");
 
-  EXPECT_TRUE(mgr.isCompilationRequired(1, makeCommand(src1.filePath(), src2.filePath())));
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->append("--effort", "high");
+  recheck->appendPath("--src1", src1.filePath());
+  recheck->appendPath("--src2", src2.filePath());
+
+  EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
 
 // Changing a command-line argument value must mark the task dirty even if every
@@ -156,10 +171,20 @@ TEST_F(TaskCompilationStateManagerTest, changed_argument_marks_task_dirty) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath(), "high"));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, stored);
 
-  EXPECT_TRUE(mgr.isCompilationRequired(
-      1, makeCommand(src1.filePath(), src2.filePath(), "low")));
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->append("--effort", "low");  // changed argument value
+  recheck->appendPath("--src1", src1.filePath());
+  recheck->appendPath("--src2", src2.filePath());
+
+  EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
 
 // Adding a new input file to the task must mark it dirty.
@@ -171,12 +196,21 @@ TEST_F(TaskCompilationStateManagerTest, added_file_marks_task_dirty) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath()));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, stored);
 
-  auto extended = makeCommand(src1.filePath(), src2.filePath());
-  extended->appendPath("--src3", src3.filePath());
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->append("--effort", "high");
+  recheck->appendPath("--src1", src1.filePath());
+  recheck->appendPath("--src2", src2.filePath());
+  recheck->appendPath("--src3", src3.filePath());  // extra input file
 
-  EXPECT_TRUE(mgr.isCompilationRequired(1, extended));
+  EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
 
 // Removing an input file from the task must mark it dirty.
@@ -187,14 +221,19 @@ TEST_F(TaskCompilationStateManagerTest, removed_file_marks_task_dirty) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath()));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, stored);
 
-  auto reduced = std::make_shared<CommandWrapper>("synth");
-  reduced->append("--top", "top_module");
-  reduced->append("--effort", "high");
-  reduced->appendPath("--src1", src1.filePath());
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->append("--effort", "high");
+  recheck->appendPath("--src1", src1.filePath());  // --src2 dropped
 
-  EXPECT_TRUE(mgr.isCompilationRequired(1, reduced));
+  EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
 
 // Different task ids are tracked independently: storing task 1 must not make
@@ -206,10 +245,26 @@ TEST_F(TaskCompilationStateManagerTest, tasks_are_tracked_independently) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath()));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, stored);
 
-  EXPECT_FALSE(mgr.isCompilationRequired(1, makeCommand(src1.filePath(), src2.filePath())));
-  EXPECT_TRUE(mgr.isCompilationRequired(2, makeCommand(src1.filePath(), src2.filePath())));
+  auto task1Recheck = std::make_shared<CommandWrapper>("synth");
+  task1Recheck->append("--top", "top_module");
+  task1Recheck->append("--effort", "high");
+  task1Recheck->appendPath("--src1", src1.filePath());
+  task1Recheck->appendPath("--src2", src2.filePath());
+  EXPECT_FALSE(mgr.isCompilationRequired(1, task1Recheck));
+
+  auto task2Command = std::make_shared<CommandWrapper>("synth");
+  task2Command->append("--top", "top_module");
+  task2Command->append("--effort", "high");
+  task2Command->appendPath("--src1", src1.filePath());
+  task2Command->appendPath("--src2", src2.filePath());
+  EXPECT_TRUE(mgr.isCompilationRequired(2, task2Command));
 }
 
 // The same task id under a different profile is a distinct entry.
@@ -220,12 +275,26 @@ TEST_F(TaskCompilationStateManagerTest, profiles_are_tracked_independently) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  mgr.storeTaskCommand(1, "rtl", makeCommand(src1.filePath(), src2.filePath()));
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->append("--effort", "high");
+  stored->appendPath("--src1", src1.filePath());
+  stored->appendPath("--src2", src2.filePath());
+  mgr.storeTaskCommand(1, "rtl", stored);
 
-  EXPECT_FALSE(mgr.isCompilationRequired(
-      1, "rtl", makeCommand(src1.filePath(), src2.filePath())));
-  EXPECT_TRUE(mgr.isCompilationRequired(
-      1, "timing", makeCommand(src1.filePath(), src2.filePath())));
+  auto sameProfile = std::make_shared<CommandWrapper>("synth");
+  sameProfile->append("--top", "top_module");
+  sameProfile->append("--effort", "high");
+  sameProfile->appendPath("--src1", src1.filePath());
+  sameProfile->appendPath("--src2", src2.filePath());
+  EXPECT_FALSE(mgr.isCompilationRequired(1, "rtl", sameProfile));
+
+  auto otherProfile = std::make_shared<CommandWrapper>("synth");
+  otherProfile->append("--top", "top_module");
+  otherProfile->append("--effort", "high");
+  otherProfile->appendPath("--src1", src1.filePath());
+  otherProfile->appendPath("--src2", src2.filePath());
+  EXPECT_TRUE(mgr.isCompilationRequired(1, "timing", otherProfile));
 }
 
 // State persisted to compilation_cache.json must survive being reloaded by a
@@ -237,24 +306,40 @@ TEST_F(TaskCompilationStateManagerTest, state_survives_persist_and_reload) {
   {
     TaskCompilationStateManager mgr(&m_compiler);
     mgr.setProjectPath(m_projectDir);
-    mgr.storeTaskCommand(1, makeCommand(src1.filePath(), src2.filePath()));
+
+    auto stored = std::make_shared<CommandWrapper>("synth");
+    stored->append("--top", "top_module");
+    stored->append("--effort", "high");
+    stored->appendPath("--src1", src1.filePath());
+    stored->appendPath("--src2", src2.filePath());
+    mgr.storeTaskCommand(1, stored);
   }
 
   TaskCompilationStateManager reloaded(&m_compiler);
   reloaded.setProjectPath(m_projectDir);
   reloaded.load();
 
-  EXPECT_FALSE(reloaded.isCompilationRequired(
-      1, makeCommand(src1.filePath(), src2.filePath())));
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->append("--effort", "high");
+  recheck->appendPath("--src1", src1.filePath());
+  recheck->appendPath("--src2", src2.filePath());
+  EXPECT_FALSE(reloaded.isCompilationRequired(1, recheck));
 
   src1.appendContent("\n// touched after reload");
-  EXPECT_TRUE(reloaded.isCompilationRequired(
-      1, makeCommand(src1.filePath(), src2.filePath())));
+
+  auto afterEdit = std::make_shared<CommandWrapper>("synth");
+  afterEdit->append("--top", "top_module");
+  afterEdit->append("--effort", "high");
+  afterEdit->appendPath("--src1", src1.filePath());
+  afterEdit->appendPath("--src2", src2.filePath());
+  EXPECT_TRUE(reloaded.isCompilationRequired(1, afterEdit));
 }
 
 // A whole directory passed as a task input is expanded recursively; changing a
 // file inside that directory must mark the task dirty (exercises the directory
-// expansion path in CommandWrapper).
+// expansion path in CommandWrapper). Only the folder is added via appendPath -
+// never the individual files.
 TEST_F(TaskCompilationStateManagerTest, directory_input_detects_inner_file_change) {
   const std::filesystem::path srcDir = inProject("rtl");
   std::filesystem::create_directories(srcDir / "sub");
@@ -264,24 +349,28 @@ TEST_F(TaskCompilationStateManagerTest, directory_input_detects_inner_file_chang
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  auto makeDirCommand = [&]() {
-    auto cmd = std::make_shared<CommandWrapper>("synth");
-    cmd->append("--top", "top_module");
-    cmd->appendPath("--srcdir", srcDir);
-    return cmd;
-  };
-
-  mgr.storeTaskCommand(1, makeDirCommand());
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->append("--top", "top_module");
+  stored->appendPath("--srcdir", srcDir);
+  mgr.storeTaskCommand(1, stored);
 
   // Unchanged directory -> up-to-date.
-  EXPECT_FALSE(mgr.isCompilationRequired(1, makeDirCommand()));
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->append("--top", "top_module");
+  recheck->appendPath("--srcdir", srcDir);
+  EXPECT_FALSE(mgr.isCompilationRequired(1, recheck));
 
   // Edit a file nested inside the directory -> dirty.
   inner2.appendContent("\n// touched");
-  EXPECT_TRUE(mgr.isCompilationRequired(1, makeDirCommand()));
+
+  auto afterEdit = std::make_shared<CommandWrapper>("synth");
+  afterEdit->append("--top", "top_module");
+  afterEdit->appendPath("--srcdir", srcDir);
+  EXPECT_TRUE(mgr.isCompilationRequired(1, afterEdit));
 }
 
-// Adding a new file into a directory input must also mark the task dirty.
+// Adding a new file into a directory input must also mark the task dirty. Only
+// the folder is added via appendPath - never the individual files.
 TEST_F(TaskCompilationStateManagerTest, directory_input_detects_new_file) {
   const std::filesystem::path srcDir = inProject("rtl");
   std::filesystem::create_directories(srcDir);
@@ -290,14 +379,14 @@ TEST_F(TaskCompilationStateManagerTest, directory_input_detects_new_file) {
   TaskCompilationStateManager mgr(&m_compiler);
   mgr.setProjectPath(m_projectDir);
 
-  auto makeDirCommand = [&]() {
-    auto cmd = std::make_shared<CommandWrapper>("synth");
-    cmd->appendPath("--srcdir", srcDir);
-    return cmd;
-  };
+  auto stored = std::make_shared<CommandWrapper>("synth");
+  stored->appendPath("--srcdir", srcDir);
+  mgr.storeTaskCommand(1, stored);
 
-  mgr.storeTaskCommand(1, makeDirCommand());
-
+  // Drop a new file into the directory after storing.
   ScopedFile inner2{srcDir / "z.v", "module z; endmodule"};
-  EXPECT_TRUE(mgr.isCompilationRequired(1, makeDirCommand()));
+
+  auto recheck = std::make_shared<CommandWrapper>("synth");
+  recheck->appendPath("--srcdir", srcDir);
+  EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
