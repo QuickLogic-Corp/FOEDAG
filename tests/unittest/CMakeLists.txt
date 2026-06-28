@@ -49,6 +49,7 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
+    Compiler/TaskCompilationStateManager_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
