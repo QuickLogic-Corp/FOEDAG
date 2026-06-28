@@ -520,13 +520,13 @@ public:
     appendArgument(parameter, value);
   }
 
-  void appendFile(const std::string& filePath)=delete;
-  void appendFile(const std::filesystem::path& file, const std::string& mask = "") {
+  void appendPath(const std::string& filePath)=delete;
+  void appendPath(const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(file.string(), "", mask);
     handlePath(file, mask);
   }
-  void appendFile(const std::string& parameter, const std::string& file)=delete;
-  void appendFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
+  void appendPath(const std::string& parameter, const std::string& file)=delete;
+  void appendPath(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(parameter, file.string(), mask);
     handlePath(file, mask);
   }
@@ -637,7 +637,7 @@ private:
 
   void handeDir(const std::filesystem::path& dir) {
     if (isLogEnabled()) {
-      qInfo() << "~~~" << "commandwrapper::handleDir" << dir.string().c_str();
+      qInfo() << "commandwrapper::handleDir" << dir.string().c_str();
     }
 
     std::vector<std::filesystem::path> files = FileUtils::FindAbsoluteFilePathsRecursively(dir);
@@ -648,7 +648,7 @@ private:
 
   void handleFile(const std::filesystem::path& file, const std::string& mask = "") {
     if (isLogEnabled()) {
-      qInfo() << "~~~" << "commandwrapper::handleFile" << file.string().c_str();
+      qInfo() << "commandwrapper::handleFile" << file.string().c_str();
     }
 
     bool skipHashCheck = false;
