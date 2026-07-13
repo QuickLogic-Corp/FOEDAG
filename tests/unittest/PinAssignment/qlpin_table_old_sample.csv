@@ -1,0 +1,9 @@
+Orientation,row,col,pin_number_in_cell,port_name,mapped_pin,netlist_name,GPIO_type,Associated Clock,Clock edge
+BOTTOM,0,3,,gfpga_pad_QL_PREIO_V2_A2F[0],b_in,A2F_B_i[0]
+BOTTOM,0,4,,gfpga_pad_QL_PREIO_V2_F2A[0],b_out,F2A_B_o[0]
+TOP,18,3,,gfpga_pad_QL_PREIO_V2_A2F[2],,A2F_T_i[2]
+TOP,18,4,,gfpga_pad_QL_PREIO_V2_F2A[1],t_out,F2A_T_o[1]
+LEFT,5,0,,gfpga_pad_QL_PREIO_V2_A2F[3],l_in,A2F_L_i[3]
+LEFT,6,0,,gfpga_pad_QL_PREIO_V2_F2A[2],l_out,F2A_L_o[2]
+RIGHT,5,20,,gfpga_pad_QL_PREIO_V2_A2F[4],r_in,A2F_R_i[4]
+RIGHT,6,20,,gfpga_pad_QL_PREIO_V2_F2A[3],,F2A_R_o[3]

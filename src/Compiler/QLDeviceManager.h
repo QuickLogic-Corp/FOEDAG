@@ -98,7 +98,8 @@ class QLDeviceManager : public QObject {
   int addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                 std::string device_data_source, bool force);
   int encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
-                    std::string device_data_source, std::string device_data_target);
+                    std::string device_data_source, std::string device_data_target,
+                    std::string customer_id = "");
   std::vector<QLDeviceVariant> listDeviceVariants(std::string family,
                                                  std::string foundry,
                                                  std::string node,
@@ -168,7 +169,16 @@ class QLDeviceManager : public QObject {
 
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
 
+  // Load the device's plaintext `config.json` into `out_config_json`.
+  // config.json is device data and is never encrypted.
+  // Returns true on success; false if the file is absent or JSON parsing fails.
+  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json);
+
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
+  // DSP version supported by the device, derived from the "DSP_TYPE" entry in
+  // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
+  // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPV1.0) when not specified.
+  std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <QProcess>
+#include <QSet>
 #include <QTimer>
 #include <vector>
 
@@ -77,6 +78,7 @@ class Process : public QProcess {
   QProcess::ProcessState m_prevState;
 
   std::vector<QString> m_bypassInnerErrors;
+  QSet<QString> m_seenErrors;
 
   void restart();
   void checkEvent();

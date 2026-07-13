@@ -84,12 +84,36 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
+if(APPLE)
+  # macOS toolchains (AppleClang) are newer/stricter than the supported
+  # Linux/Windows build toolchains and emit on-by-default warnings the
+  # project's per-subdirectory -Werror does not anticipate (e.g.
+  # -Winconsistent-missing-override, -Wmismatched-tags,
+  # -Wdeprecated-literal-operator). The per-subdirectory -Werror flags live
+  # in CMAKE_CXX_FLAGS_<CONFIG>, so the only place a suppression is
+  # guaranteed to land last (and win) is a directory compile option, which
+  # the compiler sees after those flag variables. Demote warnings to
+  # non-fatal on macOS only; warnings stay visible. Placed before the
+  # add_subdirectory() calls so it propagates to every target. APPLE-only:
+  # no effect on Linux or Windows builds.
+  add_compile_options(-Wno-error)
+endif()
+
 add_subdirectory(third_party/tcl_cmake EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/googletest EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/QScintilla-2.13.1)
 add_subdirectory(third_party/QConsole)
 add_subdirectory(third_party/nlohmann_json)
-add_subdirectory(third_party/cryptor-gh)
+# qlcrypt: QuickLogic AES-GCM encryption library (replaces in-tree cryptor-gh)
+# Pinned via submodule at third_party/qlcrypt (see .gitmodules).
+# Guard: when FOEDAG is built as a sub-project (e.g. aurora2), VTR may have
+# already defined the qlcrypt target.
+if(NOT TARGET qlcrypt)
+  set(QLCRYPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(QLCRYPT_BUILD_TOOL OFF CACHE BOOL "" FORCE)
+  set(QLCRYPT_INSTALL OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/qlcrypt)
+endif()
 add_subdirectory(third_party/gtkwave_cmake)
 add_subdirectory(third_party/scope_guard)
 add_subdirectory(tests/tclutils)
@@ -368,7 +392,7 @@ add_dependencies(newfile_bin tcl_stubb_build)
 add_dependencies(ipconfigurator nlohmann_json)
 add_dependencies(ipconfigurator tcl_stubb_build)
 #add_dependencies(ipconfigurator_bin tcl_stubb_build)
-add_dependencies(compiler cryptor)
+add_dependencies(compiler qlcrypt)
 add_dependencies(pinassignment compiler)
 add_dependencies(pinassignment tcl_stubb_build)
 add_dependencies(projnavigator tcl_build)

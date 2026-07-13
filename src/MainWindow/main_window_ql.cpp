@@ -2013,6 +2013,10 @@ bool MainWindow::saveActionTriggered() {
   if (saveConstraintFile()) {
     QtUtils::AppendToEventQueue([this]() { m_blockRefereshEn = false; });
     pinPlannerSaved();
+    if (auto* compiler_ql = dynamic_cast<CompilerOpenFPGA_ql*>(m_compiler)) {
+      compiler_ql->onPcfFileSaved();
+      updateSourceTree();
+    }
     return true;
   } else {
     m_blockRefereshEn = false;

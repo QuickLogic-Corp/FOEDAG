@@ -38,6 +38,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Log.h"
 #include "Compiler/WorkerThread.h"
 #include "Compiler/QLSettingsManager.h"
+#include "Compiler/QLDeviceManager.h"
 #include "IPGenerate/IPCatalog.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -52,6 +53,32 @@ using ms = std::chrono::milliseconds;
 // Right now we bypass new approach and still use legacy flow of building commandline arguments.
 #define EXCLUDE_MODIFICATION_JSON_FLOW
 
+namespace {
+// Common prefix of the versioned DSP generator IPs (dsp_generator_v1_0, ...).
+const char* const kDspPrefix = "dsp_generator_v";
+
+bool isDspGenerator(const std::string& ipName) {
+  return ipName.rfind(kDspPrefix, 0) == 0;
+}
+
+// Single source of truth for whether a catalog IP is supported by the current
+// device, shared by the ip_catalog listing, the ip_catalog <name> query, and
+// configure_ip so all three agree.
+//
+// Only DSP generators are device-gated: of the versions shipped, only the one
+// matching the device's DSP_TYPE is valid (e.g. a v2 IP is unsupported on a v1
+// device). The match is exact against "dsp_generator_v<major>_<minor>", the
+// suffix from QLDeviceManager::deviceDSPVersion() (e.g. "2_0"); if the catalog
+// ships no matching version, every dsp_generator_v* is unsupported.
+bool isIpVersionSupported(const std::string& ipName) {
+  if (isDspGenerator(ipName)) {
+    return ipName ==
+           kDspPrefix + QLDeviceManager::getInstance()->deviceDSPVersion();
+  }
+  return true;  // non-DSP IPs are not device-gated
+}
+}  // namespace
+
 std::filesystem::path IPGenerator::EnvsPath() const {
   return std::filesystem::weakly_canonical(m_installDir / "envs");
 }
@@ -65,7 +92,7 @@ void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::
   m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
 }
 
-IPGenerator::IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler): m_installDir(installDir), m_catalog(catalog), m_compiler(compiler) {
+IPGenerator::IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler): m_catalog(catalog), m_compiler(compiler), m_installDir(installDir) {
   // Only set PYTHONHOME and LD_LIBRARY_PATH when the bundled envs directory
   // actually exists.  When it doesn't (e.g. macOS builds without the litex
   // environment), setting PYTHONHOME to a non-existent path poisons the
@@ -229,16 +256,26 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
 
     bool status = true;
     if (argc == 1) {
-      // List all IPs
+      // List all IPs, hiding those unsupported by the current device (see
+      // isIpVersionSupported).
       std::string ips;
       for (auto def : generator->Catalog()->Definitions()) {
-        ips += def->Name() + " ";
+        const std::string& name = def->Name();
+        if (!isIpVersionSupported(name)) continue;
+        ips += name + " ";
       }
       compiler->TclInterp()->setResult(ips);
     } else if (argc == 2) {
+      const std::string ipName{argv[1]};
+      // Reject querying an unsupported IP so the Tcl API matches the listing.
+      if (!isIpVersionSupported(ipName)) {
+        compiler->ErrorMessage("IP " + ipName +
+                               " is not supported by the current device");
+        return TCL_ERROR;
+      }
       std::string ip_def;
       for (auto def : generator->Catalog()->Definitions()) {
-        if (argv[1] == def->Name()) {
+        if (ipName == def->Name()) {
           for (auto param : def->Parameters()) {
             std::string defaultValue;
             switch (param->GetType()) {
@@ -335,6 +372,17 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     IPDefinition* def = generator->Catalog()->Definition(ip_name);
     if (def == nullptr) {
       compiler->ErrorMessage("Unknown IP: " + ip_name);
+      ok = false;
+      return TCL_ERROR;
+    }
+    // Enforce the device gate here too: hiding an IP from the ip_catalog listing
+    // only affects what is shown. A script can still call configure_ip with a
+    // hard-coded name without ever listing the catalog, so generation must be
+    // blocked at this point, not just in the listing.
+    if (!isIpVersionSupported(ip_name)) {
+      compiler->ErrorMessage(
+          "IP " + ip_name +
+          " is not supported by the current device and cannot be configured");
       ok = false;
       return TCL_ERROR;
     }

@@ -30,7 +30,6 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
-#include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 
@@ -148,15 +147,9 @@ void NCriticalPathWidget::requestPathList(const QString& initiator) {
 }
 
 void NCriticalPathWidget::notifyError(QString title, QString errorMsg) {
-  if (isVisible()) {
-    QMessageBox::warning(this, title, errorMsg, QMessageBox::Ok);
-  } else {
-    // if parent widget is not visible, the message box will behave as not a
-    // modal, to avoid this let's show message box with delay.
-    QTimer::singleShot(500, [=]() {
-      QMessageBox::warning(this, title, errorMsg, QMessageBox::Ok);
-    });
-  }
+  // VPR stderr is already logged by VprProcess; redirect here to the log
+  // rather than blocking the user with a modal dialog (issue #1992).
+  SimpleLogger::instance().error(title, errorMsg);
   if (!errorMsg.contains(": warning:")) {  // hide busy widget only on errors
                                            // but not on warnings
     m_view->hideBusyOverlay();
