@@ -33,18 +33,25 @@ if(DEFINED ENV{QT_DIR} AND NOT "$ENV{QT_DIR}" STREQUAL "" AND NOT _QT_DIR_PROCES
     message(STATUS "QT_DIR=$ENV{QT_DIR} added to CMAKE_PREFIX_PATH")
 endif()
 
+# Minimum supported Qt6 version. A widget-rendering bug was seen in the VPR
+# subproject (which also depends on Qt6) with earlier Qt6 releases, so 6.9.3 is
+# the required floor: a Qt6 older than this is treated as "not found" (falls
+# back to Qt5, or errors under REQUIRE_QT6). find_package(Qt6 <version>) accepts
+# that version or newer.
+set(QT6_MINIMUM_VERSION 6.9.3)
+
 # Detect Qt version once (cached). On the first include, this picks Qt6 if
-# available, otherwise falls back to Qt5 — unless REQUIRE_QT6 is ON,
-# in which case missing Qt6 is a hard error.
+# available (>= ${QT6_MINIMUM_VERSION}), otherwise falls back to Qt5 — unless
+# REQUIRE_QT6 is ON, in which case missing Qt6 is a hard error.
 if(NOT DEFINED QT_VERSION_MAJOR)
-    find_package(Qt6 COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test QUIET)
+    find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test QUIET)
     if(Qt6_FOUND)
         set(QT_VERSION_MAJOR 6 CACHE INTERNAL "Qt major version in use")
         message(STATUS "Found Qt6 ${Qt6_VERSION}")
     elseif(REQUIRE_QT6)
         message(FATAL_ERROR
-            "Qt6 not found and REQUIRE_QT6=ON. Install Qt6 (or set "
-            "REQUIRE_QT6=OFF / unset it to allow the Qt5 fallback).")
+            "Qt6 >= ${QT6_MINIMUM_VERSION} not found and REQUIRE_QT6=ON. Install a "
+            "suitable Qt6 (or set REQUIRE_QT6=OFF / unset it to allow the Qt5 fallback).")
     else()
         set(QT_VERSION_MAJOR 5 CACHE INTERNAL "Qt major version in use")
     endif()
@@ -55,7 +62,7 @@ endif()
 # so subdirectories that use AUTOMOC need find_package to run in their scope.
 # Subsequent calls are cheap because CMake caches the package detection.
 if(QT_VERSION_MAJOR EQUAL 6)
-    find_package(Qt6 COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test REQUIRED)
+    find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test REQUIRED)
 else()
     find_package(Qt5 COMPONENTS Core Gui Widgets Xml Network REQUIRED)
     if(NOT Qt5Widgets_FOUND)
