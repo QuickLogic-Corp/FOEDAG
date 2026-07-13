@@ -47,9 +47,15 @@ set(QT_VERSION_MAJOR 6 CACHE INTERNAL "Qt major version in use")
 # floor, is a hard error here (REQUIRED).
 find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test REQUIRED)
 
-# Create Qt5:: aliases pointing to Qt6:: targets so third-party CMakeLists files
-# that still hardcode Qt5:: continue to link when building with Qt6.
-foreach(_qt_mod Core Gui Widgets Xml Network Test)
+# Qt5:: -> Qt6:: compatibility aliases for bundled third-party only.
+#
+# FOEDAG's own modules link Qt6:: directly. The two vendored libraries we do NOT
+# maintain — QConsole and QScintilla (third_party/) — still link Qt5::Core /
+# Qt5::Gui / Qt5::Widgets in their upstream CMakeLists. Rather than patch those
+# upstream sources, alias just those Qt5:: names to the real Qt6:: targets so
+# they build against Qt6. Only Core/Gui/Widgets are aliased — the only Qt5::
+# modules those two use. (Drop this block once QConsole/QScintilla are updated.)
+foreach(_qt_mod Core Gui Widgets)
     if(TARGET Qt6::${_qt_mod} AND NOT TARGET Qt5::${_qt_mod})
         add_library(Qt5::${_qt_mod} INTERFACE IMPORTED GLOBAL)
         set_target_properties(Qt5::${_qt_mod} PROPERTIES

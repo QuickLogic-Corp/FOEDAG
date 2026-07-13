@@ -452,8 +452,7 @@ target_link_libraries(foedag  PUBLIC
   pinassignment
   scope_guard
 )
-#target_link_libraries(foedag  PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml Qt5::Quick)
-target_link_libraries(foedag  PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml)
+target_link_libraries(foedag  PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::Xml)
 
 if(NOT NO_TCMALLOC)
   find_library(TCMALLOC_LIBRARY NAMES tcmalloc)

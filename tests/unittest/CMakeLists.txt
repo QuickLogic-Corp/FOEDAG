@@ -80,6 +80,6 @@ target_link_libraries(unittest PRIVATE
   newproject
   foedag
   foedagcore
-  Qt5::Test)
+  Qt6::Test)
 
 add_test(NAME unittest COMMAND unittest)
