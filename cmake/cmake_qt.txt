@@ -35,60 +35,27 @@ endif()
 
 # Minimum supported Qt6 version. A widget-rendering bug was seen in the VPR
 # subproject (which also depends on Qt6) with earlier Qt6 releases, so 6.9.3 is
-# the required floor: a Qt6 older than this is treated as "not found" (falls
-# back to Qt5, or errors under REQUIRE_QT6). find_package(Qt6 <version>) accepts
-# that version or newer.
+# the required floor: find_package(Qt6 <version>) accepts that version or newer.
 set(QT6_MINIMUM_VERSION 6.9.3)
 
-# Detect Qt version once (cached). On the first include, this picks Qt6 if
-# available (>= ${QT6_MINIMUM_VERSION}), otherwise falls back to Qt5 — unless
-# REQUIRE_QT6 is ON, in which case missing Qt6 is a hard error.
-if(NOT DEFINED QT_VERSION_MAJOR)
-    find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test QUIET)
-    if(Qt6_FOUND)
-        set(QT_VERSION_MAJOR 6 CACHE INTERNAL "Qt major version in use")
-        message(STATUS "Found Qt6 ${Qt6_VERSION}")
-    elseif(REQUIRE_QT6)
-        message(FATAL_ERROR
-            "Qt6 >= ${QT6_MINIMUM_VERSION} not found and REQUIRE_QT6=ON. Install a "
-            "suitable Qt6 (or set REQUIRE_QT6=OFF / unset it to allow the Qt5 fallback).")
-    else()
-        set(QT_VERSION_MAJOR 5 CACHE INTERNAL "Qt major version in use")
-    endif()
-endif()
+set(QT_VERSION_MAJOR 6 CACHE INTERNAL "Qt major version in use")
 
-# Always call find_package on every include — imported targets (Qt5::Core,
-# Qt5::moc, etc.) are scoped to the directory where find_package was called,
-# so subdirectories that use AUTOMOC need find_package to run in their scope.
-# Subsequent calls are cheap because CMake caches the package detection.
-if(QT_VERSION_MAJOR EQUAL 6)
-    find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test REQUIRED)
-else()
-    find_package(Qt5 COMPONENTS Core Gui Widgets Xml Network REQUIRED)
-    if(NOT Qt5Widgets_FOUND)
-        message(STATUS "Failed to find Qt5Widgets required (on debian/ubuntu try 'sudo apt install qtbase5-dev')")
-    elseif(NOT Qt5Gui_FOUND)
-        message(STATUS "Failed to find Qt5Gui required (on debian/ubuntu try 'sudo apt install qtbase5-dev')")
-    elseif(NOT Qt5Core_FOUND)
-        message(STATUS "Failed to find Qt5Core required (on debian/ubuntu try 'sudo apt install qtbase5-dev')")
-    elseif(NOT Qt5Xml_FOUND)
-        message(STATUS "Failed to find Qt5Xml required (on debian/ubuntu try 'sudo apt install qtbase5-dev')")
-    elseif(NOT Qt5Network_FOUND)
-        message(STATUS "Failed to find Qt5Network required (on debian/ubuntu try 'sudo apt install qtbase5-dev')")
-    endif()
-endif()
+# find_package is called on every include (not once) because imported targets
+# (Qt6::Core, moc, etc.) are scoped to the directory where find_package ran, so
+# subdirectories using AUTOMOC need it in their scope. Subsequent calls are
+# cheap — CMake caches the detection. A missing Qt6, or a Qt6 older than the
+# floor, is a hard error here (REQUIRED).
+find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test REQUIRED)
 
-# Create Qt5:: aliases pointing to Qt6:: targets so third-party CMakeLists
-# files that hardcode Qt5:: continue to work when building with Qt6.
-if(QT_VERSION_MAJOR EQUAL 6)
-    foreach(_qt_mod Core Gui Widgets Xml Network Test)
-        if(TARGET Qt6::${_qt_mod} AND NOT TARGET Qt5::${_qt_mod})
-            add_library(Qt5::${_qt_mod} INTERFACE IMPORTED GLOBAL)
-            set_target_properties(Qt5::${_qt_mod} PROPERTIES
-                INTERFACE_LINK_LIBRARIES "Qt6::${_qt_mod}")
-        endif()
-    endforeach()
-endif()
+# Create Qt5:: aliases pointing to Qt6:: targets so third-party CMakeLists files
+# that still hardcode Qt5:: continue to link when building with Qt6.
+foreach(_qt_mod Core Gui Widgets Xml Network Test)
+    if(TARGET Qt6::${_qt_mod} AND NOT TARGET Qt5::${_qt_mod})
+        add_library(Qt5::${_qt_mod} INTERFACE IMPORTED GLOBAL)
+        set_target_properties(Qt5::${_qt_mod} PROPERTIES
+            INTERFACE_LINK_LIBRARIES "Qt6::${_qt_mod}")
+    endif()
+endforeach()
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
