@@ -27,5 +27,6 @@ std::filesystem::path ScriptRenderer::s_projectPath;
 
 std::filesystem::path CommandWrapper::s_projectPath;
 std::unordered_set<std::string> CommandWrapper::s_bigFilesSet = {};
+bool CommandWrapper::s_enableLog = false;
 
 }  // namespace FOEDAG
