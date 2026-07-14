@@ -71,10 +71,10 @@ TEST(CommandWrapper, to_string)
     command.append("--p1", "v1");
     command.append("--p2");
     command.append("--p3", "v3");
-    command.appendFile("--file1", filePath1.filePath());
-    command.appendFile(filePath2.filePath());
-    command.appendFile(filePath3.filePath(), "arch");
-    command.appendFile("--file4", filePath4.filePath(), "arch");
+    command.appendPath("--file1", filePath1.filePath());
+    command.appendPath(filePath2.filePath());
+    command.appendPath(filePath3.filePath(), "arch");
+    command.appendPath("--file4", filePath4.filePath(), "arch");
 
     EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 --file1 filepath1 filepath2 filepath3 --file4 filepath4", command.string());
 }
@@ -88,15 +88,15 @@ TEST(CommandWrapper, compare_matches)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile("--file1", filePath1.filePath());
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", filePath1.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(diff->isEmpty());
@@ -111,14 +111,14 @@ TEST(CommandWrapper, remove_argument)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile("--file1", filePath1.filePath());
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", filePath1.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -142,14 +142,14 @@ TEST(CommandWrapper, remove_argument_file)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -172,16 +172,16 @@ TEST(CommandWrapper, add_argument)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
     command2.append("--p4", "v4");
-    command2.appendFile("--file1", filePath1.filePath());
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", filePath1.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -204,14 +204,14 @@ TEST(CommandWrapper, add_argument_file)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile("--file1", filePath1.filePath());
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", filePath1.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -234,15 +234,15 @@ TEST(CommandWrapper, change_argument)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3_NEW");
-    command2.appendFile("--file1", filePath1.filePath());
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", filePath1.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -266,15 +266,15 @@ TEST(CommandWrapper, change_argument_file)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile("--file1", std::filesystem::path{"filepath1_NEW"});
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", std::filesystem::path{"filepath1_NEW"});
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -300,8 +300,8 @@ TEST(CommandWrapper, file_content_changed)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile("--file1", filePath1.filePath());
-    command1.appendFile(filePath2.filePath());
+    command1.appendPath("--file1", filePath1.filePath());
+    command1.appendPath(filePath2.filePath());
 
     filePath1.appendContent("0101...", 2);
     const std::string filePath1ModificationTimeStr = FileUtils::ModifiedTimeStr(filePath1.filePath());
@@ -310,8 +310,8 @@ TEST(CommandWrapper, file_content_changed)
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile("--file1", filePath1.filePath());
-    command2.appendFile(filePath2.filePath());
+    command2.appendPath("--file1", filePath1.filePath());
+    command2.appendPath(filePath2.filePath());
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -338,13 +338,13 @@ TEST(CommandWrapper, masked_files_matches)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile(filePath1.filePath(), "arch");
+    command1.appendPath(filePath1.filePath(), "arch");
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile(filePath2.filePath(), "arch");
+    command2.appendPath(filePath2.filePath(), "arch");
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(diff->isEmpty());
@@ -365,13 +365,13 @@ TEST(CommandWrapper, masked_files_differ)
     command1.append("--p1", "v1");
     command1.append("--p2");
     command1.append("--p3", "v3");
-    command1.appendFile(filePath1.filePath(), "arch");
+    command1.appendPath(filePath1.filePath(), "arch");
 
     CommandWrapper command2{"cmd"};
     command2.append("--p1", "v1");
     command2.append("--p2");
     command2.append("--p3", "v3");
-    command2.appendFile(filePath2.filePath(), "arch");
+    command2.appendPath(filePath2.filePath(), "arch");
 
     DiffCommandPtr diff = command2.collectDiff(command1);
     EXPECT_TRUE(!diff->isEmpty());
@@ -396,8 +396,8 @@ TEST(CommandWrapper, serialization)
     commandOrig.append("--p1", "v1");
     commandOrig.append("--p2");
     commandOrig.append("--p3", "v3");
-    commandOrig.appendFile(filePath1.filePath(), "arch");
-    commandOrig.appendFile("--file2", filePath2.filePath());
+    commandOrig.appendPath(filePath1.filePath(), "arch");
+    commandOrig.appendPath("--file2", filePath2.filePath());
     ScriptRendererPtr script = std::make_shared<ScriptRenderer>("www");
     commandOrig.setScriptRenderer(script);
 

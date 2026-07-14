@@ -51,7 +51,8 @@ Process::Process(const QString& name) : m_name(name) {
         break;
       }
     }
-    if (!skipUIReportingError) {
+    if (!skipUIReportingError && !m_seenErrors.contains(error)) {
+      m_seenErrors.insert(error);
       emit innerErrorOccurred(error);
     }
   });

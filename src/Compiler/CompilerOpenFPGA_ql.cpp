@@ -1406,7 +1406,11 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                "report_unconstrained_timing.hold.rpt",
                "report_unconstrained_timing.setup.rpt",
                "vpr_stdout.log",
-               BITSTREAM_LOG};
+               BITSTREAM_LOG,
+               // secure post-process artefacts (REQUIREMENTS.md §4.3, FR-9)
+               std::string{projectName + "_fabric_bitstream.bch"},
+               std::string{projectName + "_fabric_bitstream.ascon"},
+               std::string{projectName + "_bitstream_encode.log"}};
       break;
     default:
       break;
@@ -2237,7 +2241,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      vpr_options += std::string(" --max_router_iterations 100");
+      vpr_options += std::string(" --max_router_iterations 300");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
@@ -2388,8 +2392,6 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
         vpr_options += " --crypt_key_db " + crypt_key_db.string();
       }
 
-      vpr_options += " --preserve_input_pin_connections off";
-      vpr_options += " --preserve_output_pin_connections off";
       vpr_options += " --annotated_rr_graph on";
       vpr_options += " --remove_dangling_nodes off";
       // this is always enabled in the default Aurora flow, so don't add here.
@@ -2563,9 +2565,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return nullptr;
     }
-    command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
+    command->appendPath("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
   } else {
-    command->appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
+    command->appendPath("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
   }
 
   if (cfg.use_place_file) {
@@ -2575,9 +2577,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
           return nullptr;
       }
-      command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+      command->appendPath("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
     } else {
-      command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+      command->appendPath("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
     }
   }
 
@@ -2588,9 +2590,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
           return nullptr;
         }
-      command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+      command->appendPath("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
     } else {
-      command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+      command->appendPath("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
     }
   }
 
@@ -2607,7 +2609,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!sdc_file_path.empty()) {
     Message(std::string("SDC file found: ") + sdc_file_path.string());
-    command->appendFile("--sdc_file", sdc_file_path);
+    command->appendPath("--sdc_file", sdc_file_path);
   }
   else {
     Message(std::string("SDC file not found, no constraints passed to vpr."));
@@ -2616,7 +2618,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
-    command->appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
+    command->appendPath("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
   }
 
   // parse vpr netlist options
@@ -2646,7 +2648,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      command->append("--max_router_iterations",  "100");
+      command->append("--max_router_iterations",  "300");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
@@ -2746,8 +2748,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
-    command->appendFile("--read_rr_graph", rr_graph_file_path);
-    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+    command->appendPath("--read_rr_graph", rr_graph_file_path);
+    command->appendPath("--read_router_lookahead", router_lookahead_file_path);
   }
   else {
     // no rr_graph available to use, try to use dynamic rr_graph generation.
@@ -2762,8 +2764,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
       // Plaintext and encrypted CRR flows pass --sb_maps/--sb_templates
       // identically; encryption only adds --crypt_key_db.
-      command->appendFile("--sb_maps", m_SBMapsFile);
-      command->appendFile("--sb_templates", m_SBTemplatesDir);
+      command->appendPath("--sb_maps", m_SBMapsFile);
+      command->appendPath("--sb_templates", m_SBTemplatesDir);
 
       // VPR keys CRR encryption solely off the ".en" suffix on --sb_maps and
       // then requires --crypt_key_db (see VTR read_options.cpp). Keep FOEDAG in
@@ -2783,11 +2785,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
           return nullptr;
         }
-        command->appendFile("--crypt_key_db", crypt_key_db);
+        command->appendPath("--crypt_key_db", crypt_key_db);
       }
 
-      command->append("--preserve_input_pin_connections off");
-      command->append("--preserve_output_pin_connections off");
       command->append("--annotated_rr_graph on");
       command->append("--remove_dangling_nodes off");
       // this is always enabled in the default Aurora flow, so don't add here.
@@ -2837,7 +2837,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     if (fs::exists(fp_constraint_filepath_absolute)) {
-      command->appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
+      command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
   else { //IO floorplanning generation failed, must stop the flow
@@ -4753,7 +4753,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
         std::filesystem::is_regular_file(sdfFileName) &&
         std::filesystem::is_regular_file(sdcFileName)) {
       taCommand = BaseStaCommand();
-      taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
+      taCommand->appendPath(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
       
       FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
     } else {
@@ -6244,6 +6244,31 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in routed state"));
     return false;
   }
+  // `bitstream encode` (Tcl verb): run the secure post-process over an EXISTING
+  // fabric_bitstream.bit only -- do NOT re-run OpenFPGA, and bypass the
+  // bitstream_generation gate below (REQUIREMENTS.md §4.2, OQ-1).
+  if (BitstreamEncode()) {
+    const std::filesystem::path fabricBit =
+        std::filesystem::path(ProjManager()->projectPath()) /
+        "fabric_bitstream.bit";
+    if (!FileUtils::FileExists(fabricBit)) {
+      ErrorMessage(
+          "bitstream encode: fabric_bitstream.bit not found. Run 'bitstream' "
+          "first to generate it.");
+      ResetBitstreamEncode();
+      return false;
+    }
+    const uint32_t stages = ResolveBitstreamEncodeStages();
+    if (stages != 0) {
+      (void)RunBitstreamEncode(stages);
+    } else {
+      Message("bitstream encode: no stages enabled; nothing to do.");
+    }
+    ResetBitstreamEncode();
+    m_state = State::BistreamGenerated;
+    return true;
+  }
+
   Message("##################################################");
   Message("Bitstream generation for design \"" + ProjManager()->projectName() +
           "\" on device \"" + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() + "\"");
@@ -6468,10 +6493,216 @@ int status = ExecuteAndMonitorSystemCommand(command);
                  " bitstream generation failed");
     return false;
   }
+  // Secure bitstream post-process (REQUIREMENTS.md §4): checksum -> ASCON -> BCH.
+  // Runs only if a stage is enabled via the settings JSON or forced via the
+  // `bitstream encode` Tcl verb. A post-process failure is logged but does NOT
+  // fail bitstream generation, since the plain fabric_bitstream.bit is valid
+  // (§4.5). The encode request state is cleared so it does not leak to the next
+  // bitstream run.
+  const uint32_t encodeStages = ResolveBitstreamEncodeStages();
+  if (encodeStages != 0) {
+    (void)RunBitstreamEncode(encodeStages);
+  }
+  ResetBitstreamEncode();
+
   m_state = State::BistreamGenerated;
 
   Message("Design " + ProjManager()->projectName() + " bitstream is generated.\n");
   
+  return true;
+}
+
+uint32_t CompilerOpenFPGA_ql::ResolveBitstreamEncodeStages() const {
+  // Device-capability gate: for checkbox settings, getStringValue() returns ""
+  // when the key is absent from the project JSON (which is a copy of the device
+  // settings_template.json), and "checked"/"unchecked" when it is present.
+  // If none of the three encoding keys exist in the project settings, the
+  // device's template does not declare encryption support — block all encoding
+  // paths, including the explicit `bitstream encode` Tcl verb.
+  auto keyPresent = [](const char* key) {
+    return !QLSettingsManager::getStringValue("openfpga", "general", key)
+                .empty();
+  };
+  if (!keyPresent("checksum_encoding") && !keyPresent("ascon_encoding") &&
+      !keyPresent("bch_encoding")) {
+    if (BitstreamEncode()) {
+      Message(
+          "bitstream encode: device settings do not include encryption keys; "
+          "secure encoding is not supported for this device.");
+    }
+    return 0;
+  }
+
+  auto checked = [](const char* key) {
+    return QLSettingsManager::getStringValue("openfpga", "general", key) ==
+           std::string("checked");
+  };
+  uint32_t jsonStages = 0;
+  if (checked("checksum_encoding"))
+    jsonStages |=
+        static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Checksum);
+  if (checked("ascon_encoding"))
+    jsonStages |= static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Ascon);
+  if (checked("bch_encoding"))
+    jsonStages |= static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Bch);
+
+  if (BitstreamEncode()) {
+    // `bitstream encode <stage>...` forces exactly the named stages; bare
+    // `bitstream encode` honours the JSON toggles (REQUIREMENTS.md §4.2).
+    const uint32_t forced = BitstreamEncodeStages();
+    return forced != 0 ? forced : jsonStages;
+  }
+  // Plain `bitstream`: the bitstream_generation gate was already checked.
+  return jsonStages;
+}
+
+bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
+  const std::filesystem::path projectPath(ProjManager()->projectPath());
+  const std::string projectName = ProjManager()->projectName();
+
+  // Vendored encoder, resolved via the same scripts root as other utilities.
+  const std::filesystem::path script =
+      GetSession()->Context()->DataPath() / std::filesystem::path("..") /
+      std::filesystem::path("scripts") / std::filesystem::path("bitstream") /
+      std::filesystem::path("aurora_bitstream_encode.py");
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else   // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif  // _WIN32
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " not found; skipping secure bitstream post-process.");
+    return false;
+  }
+
+  const std::filesystem::path inp = projectPath / "fabric_bitstream.bit";
+  const std::filesystem::path out =
+      projectPath / (projectName + "_fabric_bitstream.bch");
+  const std::filesystem::path encFile =
+      projectPath / (projectName + "_fabric_bitstream.ascon");
+  const std::filesystem::path tagFile =
+      projectPath / (projectName + "_fabric_bitstream.tag");
+  // The distribution XML filename defaults to "bitstream_distribution.xml" but
+  // a user-supplied value in settings supersedes it. An absolute path is used
+  // as-is; a bare filename is resolved against the project output dir (and the
+  // device data copy in the fallback below).
+  const std::string xmlSetting = QLSettingsManager::getStringValue(
+      "openfpga", "general", "bitstream_distribution_xml");
+  const std::string xmlName = xmlSetting.empty()
+                                  ? std::string("bitstream_distribution.xml")
+                                  : xmlSetting;
+  std::filesystem::path xml = std::filesystem::path(xmlName).is_absolute()
+                                  ? std::filesystem::path(xmlName)
+                                  : projectPath / xmlName;
+  const std::filesystem::path log =
+      projectPath / (projectName + "_bitstream_encode.log");
+
+  const bool doChecksum =
+      stages & static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Checksum);
+  const bool doAscon =
+      stages & static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Ascon);
+  const bool doBch =
+      stages & static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Bch);
+
+  // If checksum is requested but the distribution XML is not in the project
+  // output directory, fall back to the device data copy. Without this file the
+  // Python encoder silently skips the checksum stage, producing a BCH without
+  // checksum rows that will fail hardware programming.
+  if (doChecksum && !std::filesystem::exists(xml)) {
+    const QLDeviceTarget device_target =
+        QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    const std::filesystem::path deviceXml =
+        QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
+        std::filesystem::path(xmlName).filename();
+    if (std::filesystem::exists(deviceXml)) {
+      Message("bitstream encode: " +
+              std::filesystem::path(xmlName).filename().string() +
+              " not in project dir; using device data copy.");
+      xml = deviceXml;
+    }
+  }
+
+  std::string stageNames;
+  if (doChecksum) stageNames += " checksum";
+  if (doAscon)    stageNames += " ascon";
+  if (doBch)      stageNames += " bch";
+
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(script.string());
+  args.push_back("--inp");
+  args.push_back(inp.string());
+  args.push_back("--out");
+  args.push_back(out.string());
+  if (doAscon) {
+    args.push_back("--enc");
+    args.push_back(encFile.string());
+    // Tag is an internal artifact (not exposed in GUI) used for software
+    // decode and roundtrip verification. Written alongside .bch and .ascon.
+    args.push_back("--tag");
+    args.push_back(tagFile.string());
+  }
+  if (doChecksum) {
+    args.push_back("--xml");
+    args.push_back(xml.string());
+  }
+  args.push_back("--log");
+  args.push_back(log.string());
+  if (doChecksum) args.push_back("--checksum");
+  if (doAscon)    args.push_back("--ascon");
+  if (doBch)      args.push_back("--bch");
+
+  // Advanced knobs default to driver values when the settings are absent.
+  const std::string padbits = QLSettingsManager::getStringValue(
+      "openfpga", "general", "bch_input_padbits");
+  if (!padbits.empty()) {
+    args.push_back("--input_padbits");
+    args.push_back(padbits);
+  }
+  const std::string just =
+      QLSettingsManager::getStringValue("openfpga", "general", "bch_input_just");
+  if (!just.empty()) {
+    args.push_back("--input_just");
+    args.push_back(just);
+  }
+
+  // Production key injection: when a device settings_template.json provides
+  // key file paths the encoder uses them; otherwise it falls back to the
+  // vendored non-secret sample keys (scripts/bitstream/sample_keys/).
+  if (doAscon) {
+    const std::string asconKey =
+        QLSettingsManager::getStringValue("openfpga", "general", "ascon_key_file");
+    if (!asconKey.empty()) {
+      args.push_back("--ascon_key");
+      args.push_back(asconKey);
+    }
+    const std::string asconNonce =
+        QLSettingsManager::getStringValue("openfpga", "general", "ascon_nonce_file");
+    if (!asconNonce.empty()) {
+      args.push_back("--ascon_nonce");
+      args.push_back(asconNonce);
+    }
+    const std::string asconAd =
+        QLSettingsManager::getStringValue("openfpga", "general", "ascon_ad_file");
+    if (!asconAd.empty()) {
+      args.push_back("--ascon_ad");
+      args.push_back(asconAd);
+    }
+  }
+
+  Message("Secure bitstream post-process [" + stageNames.substr(1) + "]: " +
+          command + " " + script.string());
+  const int status =
+      FileUtils::ExecuteSystemCommand(command, args, m_out, -1).realCode;
+  if (status != 0) {
+    // Non-fatal: the plain fabric_bitstream.bit is still valid (§4.5).
+    ErrorMessage("Secure bitstream post-process failed (see " + log.string() +
+                 "). The plain fabric_bitstream.bit is unaffected.");
+    return false;
+  }
+  Message("Secure bitstream written: " + out.string());
   return true;
 }
 
@@ -9740,7 +9971,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
-  //   command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
   // }
   // else
   // {

@@ -244,6 +244,25 @@ std::filesystem::path candidate = searchPath / filename;
   return result;
 }
 
+std::vector<std::filesystem::path> FileUtils::FindAbsoluteFilePathsRecursively(
+    const std::filesystem::path& searchPath) {
+  std::vector<std::filesystem::path> results{};
+  if (!FileUtils::FileIsDirectory(searchPath)) {
+    return results;
+  }
+  std::error_code ec;
+  std::filesystem::recursive_directory_iterator it(
+      searchPath, std::filesystem::directory_options::skip_permission_denied,
+      ec);
+  const std::filesystem::recursive_directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    if (FileUtils::FileIsRegular(it->path())) {
+      results.push_back(std::filesystem::absolute(it->path()));
+    }
+  }
+  return results;
+}
+
 // This will search the given paths (non-recursively) for a child file.
 // All matches will be returned in a vector
 std::vector<std::filesystem::path> FileUtils::FindFileInDirs(

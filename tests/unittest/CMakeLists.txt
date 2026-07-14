@@ -49,6 +49,7 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
+    Compiler/TaskCompilationStateManager_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
@@ -62,6 +63,7 @@ if (USE_IPA)
     InteractivePathAnalysis/TelegramParser_test.cpp
     InteractivePathAnalysis/TelegramBuffer_test.cpp
     InteractivePathAnalysis/NCriticalPathModel_test.cpp
+    InteractivePathAnalysis/VprProcess_test.cpp
   )
 endif()
 
