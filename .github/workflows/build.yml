@@ -286,6 +286,7 @@ jobs:
         host: 'linux'
         target: 'desktop'
         arch: 'linux_gcc_64'
+        aqtversion: '==3.3.*'
 
     - name: Show Shell Configuration
       run: |
