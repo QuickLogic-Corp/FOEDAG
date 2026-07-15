@@ -34,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <regex>
 #include <memory>
 
+#include <QDebug>
 // #include <iostream>
 
 // #define DEBUG_ENABLE_PARANOIC_CHECK
@@ -463,6 +464,7 @@ CompilationFilesScopedSession& operator=(CompilationFilesScopedSession&&) = dele
 class CommandWrapper {
   static std::filesystem::path s_projectPath;
   static std::unordered_set<std::string> s_bigFilesSet;
+  static bool s_enableLog;
 
 public:
   CommandWrapper()=default;
@@ -483,6 +485,13 @@ public:
   static void setProjectPath(const std::filesystem::path& path) { s_projectPath = path; }
   static const std::filesystem::path& projectPath() { return s_projectPath; }
   static void addBigFileName(const std::string& fileName) { s_bigFilesSet.insert(fileName); }
+
+  // Developer toggle for verbose CommandWrapper debug logging. Enabled once at
+  // startup from the AURORA_INCR_COMPILATOR_LOG environment variable (see
+  // TaskCompilationStateManager), so debugging can be turned on at runtime
+  // without recompiling the app.
+  static void setLogEnabled(bool enabled) { s_enableLog = enabled; }
+  static bool isLogEnabled() { return s_enableLog; }
 
   DiffCommandPtr collectDiff(const CommandWrapper& old) {
     DiffCommandPtr diff = std::make_shared<DiffCommand>();
@@ -511,15 +520,15 @@ public:
     appendArgument(parameter, value);
   }
 
-  void appendFile(const std::string& filePath)=delete;
-  void appendFile(const std::filesystem::path& file, const std::string& mask = "") {
+  void appendPath(const std::string& filePath)=delete;
+  void appendPath(const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(file.string(), "", mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
-  void appendFile(const std::string& parameter, const std::string& file)=delete;
-  void appendFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
+  void appendPath(const std::string& parameter, const std::string& file)=delete;
+  void appendPath(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(parameter, file.string(), mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
 
   void prepend(const std::string& parameter, const std::string& value = "") {
@@ -529,13 +538,13 @@ public:
   void prependFile(const std::string& file)=delete;
   void prependFile(const std::filesystem::path& file, const std::string& mask = "") {
     prependArgument(file.string(), "", mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
 
   void prependFile(const std::string& parameter, const std::string& file)=delete;
   void prependFile(const std::string& parameter, const std::filesystem::path& file, const std::string& mask) {
     prependArgument(parameter, file.string(), mask);
-    handleFile(file, mask);
+    handlePath(file, mask);
   }
 
 private:
@@ -605,30 +614,57 @@ private:
     }
   }
 
-  void handleFile(const std::filesystem::path& file, const std::string& mask) {
-    std::filesystem::path resolvedFilePath(file);
-    if (file.is_relative() && !s_projectPath.empty()) {
-      resolvedFilePath = s_projectPath / file;
+  void resolveProjectRelativePath(std::filesystem::path& path) {
+    if (path.is_relative() && !s_projectPath.empty()) {
+      path = s_projectPath / path;
     }
+  }
 
-    if (!std::filesystem::exists(resolvedFilePath)) {
+  void handlePath(const std::filesystem::path& file, const std::string& mask) {
+    std::filesystem::path resolvedPath(file);
+    resolveProjectRelativePath(resolvedPath);
+
+    if (!std::filesystem::exists(resolvedPath)) {
       return;
     }
 
+    if (std::filesystem::is_directory(resolvedPath)) {
+      handeDir(resolvedPath);
+    } else {
+      handleFile(resolvedPath, mask);
+    }
+  }
+
+  void handeDir(const std::filesystem::path& dir) {
+    if (isLogEnabled()) {
+      qInfo() << "commandwrapper::handleDir" << dir.string().c_str();
+    }
+
+    std::vector<std::filesystem::path> files = FileUtils::FindAbsoluteFilePathsRecursively(dir);
+    for (const auto& file: files) {
+      handleFile(file);
+    }
+  }
+
+  void handleFile(const std::filesystem::path& file, const std::string& mask = "") {
+    if (isLogEnabled()) {
+      qInfo() << "commandwrapper::handleFile" << file.string().c_str();
+    }
+
     bool skipHashCheck = false;
-    auto it = s_bigFilesSet.find(resolvedFilePath.filename().string());
+    auto it = s_bigFilesSet.find(file.filename().string());
     if (it != s_bigFilesSet.end()) {
       skipHashCheck = true;
     }
-    if (resolvedFilePath.extension() == ".bin") {
+    if (file.extension() == ".bin") {
       skipHashCheck = true; // calc md5 sum for big bin files takes a lot of time
     }
 
-    std::string key = mask.empty()? resolvedFilePath.string(): mask;
+    std::string key = mask.empty()? file.string(): mask;
     if (FilesIdentityCache::instance().isEnabled()) {
-      m_files[key] = FilesIdentityCache::instance().get(resolvedFilePath, mask, skipHashCheck);
+      m_files[key] = FilesIdentityCache::instance().get(file, mask, skipHashCheck);
     } else {
-      m_files[key] = std::make_shared<FileIdentity>(resolvedFilePath, mask, skipHashCheck);
+      m_files[key] = std::make_shared<FileIdentity>(file, mask, skipHashCheck);
     }
   }
 

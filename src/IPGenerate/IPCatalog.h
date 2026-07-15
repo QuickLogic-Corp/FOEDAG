@@ -233,6 +233,32 @@ class IPParameter : public Value {
   Type GetType() const { return Type::ParamIpVal; }
   ParamType GetParamType() const { return m_paramType; }
 
+  // Validates a candidate string value against this parameter's catalog
+  // constraints (type, enum options, numeric range). Returns true if valid; on
+  // failure returns false and sets `errorMsg` to a human-readable reason.
+  // Mirrors the interactive validation the GUI performs via Qt validators /
+  // comboboxes, so the non-GUI (batch / Tcl configure_ip) path enforces the
+  // same rules.
+  bool Validate(const std::string& value, std::string& errorMsg) const;
+
+  // Returns true if this parameter is currently "active" (editable, and thus
+  // should be validated). A parameter is inactive when it is statically
+  // disabled (disable == "true") or when any boolean parameter it depends on
+  // ("dependency" in the catalog) resolves to false. `paramValues` maps
+  // parameter name -> current string value (supplied value or catalog default);
+  // a dependency missing from the map is treated as false. Inactive fields keep
+  // their default in the GUI and are never user-edited, so the batch path skips
+  // validating them.
+  bool IsActive(
+      const std::map<std::string, std::string>& paramValues) const;
+
+  // Human-readable type name: "int", "float", "bool", "string", "filepath".
+  std::string ParamTypeStr() const;
+
+  // Allowed-values description: "range: [min, max]" or "choices: a, b, c", or
+  // "" when unconstrained. Mirrors the GUI's options-over-range precedence.
+  std::string ConstraintStr() const;
+
   void SetDisable(const std::string& d) { m_disable = d; }
   std::string Disabled() const { return m_disable; }
 
@@ -253,6 +279,13 @@ class IPParameter : public Value {
   std::vector<std::string> m_range{};
   std::string m_disable{false};
 };
+
+// Returns a human-readable, one-parameter-per-line listing of the IP-value
+// parameters in `params` (aligned name/type columns, plus each parameter's
+// default and allowed values). Non-IP-value entries are skipped. Intended for
+// CLI help/error output and reusable by future commands (e.g. listing the
+// parameters of an IP).
+std::string DescribeIPParameters(const std::vector<Value*>& params);
 
 class IPDefinition {
  public:

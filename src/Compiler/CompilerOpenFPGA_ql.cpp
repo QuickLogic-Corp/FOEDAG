@@ -2565,9 +2565,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return nullptr;
     }
-    command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
+    command->appendPath("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
   } else {
-    command->appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
+    command->appendPath("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
   }
 
   if (cfg.use_place_file) {
@@ -2577,9 +2577,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
           return nullptr;
       }
-      command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+      command->appendPath("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
     } else {
-      command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+      command->appendPath("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
     }
   }
 
@@ -2590,9 +2590,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
           return nullptr;
         }
-      command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+      command->appendPath("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
     } else {
-      command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+      command->appendPath("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
     }
   }
 
@@ -2609,7 +2609,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!sdc_file_path.empty()) {
     Message(std::string("SDC file found: ") + sdc_file_path.string());
-    command->appendFile("--sdc_file", sdc_file_path);
+    command->appendPath("--sdc_file", sdc_file_path);
   }
   else {
     Message(std::string("SDC file not found, no constraints passed to vpr."));
@@ -2618,7 +2618,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
-    command->appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
+    command->appendPath("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
   }
 
   // parse vpr netlist options
@@ -2748,8 +2748,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
-    command->appendFile("--read_rr_graph", rr_graph_file_path);
-    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+    command->appendPath("--read_rr_graph", rr_graph_file_path);
+    command->appendPath("--read_router_lookahead", router_lookahead_file_path);
   }
   else {
     // no rr_graph available to use, try to use dynamic rr_graph generation.
@@ -2764,8 +2764,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
       // Plaintext and encrypted CRR flows pass --sb_maps/--sb_templates
       // identically; encryption only adds --crypt_key_db.
-      command->appendFile("--sb_maps", m_SBMapsFile);
-      command->appendFile("--sb_templates", m_SBTemplatesDir);
+      command->appendPath("--sb_maps", m_SBMapsFile);
+      command->appendPath("--sb_templates", m_SBTemplatesDir);
 
       // VPR keys CRR encryption solely off the ".en" suffix on --sb_maps and
       // then requires --crypt_key_db (see VTR read_options.cpp). Keep FOEDAG in
@@ -2785,7 +2785,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
           return nullptr;
         }
-        command->appendFile("--crypt_key_db", crypt_key_db);
+        command->appendPath("--crypt_key_db", crypt_key_db);
       }
 
       command->append("--annotated_rr_graph on");
@@ -2837,7 +2837,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     if (fs::exists(fp_constraint_filepath_absolute)) {
-      command->appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
+      command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
   else { //IO floorplanning generation failed, must stop the flow
@@ -4757,7 +4757,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
         std::filesystem::is_regular_file(sdfFileName) &&
         std::filesystem::is_regular_file(sdcFileName)) {
       taCommand = BaseStaCommand();
-      taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
+      taCommand->appendPath(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
       
       FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
     } else {
@@ -9975,7 +9975,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
-  //   command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
   // }
   // else
   // {

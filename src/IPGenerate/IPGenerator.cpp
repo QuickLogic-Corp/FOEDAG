@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <map>
 #include <queue>
 #include <sstream>
 #include <thread>
@@ -403,6 +404,50 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     if (version.empty()) {
       printWrongUsageMsgHelperFn("-version is not set");
       return TCL_ERROR;
+    }
+
+    // Validate each supplied parameter against the catalog definition before
+    // building the instance. The GUI enforces these constraints interactively
+    // (Qt validators / comboboxes); the batch (Tcl) path had no equivalent, so
+    // an out-of-range or otherwise invalid value silently reached generation.
+    const auto defParams = def->Parameters();
+    // Effective value of every parameter (catalog default, overridden by any
+    // supplied value) — used to evaluate dependency gating below.
+    std::map<std::string, std::string> paramValues;
+    for (auto* p : defParams) {
+      if (p->GetType() == Value::Type::ParamIpVal) {
+        paramValues[p->Name()] = static_cast<IPParameter*>(p)->GetSValue();
+      }
+    }
+    for (const auto& sp : parameters) {
+      paramValues[sp.Name()] = sp.GetSValue();
+    }
+    for (const auto& sparam : parameters) {
+      FOEDAG::Value* catVal = nullptr;
+      for (auto* p : defParams) {
+        if (p->Name() == sparam.Name()) {
+          catVal = p;
+          break;
+        }
+      }
+      if (catVal == nullptr || catVal->GetType() != Value::Type::ParamIpVal) {
+        compiler->ErrorMessage(
+            "Unknown parameter '-P" + sparam.Name() + "' for IP " + ip_name +
+                ".\nKnown parameters:\n" + DescribeIPParameters(defParams),
+            false);
+        return TCL_ERROR;
+      }
+      auto* ipParam = static_cast<IPParameter*>(catVal);
+      // Skip inactive fields (statically disabled, or gated off by a dependency
+      // bool). The GUI keeps these at their default and never validates them.
+      if (!ipParam->IsActive(paramValues)) continue;
+      std::string err;
+      if (!ipParam->Validate(sparam.GetSValue(), err)) {
+        compiler->ErrorMessage(
+            "Invalid value for parameter '" + sparam.Name() + "': " + err,
+            false);
+        return TCL_ERROR;
+      }
     }
 
     IPInstance* instance =
