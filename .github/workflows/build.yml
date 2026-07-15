@@ -70,9 +70,8 @@ jobs:
           mingw-w64-${{ matrix.env }}-tcl
           mingw-w64-${{ matrix.env }}-zlib
           mingw-w64-${{ matrix.env }}-swig
-          mingw-w64-${{ matrix.env }}-qt5-base-debug
-          mingw-w64-${{ matrix.env }}-qt5
-          mingw-w64-${{ matrix.env }}-qt5-declarative-debug
+          mingw-w64-${{ matrix.env }}-qt6-base
+          mingw-w64-${{ matrix.env }}-qt6-base-debug
           mingw-w64-${{ matrix.env }}-ninja
 
     - name: Setup Python
