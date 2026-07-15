@@ -3182,7 +3182,11 @@ bool CompilerOpenFPGA_ql::Packing() {
         // get the layout name generated from the log file:
         const QRegularExpression auto_layout_regex("Layout for (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
         QFile file{QString::fromStdString(logfile_auto_device.string())};
-        file.open(QFile::ReadOnly);
+        if (!file.open(QFile::ReadOnly)) {
+          ErrorMessage("Cannot open auto-layout log file: " +
+                       logfile_auto_device.string() + "\n");
+          return false;
+        }
         while (!file.atEnd()) {
           auto line = file.readLine();
           auto match = auto_layout_regex.match(line);
