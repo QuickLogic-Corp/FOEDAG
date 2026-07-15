@@ -15,7 +15,6 @@ apt-get install -y \
     lcov \
     valgrind \
     xorg \
-    qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools \
     xvfb \
     yosys \
     automake \
