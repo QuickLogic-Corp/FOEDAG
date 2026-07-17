@@ -15,9 +15,9 @@ namespace {
 static constexpr const char *RESOURCES_SPLIT{"blocks of type:"};
 static constexpr const char *BLOCKS_COL{"Blocks"};
 
-static const QRegExp FIND_CIRCUIT_STAT{"Circuit Statistics:.*"};
-static const QRegExp WARNING_REGEXP("Warning( [0-9])?.*:");
-static const QRegExp ERROR_REGEXP("Error( [0-9])?.*:");
+static const QRegularExpression FIND_CIRCUIT_STAT{"Circuit Statistics:.*"};
+static const QRegularExpression WARNING_REGEXP{"Warning( [0-9])?.*:"};
+static const QRegularExpression ERROR_REGEXP{"Error( [0-9])?.*:"};
 
 static const QRegularExpression SPLIT_HISTOGRAM{
     "((([0-9]*[.])?[0-9]+)e?[+-]?%?)+|\\*.*"};
@@ -25,8 +25,16 @@ static const QRegularExpression SPLIT_HISTOGRAM{
 
 namespace FOEDAG {
 
-const QRegExp AbstractReportManager::FIND_RESOURCES{"Resource usage.*"};
-const QRegExp AbstractReportManager::FIND_CIRCUIT_STAT{"Circuit Statistics:.*"};
+const QRegularExpression AbstractReportManager::FIND_RESOURCES{"Resource usage.*"};
+const QRegularExpression AbstractReportManager::FIND_CIRCUIT_STAT{"Circuit Statistics:.*"};
+
+QRegularExpressionMatch AbstractReportManager::lastMatch(
+    const QRegularExpression& re, const QString& str) {
+  auto it = re.globalMatch(str);
+  QRegularExpressionMatch m;
+  while (it.hasNext()) m = it.next();
+  return m;
+}
 
 AbstractReportManager::AbstractReportManager(const TaskManager &taskManager) {
   // Log files should be re-parsed after starting new compilation
@@ -184,9 +192,9 @@ int AbstractReportManager::parseErrorWarningSection(QTextStream &in, int lineNr,
 
     // check whether current line is among desired keys
     for (auto &keyRegExp : keys) {
-      if (keyRegExp.indexIn(line) != -1) {
+      if (auto m = keyRegExp.match(line); m.hasMatch()) {
         auto tm = TaskMessage{
-            lineNr, MessageSeverity::INFO_MESSAGE, keyRegExp.cap(), {}};
+            lineNr, MessageSeverity::INFO_MESSAGE, m.captured(0), {}};
         sectionMsg.m_childMessages.insert(lineNr, std::move(tm));
         // remove the key once found to save some performance
         keys.removeAll(keyRegExp);
@@ -214,12 +222,12 @@ int AbstractReportManager::parseErrorWarningSection(QTextStream &in, int lineNr,
         sectionMsg.m_childMessages.insert(wrnItem.m_lineNr, wrnItem);
       }
 /// TODO: is it right place for this? Maybe this should be moved to upper hierarhy class?
-    } else if (FIND_RESOURCES.indexIn(line) != -1) {
+    } else if (FIND_RESOURCES.match(line).hasMatch()) {
       parseResourceUsage(in, lineNr);
     } else if (isStatisticalTimingLine(line)) {
       timings << line + "\n";
     } else if (isStatisticalTimingHistogram(line)) {
-      histograms().push_back(qMakePair(line, parseHistogram(in, lineNr)));
+      histograms().push_back({line, parseHistogram(in, lineNr)});
     }
 ///
   }

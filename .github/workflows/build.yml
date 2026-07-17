@@ -68,9 +68,8 @@ jobs:
           mingw-w64-${{ matrix.env }}-tcl
           mingw-w64-${{ matrix.env }}-zlib
           mingw-w64-${{ matrix.env }}-swig
-          mingw-w64-${{ matrix.env }}-qt5-base-debug
-          mingw-w64-${{ matrix.env }}-qt5
-          mingw-w64-${{ matrix.env }}-qt5-declarative-debug
+          mingw-w64-${{ matrix.env }}-qt6-base
+          mingw-w64-${{ matrix.env }}-qt6-base-debug
           mingw-w64-${{ matrix.env }}-ninja
 
     - name: Setup Python
@@ -277,6 +276,15 @@ jobs:
       run: |
         sudo bash ./.github/workflows/${{ matrix.install_script }}
 
+    - name: Install Qt6
+      uses: jurplel/install-qt-action@v3.0.0
+      with:
+        version: '6.9.3'
+        host: 'linux'
+        target: 'desktop'
+        arch: 'linux_gcc_64'
+        aqtversion: '==3.3.*'
+
     - name: Show Shell Configuration
       run: |
         which git && git --version || true
@@ -309,8 +317,10 @@ jobs:
 
     - name: Build
       run: |
+        export QT_DIR="${QT_ROOT_DIR}"
         make -f Makefile.au install -j$(nproc)
 
     - name: Test
       run: |
+        export QT_DIR="${QT_ROOT_DIR}"
         make test -j$(nproc)

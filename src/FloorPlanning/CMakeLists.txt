@@ -78,7 +78,7 @@ add_library(floorplanning STATIC
   ${QRC_LIST}
 )
 
-target_link_libraries(floorplanning PUBLIC Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
+target_link_libraries(floorplanning PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
 
 target_compile_definitions(floorplanning PRIVATE FP_UI_MARGIN=0)
 
@@ -106,7 +106,7 @@ if (STANDALONE_FP_APP)
         ../Utils/FileUtils.h
         ../Widgets/RoundProgressWidget.h
     )
-    target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt5::Core Qt5::Gui Qt5::Widgets Qt5::Xml)
+    target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
 
     target_compile_definitions(floorplanning_bin PRIVATE FP_UI_MARGIN=0)
 endif()

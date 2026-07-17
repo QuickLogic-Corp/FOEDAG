@@ -1,6 +1,10 @@
 #include "create_runs_dialog.h"
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
+#else
+#include <QScreen>
+#endif
 
 #include "runs_summary_form.h"
 #include "select_design_type_form.h"
@@ -16,9 +20,15 @@ CreateRunsDialog::CreateRunsDialog(QWidget *parent)
   m_formIndex = CRFI_SELECTTYPE;
 
   // One thirds of desktop size
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  auto *screen = QApplication::primaryScreen();
+  int w = screen->geometry().width() / 4;
+  int h = screen->geometry().height() / 3;
+#else
   QDesktopWidget dw;
   int w = dw.width() / 4;
   int h = dw.height() / 3;
+#endif
   setGeometry(w, h, w, h);
 
   m_selectTypeForm = new SelectDesignTypeForm(this);

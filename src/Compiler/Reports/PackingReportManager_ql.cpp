@@ -16,7 +16,7 @@ static constexpr const char *RESOURCE_REPORT_NAME{
     "Packing - Report Resource Utilization"};
 
 // Messages
-static const QRegExp VPR_ROUTING_OPT{
+static const QRegularExpression VPR_ROUTING_OPT{
     "VPR was run with the following options.*"};
 static const QString BLOCK_GRAPH_BUILD_SECTION{
     "# Building complex block graph"};
@@ -92,17 +92,17 @@ void PackingReportManager::parseLogFile() {
   while (in.readLineInto(&line)) {
     if (line.startsWith(LOAD_ARCH_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_ARCH_SECTION, {});
-    else if (VPR_ROUTING_OPT.indexIn(line) != -1)
+    else if (auto m = VPR_ROUTING_OPT.match(line); m.hasMatch())
       messages().insert(lineNr, TaskMessage{lineNr,
                                             MessageSeverity::INFO_MESSAGE,
-                                            VPR_ROUTING_OPT.cap(),
+                                            m.captured(0),
                                             {}});
     else if (line.startsWith(BLOCK_GRAPH_BUILD_SECTION))
       lineNr =
           parseErrorWarningSection(in, lineNr, BLOCK_GRAPH_BUILD_SECTION, {});
     else if (line.startsWith(LOAD_CIRCUIT_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, LOAD_CIRCUIT_SECTION, {});
-    else if (FIND_CIRCUIT_STAT.indexIn(line) != -1)
+    else if (FIND_CIRCUIT_STAT.match(line).hasMatch())
       m_circuitData = parseCircuitStats(in, lineNr);
     else if (line.endsWith(BUILD_TIM_GRAPH))
       messages().insert(
@@ -114,8 +114,8 @@ void PackingReportManager::parseLogFile() {
     else if (line.startsWith(PACKING_SECTION))
       lineNr =
           parseErrorWarningSection(in, lineNr, PACKING_SECTION,
-                                   {QRegExp("Final Clustering Statistics")});
-    else if (FIND_RESOURCES.indexIn(line) != -1)
+                                   {QRegularExpression{"Final Clustering Statistics"}});
+    else if (FIND_RESOURCES.match(line).hasMatch())
       parseResourceUsage(in, lineNr);
 
     ++lineNr;
