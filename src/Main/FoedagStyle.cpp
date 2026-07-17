@@ -33,6 +33,8 @@ class FoedagStylePrivate {
 FoedagStyle::FoedagStyle(QStyle *style)
     : QProxyStyle(style), d{new FoedagStylePrivate} {}
 
+FoedagStyle::~FoedagStyle() = default;
+
 void FOEDAG::FoedagStyle::drawPrimitive(PrimitiveElement element,
                                         const QStyleOption *opt, QPainter *p,
                                         const QWidget *widget) const {

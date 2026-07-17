@@ -71,9 +71,14 @@ TaskTableView::TaskTableView(TaskManager *tManager, QWidget *parent)
 }
 
 void TaskTableView::mousePressEvent(QMouseEvent *event) {
-  auto idx = indexAt(event->pos());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  const QPoint eventPos = event->position().toPoint();
+#else
+  const QPoint eventPos = event->pos();
+#endif
+  auto idx = indexAt(eventPos);
   if (idx.column() == TitleCol) {
-    bool expandAreaClicked = expandArea(idx).contains(event->pos());
+    bool expandAreaClicked = expandArea(idx).contains(eventPos);
     if (expandAreaClicked) {
       model()->setData(idx, ExpandAreaAction::Invert, ExpandAreaRole);
     }
@@ -86,9 +91,14 @@ void TaskTableView::mouseDoubleClickEvent(QMouseEvent *event) {
   // We only disabled the viewport in order to have scrollbar enabled.
   // Mouse events keep on coming in this case though, so we catch them manually.
   if (m_viewDisabled) return;
-  auto idx = indexAt(event->pos());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  const QPoint eventPos = event->position().toPoint();
+#else
+  const QPoint eventPos = event->pos();
+#endif
+  auto idx = indexAt(eventPos);
   if (idx.isValid() && (idx.column() == TitleCol) &&
-      !expandArea(idx).contains(event->pos())) {
+      !expandArea(idx).contains(eventPos)) {
     userActionHandle(idx);
   }
   QTableView::mouseDoubleClickEvent(event);
@@ -313,7 +323,11 @@ void TaskTableView::TasksDelegate::paint(QPainter *painter,
     auto label = qobject_cast<QLabel *>(m_view.indexWidget(index));
     if (!label) return;
     // QTableView can't paint animations. Do it manually via QLabel.
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    if (statusData.typeId() == QMetaType::Bool) {
+#else
     if (statusData.type() == QVariant::Bool) {
+#endif
       label->setMovie(m_inProgressMovie);
       // Place the animation to cells left side, similar to other decorations
       label->move(m_view.visualRect(index).center() -

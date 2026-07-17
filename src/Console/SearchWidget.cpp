@@ -53,7 +53,11 @@ SearchWidget::SearchWidget(QTextEdit *searchEdit, QWidget *parent,
 
   QCheckBox *findWholeWords = new QCheckBox{this};
   findWholeWords->setText(tr("Whole word"));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+  connect(findWholeWords, &QCheckBox::checkStateChanged, this, [this](Qt::CheckState state) {
+#else
   connect(findWholeWords, &QCheckBox::stateChanged, this, [this](int state) {
+#endif
     m_searchFlags.setFlag(QTextDocument::FindFlag::FindWholeWords,
                           state == Qt::Checked);
     findNext();
@@ -63,8 +67,13 @@ SearchWidget::SearchWidget(QTextEdit *searchEdit, QWidget *parent,
 
   QCheckBox *findCaseSensitively = new QCheckBox{this};
   findCaseSensitively->setText(tr("Case sensitive"));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+  connect(findCaseSensitively, &QCheckBox::checkStateChanged, this,
+          [this](Qt::CheckState state) {
+#else
   connect(findCaseSensitively, &QCheckBox::stateChanged, this,
           [this](int state) {
+#endif
             m_searchFlags.setFlag(QTextDocument::FindFlag::FindCaseSensitively,
                                   state == Qt::Checked);
             findNext();
@@ -73,7 +82,11 @@ SearchWidget::SearchWidget(QTextEdit *searchEdit, QWidget *parent,
 
   QCheckBox *findBackward = new QCheckBox{this};
   findBackward->setText(tr("Backward"));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+  connect(findBackward, &QCheckBox::checkStateChanged, this, [this](Qt::CheckState state) {
+#else
   connect(findBackward, &QCheckBox::stateChanged, this, [this](int state) {
+#endif
     m_searchFlags.setFlag(QTextDocument::FindFlag::FindBackward,
                           state == Qt::Checked);
     findNext();

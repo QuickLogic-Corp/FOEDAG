@@ -36,9 +36,9 @@ static constexpr const char *MAX_LVL_STR{"Maximum logic level"};
 static constexpr const char *AVG_LVL_STR{"Average logic level"};
 
 // Messages regexp
-static const QRegExp VERIFIC_ERR_REGEXP{"VERIFIC-ERROR.*"};
-static const QRegExp VERIFIC_WARN_REGEXP{"VERIFIC-WARNING.*"};
-static const QRegExp VERIFIC_INFO_REGEXP{
+static const QRegularExpression VERIFIC_ERR_REGEXP{"VERIFIC-ERROR.*"};
+static const QRegularExpression VERIFIC_WARN_REGEXP{"VERIFIC-WARNING.*"};
+static const QRegularExpression VERIFIC_INFO_REGEXP{
     "Executing synth_rs pass.*|Executing RS_DSP_MACC.*"};
 }  // namespace
 
@@ -59,11 +59,12 @@ IDataReport::TableData SynthesisReportManager::getStatistics(
   auto dataLine = QString{};    // Simplified line
   auto parentItem = QString{};  // Parent item for lines starting with tab
 
-  auto statTable =
-      QRegExp("Number.*");  // Drop the beginning and start with stats
-  if (statTable.indexIn(statsStr) == -1) return res;
+  QRegularExpression statTable{
+      "Number.*"};  // Drop the beginning and start with stats
+  auto statTableMatch = statTable.match(statsStr);
+  if (!statTableMatch.hasMatch()) return res;
 
-  QTextStream in(statTable.cap().toLatin1());
+  QTextStream in(statTableMatch.captured(0).toLatin1());
 
   while (in.readLineInto(&line)) {
     if (line.startsWith("     ") && parentItem.isEmpty())
@@ -131,15 +132,14 @@ void SynthesisReportManager::parseLogFile() {
   auto fileStr = QTextStream(logFile.get()).readAll();
   logFile->close();
 
-  auto findStats = QRegExp("Printing statistics.*\n\n===.*===\n\n.*[^\n{2}]+");
+  QRegularExpression findStats{"Printing statistics.*\n\n===.*===\n\n.*[^\n{2}]+"};
 
-  if (findStats.lastIndexIn(fileStr) != -1)
-    m_resourceData = getStatistics(findStats.cap());
+  if (auto m = lastMatch(findStats, fileStr); m.hasMatch())
+    m_resourceData = getStatistics(m.captured(0));
 
-  auto findLvls = QRegExp{"DE:([^\n]+)"};
-  if (findLvls.lastIndexIn(fileStr) != -1) {
-    fillLevels(findLvls.cap(), m_resourceData);
-  }
+  QRegularExpression findLvls{"DE:([^\n]+)"};
+  if (auto m = lastMatch(findLvls, fileStr); m.hasMatch())
+    fillLevels(m.captured(0), m_resourceData);
 
   auto line = QString{};
   QTextStream in(fileStr.toLatin1());
@@ -159,22 +159,22 @@ void SynthesisReportManager::parseLogFile() {
   };
 
   while (in.readLineInto(&line)) {
-    if (VERIFIC_INFO_REGEXP.indexIn(line) != -1) {
+    if (auto m = VERIFIC_INFO_REGEXP.match(line); m.hasMatch()) {
       m_messages.insert(lineNr,
                         TaskMessage{lineNr,
                                     MessageSeverity::INFO_MESSAGE,
-                                    VERIFIC_INFO_REGEXP.cap().simplified(),
+                                    m.captured(0).simplified(),
                                     {}});
       fillErrorsWarnings();
-    } else if (VERIFIC_ERR_REGEXP.indexIn(line) != -1) {
-      errors.emplace(lineNr, VERIFIC_ERR_REGEXP.cap().simplified());
+    } else if (auto m = VERIFIC_ERR_REGEXP.match(line); m.hasMatch()) {
+      errors.emplace(lineNr, m.captured(0).simplified());
       if (!warnings.empty()) {
         auto warningsItem =
             createWarningErrorItem(MessageSeverity::WARNING_MESSAGE, warnings);
         m_messages.insert(warningsItem.m_lineNr, warningsItem);
       }
-    } else if (VERIFIC_WARN_REGEXP.indexIn(line) != -1) {
-      warnings.emplace(lineNr, VERIFIC_WARN_REGEXP.cap().simplified());
+    } else if (auto m = VERIFIC_WARN_REGEXP.match(line); m.hasMatch()) {
+      warnings.emplace(lineNr, m.captured(0).simplified());
 
       if (!errors.empty()) {
         auto errorsItem =
