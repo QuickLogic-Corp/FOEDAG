@@ -39,7 +39,7 @@ set (CPP_LIST
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
-#    IPGenerator/IPGenerator_test.cpp // TODO @wOlek, fix crash
+    IPGenerator/IPGenerator_test.cpp
     FloorPlanning/FloorPlanning_test.cpp
     NewProject/source_grid_test.cpp
     Utils/sequential_map_test.cpp
@@ -49,9 +49,11 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
+    Compiler/TaskCompilationStateManager_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
+
 )
 
 if (USE_IPA)
