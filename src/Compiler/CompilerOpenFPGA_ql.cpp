@@ -3085,6 +3085,19 @@ bool CompilerOpenFPGA_ql::Packing() {
     int generated_layout_height = 0;
     m_autoLayoutGeneratedLayoutName = "";
 
+    // Uniquify the generated device name per run. The generated device package is
+    // written into the shared device_data tree as a sibling of FPGA_AUTO, named
+    // only by size (e.g. AUTOFPGA<WxH>). When designs run concurrently (the
+    // benchmark runs multiple designs, and multiple tools per design, in parallel
+    // against the same device_data), any two runs resolving to the same size
+    // targeted the same directory and raced on the delete+recopy below - one run's
+    // RmDirRecursively/copy corrupted another's in-flight device. Appending a token
+    // derived from the absolute project path (unique per concurrent aurora
+    // invocation) gives each run its own device directory, eliminating the race.
+    const std::string generated_layout_unique_suffix =
+        std::string("_") +
+        std::to_string(std::hash<std::string>{}(ProjManager()->projectPath()));
+
     if ( (m_autoLayoutGenerationMode && (status != 0)) ||
          (m_customLayoutGenerationMode) ) {
 
@@ -3220,18 +3233,20 @@ bool CompilerOpenFPGA_ql::Packing() {
       if(m_autoLayoutGenerationMode) {
         // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
         // if the layout name of the device is 'FPGA_AUTO'
-        m_autoLayoutGeneratedLayoutName = 
-                std::string("AUTOFPGA") + 
-                std::to_string(generated_layout_width) + 
-                std::to_string(generated_layout_height);
+        m_autoLayoutGeneratedLayoutName =
+                std::string("AUTOFPGA") +
+                std::to_string(generated_layout_width) +
+                std::to_string(generated_layout_height) +
+                generated_layout_unique_suffix;
       }
       if(m_customLayoutGenerationMode) {
       // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
       // if the layout name of the device is 'FPGA_AUTO'
-      m_autoLayoutGeneratedLayoutName = 
-              std::string("CUSTOMFPGA") + 
-              std::to_string(generated_layout_width) + 
-              std::to_string(generated_layout_height);
+      m_autoLayoutGeneratedLayoutName =
+              std::string("CUSTOMFPGA") +
+              std::to_string(generated_layout_width) +
+              std::to_string(generated_layout_height) +
+              generated_layout_unique_suffix;
       }
 
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
@@ -3242,10 +3257,11 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       generated_layout_width = current_device_target.device_variant_layout.width;
       generated_layout_height = current_device_target.device_variant_layout.height;
-      m_autoLayoutGeneratedLayoutName = 
-              std::string("AUTOFPGA") + 
-              std::to_string(generated_layout_width) + 
-              std::to_string(generated_layout_height);
+      m_autoLayoutGeneratedLayoutName =
+              std::string("AUTOFPGA") +
+              std::to_string(generated_layout_width) +
+              std::to_string(generated_layout_height) +
+              generated_layout_unique_suffix;
 
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
