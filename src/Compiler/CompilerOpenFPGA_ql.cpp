@@ -5523,16 +5523,38 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
     tmp_xlsx_filepath.remove();
   }
+  // The power-calculator prints its diagnostics (ERROR:/WARNING: lines) to
+  // stderr, which ExecuteAndMonitorSystemCommand tees into power_analysis.rpt.
+  // On a non-OK status, extract those lines so the specific reason is surfaced
+  // to the user instead of only a generic message.
+  auto powerCalculatorDiagnostics = [&]() -> std::string {
+    std::ifstream rpt(power_analysis_rpt_filepath);
+    std::string line, detail;
+    while (std::getline(rpt, line)) {
+      if (line.rfind("ERROR:", 0) == 0 || line.rfind("WARNING:", 0) == 0) {
+        if (!detail.empty()) detail += "; ";
+        detail += line;
+      }
+    }
+    return detail;
+  };
+
   if (status == 0) {
     Message("Design " + ProjManager()->projectName() + " is power analysed");
     return true;
   } else if (status == 1) {
-    Message("Design " + ProjManager()->projectName() + " power analysis is skipped");
+    const std::string detail = powerCalculatorDiagnostics();
+    Message("Design " + ProjManager()->projectName() +
+            " power analysis is skipped" +
+            (detail.empty() ? "" : (": " + detail)));
     return true;
   } else {
-    ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
+    const std::string detail = powerCalculatorDiagnostics();
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " power analysed fail" +
+                 (detail.empty() ? "" : (": " + detail)));
     return false;
-  } 
+  }
 #endif // LEGACY_POWER_CALCULATOR
 }
 
