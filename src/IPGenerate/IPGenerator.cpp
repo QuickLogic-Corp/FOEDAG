@@ -69,6 +69,13 @@ bool isFpuMultGenerator(const std::string& ipName) {
   return ipName.rfind(kFpuMultPrefix, 0) == 0;
 }
 
+// Prefix of the versioned FPU add/sub generator IPs (fpu_addsub_generator_v1_0, ...).
+const char* const kFpuAddsubPrefix = "fpu_addsub_generator_v";
+
+bool isFpuAddsubGenerator(const std::string& ipName) {
+  return ipName.rfind(kFpuAddsubPrefix, 0) == 0;
+}
+
 // Single source of truth for whether a catalog IP is supported by the current
 // device, shared by the ip_catalog listing, the ip_catalog <name> query, and
 // configure_ip so all three agree.
@@ -89,6 +96,11 @@ bool isIpVersionSupported(const std::string& ipName) {
   if (isFpuMultGenerator(ipName)) {
     const auto types = QLDeviceManager::getInstance()->deviceFPUTypes();
     return types.count("FPUMULT") > 0;
+  }
+  // The add/sub member requires the "FPUADDSUB" capability token, same scheme.
+  if (isFpuAddsubGenerator(ipName)) {
+    const auto types = QLDeviceManager::getInstance()->deviceFPUTypes();
+    return types.count("FPUADDSUB") > 0;
   }
   return true;  // other IPs are not device-gated
 }
