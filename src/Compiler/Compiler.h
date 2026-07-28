@@ -104,6 +104,14 @@ class Compiler {
   enum class PowerOpt { None, Clean };
   enum class STAOpt { None, Clean, View };
   enum class BitstreamOpt { DefaultBitsOpt, Force, EnableSimulation, Clean };
+  // Combinable secure-encode stages, orthogonal to BitstreamOpt above (which is
+  // single-valued). `bitstream encode [checksum] [ascon] [bch]` ORs these.
+  enum class BitstreamEncodeStage : uint32_t {
+    None = 0,
+    Checksum = 1u << 0,
+    Ascon = 1u << 1,
+    Bch = 1u << 2,
+  };
   enum class STAEngineOpt { Tatum, Opensta };
 
   // Most common use case, create the compiler in your main
@@ -191,6 +199,17 @@ class Compiler {
 
   BitstreamOpt BitsOpt() const { return m_bitstreamOpt; }
   void BitsOpt(BitstreamOpt opt) { m_bitstreamOpt = opt; }
+  // Secure-encode (`bitstream encode ...`) request state for this run.
+  bool BitstreamEncode() const { return m_bitstreamEncode; }
+  void SetBitstreamEncode(bool value) { m_bitstreamEncode = value; }
+  uint32_t BitstreamEncodeStages() const { return m_bitstreamEncodeStages; }
+  void AddBitstreamEncodeStage(BitstreamEncodeStage stage) {
+    m_bitstreamEncodeStages |= static_cast<uint32_t>(stage);
+  }
+  void ResetBitstreamEncode() {
+    m_bitstreamEncode = false;
+    m_bitstreamEncodeStages = 0;
+  }
   // Compiler specific opt
   const std::string& SynthMoreOpt() { return m_synthMoreOpt; }
   void SynthMoreOpt(const std::string& opt) { m_synthMoreOpt = opt; }
@@ -341,6 +360,8 @@ class Compiler {
   STAOpt m_staOpt = STAOpt::None;
   STAEngineOpt m_staEngineOpt = STAEngineOpt::Tatum;
   BitstreamOpt m_bitstreamOpt = BitstreamOpt::DefaultBitsOpt;
+  bool m_bitstreamEncode = false;
+  uint32_t m_bitstreamEncodeStages = 0;
   std::filesystem::path m_PinMapCSV{};
   DeviceData m_deviceData;
 

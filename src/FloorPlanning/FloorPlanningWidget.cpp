@@ -127,7 +127,15 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested, this, &FloorPlanningWidget::createNewPartition);
 
     QCheckBox* bnScrollPartition = new QCheckBox("Scroll to partition");
-    connect(bnScrollPartition, &QCheckBox::stateChanged, m_deviceWidget, &DeviceGridWidget::setScrollToPartitionWhenSelected);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+    connect(bnScrollPartition, &QCheckBox::checkStateChanged, m_deviceWidget,
+            [this](Qt::CheckState state) {
+                m_deviceWidget->setScrollToPartitionWhenSelected(state != Qt::Unchecked);
+            });
+#else
+    connect(bnScrollPartition, &QCheckBox::stateChanged, m_deviceWidget,
+            &DeviceGridWidget::setScrollToPartitionWhenSelected);
+#endif
     bnScrollPartition->setVisible(false);
 
     // move controls

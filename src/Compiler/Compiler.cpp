@@ -1196,6 +1196,26 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->BitsOpt(Compiler::BitstreamOpt::Clean);
         } else if (arg == "enable_simulation") {
           compiler->BitsOpt(Compiler::BitstreamOpt::EnableSimulation);
+        } else if (arg == "encode") {
+          // Force the secure post-process this run (REQUIREMENTS.md §4.2).
+          compiler->SetBitstreamEncode(true);
+        } else if (arg == "checksum" || arg == "ascon" || arg == "bch") {
+          // Per-stage keywords are only valid after the `encode` verb.
+          if (!compiler->BitstreamEncode()) {
+            compiler->ErrorMessage("bitstream stage '" + arg +
+                                   "' requires 'encode' first");
+            return TCL_ERROR;
+          }
+          if (arg == "checksum") {
+            compiler->AddBitstreamEncodeStage(
+                Compiler::BitstreamEncodeStage::Checksum);
+          } else if (arg == "ascon") {
+            compiler->AddBitstreamEncodeStage(
+                Compiler::BitstreamEncodeStage::Ascon);
+          } else {
+            compiler->AddBitstreamEncodeStage(
+                Compiler::BitstreamEncodeStage::Bch);
+          }
         } else {
           compiler->ErrorMessage("Unknown bitstream option: " + arg);
         }
@@ -1549,6 +1569,26 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           compiler->BitsOpt(Compiler::BitstreamOpt::Clean);
         } else if (arg == "enable_simulation") {
           compiler->BitsOpt(Compiler::BitstreamOpt::EnableSimulation);
+        } else if (arg == "encode") {
+          // Force the secure post-process this run (REQUIREMENTS.md §4.2).
+          compiler->SetBitstreamEncode(true);
+        } else if (arg == "checksum" || arg == "ascon" || arg == "bch") {
+          // Per-stage keywords are only valid after the `encode` verb.
+          if (!compiler->BitstreamEncode()) {
+            compiler->ErrorMessage("bitstream stage '" + arg +
+                                   "' requires 'encode' first");
+            return TCL_ERROR;
+          }
+          if (arg == "checksum") {
+            compiler->AddBitstreamEncodeStage(
+                Compiler::BitstreamEncodeStage::Checksum);
+          } else if (arg == "ascon") {
+            compiler->AddBitstreamEncodeStage(
+                Compiler::BitstreamEncodeStage::Ascon);
+          } else {
+            compiler->AddBitstreamEncodeStage(
+                Compiler::BitstreamEncodeStage::Bch);
+          }
         } else {
           compiler->ErrorMessage("Unknown bitstream option: " + arg);
         }
@@ -2750,6 +2790,13 @@ QProcess* Compiler::ExecuteCommand(const std::string& command) const {
 
 std::string Compiler::ReplaceAll(std::string_view str, std::string_view from,
                                  std::string_view to) {
+
+  // An empty 'from' would match at every position and loop forever (growing the
+  // result until std::bad_alloc). It is never a meaningful search target, so
+  // return the input unchanged.
+  if (from.empty()) {
+    return std::string(str);
+  }
 
 #if OVERRIDE_WITH_ENV_VAR
   // check if the string replacement 'from' is an env variable style definition: '${xxx}'

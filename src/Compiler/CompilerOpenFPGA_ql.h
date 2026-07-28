@@ -140,6 +140,21 @@ class CompilerOpenFPGA_ql : public Compiler {
   int CleanTempFiles();
   void CleanScripts();
 
+  /// Decrypt a device `.en` file to disk using the `<family>_Supp.db` key
+  /// database located in `deviceTypeDir`. On success writes `dst_plain` and
+  /// returns true. On failure logs via ErrorMessage() and returns false.
+  bool decryptDeviceFile(const std::filesystem::path& src_en,
+                         const std::filesystem::path& dst_plain,
+                         const std::filesystem::path& deviceTypeDir,
+                         const std::string& deviceTypeString);
+
+  /// Encrypt each file in `paths` in place (produces `<path>.en`) using a
+  /// key DB at `<deviceTypeDir>/<deviceTypeString>_Supp.db`. If the key DB
+  /// does not exist, one is generated and saved to that path.
+  bool encryptDeviceFiles(const std::vector<std::filesystem::path>& paths,
+                          const std::filesystem::path& deviceTypeDir,
+                          const std::string& deviceTypeString);
+
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
@@ -158,6 +173,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string uniqueStaVprOptions() const;
   
   void onQdcFileSaved();
+  void onPcfFileSaved();
 
  protected:
   virtual bool IPGenerate();
@@ -172,6 +188,13 @@ class CompilerOpenFPGA_ql : public Compiler {
   bool TimingAnalysisHelper(const QLDeviceTarget&, const std::string&);
   virtual bool PowerAnalysis();
   virtual bool GenerateBitstream();
+  // Secure bitstream post-process (checksum -> ASCON -> BCH). Resolve which
+  // stages to run from the settings JSON toggles and the `bitstream encode`
+  // Tcl verb; run the vendored scripts/bitstream/aurora_bitstream_encode.py.
+  // A post-process failure is logged but does not fail GenerateBitstream
+  // (REQUIREMENTS.md §4.5). Returns false only on a hard invocation error.
+  uint32_t ResolveBitstreamEncodeStages() const;
+  [[nodiscard]] bool RunBitstreamEncode(uint32_t stages);
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
   bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
   virtual bool LoadDeviceData(const std::string& deviceName);

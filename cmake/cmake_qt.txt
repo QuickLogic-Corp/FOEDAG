@@ -19,20 +19,51 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-find_package(Qt5 COMPONENTS Core Gui Widgets Xml Network REQUIRED)
-if (NOT Qt5Widgets_FOUND)
-    message(STATUS "Failed to find Qt5Widgets required (on debian/ubuntu try 'sudo apt install qt5-default')")
-elseif (NOT Qt5Gui_FOUND)
-    message(STATUS "Failed to find Qt5Gui required (on debian/ubuntu try 'sudo apt install qt5-default')")
-elseif (NOT Qt5Core_FOUND)
-    message(STATUS "Failed to find Qt5Core required (on debian/ubuntu try 'sudo apt install qt5-default')")
-elseif (NOT Qt5Xml_FOUND)
-    message(STATUS "Failed to find Qt5Xml required (on debian/ubuntu try 'sudo apt install qt5-default')")
-elseif (NOT Qt5Network_FOUND)
-    message(STATUS "Failed to find Qt5Network required (on debian/ubuntu try 'sudo apt install qt5-default')")
-else()
-    set(CMAKE_AUTOMOC ON)
-    set(CMAKE_AUTOUIC ON)
-    set(CMAKE_AUTORCC ON)
+# If the QT_DIR environment variable is set (e.g., to C:/Qt/6.9.3/mingw_64
+# on Windows MSYS2), prepend it to CMAKE_PREFIX_PATH so find_package(Qt6)
+# can locate it. Stored as a CACHE variable with FORCE so nested CMake
+# invocations (subdirectories, ExternalProject, etc.) see the same value.
+# Guarded with _QT_DIR_PROCESSED so the message prints once even though this
+# file is included from many subdirectory CMakeLists.txt files.
+if(DEFINED ENV{QT_DIR} AND NOT "$ENV{QT_DIR}" STREQUAL "" AND NOT _QT_DIR_PROCESSED)
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{QT_DIR}")
+    set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH}" CACHE STRING
+        "Search prefixes for find_package" FORCE)
+    set(_QT_DIR_PROCESSED 1 CACHE INTERNAL "")
+    message(STATUS "QT_DIR=$ENV{QT_DIR} added to CMAKE_PREFIX_PATH")
 endif()
+
+# Minimum supported Qt6 version. A widget-rendering bug was seen in the VPR
+# subproject (which also depends on Qt6) with earlier Qt6 releases, so 6.9.3 is
+# the required floor: find_package(Qt6 <version>) accepts that version or newer.
+set(QT6_MINIMUM_VERSION 6.9.3)
+
+set(QT_VERSION_MAJOR 6 CACHE INTERNAL "Qt major version in use")
+
+# find_package is called on every include (not once) because imported targets
+# (Qt6::Core, moc, etc.) are scoped to the directory where find_package ran, so
+# subdirectories using AUTOMOC need it in their scope. Subsequent calls are
+# cheap — CMake caches the detection. A missing Qt6, or a Qt6 older than the
+# floor, is a hard error here (REQUIRED).
+find_package(Qt6 ${QT6_MINIMUM_VERSION} COMPONENTS Core Gui Widgets Xml Network OPTIONAL_COMPONENTS Test REQUIRED)
+
+# Qt5:: -> Qt6:: compatibility aliases for bundled third-party only.
+#
+# FOEDAG's own modules link Qt6:: directly. The two vendored libraries we do NOT
+# maintain — QConsole and QScintilla (third_party/) — still link Qt5::Core /
+# Qt5::Gui / Qt5::Widgets in their upstream CMakeLists. Rather than patch those
+# upstream sources, alias just those Qt5:: names to the real Qt6:: targets so
+# they build against Qt6. Only Core/Gui/Widgets are aliased — the only Qt5::
+# modules those two use. (Drop this block once QConsole/QScintilla are updated.)
+foreach(_qt_mod Core Gui Widgets)
+    if(TARGET Qt6::${_qt_mod} AND NOT TARGET Qt5::${_qt_mod})
+        add_library(Qt5::${_qt_mod} INTERFACE IMPORTED GLOBAL)
+        set_target_properties(Qt5::${_qt_mod} PROPERTIES
+            INTERFACE_LINK_LIBRARIES "Qt6::${_qt_mod}")
+    endif()
+endforeach()
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 

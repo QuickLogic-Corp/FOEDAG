@@ -86,27 +86,20 @@ void PowerAnalysisReportManager::parseLogFile() {
   auto fileStr = QTextStream(logFile.get()).readAll();
   logFile->close();
 
-  QRegExp dynamic_power_regex = QRegExp{"Dynamic Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
+  QRegularExpression dynamic_power_regex{"Dynamic Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
   QString dynamic_power_value;
-  if (dynamic_power_regex.lastIndexIn(fileStr) != -1) {
-    dynamic_power_value = dynamic_power_regex.cap(1);
-    // std::cout << dynamic_power_value.toStdString() << std::endl;
-  }
+  if (auto m = lastMatch(dynamic_power_regex, fileStr); m.hasMatch())
+    dynamic_power_value = m.captured(1);
 
-  QRegExp leakage_power_regex = QRegExp{"Leakage Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
+  QRegularExpression leakage_power_regex{"Leakage Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
   QString leakage_power_value;
-  if (leakage_power_regex.lastIndexIn(fileStr) != -1) {
-    leakage_power_value = leakage_power_regex.cap(1);
-    // std::cout << leakage_power_value.toStdString() << std::endl;
-  }
+  if (auto m = lastMatch(leakage_power_regex, fileStr); m.hasMatch())
+    leakage_power_value = m.captured(1);
 
-
-  QRegExp total_power_regex = QRegExp{"Total Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
+  QRegularExpression total_power_regex{"Total Power\\s*=\\s*([+-]?[0-9]*\\.[0-9]*)\\s+[^\\s]+"};
   QString total_power_value;
-  if (total_power_regex.lastIndexIn(fileStr) != -1) {
-    total_power_value = total_power_regex.cap(1);
-    // std::cout << total_power_value.toStdString() << std::endl;
-  }
+  if (auto m = lastMatch(total_power_regex, fileStr); m.hasMatch())
+    total_power_value = m.captured(1);
 
 
   // create power analysis report
@@ -137,43 +130,35 @@ void PowerAnalysisReportManager::parseLogFile() {
 
   QVector<QStringList> user_input_lines;
   // calculator_d6  : 4              [Array X]
-  QRegExp user_inputs_regex("(\\S+)\\s+:\\s+(\\S+)\\s+\\[(.+)\\]");
-  user_inputs_regex.setMinimal(true);
-  int pos = 0;
-  while ((pos = user_inputs_regex.indexIn(fileStr_debug, pos)) != -1) {
-    QStringList user_input;
+  QRegularExpression user_inputs_regex{"(\\S+)\\s+:\\s+(\\S+)\\s+\\[(.+?)\\]"};
+  {
+    auto it = user_inputs_regex.globalMatch(fileStr_debug);
+    while (it.hasNext()) {
+      auto m = it.next();
+      QStringList user_input;
 
-    // std::cout << "1: " << user_inputs_regex.cap(1).toStdString() << std::endl;
-    // std::cout << "2: " << user_inputs_regex.cap(2).toStdString() << std::endl;
-    // std::cout << "3: "<< user_inputs_regex.cap(3).toStdString() << std::endl;
+      user_input << m.captured(1);
+      user_input << m.captured(2);
+      user_input << m.captured(3);
 
-    user_input << user_inputs_regex.cap(1);
-    user_input << user_inputs_regex.cap(2);
-    user_input << user_inputs_regex.cap(3);
-
-    user_input_lines.push_back(std::move(user_input));
-
-    pos += user_inputs_regex.matchedLength();
+      user_input_lines.push_back(std::move(user_input));
+    }
   }
 
 
-  QRegExp user_inputs_def_regex("(\\S+)\\s+:\\s+(\\S+)\\s+(V|MHz|%)\\s+\\[(.+)\\]");
-  user_inputs_def_regex.setMinimal(true);
-  pos = 0;
-  while ((pos = user_inputs_def_regex.indexIn(fileStr_debug, pos)) != -1) {
-    QStringList user_input;
+  QRegularExpression user_inputs_def_regex{"(\\S+)\\s+:\\s+(\\S+)\\s+(V|MHz|%)\\s+\\[(.+?)\\]"};
+  {
+    auto it = user_inputs_def_regex.globalMatch(fileStr_debug);
+    while (it.hasNext()) {
+      auto m = it.next();
+      QStringList user_input;
 
-    // std::cout << "1: " << user_inputs_def_regex.cap(1).toStdString() << std::endl;
-    // std::cout << "2: " << user_inputs_def_regex.cap(2).toStdString() << std::endl;
-    // std::cout << "3: "<< user_inputs_def_regex.cap(3).toStdString() << std::endl;
+      user_input << m.captured(1);
+      user_input << m.captured(2) + " " + m.captured(3);
+      user_input << m.captured(4);
 
-    user_input << user_inputs_def_regex.cap(1);
-    user_input << user_inputs_def_regex.cap(2) + " " + user_inputs_def_regex.cap(3);
-    user_input << user_inputs_def_regex.cap(4);
-
-    user_input_lines.push_back(std::move(user_input));
-
-    pos += user_inputs_def_regex.matchedLength();
+      user_input_lines.push_back(std::move(user_input));
+    }
   }
 
 

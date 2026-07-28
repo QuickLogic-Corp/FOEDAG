@@ -21,14 +21,21 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& architectureFile, 
 
     QDomDocument doc;
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    auto parseResult = doc.setContent(QByteArray::fromStdString(FOEDAG::FileUtils::GetFileContent(architectureFile)));
+    if (!parseResult) {
+        m_error = "XML parse error at " + QString::number(parseResult.errorLine) + ":" + QString::number(parseResult.errorColumn) + "-" + parseResult.errorMessage;
+        return false;
+    }
+#else
     QString errMsg;
     int errLine = 0;
     int errCol = 0;
-
     if (!doc.setContent(QByteArray::fromStdString(FOEDAG::FileUtils::GetFileContent(architectureFile)), &errMsg, &errLine, &errCol)) {
-        m_error = "XML parse error at" + QString::number(errLine) + ":" + QString::number(errCol) + "-" + errMsg;
+        m_error = "XML parse error at " + QString::number(errLine) + ":" + QString::number(errCol) + "-" + errMsg;
         return false;
     }
+#endif
 
     if (!parseLayout(doc, targetLayoutName)) {
         return false;

@@ -122,8 +122,14 @@ void TclConsoleWidget::handleTerminateCommand() {
 }
 
 void TclConsoleWidget::mouseReleaseEvent(QMouseEvent *e) {
-  if (m_linkActivated && m_mouseButtonPressed == Qt::LeftButton)
-    handleLink(e->pos());
+  if (m_linkActivated && m_mouseButtonPressed == Qt::LeftButton) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QPoint eventPos = e->position().toPoint();
+#else
+    const QPoint eventPos = e->pos();
+#endif
+    handleLink(eventPos);
+  }
 
   // Mouse was released, activate links again
   m_linkActivated = true;
@@ -142,7 +148,12 @@ void TclConsoleWidget::mouseMoveEvent(QMouseEvent *e) {
   if (m_mouseButtonPressed != Qt::NoButton && textCursor().hasSelection())
     m_linkActivated = false;
 
-  if (!m_linkActivated || anchorAt(e->pos()).isEmpty())
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  const QPoint eventPos = e->position().toPoint();
+#else
+  const QPoint eventPos = e->pos();
+#endif
+  if (!m_linkActivated || anchorAt(eventPos).isEmpty())
     viewport()->setCursor(Qt::IBeamCursor);
   else
     viewport()->setCursor(Qt::PointingHandCursor);
@@ -299,7 +310,7 @@ bool TclConsoleWidget::handleCommandFromHistory(const QString &command,
                                                 QString &commandFromHist) {
   if (command.startsWith("!")) {
     bool ok;
-    int cmdNumber = command.midRef(1).toInt(&ok);
+    int cmdNumber = command.mid(1).toInt(&ok);
     if (ok && cmdNumber >= 1 && cmdNumber <= historyIndex) {
       commandFromHist = history.at(cmdNumber - 1);
       return true;

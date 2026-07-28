@@ -151,7 +151,7 @@ add_library(compiler STATIC
   ${res_LIST}
 )
 
-target_link_libraries(compiler PUBLIC Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Xml cryptor)
+target_link_libraries(compiler PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::Xml qlcrypt::qlcrypt)
 target_compile_definitions(compiler PRIVATE COMPILER_LIBRARY)
 if(HAS_POWER_CALC_RESOURCE)
   target_compile_definitions(compiler PUBLIC HAS_POWER_CALC_RESOURCE)

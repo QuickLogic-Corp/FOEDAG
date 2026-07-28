@@ -16,8 +16,21 @@ apt-get install -y \
     lcov \
     valgrind \
     xorg \
-    qtbase5-dev qtchooser qt5-qmake qtbase5-dev-tools \
     xvfb \
     yosys \
     automake \
-    ninja-build
+    ninja-build \
+    libxcb-cursor0 \
+    libxcb-icccm4 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-randr0 \
+    libxcb-render-util0 \
+    libxcb-shape0 \
+    libxcb-xinerama0 \
+    libxcb-xkb1 \
+    libxkbcommon0 \
+    libxkbcommon-x11-0 \
+    libgl1 \
+    libfontconfig1 \
+    libdbus-1-3

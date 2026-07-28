@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <unordered_map>
 #include <iostream>
+#include <cstdlib>
 
 namespace FOEDAG {
 
@@ -37,7 +38,12 @@ constexpr const char* COMPILATION_CACHE_FILENAME = "compilation_cache.json";
 class TaskCompilationStateManager {
 public:
   TaskCompilationStateManager(Compiler* compiler): m_compiler(compiler) {
-
+    // Read the developer log toggle once and propagate it to CommandWrapper, so
+    // verbose logging can be enabled at runtime via the environment variable
+    // without recompiling the app.
+    static const bool logEnabled =
+        std::getenv("AURORA_INCR_COMPILATOR_LOG") != nullptr;
+    CommandWrapper::setLogEnabled(logEnabled);
   }
 
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
@@ -90,7 +96,6 @@ public:
   }
 
 private:
-  bool m_isLogEnabled = false;
   Compiler* m_compiler = nullptr; // used for log messages
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
@@ -117,7 +122,7 @@ private:
 
     auto it = m_taskCommandsMap.find(id);
     if (it == m_taskCommandsMap.end()) {
-      if (m_isLogEnabled) {
+      if (CommandWrapper::isLogEnabled()) {
         m_compiler->Message(logPrefix() + "task [" + id + "] wasn't previously compiled");
       }
       return true;
@@ -125,7 +130,7 @@ private:
     const CommandWrapper& commandOld = *it->second;
     DiffCommandPtr diff = command->collectDiff(commandOld);
     if (!diff->isEmpty()) {
-      if (m_isLogEnabled) {
+      if (CommandWrapper::isLogEnabled()) {
         for (const std::string& msg: diff->messages()) {
           m_compiler->Message(logPrefix() + "task(" + id + "), detects " + msg);
         }
