@@ -77,6 +77,7 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
+#include "FloorPlanning/PostSynthVerilogResourceExtractor.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -7039,16 +7040,24 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) / 
-                                      std::string(ProjManager()->projectName() + "_post_synth.blif");
+  // Same file, same extractor the FloorPlanning UI itself uses (Goal 4 of
+  // #1725): the existence check below must recognize exactly the names the
+  // UI let the user select, not a name space derived from a second,
+  // independent parser of a different file. Plain _post_synth.blif carries
+  // no cell-instance identity at all, so re-parsing it here (as the prior
+  // FOEDAG::BlifParser::load()-based approach did) could never recognize a
+  // leaf-instance name sourced from Verilog in the first place.
+  std::filesystem::path netlist_path = getPostSynthVerilogFilePath();
 
   if (!fs::exists(netlist_path)){
-    ErrorMessage("Post Synthesis blif Was Not Found!\n");
+    ErrorMessage("Post Synthesis Verilog Was Not Found!\n");
     ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
     return false;
   }
 
-  m_blifParser.load(netlist_path);
+  fp::PostSynthVerilogResourceExtractor resourceExtractor;
+  resourceExtractor.loadAtomNamesFromVerilogFile(netlist_path);
+  m_blifParser.loadFromNames(resourceExtractor.elements());
   //m_blifParser.printHierachy(); // debug
   
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();

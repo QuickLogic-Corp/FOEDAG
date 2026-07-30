@@ -263,6 +263,15 @@ std::shared_ptr<BlifNode> BlifParser::load(const std::filesystem::path& filepath
     return m_rootNodePtr;
 }
 
+std::shared_ptr<BlifNode> BlifParser::loadFromNames(const std::set<std::string>& names)
+{
+    m_rootNodePtr = std::make_shared<BlifNode>();
+    for (const std::string& name : names) {
+        m_rootNodePtr->insert(name);
+    }
+    return m_rootNodePtr;
+}
+
 std::shared_ptr<BlifNode> BlifParser::parseLines(const std::vector<std::string>& lines)
 {
     m_rootNodePtr = std::make_shared<BlifNode>();

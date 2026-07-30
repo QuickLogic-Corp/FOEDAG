@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <memory>
 
@@ -70,6 +71,14 @@ public:
   std::shared_ptr<BlifNode> load(const std::filesystem::path& filepath);
   std::shared_ptr<BlifNode> parseLines(const std::vector<std::string>& lines);
   bool isFileChanged(const std::filesystem::path& filepath) const;
+
+  // Builds the same hierarchy/wildcard-matching tree findMatchingNames()
+  // queries, from an already-extracted flat name set rather than by parsing
+  // .subckt/.names tokens out of a .blif file. Used to validate .qdc
+  // hierarchy patterns against the same name set the FloorPlanning UI
+  // extracted from _post_synth.v, instead of re-parsing _post_synth.blif
+  // (which carries no cell-instance identity) through a second parser.
+  std::shared_ptr<BlifNode> loadFromNames(const std::set<std::string>& names);
 
   void printHierachy() {
     if (m_rootNodePtr) {
