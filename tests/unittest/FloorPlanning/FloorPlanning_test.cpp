@@ -4,9 +4,13 @@
 #include <FloorPlanning/QdcSerializer.h>
 #include <FloorPlanning/Partition.h>
 #include <FloorPlanning/SynthResourceExtractor.h>
+#include <FloorPlanning/PostSynthVerilogResourceExtractor.h>
+#include <FloorPlanning/PostSynthVerilogNameBridge.h>
 
 #include <QPoint>
+#include <QTemporaryDir>
 
+#include <fstream>
 #include <iostream>
 
 #include "gtest/gtest.h"
@@ -325,4 +329,434 @@ TEST(SynthResourceExtractor, BlifSubcktNamesFallbackNoComment)
     // connection nets must not be collected from .subckt lines
     EXPECT_EQ(e.count("n1"), 0u);
     EXPECT_EQ(e.count("sum"), 0u);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PostSynthVerilogResourceExtractor — parses cell instantiations (real leaf-
+// cell identity in synthesized output), not wire/input/output declarations.
+// ═══════════════════════════════════════════════════════════════════════
+
+TEST(PostSynthVerilogResourceExtractor, PlainInstanceName)
+{
+    const std::string v =
+        "module top(clk, a, y);\n"
+        "  input clk;\n"
+        "  input [3:0] a;\n"
+        "  output [3:0] y;\n"
+        "  sdffre my_ff (.C(clk), .D(a[3]), .Q(y[3]));\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("my_ff"), 1u);
+    EXPECT_EQ(ex.elements().size(), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, EscapedInstanceNameWithDots)
+{
+    const std::string v =
+        "module top(clk);\n"
+        "  input clk;\n"
+        "  sdffre \\u_sub.u_leaf.q_ff  (\n"
+        "    .C(clk)\n"
+        "  );\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("u_sub.u_leaf.q_ff"), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, BusInstanceGroupYosysSuffixed)
+{
+    // One RTL register split into per-bit primitives by techmap, disambiguated
+    // with a Yosys-style _Q/_Q_1/_Q_2/... suffix -- each is a distinct instance.
+    const std::string v =
+        "module top(clk, a, y);\n"
+        "  input clk;\n"
+        "  input [3:0] a;\n"
+        "  output [3:0] y;\n"
+        "  sdffre \\u_leaf.q_sdffre_Q  (.C(clk), .D(a[3]), .Q(y[3]));\n"
+        "  sdffre \\u_leaf.q_sdffre_Q_1  (.C(clk), .D(a[2]), .Q(y[2]));\n"
+        "  sdffre \\u_leaf.q_sdffre_Q_2  (.C(clk), .D(a[1]), .Q(y[1]));\n"
+        "  sdffre \\u_leaf.q_sdffre_Q_3  (.C(clk), .D(a[0]), .Q(y[0]));\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().size(), 4u);
+    EXPECT_EQ(ex.elements().count("u_leaf.q_sdffre_Q"), 1u);
+    EXPECT_EQ(ex.elements().count("u_leaf.q_sdffre_Q_1"), 1u);
+    EXPECT_EQ(ex.elements().count("u_leaf.q_sdffre_Q_2"), 1u);
+    EXPECT_EQ(ex.elements().count("u_leaf.q_sdffre_Q_3"), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, PortConnectionBracketsNotPartOfName)
+{
+    // Bracket/index syntax inside port-connection expressions (.D(a[3])) must
+    // not be mistaken for part of the instance name.
+    const std::string v =
+        "module top(clk, a, y);\n"
+        "  input clk;\n"
+        "  input [3:0] a;\n"
+        "  output [3:0] y;\n"
+        "  sdffre my_ff (.C(clk), .D(a[3]), .Q(y[3]));\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("my_ff"), 1u);
+    EXPECT_EQ(ex.elements().count("a"), 0u);
+    EXPECT_EQ(ex.elements().count("a[3"), 0u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, MidPathBracketFromGenerateArray)
+{
+    // A generate-array index lands in the MIDDLE of the escaped instance
+    // name, not just as a trailing bus-bit suffix. Per the escaped-identifier
+    // rule this is one token, delimited only by whitespace -- must not be cut
+    // short at the first '['.
+    const std::string v =
+        "module top(clk, a0, y0);\n"
+        "  input clk;\n"
+        "  input [3:0] a0;\n"
+        "  output [3:0] y0;\n"
+        "  sdffre \\gen_lane[0].u_lane.u_leaf.q_sdffre_Q  (\n"
+        "    .C(clk),\n"
+        "    .D(a0[3]),\n"
+        "    .Q(y0[3])\n"
+        "  );\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("gen_lane[0].u_lane.u_leaf.q_sdffre_Q"), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, MultiLineParameterizedInstantiation)
+{
+    const std::string v =
+        "module top(a, y);\n"
+        "  input [7:0] a;\n"
+        "  output [7:0] y;\n"
+        "  QL_DSPV2 #(\n"
+        "    .WIDTH(8),\n"
+        "    .MODE(\"MULT\")\n"
+        "  ) \\dsp.inst0  (\n"
+        "    .A(a),\n"
+        "    .Y(y)\n"
+        "  );\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("dsp.inst0"), 1u);
+    EXPECT_EQ(ex.elements().size(), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, AttributeLinesSkipped)
+{
+    const std::string v =
+        "module top(clk, a, y);\n"
+        "  input clk;\n"
+        "  input [3:0] a;\n"
+        "  output [3:0] y;\n"
+        "  (* module_not_derived = 32'd1 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|internal.v:1.1-1.1\" *)\n"
+        "  sdffre \\u_sub.u_leaf.q_sdffre_Q  (\n"
+        "    .C(clk),\n"
+        "    .D(a[3]),\n"
+        "    .Q(y[3])\n"
+        "  );\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().size(), 1u);
+    EXPECT_EQ(ex.elements().count("u_sub.u_leaf.q_sdffre_Q"), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, DeepHierarchyPath)
+{
+    const std::string v =
+        "module top(a, y);\n"
+        "  input a;\n"
+        "  output y;\n"
+        "  lut6 \\u_top.u_mid.u_leaf.cellname  (.I0(a), .O(y));\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("u_top.u_mid.u_leaf.cellname"), 1u);
+}
+
+TEST(PostSynthVerilogResourceExtractor, AnonymousCellsExcluded)
+{
+    const std::string v =
+        "module top(a, y);\n"
+        "  input [3:0] a;\n"
+        "  output [3:0] y;\n"
+        "  $abc$1234$auto$blah.cc:5678:some_pass$99 (\n"
+        "    .A(a[0]),\n"
+        "    .Y(y[0])\n"
+        "  );\n"
+        "  lut6 plain_inst (.I0(a[1]), .O(y[1]));\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().count("plain_inst"), 1u);
+    EXPECT_EQ(ex.elements().size(), 1u);  // the $abc$.../$auto$... cell must not appear
+}
+
+TEST(PostSynthVerilogResourceExtractor, RealSynthQuicklogicOutputFixture)
+{
+    // Modeled directly on real synth_quicklogic output (Yosys 0.55, verified
+    // against an actual run) for a small hierarchical design with a
+    // generate/genvar loop instantiating two "lane" submodules, each
+    // containing one 4-bit register -- a regression fixture for the exact
+    // syntax shape this extractor must handle end to end, not a synthetic
+    // minimal case.
+    const std::string v =
+        "module top(clk, a0, a1, y0, y1);\n"
+        "  input [3:0] a0;\n"
+        "  wire [3:0] a0;\n"
+        "  input [3:0] a1;\n"
+        "  wire [3:0] a1;\n"
+        "  input clk;\n"
+        "  wire clk;\n"
+        "  output [3:0] y0;\n"
+        "  wire [3:0] y0;\n"
+        "  output [3:0] y1;\n"
+        "  wire [3:0] y1;\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[0].u_lane.u_leaf.q_sdffre_Q  (\n"
+        "    .C(clk),\n"
+        "    .D(a0[3]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y0[3]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[0].u_lane.u_leaf.q_sdffre_Q_1  (\n"
+        "    .C(clk),\n"
+        "    .D(a0[2]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y0[2]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[0].u_lane.u_leaf.q_sdffre_Q_2  (\n"
+        "    .C(clk),\n"
+        "    .D(a0[1]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y0[1]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[0].u_lane.u_leaf.q_sdffre_Q_3  (\n"
+        "    .C(clk),\n"
+        "    .D(a0[0]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y0[0]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[1].u_lane.u_leaf.q_sdffre_Q  (\n"
+        "    .C(clk),\n"
+        "    .D(a1[3]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y1[3]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[1].u_lane.u_leaf.q_sdffre_Q_1  (\n"
+        "    .C(clk),\n"
+        "    .D(a1[2]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y1[2]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[1].u_lane.u_leaf.q_sdffre_Q_2  (\n"
+        "    .C(clk),\n"
+        "    .D(a1[1]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y1[1]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "  (* module_not_derived = 32'h00000001 *)\n"
+        "  (* src = \"leaf.v:6.3-6.32|/opt/yosys/qlf_k6n10f/ffs_map.v:178.12-178.65\" *)\n"
+        "  sdffre \\gen_lane[1].u_lane.u_leaf.q_sdffre_Q_3  (\n"
+        "    .C(clk),\n"
+        "    .D(a1[0]),\n"
+        "    .E(1'h1),\n"
+        "    .Q(y1[0]),\n"
+        "    .R(1'h1)\n"
+        "  );\n"
+        "endmodule\n";
+
+    fp::PostSynthVerilogResourceExtractor ex;
+    ASSERT_TRUE(ex.parseAtomNamesFromVerilogFileContent(v));
+    EXPECT_EQ(ex.elements().size(), 8u);
+    for (int lane = 0; lane < 2; ++lane) {
+        EXPECT_EQ(ex.elements().count("gen_lane[" + std::to_string(lane) + "].u_lane.u_leaf.q_sdffre_Q"), 1u);
+        EXPECT_EQ(ex.elements().count("gen_lane[" + std::to_string(lane) + "].u_lane.u_leaf.q_sdffre_Q_1"), 1u);
+        EXPECT_EQ(ex.elements().count("gen_lane[" + std::to_string(lane) + "].u_lane.u_leaf.q_sdffre_Q_2"), 1u);
+        EXPECT_EQ(ex.elements().count("gen_lane[" + std::to_string(lane) + "].u_lane.u_leaf.q_sdffre_Q_3"), 1u);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PostSynthVerilogNameBridge::loadRtlSources — generate/genvar support
+// ═══════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// loadRtlSources() takes real file paths; write RTL content to a temp file
+// under a fresh, auto-cleaned temporary directory.
+std::filesystem::path writeTempRtl(QTemporaryDir& dir, const std::string& name, const std::string& content)
+{
+    const std::filesystem::path path = std::filesystem::path(dir.path().toStdString()) / name;
+    std::ofstream out(path);
+    out << content;
+    out.close();
+    return path;
+}
+
+}  // namespace
+
+TEST(PostSynthVerilogNameBridge, GenerateForLoopNamedBlockPerIterationPaths)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const auto path = writeTempRtl(dir, "top.v",
+        "module leaf(input clk, input [3:0] d, output reg [3:0] q);\n"
+        "  always @(posedge clk) q <= d;\n"
+        "endmodule\n"
+        "module lane(input clk, input [3:0] a, output [3:0] y);\n"
+        "  leaf u_leaf(.clk(clk), .d(a), .q(y));\n"
+        "endmodule\n"
+        "module top(input clk, input [3:0] a0, input [3:0] a1, output [3:0] y0, output [3:0] y1);\n"
+        "  genvar i;\n"
+        "  generate\n"
+        "    for (i = 0; i < 2; i = i + 1) begin : gen_lane\n"
+        "      lane u_lane (.clk(clk), .a(a0), .y(y0));\n"
+        "    end\n"
+        "  endgenerate\n"
+        "endmodule\n");
+
+    fp::PostSynthVerilogNameBridge bridge;
+    ASSERT_TRUE(bridge.loadRtlSources({path}));
+    const auto paths = bridge.instPaths();
+
+    // Without generate support, only "u_lane"/"u_lane.u_leaf" would appear
+    // once each -- the fix must produce one entry per elaborated iteration.
+    EXPECT_TRUE(paths.count("gen_lane[0].u_lane"));
+    EXPECT_TRUE(paths.count("gen_lane[0].u_lane.u_leaf"));
+    EXPECT_TRUE(paths.count("gen_lane[1].u_lane"));
+    EXPECT_TRUE(paths.count("gen_lane[1].u_lane.u_leaf"));
+    EXPECT_FALSE(paths.count("u_lane"));
+}
+
+TEST(PostSynthVerilogNameBridge, NestedGenerateBlocksComposePrefixes)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const auto path = writeTempRtl(dir, "top.v",
+        "module leaf(input clk, output q);\n"
+        "endmodule\n"
+        "module top(input clk);\n"
+        "  genvar i, j;\n"
+        "  generate\n"
+        "    for (i = 0; i < 2; i = i + 1) begin : outer\n"
+        "      for (j = 0; j < 2; j = j + 1) begin : inner\n"
+        "        leaf u_leaf(.clk(clk));\n"
+        "      end\n"
+        "    end\n"
+        "  endgenerate\n"
+        "endmodule\n");
+
+    fp::PostSynthVerilogNameBridge bridge;
+    ASSERT_TRUE(bridge.loadRtlSources({path}));
+    const auto paths = bridge.instPaths();
+
+    for (int oi = 0; oi < 2; ++oi)
+        for (int ii = 0; ii < 2; ++ii)
+            EXPECT_TRUE(paths.count("outer[" + std::to_string(oi) + "].inner[" + std::to_string(ii) + "].u_leaf"));
+}
+
+TEST(PostSynthVerilogNameBridge, GenerateBlockWithNoInstantiationsDoesNotCrash)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const auto path = writeTempRtl(dir, "top.v",
+        "module top(input clk, output reg [3:0] q);\n"
+        "  genvar i;\n"
+        "  generate\n"
+        "    for (i = 0; i < 4; i = i + 1) begin : gen_bit\n"
+        "      // no instantiation here -- purely combinational, nothing to record\n"
+        "    end\n"
+        "  endgenerate\n"
+        "endmodule\n");
+
+    fp::PostSynthVerilogNameBridge bridge;
+    EXPECT_TRUE(bridge.loadRtlSources({path}));
+    for (int i = 0; i < 4; ++i)
+        EXPECT_FALSE(bridge.instPaths().count("gen_bit[" + std::to_string(i) + "]"));
+}
+
+TEST(PostSynthVerilogNameBridge, AnonymousGenerateBlockGetsAPlaceholderLabel)
+{
+    // NOT a claim about real Yosys naming -- that convention is unverified
+    // (see requirements.md's open risks). This only pins down today's
+    // placeholder behavior (a distinct, counter-based label per anonymous
+    // block) so a future change to it is a deliberate, visible diff here,
+    // not a silent regression.
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const auto path = writeTempRtl(dir, "top.v",
+        "module leaf(input clk, output q);\n"
+        "endmodule\n"
+        "module top(input clk);\n"
+        "  genvar i;\n"
+        "  generate\n"
+        "    for (i = 0; i < 2; i = i + 1) begin\n"
+        "      leaf u_leaf(.clk(clk));\n"
+        "    end\n"
+        "  endgenerate\n"
+        "endmodule\n");
+
+    fp::PostSynthVerilogNameBridge bridge;
+    ASSERT_TRUE(bridge.loadRtlSources({path}));
+    const auto paths = bridge.instPaths();
+
+    int labeledEntries = 0;
+    for (const auto& p : paths)
+        if (p.find(".u_leaf") != std::string::npos) ++labeledEntries;
+    EXPECT_EQ(labeledEntries, 2);  // one per elaborated iteration, each under its own label
+}
+
+TEST(PostSynthVerilogNameBridge, PlainInstantiationNoRegressionWithoutGenerate)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const auto path = writeTempRtl(dir, "top.v",
+        "module leaf(input clk, input [3:0] d, output reg [3:0] q);\n"
+        "  always @(posedge clk) q <= d;\n"
+        "endmodule\n"
+        "module top(input clk, input [3:0] a, output [3:0] y);\n"
+        "  leaf u_leaf(.clk(clk), .d(a), .q(y));\n"
+        "endmodule\n");
+
+    fp::PostSynthVerilogNameBridge bridge;
+    ASSERT_TRUE(bridge.loadRtlSources({path}));
+    EXPECT_TRUE(bridge.instPaths().count("u_leaf"));
 }
