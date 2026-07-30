@@ -14,8 +14,6 @@
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
-#define DUMP_NETLIST_ELEMENTS_TO_FILE
-
 namespace fp {
 
 bool SynthResourceExtractor::loadAtomNamesFromNetFile(const std::filesystem::path& filePath)
@@ -188,10 +186,6 @@ bool SynthResourceExtractor::parseAtomNamesFromBlifFileContent(const std::string
       }
     }
   }
-
-#ifdef DUMP_NETLIST_ELEMENTS_TO_FILE
-  dumpElementsToFile("extracted_vpr_netlist.txt");
-#endif
 
   return true;
 }
