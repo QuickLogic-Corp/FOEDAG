@@ -99,6 +99,152 @@ std::string parseIdent(const std::string& s, size_t& pos)
   return s.substr(start, pos - start);
 }
 
+// One active `for (...) begin [: label] ... end` generate scope: the fully
+// elaborated list of loop-index values, and the begin/end nesting depth at
+// which it was pushed (so a later `end` only pops it once any intervening,
+// non-generate begin/end blocks nested inside it have also closed).
+struct GenScope {
+  std::string label;
+  std::vector<int> indices;
+  int atDepth;
+};
+
+// Cartesian product of every active generate scope's indices, outermost
+// first, e.g. for nested `outer`/`inner` loops: "outer[0].inner[0].",
+// "outer[0].inner[1].", "outer[1].inner[0].", ... One instantiation
+// textually inside N nested loops elaborates to one entry per combination.
+std::vector<std::string> composedGeneratePrefixes(const std::vector<GenScope>& stack)
+{
+  std::vector<std::string> prefixes{""};
+  for (const auto& scope : stack) {
+    std::vector<std::string> next;
+    next.reserve(prefixes.size() * scope.indices.size());
+    for (const auto& p : prefixes)
+      for (int idx : scope.indices)
+        next.push_back(p + scope.label + "[" + std::to_string(idx) + "].");
+    prefixes = std::move(next);
+  }
+  return prefixes;
+}
+
+// Parses `for (<var> = <start>; <var> <cmp> <end>; <var> = <var> + <step>)
+// begin [: <label>]` — the standard generate-array idiom, expected on one
+// line (matching common RTL style; this parser is line-oriented and does
+// not track free-form multi-line expressions here). `pos` is the position
+// just after the "for" token. `paramValues` resolves a simple named bound
+// captured from a `parameter`/`localparam NAME = <int>;` declaration seen
+// so far in the current module — full expression evaluation and
+// `` `define``-based macro substitution are both out of scope (this parser
+// does no preprocessing at all; macro-based bounds only work if already
+// textually resolved before this file is read, which is not something this
+// function attempts). Returns false if the loop bounds aren't resolvable
+// this way, or the trailing `begin` is missing (i.e. this `for` isn't a
+// generate-array loop this walker can expand) — the caller then falls back
+// to ordinary keyword-skip behavior for the line, exactly as before this
+// support was added, so non-generate `for` loops (e.g. inside `initial`
+// blocks) are unaffected.
+bool parseGenerateFor(const std::string& line, size_t pos,
+                       const std::map<std::string, int>& paramValues,
+                       GenScope& out)
+{
+  auto skipWs = [&](size_t& p) { while (p < line.size() && (line[p] == ' ' || line[p] == '\t')) ++p; };
+
+  auto parseIntOrParam = [&](size_t& p, int& value) -> bool {
+    skipWs(p);
+    if (p < line.size() && std::isdigit(static_cast<unsigned char>(line[p]))) {
+      const size_t s = p;
+      while (p < line.size() && std::isdigit(static_cast<unsigned char>(line[p]))) ++p;
+      value = std::stoi(line.substr(s, p - s));
+      return true;
+    }
+    const size_t saved = p;
+    const std::string ident = parseIdent(line, p);
+    if (ident.empty()) return false;
+    const auto it = paramValues.find(ident);
+    if (it == paramValues.end()) { p = saved; return false; }
+    value = it->second;
+    return true;
+  };
+
+  skipWs(pos);
+  if (pos >= line.size() || line[pos] != '(') return false;
+  ++pos;
+
+  if (parseIdent(line, pos).empty()) return false;  // loop variable
+  skipWs(pos);
+  if (pos >= line.size() || line[pos] != '=') return false;
+  ++pos;
+  int startVal = 0;
+  if (!parseIntOrParam(pos, startVal)) return false;
+  skipWs(pos);
+  if (pos >= line.size() || line[pos] != ';') return false;
+  ++pos;
+
+  skipWs(pos);
+  parseIdent(line, pos);  // loop variable again — not re-validated, kept permissive
+  skipWs(pos);
+  bool inclusive = false;
+  if (pos < line.size() && line[pos] == '<') {
+    ++pos;
+    if (pos < line.size() && line[pos] == '=') { inclusive = true; ++pos; }
+  } else {
+    return false;  // only < / <= supported
+  }
+  int endVal = 0;
+  if (!parseIntOrParam(pos, endVal)) return false;
+  skipWs(pos);
+  if (pos >= line.size() || line[pos] != ';') return false;
+  ++pos;
+
+  // Step: scan for a "+ <int>" up to the closing ')' of the for(...); default
+  // to 1 (by far the common case: "i = i + 1").
+  int step = 1;
+  {
+    int depth = 1;  // already past the for(...)'s opening '('
+    bool sawPlus = false;
+    for (; pos < line.size() && depth > 0; ++pos) {
+      if (line[pos] == '(') { ++depth; continue; }
+      if (line[pos] == ')') { if (--depth == 0) break; continue; }
+      if (line[pos] == '+' && !sawPlus) {
+        sawPlus = true;
+        size_t q = pos + 1;
+        skipWs(q);
+        if (q < line.size() && std::isdigit(static_cast<unsigned char>(line[q]))) {
+          const size_t s = q;
+          while (q < line.size() && std::isdigit(static_cast<unsigned char>(line[q]))) ++q;
+          step = std::stoi(line.substr(s, q - s));
+        }
+      }
+    }
+    if (pos < line.size() && line[pos] == ')') ++pos;
+  }
+  if (step <= 0) return false;
+
+  out.indices.clear();
+  if (inclusive) {
+    for (int i = startVal; i <= endVal; i += step) out.indices.push_back(i);
+  } else {
+    for (int i = startVal; i < endVal; i += step) out.indices.push_back(i);
+  }
+  if (out.indices.empty()) return false;
+
+  skipWs(pos);
+  if (parseIdent(line, pos) != "begin") return false;
+
+  skipWs(pos);
+  out.label.clear();
+  if (pos < line.size() && line[pos] == ':') {
+    ++pos;
+    out.label = parseIdent(line, pos);
+  }
+  // Anonymous generate block (no ": label"): Yosys assigns its own label
+  // (commonly "genblk1", "genblk2", ... in textual order) — this exact
+  // convention is NOT verified against real synthesized output here; it is
+  // a placeholder pending that verification (see requirements.md's open
+  // risks). Caller assigns a counter-based placeholder in this case.
+  return true;
+}
+
 }  // namespace
 
 void PostSynthVerilogNameBridge::setVprNetlist(const std::set<std::string>& elements)
@@ -168,6 +314,27 @@ bool PostSynthVerilogNameBridge::loadVprNetlist(const std::filesystem::path& fil
 //   The leading keyword (input/output/inout/wire/reg/logic) is consumed,
 //   followed by an optional modifier, an optional range, and then one or
 //   more comma-separated identifiers.  Bus ranges expand as in Pattern 4.
+//
+// ── Pattern 6: generate/genvar array instantiation ───────────────────────
+//   genvar i;
+//   generate
+//     for (i = 0; i < NUM_LANES; i = i + 1) begin : gen_lane
+//       lane u_lane ( ... );
+//     end
+//   endgenerate
+//   Without this pattern, an instantiation textually inside a generate loop
+//   would be recorded once (as plain instPath "u_lane"), not once per
+//   elaborated iteration ("gen_lane[0].u_lane", "gen_lane[1].u_lane", ...) —
+//   a real mismatch against synthesized output, which does carry the
+//   "gen_lane[N]." segment. A stack of active for-loop scopes
+//   (composedGeneratePrefixes/parseGenerateFor) tracks every nested loop's
+//   fully elaborated index range; every instantiation recorded while one or
+//   more scopes are active gets one entry per index combination, prefixed
+//   accordingly. Loop bounds must be integer literals or resolvable via a
+//   simple parameter/localparam value table built while scanning (no
+//   general expression evaluation or macro preprocessing is attempted);
+//   unresolvable bounds cause the loop to be treated as ordinary
+//   (non-generate) — see parseGenerateFor's doc comment.
 //
 // Only signals belonging to the TOP module (the one not instantiated by any
 // other parsed module) are promoted to m_instPaths.  Signals of sub-modules
@@ -269,6 +436,15 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
     std::string pendingModuleType;
     int paramDepth = 0;
 
+    // generate/genvar support: a stack of active `for...begin[:label]` loops
+    // (outermost first), the begin/end nesting depth they were pushed at,
+    // a simple int-valued parameter/localparam table for resolving named
+    // loop bounds, and a counter for naming anonymous (unlabeled) blocks.
+    std::vector<GenScope> genStack;
+    int beginDepth = 0;
+    std::map<std::string, int> paramValues;
+    int anonGenBlockCounter = 0;
+
     for (const auto& line : FOEDAG::StringUtils::tokenize(content, "\n")) {
       size_t pos = 0;
 
@@ -293,8 +469,10 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
           pos = savedPos;
         } else if (!tok.empty()) {
           while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
-          if (pos < line.size() && (line[pos] == '(' || line[pos] == '#' || line[pos] == ';'))
-            modules[currentModule].emplace_back(tok, pendingModuleType);
+          if (pos < line.size() && (line[pos] == '(' || line[pos] == '#' || line[pos] == ';')) {
+            for (const auto& prefix : composedGeneratePrefixes(genStack))
+              modules[currentModule].emplace_back(prefix + tok, pendingModuleType);
+          }
           pendingModuleType.clear();
           continue;
         } else {
@@ -344,6 +522,61 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
         continue;
       }
 
+      // Simple int-valued parameter/localparam capture, so a generate loop
+      // bound referencing a named constant (e.g. "i < NUM_LANES") can be
+      // resolved without full expression evaluation. Only a plain integer
+      // literal RHS is captured; anything else (an expression, a string, a
+      // `` `define``-based macro not yet substituted) is not — a generate
+      // bound referencing such a name then simply fails to resolve and that
+      // `for` loop is treated as non-generate (see parseGenerateFor).
+      if (first == "parameter" || first == "localparam") {
+        size_t p = pos;
+        const std::string name = parseIdent(line, p);
+        if (!name.empty()) {
+          while (p < line.size() && (line[p] == ' ' || line[p] == '\t')) ++p;
+          if (p < line.size() && line[p] == '=') {
+            ++p;
+            while (p < line.size() && (line[p] == ' ' || line[p] == '\t')) ++p;
+            if (p < line.size() && std::isdigit(static_cast<unsigned char>(line[p]))) {
+              const size_t s = p;
+              while (p < line.size() && std::isdigit(static_cast<unsigned char>(line[p]))) ++p;
+              paramValues[name] = std::stoi(line.substr(s, p - s));
+            }
+          }
+        }
+        continue;
+      }
+
+      // generate/genvar: a `for (...) begin [: label]` line is fully
+      // consumed here (whether or not it turns out to be a generate-array
+      // loop this walker can expand — parseGenerateFor returning false
+      // means it wasn't, e.g. a `for` loop inside an `initial` block used
+      // purely as simulation code, which never contains a real module
+      // instantiation anyway, so pushing nothing for it is harmless).
+      if (first == "for") {
+        GenScope scope;
+        if (parseGenerateFor(line, pos, paramValues, scope)) {
+          ++beginDepth;
+          if (scope.label.empty())
+            scope.label = "genblk" + std::to_string(++anonGenBlockCounter);
+          scope.atDepth = beginDepth;
+          genStack.push_back(std::move(scope));
+        }
+        continue;
+      }
+      // A standalone "begin" (not part of a "for...begin" line, already
+      // consumed above) — just track nesting depth; e.g. `always @(...)
+      // begin`, a plain `begin`/`end` block, or a `generate` block whose
+      // `begin : label` appears on its own line (label-less handling for
+      // that specific shape is not attempted — see requirements.md's open
+      // risks on unverified anonymous-block naming).
+      if (first == "begin") { ++beginDepth; continue; }
+      if (first == "end") {
+        if (!genStack.empty() && genStack.back().atDepth == beginDepth) genStack.pop_back();
+        --beginDepth;
+        continue;
+      }
+
       if (kVerilogKeywords.count(first)) continue;
 
       // <ModuleType> [#(...)] <instName>(
@@ -376,7 +609,11 @@ bool PostSynthVerilogNameBridge::loadRtlSources(const std::vector<std::filesyste
       if (pos >= line.size()) continue;
       if (line[pos] != '(' && line[pos] != '#' && line[pos] != ';') continue;
 
-      modules[currentModule].emplace_back(second, first);  // (inst_name, module_type)
+      // (inst_name, module_type) — one entry per active generate-loop index
+      // combination (composedGeneratePrefixes returns {""} when no generate
+      // scope is active, i.e. exactly today's un-prefixed behavior).
+      for (const auto& prefix : composedGeneratePrefixes(genStack))
+        modules[currentModule].emplace_back(prefix + second, first);
     }
   }
 
