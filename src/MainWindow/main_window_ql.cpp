@@ -80,7 +80,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/QLSettingsManager.h"
 
 #include "FloorPlanning/FloorPlanningWidget.h"
-#include "FloorPlanning/SynthResourceExtractor.h"
+#include "FloorPlanning/PostSynthVerilogResourceExtractor.h"
 #include "FloorPlanning/PostSynthVerilogNameBridge.h"
 
 using namespace FOEDAG;
@@ -2267,13 +2267,14 @@ void MainWindow::floorPlanningActionTriggered()
 
   if (floorPlanningAction->isChecked()) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
-    std::filesystem::path postSynthBlifFilePath = compiler->getPostSynthBlifFilePath();
+    std::filesystem::path postSynthVerilogFilePath = compiler->getPostSynthVerilogFilePath();
 
-    // post synth blif test
-    if (!FileUtils::FileExists(postSynthBlifFilePath)) {
-      QMessageBox::critical(this, "Floor Planning cannot be started.", 
+    // post synth verilog test — this is now the sole netlist source (no VPR
+    // invocation is needed to populate the FloorPlanning UI, see #1725)
+    if (!FileUtils::FileExists(postSynthVerilogFilePath)) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.",
         QString("%1 file is missing.\nPlease run SYNTHESIS task first and then activate Floor Planning again.")
-        .arg(QString::fromStdString(postSynthBlifFilePath.string())));
+        .arg(QString::fromStdString(postSynthVerilogFilePath.string())));
       cleanFloorPlanningUI();
       return;
     }
@@ -2295,7 +2296,17 @@ void MainWindow::floorPlanningActionTriggered()
       cleanFloorPlanningUI();
       return;
     }
-      
+
+    // synchronous local-file parse — no subprocess, no callback
+    fp::PostSynthVerilogResourceExtractor resourceExtractor;
+    resourceExtractor.loadAtomNamesFromVerilogFile(postSynthVerilogFilePath);
+
+    if (resourceExtractor.elements().empty()) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(postSynthVerilogFilePath.string())));
+      cleanFloorPlanningUI();
+      return;
+    }
+
     if (m_floorPlanningWidget) {
       m_floorPlanningWidget->hide();
       m_floorPlanningWidget->deleteLater();
@@ -2312,63 +2323,23 @@ void MainWindow::floorPlanningActionTriggered()
       compiler->onQdcFileSaved();
       updateSourceTree();
     });
-  
+
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
-    // vpr proc
-    QString vpr_program = "vpr";
-    QList<QString> args;
-    args.append(QString::fromStdString(archFileProviderPtr->get().string()));
-    args.append(QString::fromStdString(postSynthBlifFilePath.string()));
-    args.append("--circuit_format");
-    args.append("eblif");
-    args.append("--timing_analysis");
-    args.append("off");
-    args.append("--show_arch_resources");
+    std::vector<std::filesystem::path> rtlSourceFiles;
+    for (const auto& f : compiler->ProjManager()->getDesignFiles())
+      rtlSourceFiles.emplace_back(f.toStdString());
+    auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
+    nameBridge->setVprNetlist(resourceExtractor.elements());
+    nameBridge->loadRtlSources(rtlSourceFiles);
+    m_floorPlanningWidget->setNameBridge(nameBridge);
+    m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
+    // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
+    // so we construct path based on json settings location file.
+    std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc");
 
-    QProcess* process = new QProcess;
-    const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
-    std::filesystem::current_path(projectPath);
+    m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
 
-    process->start(vpr_program, args);
-    //qDebug() << "run" << vpr_program << args.join(" ");
-
-    // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
-    QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr, compiler](int exitCode) {
-      //QDebug() << "vpr netlist dump proc finished" << exitCode;
-      if (m_floorPlanningWidget) {
-        if (exitCode != 0) {
-          QMessageBox::critical(this, "Floor Planning cannot be started.", "VPR cannot dump netlist file");
-          cleanFloorPlanningUI();
-        } else {
-          fp::SynthResourceExtractor resourceExtractor;
-          std::filesystem::path vprEchoBlifFilePath(projectPath / "atom_netlist.cleaned.echo.blif");
-          resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
-
-          if (!resourceExtractor.elements().empty()) {
-            std::vector<std::filesystem::path> rtlSourceFiles;
-            for (const auto& f : compiler->ProjManager()->getDesignFiles())
-              rtlSourceFiles.emplace_back(f.toStdString());
-            auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
-            nameBridge->setVprNetlist(resourceExtractor.elements());
-            nameBridge->loadRtlSources(rtlSourceFiles);
-            m_floorPlanningWidget->setNameBridge(nameBridge);
-            m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
-            // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
-            // so we construct path based on json settings location file.
-            std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc"); 
-
-            m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
-          } else {
-            QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(vprEchoBlifFilePath.string())));
-            cleanFloorPlanningUI();
-          }
-        }
-      }
-      archFileProviderPtr->clean();
-      process->deleteLater();
-    });
-  
     m_floorPlanningWidget->show();
 
   } else {
