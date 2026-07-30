@@ -2,17 +2,62 @@
 
 #include <cctype>
 #include <fstream>
+#include <set>
 
 #include "Utils/FileUtils.h"
 #include "Utils/StringUtils.h"
 
 namespace fp {
 
-// Parses a Yosys flat post-synthesis Verilog (.v) file and collects all wire/
-// port signal names as atom identifiers.  Naming rules mirror VPR's atoms:
-//   - Escaped identifiers (leading \) are stored without the backslash.
-//   - A [N:M] bus expands to individual bits "name[lo]" ... "name[hi]".
-//   - A single-bit bus [k:k] is stored as "name" (no index suffix).
+namespace {
+
+// Keywords that open a declaration/statement this extractor never needs to
+// look inside — real leaf-cell identity lives in instantiation statements,
+// not these. Post-synthesis Verilog is a flat, already-elaborated netlist
+// (flatten has already run), so RTL-only constructs like generate/genvar
+// never appear here.
+const std::set<std::string> kSkipKeywords{
+  "module", "endmodule", "input", "output", "inout", "wire", "reg", "assign",
+  "parameter", "localparam",
+};
+
+bool isIdentStart(char c) {
+  return std::isalpha(static_cast<unsigned char>(c)) || c == '_' || c == '$';
+}
+bool isIdentChar(char c) {
+  return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$';
+}
+
+std::string parsePlainIdent(const std::string& line, size_t& pos) {
+  while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+  if (pos >= line.size() || !isIdentStart(line[pos])) return {};
+  const size_t start = pos;
+  while (pos < line.size() && isIdentChar(line[pos])) ++pos;
+  return line.substr(start, pos - start);
+}
+
+// Escaped identifier: '\' followed by any non-whitespace characters, per the
+// Verilog escaped-identifier rule — internal '.', '[', ']' are just part of
+// the token and must not be treated specially here. Returns the name without
+// the leading backslash. Assumes line[pos] == '\\' on entry.
+std::string parseEscapedIdent(const std::string& line, size_t& pos) {
+  ++pos;
+  const size_t start = pos;
+  while (pos < line.size() && line[pos] != ' ' && line[pos] != '\t') ++pos;
+  return line.substr(start, pos - start);
+}
+
+// Yosys-internal optimizer temporaries have no user-meaningful RTL identity
+// (e.g. "$abc$1234$auto$blah.cc:5678:some_pass$99") and must be excluded.
+bool isAnonymousCell(const std::string& name) {
+  if (name.empty()) return false;
+  if (name[0] == '$') return true;
+  if (name.find("$abc$") != std::string::npos) return true;
+  if (name.find("$auto$") != std::string::npos) return true;
+  return false;
+}
+
+}  // namespace
 
 bool PostSynthVerilogResourceExtractor::loadAtomNamesFromVerilogFile(const std::filesystem::path& filePath)
 {
@@ -27,6 +72,20 @@ bool PostSynthVerilogResourceExtractor::loadAtomNamesFromVerilogFile(const std::
   return parseAtomNamesFromVerilogFileContent(FOEDAG::FileUtils::GetFileContent(filePath));
 }
 
+// Parses a flat, post-synthesis (post-flatten, post-techmap) Verilog file and
+// collects real leaf-cell instance names — i.e. the identifiers on module
+// instantiation statements:
+//   <celltype> \<escaped-instance-name>  (<port connections>);
+//   <celltype> <plain-instance-name> (<port connections>);
+//   <celltype> #(<params>) <instance-name> (<port connections>);   (params may span lines)
+//
+// Real leaf-cell identity in synthesized output lives almost exclusively in
+// these instantiation identifiers, not in wire/input/output declarations —
+// intermediate nets are frequently optimized straight through without ever
+// getting a standalone declaration. Attribute lines
+// ("(* src = "..." *)", "(* module_not_derived = ... *)") are skipped, not
+// parsed for source-location data — this extractor keeps a single namespace
+// (the raw synthesized instance name), per the project's naming design.
 bool PostSynthVerilogResourceExtractor::parseAtomNamesFromVerilogFileContent(const std::string& fileContent)
 {
   m_error.clear();
@@ -38,92 +97,119 @@ bool PostSynthVerilogResourceExtractor::parseAtomNamesFromVerilogFileContent(con
 
   const auto lines = FOEDAG::StringUtils::tokenize(content, "\n");
 
-  for (const auto& line : lines) {
-    // Identify declaration keyword (wire / input / output)
-    static const struct { const char* kw; size_t len; } kKeywords[] = {
-      {"wire ",   5},
-      {"input ",  6},
-      {"output ", 7},
-    };
-
-    size_t kwPos = std::string::npos;
-    size_t kwLen = 0;
-    for (const auto& k : kKeywords) {
-      const size_t p = line.find(k.kw);
-      if (p != std::string::npos) { kwPos = p; kwLen = k.len; break; }
+  // Scans forward from `pos`, tracking paren depth (already `depth` deep on
+  // entry). Returns true and leaves `pos` just past the closing ')' if depth
+  // returns to 0 on this line; otherwise returns false, leaving `depth` set
+  // to resume on a later line. '[' / ']' (bit-select brackets inside port
+  // expressions, or mid-path brackets inside an escaped instance name) never
+  // affect paren depth.
+  auto skipParens = [](const std::string& line, size_t& pos, int& depth) -> bool {
+    for (; pos < line.size(); ++pos) {
+      if (line[pos] == '(') ++depth;
+      else if (line[pos] == ')') { if (--depth == 0) { ++pos; return true; } }
     }
-    if (kwPos == std::string::npos) continue;
+    return false;
+  };
 
-    // Require only whitespace before the keyword (skip "input wire", concatenations, etc.)
-    bool leadingOnly = true;
-    for (size_t i = 0; i < kwPos; ++i) {
-      if (line[i] != ' ' && line[i] != '\t') { leadingOnly = false; break; }
-    }
-    if (!leadingOnly) continue;
+  enum class State { Normal, AttrBlock, ParamBlock, AwaitInstName, PortBlock };
+  State state = State::Normal;
+  int depth = 0;
 
-    size_t pos = kwPos + kwLen;
-
-    // Skip whitespace after keyword
+  // Tries to parse an instance name at `pos` (skipping leading whitespace
+  // first). On success (name found, followed by '('), records it (subject to
+  // the anonymous-cell filter) and transitions to PortBlock/Normal depending
+  // on whether the port-connection list closes on this same line. On
+  // failure (no name, or no '(' following it), gives up on this statement
+  // and returns to Normal — malformed/unrecognized lines are skipped rather
+  // than treated as an error.
+  auto tryParseInstance = [&](const std::string& line, size_t& pos) {
     while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+    if (pos >= line.size()) { state = State::AwaitInstName; return; }
+    const std::string instName =
+        (line[pos] == '\\') ? parseEscapedIdent(line, pos) : parsePlainIdent(line, pos);
+    if (instName.empty()) { state = State::Normal; return; }
+    while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+    if (pos >= line.size() || line[pos] != '(') { state = State::Normal; return; }
+    if (!isAnonymousCell(instName)) m_elements.insert(instName);
+    depth = 0;
+    state = skipParens(line, pos, depth) ? State::Normal : State::PortBlock;
+  };
 
-    // Optional range specifier [hi:lo]
-    int rangeHi = -1, rangeLo = -1;
-    if (pos < line.size() && line[pos] == '[') {
-      ++pos;
-      size_t numStart = pos;
-      while (pos < line.size() && (line[pos] >= '0' && line[pos] <= '9')) ++pos;
-      if (pos == numStart || pos >= line.size() || line[pos] != ':') continue;
-      rangeHi = std::stoi(line.substr(numStart, pos - numStart));
-      ++pos; // skip ':'
-      numStart = pos;
-      while (pos < line.size() && (line[pos] >= '0' && line[pos] <= '9')) ++pos;
-      if (pos == numStart || pos >= line.size() || line[pos] != ']') continue;
-      rangeLo = std::stoi(line.substr(numStart, pos - numStart));
-      ++pos; // skip ']'
-      while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
-    }
+  for (const auto& line : lines) {
+    size_t pos = 0;
 
-    // Parse identifier — escaped (\...) or plain
-    std::string name;
-    if (pos < line.size() && line[pos] == '\\') {
-      ++pos;
-      const size_t nameStart = pos;
-      while (pos < line.size() && line[pos] != ' ' && line[pos] != '\t' && line[pos] != ';') ++pos;
-      name = line.substr(nameStart, pos - nameStart);
-    } else {
-      if (pos >= line.size()) continue;
-      const char c = line[pos];
-      if (!std::isalpha(static_cast<unsigned char>(c)) && c != '_' && c != '$') continue;
-      const size_t nameStart = pos;
-      while (pos < line.size() &&
-             (std::isalnum(static_cast<unsigned char>(line[pos])) ||
-              line[pos] == '_' || line[pos] == '$')) {
+    if (state == State::AttrBlock) {
+      while (pos < line.size()) {
+        if (line[pos] == '*' && pos + 1 < line.size() && line[pos + 1] == ')') {
+          pos += 2;
+          state = State::Normal;
+          break;
+        }
         ++pos;
       }
-      name = line.substr(nameStart, pos - nameStart);
+      continue;  // observed attribute lines are self-contained; nothing else to parse on this line
     }
 
-    if (name.empty()) continue;
+    if (state == State::PortBlock) {
+      if (!skipParens(line, pos, depth)) continue;
+      state = State::Normal;
+      continue;  // ignore trailing ';'
+    }
 
-    // Require a terminating semicolon (declaration line, not a port/expression)
+    if (state == State::ParamBlock) {
+      if (!skipParens(line, pos, depth)) continue;
+      state = State::AwaitInstName;
+      // fall through: look for the instance name in the remainder of this line
+    }
+
+    if (state == State::AwaitInstName) {
+      tryParseInstance(line, pos);
+      continue;
+    }
+
+    // state == State::Normal
     while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
-    if (pos >= line.size() || line[pos] != ';') continue;
+    if (pos >= line.size()) continue;
 
-    // Emit element(s)
-    if (rangeHi < 0) {
-      m_elements.insert(name);
-    } else {
-      const int lo = std::min(rangeHi, rangeLo);
-      const int hi = std::max(rangeHi, rangeLo);
-      if (lo == hi) {
-        // [k:k] — single-bit bus, store without index
-        m_elements.insert(name);
-      } else {
-        for (int i = lo; i <= hi; ++i) {
-          m_elements.insert(name + '[' + std::to_string(i) + ']');
+    // Attribute line: (* ... *), possibly spanning multiple lines.
+    if (line[pos] == '(' && pos + 1 < line.size() && line[pos + 1] == '*') {
+      pos += 2;
+      bool closed = false;
+      while (pos < line.size()) {
+        if (line[pos] == '*' && pos + 1 < line.size() && line[pos + 1] == ')') {
+          closed = true;
+          pos += 2;
+          break;
         }
+        ++pos;
       }
+      if (!closed) state = State::AttrBlock;
+      continue;
     }
+
+    if (line[pos] == '/') continue;  // comment line
+
+    const std::string first = parsePlainIdent(line, pos);
+    if (first.empty() || kSkipKeywords.count(first)) continue;
+
+    // `first` is a candidate cell type. Optional #(...) parameter block,
+    // then the instance name.
+    while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+
+    if (pos < line.size() && line[pos] == '#') {
+      ++pos;
+      while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) ++pos;
+      if (pos >= line.size() || line[pos] != '(') continue;  // malformed; give up on this line
+      depth = 0;
+      if (skipParens(line, pos, depth)) {
+        tryParseInstance(line, pos);
+      } else {
+        state = State::ParamBlock;  // parameter block continues on later lines
+      }
+      continue;
+    }
+
+    tryParseInstance(line, pos);
   }
 
   return true;
