@@ -62,6 +62,20 @@ bool isDspGenerator(const std::string& ipName) {
   return ipName.rfind(kDspPrefix, 0) == 0;
 }
 
+// Prefix of the versioned FPU multiplier generator IPs (fpu_mult_generator_v1_0, ...).
+const char* const kFpuMultPrefix = "fpu_mult_generator_v";
+
+bool isFpuMultGenerator(const std::string& ipName) {
+  return ipName.rfind(kFpuMultPrefix, 0) == 0;
+}
+
+// Prefix of the versioned FPU add/sub generator IPs (fpu_addsub_generator_v1_0, ...).
+const char* const kFpuAddsubPrefix = "fpu_addsub_generator_v";
+
+bool isFpuAddsubGenerator(const std::string& ipName) {
+  return ipName.rfind(kFpuAddsubPrefix, 0) == 0;
+}
+
 // Single source of truth for whether a catalog IP is supported by the current
 // device, shared by the ip_catalog listing, the ip_catalog <name> query, and
 // configure_ip so all three agree.
@@ -76,7 +90,19 @@ bool isIpVersionSupported(const std::string& ipName) {
     return ipName ==
            kDspPrefix + QLDeviceManager::getInstance()->deviceDSPVersion();
   }
-  return true;  // non-DSP IPs are not device-gated
+  // FPU IPs are gated on a device capability token in the "FPU_TYPE" array of
+  // config.json (opt-in): the multiplier requires "FPUMULT". Absent/empty/
+  // non-array FPU_TYPE (or one lacking FPUMULT) hides the IP.
+  if (isFpuMultGenerator(ipName)) {
+    const auto types = QLDeviceManager::getInstance()->deviceFPUTypes();
+    return types.count("FPUMULT") > 0;
+  }
+  // The add/sub member requires the "FPUADDSUB" capability token, same scheme.
+  if (isFpuAddsubGenerator(ipName)) {
+    const auto types = QLDeviceManager::getInstance()->deviceFPUTypes();
+    return types.count("FPUADDSUB") > 0;
+  }
+  return true;  // other IPs are not device-gated
 }
 }  // namespace
 
