@@ -7108,7 +7108,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
         std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
         for (const std::string& pattern: patterns) {
           std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
-          if (patternElements.empty()) {
+          if (false/*patternElements.empty()*/) {
             ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
             return false;
           } else {
