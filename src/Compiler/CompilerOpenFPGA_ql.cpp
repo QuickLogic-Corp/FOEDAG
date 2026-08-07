@@ -9818,6 +9818,22 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
   
+  // Promote boundary registers into the IO tile flip-flops. Reset-carrying
+  // registers become io_sdffr/io_sdffnr, which only exist on a GPIO v3.0
+  // architecture, so this stays opt-in.
+  if( QLSettingsManager::getStringValue("yosys", "general", "ioff") == "checked" ) {
+
+    yosys_options += " -ioff";
+  }
+
+  // Threshold for the shared-inverter override on the IO reset path. Inert
+  // without -ioff, so it is safe to carry a value while ioff is unchecked.
+  if( !QLSettingsManager::getStringValue("yosys", "general", "ioff_min_shared_reset").empty() ) {
+    yosys_options += std::string(" -ioff_min_shared_reset") +
+                   std::string(" ") +
+                   QLSettingsManager::getStringValue("yosys", "general", "ioff_min_shared_reset");
+  }
+
   #ifdef __linux__
   if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
     yosys_options += std::string(" -de") + 
