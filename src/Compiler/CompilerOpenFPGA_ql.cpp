@@ -9766,6 +9766,27 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   yosysScript->addFile(aurora_rehier_script_path);
   // -- rehier_script ----------------------------------------------------------------
 
+  // -- atomsets_script --------------------------------------------------------------
+  // [aurora2#1725 stage P3] atom-set extraction. Supplies the device template's
+  // ${CALL_TCL_ATOMSETS_SCRIPT} so it can emit atomsets.json -- the exact set of netlist
+  // atoms belonging to each RTL instance, which stages P4/P5/P7 all consume.
+  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P3).
+  //
+  // Runs in the same yosys session as synth_ql, after the BLIF is written, so the design
+  // is still in memory and the atom names are the ones yosys holds rather than names
+  // re-derived by regexing an output file.
+  std::filesystem::path aurora_atomsets_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("aurora_atomsets.tcl");
+
+  yosysScript->apply("${CALL_TCL_ATOMSETS_SCRIPT}", std::string("tcl") +
+                                                    std::string(" ") +
+                                                    aurora_atomsets_script_path.string());
+  yosysScript->addFile(aurora_atomsets_script_path);
+  // -- atomsets_script --------------------------------------------------------------
+
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
   yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
   yosysScript->addFile(output_blif_filepath);
