@@ -9741,6 +9741,31 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   }
   // ---------------------------------------------------------------- synth_sdc_file --
 
+  // -- rehier_script ----------------------------------------------------------------
+  // [aurora2#1725 stage P2] synthesis. Supplies the device template's
+  // ${CALL_TCL_REHIER_SCRIPT} so it can emit [4] <top>_post_synth_hier.v.
+  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P2).
+  //
+  // Path to the review-only hierarchy-rebuild script, for the device template's
+  // ${CALL_TCL_REHIER_SCRIPT} line. Mirrors the aurora_yosys_import.tcl resolution
+  // above, but is unconditional: unlike the import script it does not depend on a
+  // synth SDC file being present.
+  //
+  // The script runs after synth_ql has already written the BLIF and Verilog the flow
+  // consumes, so it cannot affect QoR. Its output is never read by packing, placement,
+  // routing or bitstream generation.
+  std::filesystem::path aurora_rehier_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("aurora_rehier.tcl");
+
+  yosysScript->apply("${CALL_TCL_REHIER_SCRIPT}", std::string("tcl") +
+                                                  std::string(" ") +
+                                                  aurora_rehier_script_path.string());
+  yosysScript->addFile(aurora_rehier_script_path);
+  // -- rehier_script ----------------------------------------------------------------
+
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
   yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
   yosysScript->addFile(output_blif_filepath);
