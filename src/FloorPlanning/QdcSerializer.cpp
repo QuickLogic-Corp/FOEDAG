@@ -121,27 +121,24 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             continue;
         }
 
-        // collect netlist elements — prefer resolved VPR names when available
+        // [aurora2#1725 stage P1] RTL names only -- never element.vprNames.
+        //
+        // Writing resolved VPR atom names here is what produced the defect this feature
+        // exists to fix: a .qdc holding 39 enumerated atom names for an instance that has
+        // 523 in the netlist, silently under-constraining it by 13x and going stale on every
+        // resynthesis. An enumerated list cannot be complete, and the names are in a
+        // different namespace from the atoms VPR actually places (A.P3).
+        //
+        // The whole-instance form (path + ".*") is expanded at emission time instead, which
+        // is REQ-003: expansion happens when the constraints XML is generated, never at .qdc
+        // write time and never in the UI.
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
-            if (!element.vprNames.empty()) {
-                // write each resolved VPR atom name directly
-                size_t vprCounter = 0;
-                for (const auto& vprName : element.vprNames) {
-                    elementsStr += vprName;
-                    if (++vprCounter < element.vprNames.size()) {
-                        elementsStr += ",";
-                        elementsStr += lfCommandDelimiter();
-                    }
-                }
+            if (element.isLeaf) {
+                elementsStr += element.path;
             } else {
-                // fallback: user RTL path (bridge not available or no match)
-                if (element.isLeaf) {
-                    elementsStr += element.path;
-                } else {
-                    elementsStr += element.path + ".*";
-                }
+                elementsStr += element.path + ".*";
             }
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {

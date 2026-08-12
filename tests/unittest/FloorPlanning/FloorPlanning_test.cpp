@@ -760,3 +760,46 @@ TEST(PostSynthVerilogNameBridge, PlainInstantiationNoRegressionWithoutGenerate)
     ASSERT_TRUE(bridge.loadRtlSources({path}));
     EXPECT_TRUE(bridge.instPaths().count("u_leaf"));
 }
+
+// [aurora2#1725 stage P1] REQ-002: the .qdc carries RTL names, never post-synthesis ones.
+//
+// This is a regression guard, not a formality. Serializing resolved VPR atom names is what
+// produced the defect the feature exists to fix: a .qdc holding 39 enumerated atoms for an
+// instance with 523 in the netlist, under-constraining it by 13x and going stale on every
+// resynthesis. Expansion belongs at emission time (REQ-003).
+TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
+{
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
+    fp::DeviceGrid device(descriptor);
+
+    std::optional<QPointF> bl = findBottomLeftTilePoint(device, fp::Tile::Index{2, 2});
+    std::optional<QPointF> tr = findTopRightTilePoint(device, fp::Tile::Index{4, 4});
+    ASSERT_TRUE(bl.has_value());
+    ASSERT_TRUE(tr.has_value());
+
+    fp::RegionPtr region = std::make_shared<fp::Region>(bl.value(), tr.value());
+    region->setTiles(device.findTiles(region->rect()));
+
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p_rtl_only");
+    partition->addRegion(region);
+
+    // An element that HAS resolved VPR names -- the case that used to leak them into the file.
+    partition->addElement(fp::HierarhyElement{
+        "i_mul_24", /*isLeaf=*/false,
+        {"i_mul_24.fract_o_adder_carry_sumout_cout[20]",
+         "i_mul_24.count_sdffre_Q_1_D"}});
+    device.addPartition(partition);
+
+    fp::QdcSerializer qdc;
+    const std::string content = qdc.serialize(device);
+
+    EXPECT_NE(content.find("i_mul_24.*"), std::string::npos)
+        << "the whole-instance RTL form must be written";
+    EXPECT_EQ(content.find("fract_o_adder_carry_sumout_cout"), std::string::npos)
+        << "a post-synthesis atom name reached the .qdc (REQ-002 violation)";
+    EXPECT_EQ(content.find("count_sdffre_Q_1_D"), std::string::npos)
+        << "a post-synthesis atom name reached the .qdc (REQ-002 violation)";
+}
