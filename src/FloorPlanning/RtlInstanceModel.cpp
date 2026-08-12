@@ -1,0 +1,190 @@
+#include "RtlInstanceModel.h"
+
+#include "nlohmann_json/json.hpp"
+
+#include <algorithm>
+#include <fstream>
+
+namespace fp {
+
+namespace {
+
+std::string parentOf(const std::string& path)
+{
+    const std::size_t dot = path.rfind('.');
+    return dot == std::string::npos ? std::string{} : path.substr(0, dot);
+}
+
+}  // namespace
+
+bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
+{
+    m_instances.clear();
+    m_byPath.clear();
+    m_top.clear();
+    m_error.clear();
+
+    if (!std::filesystem::exists(path)) {
+        m_error = "instance list not found: " + path.string()
+                + " -- run the SYNTHESIS task first";
+        return false;
+    }
+
+    nlohmann::json doc;
+    try {
+        std::ifstream stream(path);
+        stream >> doc;
+    } catch (const std::exception& e) {
+        m_error = "instance list is not valid JSON (" + path.string() + "): " + e.what();
+        return false;
+    }
+
+    if (!doc.contains("instances") || !doc["instances"].is_array()) {
+        m_error = "instance list has no \"instances\" array: " + path.string();
+        return false;
+    }
+
+    m_top = doc.value("top", std::string{});
+
+    for (const auto& entry : doc["instances"]) {
+        if (!entry.contains("path")) {
+            continue;
+        }
+        RtlInstance instance;
+        instance.path = entry.value("path", std::string{});
+        instance.component = entry.value("component", std::string{});
+        instance.moduleRaw = entry.value("module_raw", std::string{});
+        // src may be JSON null when the elaborated netlist was written with -noattr; stage
+        // P0b rejects that case, but tolerate it here rather than throwing.
+        if (entry.contains("src") && entry["src"].is_string()) {
+            instance.src = entry["src"].get<std::string>();
+        }
+        if (entry.contains("component_src") && entry["component_src"].is_string()) {
+            instance.componentSrc = entry["component_src"].get<std::string>();
+        }
+        // last_status is carried forward by P0b from the previous run, so the panel can show
+        // a sensible state before validation has run again.
+        instance.status = entry.value("last_status", std::string{"unknown"});
+        m_instances.push_back(std::move(instance));
+    }
+
+    if (m_instances.empty()) {
+        m_error = "instance list is empty: " + path.string();
+        return false;
+    }
+
+    buildTree();
+    return true;
+}
+
+bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
+{
+    if (!std::filesystem::exists(path)) {
+        m_error = "verdicts not found: " + path.string();
+        return false;
+    }
+
+    nlohmann::json doc;
+    try {
+        std::ifstream stream(path);
+        stream >> doc;
+    } catch (const std::exception& e) {
+        m_error = std::string{"verdicts are not valid JSON: "} + e.what();
+        return false;
+    }
+
+    if (!doc.contains("instances") || !doc["instances"].is_object()) {
+        m_error = "verdicts have no \"instances\" object: " + path.string();
+        return false;
+    }
+
+    for (auto it = doc["instances"].begin(); it != doc["instances"].end(); ++it) {
+        const auto found = m_byPath.find(it.key());
+        if (found == m_byPath.end()) {
+            // A verdict for an instance the tree does not know about. Not fatal, but it means
+            // the two files came from different elaborations.
+            continue;
+        }
+        RtlInstance& instance = m_instances[found->second];
+        const auto& verdict = it.value();
+        instance.status = verdict.value("verdict", std::string{"unknown"});
+        instance.atomCount = verdict.value("atom_count", -1);
+        if (verdict.contains("reason") && verdict["reason"].is_string()) {
+            instance.statusReason = verdict["reason"].get<std::string>();
+        } else if (verdict.contains("warnings") && verdict["warnings"].is_array()
+                   && !verdict["warnings"].empty()) {
+            // Surface the first real warning; the "check 3 not run" note is bookkeeping
+            // rather than something the user needs in a tooltip.
+            for (const auto& warning : verdict["warnings"]) {
+                const std::string text = warning.get<std::string>();
+                if (text.find("not run") == std::string::npos) {
+                    instance.statusReason = text;
+                    break;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+void RtlInstanceModel::buildTree()
+{
+    m_byPath.clear();
+    for (std::size_t i = 0; i < m_instances.size(); ++i) {
+        m_byPath[m_instances[i].path] = i;
+    }
+
+    for (RtlInstance& instance : m_instances) {
+        instance.children.clear();
+        instance.isLeaf = true;
+    }
+
+    for (const RtlInstance& instance : m_instances) {
+        const std::string parent = parentOf(instance.path);
+        if (parent.empty()) {
+            continue;
+        }
+        const auto found = m_byPath.find(parent);
+        if (found == m_byPath.end()) {
+            continue;
+        }
+        RtlInstance& parentInstance = m_instances[found->second];
+        parentInstance.children.push_back(instance.path);
+        parentInstance.isLeaf = false;
+    }
+}
+
+const RtlInstance* RtlInstanceModel::find(const std::string& path) const
+{
+    const auto found = m_byPath.find(path);
+    return found == m_byPath.end() ? nullptr : &m_instances[found->second];
+}
+
+std::vector<std::string> RtlInstanceModel::roots() const
+{
+    std::vector<std::string> result;
+    for (const RtlInstance& instance : m_instances) {
+        const std::string parent = parentOf(instance.path);
+        if (parent.empty() || m_byPath.find(parent) == m_byPath.end()) {
+            result.push_back(instance.path);
+        }
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+HierarhyElements RtlInstanceModel::toHierarhyElements() const
+{
+    HierarhyElements elements;
+    for (const RtlInstance& instance : m_instances) {
+        if (instance.deleted()) {
+            continue;
+        }
+        // No vprNames: the .qdc and this model carry RTL names only, and expansion to netlist
+        // names happens at emission time (REQ-002 / REQ-003).
+        elements.insert(HierarhyElement{instance.path, instance.isLeaf});
+    }
+    return elements;
+}
+
+}  // namespace fp

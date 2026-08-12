@@ -41,6 +41,7 @@ set (SRC_LIST
   PostSynthVerilogResourceExtractor.cpp
   PostSynthVerilogNameBridge.cpp
   QdcSerializer.cpp
+  RtlInstanceModel.cpp
   DeviceGrid.cpp
   Tile.cpp
   Partition.cpp
@@ -64,6 +65,7 @@ set (HDR_LIST
   PostSynthVerilogResourceExtractor.h
   PostSynthVerilogNameBridge.h
   QdcSerializer.h
+  RtlInstanceModel.h
   DeviceGrid.h
   Tile.h
   Partition.h

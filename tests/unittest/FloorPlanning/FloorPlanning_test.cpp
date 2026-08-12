@@ -2,6 +2,7 @@
 
 #include <FloorPlanning/DeviceGrid.h>
 #include <FloorPlanning/QdcSerializer.h>
+#include <FloorPlanning/RtlInstanceModel.h>
 #include <FloorPlanning/Partition.h>
 #include <FloorPlanning/SynthResourceExtractor.h>
 #include <FloorPlanning/PostSynthVerilogResourceExtractor.h>
@@ -802,4 +803,176 @@ TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
         << "a post-synthesis atom name reached the .qdc (REQ-002 violation)";
     EXPECT_EQ(content.find("count_sdffre_Q_1_D"), std::string::npos)
         << "a post-synthesis atom name reached the .qdc (REQ-002 violation)";
+}
+
+// ---------------------------------------------------------------------------
+// [aurora2#1725 stage P0b/P1] RtlInstanceModel -- the RTL instance tree the panel shows.
+// ---------------------------------------------------------------------------
+namespace {
+
+std::filesystem::path writeTempJson(const std::filesystem::path& dir,
+                                    const std::string& name,
+                                    const std::string& content)
+{
+    std::filesystem::create_directories(dir);
+    const std::filesystem::path path = dir / name;
+    std::ofstream stream(path);
+    stream << content;
+    return path;
+}
+
+const char* kInstancesJson = R"JSON({
+  "top": "fpu_single",
+  "instances": [
+    { "path": "i_mul_24", "component": "mul_24", "module_raw": "mul_24_default(rtl)",
+      "src": "fpu_single.vhd:225.2-225.10", "component_src": "mul_24.vhd:52.8-52.14",
+      "parameters": {}, "last_status": "unknown" },
+    { "path": "i_serial_mul", "component": "serial_mul", "module_raw": "serial_mul_default(rtl)",
+      "src": "fpu_single.vhd:237.2-237.14", "component_src": "serial_mul.vhd:1.1-1.2",
+      "parameters": {}, "last_status": "unknown" },
+    { "path": "i_mul_24.i_inner", "component": "inner", "module_raw": "inner_default(rtl)",
+      "src": "mul_24.vhd:70.2-70.9", "component_src": "inner.vhd:3.1-3.6",
+      "parameters": {}, "last_status": "unknown" }
+  ]
+})JSON";
+
+const char* kValidationJson = R"JSON({
+  "netlist_sha256": "abc123",
+  "instances": {
+    "i_mul_24":     { "verdict": "complete", "atom_count": 536, "checks": {} },
+    "i_serial_mul": { "verdict": "deleted", "atom_count": 0,
+                      "reason": "no atoms in the netlist; synthesis reported 'Deleting now unused module serial_mul_default'" },
+    "i_mul_24.i_inner": { "verdict": "partial", "atom_count": 12,
+                          "warnings": ["check 3 not run: [6] unavailable",
+                                       "check 2b: 1 atom(s) where prefix and scopename disagree"] }
+  }
+})JSON";
+
+}  // namespace
+
+TEST(RtlInstanceModel, MissingFileFailsWithAnActionableMessage)
+{
+    // The panel must say "run synthesis" rather than showing an empty tree or a VPR error.
+    fp::RtlInstanceModel model;
+    EXPECT_FALSE(model.loadInstances("definitely/not/here/instances.json"));
+    EXPECT_NE(model.error().find("SYNTHESIS"), std::string::npos);
+    EXPECT_TRUE(model.empty());
+}
+
+TEST(RtlInstanceModel, MalformedJsonIsRejectedNotSilentlyEmpty)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_bad";
+    const auto path = writeTempJson(dir, "instances.json", "{ this is not json ");
+    fp::RtlInstanceModel model;
+    EXPECT_FALSE(model.loadInstances(path));
+    EXPECT_NE(model.error().find("valid JSON"), std::string::npos);
+}
+
+TEST(RtlInstanceModel, LoadsInstancesAndNestsThemByDottedPath)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_ok";
+    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    EXPECT_EQ(model.top(), "fpu_single");
+    EXPECT_EQ(model.size(), 3u);
+
+    // i_mul_24.i_inner is a child of i_mul_24, so the parent is not a leaf.
+    const fp::RtlInstance* parent = model.find("i_mul_24");
+    ASSERT_NE(parent, nullptr);
+    EXPECT_FALSE(parent->isLeaf);
+    ASSERT_EQ(parent->children.size(), 1u);
+    EXPECT_EQ(parent->children.front(), "i_mul_24.i_inner");
+    EXPECT_EQ(parent->component, "mul_24");
+    EXPECT_EQ(parent->src, "fpu_single.vhd:225.2-225.10");
+
+    // Only the two top-level instances are roots; the nested one is not.
+    const std::vector<std::string> roots = model.roots();
+    ASSERT_EQ(roots.size(), 2u);
+    EXPECT_EQ(roots[0], "i_mul_24");
+    EXPECT_EQ(roots[1], "i_serial_mul");
+}
+
+TEST(RtlInstanceModel, StatusIsUnknownUntilVerdictsAreMerged)
+{
+    // Absence of a verdict must never read as usable.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_nostatus";
+    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path));
+    for (const fp::RtlInstance& instance : model.instances()) {
+        EXPECT_EQ(instance.status, "unknown");
+        EXPECT_FALSE(instance.constrainable());
+    }
+}
+
+TEST(RtlInstanceModel, MergedVerdictsDriveWhatThePanelCanShow)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_verdicts";
+    const auto instances = writeTempJson(dir, "instances.json", kInstancesJson);
+    const auto verdicts = writeTempJson(dir, "validation.json", kValidationJson);
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(instances)) << model.error();
+    ASSERT_TRUE(model.mergeVerdicts(verdicts)) << model.error();
+
+    const fp::RtlInstance* complete = model.find("i_mul_24");
+    ASSERT_NE(complete, nullptr);
+    EXPECT_EQ(complete->status, "complete");
+    EXPECT_EQ(complete->atomCount, 536);
+    EXPECT_TRUE(complete->constrainable());
+
+    // A deleted instance stays in the tree so it can be greyed out, and carries the cause.
+    const fp::RtlInstance* deleted = model.find("i_serial_mul");
+    ASSERT_NE(deleted, nullptr);
+    EXPECT_TRUE(deleted->deleted());
+    EXPECT_FALSE(deleted->constrainable());
+    EXPECT_NE(deleted->statusReason.find("Deleting now unused module"), std::string::npos);
+
+    // A partial instance is still constrainable, but the reason shown must be the real check
+    // failure, not the "check 3 not run" bookkeeping note.
+    const fp::RtlInstance* partial = model.find("i_mul_24.i_inner");
+    ASSERT_NE(partial, nullptr);
+    EXPECT_TRUE(partial->partial());
+    EXPECT_TRUE(partial->constrainable());
+    EXPECT_NE(partial->statusReason.find("scopename"), std::string::npos);
+    EXPECT_EQ(partial->statusReason.find("not run"), std::string::npos);
+}
+
+TEST(RtlInstanceModel, DeletedInstancesAreNotOfferedAsConstraintTargets)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_elements";
+    const auto instances = writeTempJson(dir, "instances.json", kInstancesJson);
+    const auto verdicts = writeTempJson(dir, "validation.json", kValidationJson);
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(instances));
+    ASSERT_TRUE(model.mergeVerdicts(verdicts));
+
+    const fp::HierarhyElements elements = model.toHierarhyElements();
+    EXPECT_TRUE(elements.contains("i_mul_24"));
+    EXPECT_TRUE(elements.contains("i_mul_24.i_inner"));
+    EXPECT_FALSE(elements.contains("i_serial_mul"))
+        << "an instance with no atoms cannot be constrained";
+
+    // And no element carries post-synthesis names (REQ-002).
+    for (const fp::HierarhyElement& element : elements) {
+        EXPECT_TRUE(element.vprNames.empty());
+    }
+}
+
+TEST(RtlInstanceModel, VerdictsForUnknownInstancesAreIgnoredNotFatal)
+{
+    // Two files from different elaborations should not crash the panel.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_mismatch";
+    const auto instances = writeTempJson(dir, "instances.json", kInstancesJson);
+    const auto verdicts = writeTempJson(
+        dir, "validation.json",
+        R"({"instances": {"i_does_not_exist": {"verdict": "complete", "atom_count": 1}}})");
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(instances));
+    EXPECT_TRUE(model.mergeVerdicts(verdicts));
+    EXPECT_EQ(model.find("i_mul_24")->status, "unknown");
 }
