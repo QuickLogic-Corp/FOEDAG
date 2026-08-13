@@ -175,6 +175,19 @@ class CompilerOpenFPGA_ql : public Compiler {
   void onQdcFileSaved();
   void onPcfFileSaved();
 
+ public:
+  // [aurora2#1725 stage P0] instance discovery -- runs an elaboration-only Yosys pass
+  // (verific/read_verilog -> hierarchy -> write_json, attributes kept) to produce
+  // <top>_elab.json, then derives instances.json from it via scripts/elab_instances.py.
+  // Lazy: skipped when instances.json already exists and no design file has changed
+  // since (see m_designDirty in Compiler.h). Called from Synthesize() (covers headless,
+  // and any GUI flow that never opens FloorPlanning) and from MainWindow's
+  // FloorPlanning QAction handler (covers browsing the hierarchy before synthesis
+  // runs) -- the latter is why this is public rather than one of the protected
+  // Compile-stage virtuals below.
+  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0).
+  virtual bool EnsureElaborated();
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -281,6 +294,16 @@ private:
 
   BlifParser m_blifParser;
   TaskCompilationStateManager m_taskCompilationStateManager;
+
+  // [aurora2#1725 stage P0] instance discovery -- helpers for EnsureElaborated().
+  // BuildElaborationScript() mirrors the verific/read_verilog file-reading logic in
+  // getSynthesisCommands(), but stops after `hierarchy -top` + `write_json` (no flatten,
+  // no synth_ql), so instances synthesis later deletes or merges are still visible.
+  // Duplicated rather than shared with getSynthesisCommands() to keep this stage
+  // independent of the device template and of the main synthesis code path.
+  std::string BuildElaborationScript(const std::string& topModule);
+  bool RunElaboration();
+  bool RunElabInstances();
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();

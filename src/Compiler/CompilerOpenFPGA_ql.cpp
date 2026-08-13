@@ -1726,6 +1726,332 @@ bool CompilerOpenFPGA_ql::Analyze() {
   return true;
 }
 
+// [aurora2#1725 stage P0] instance discovery -- see BuildElaborationScript() below and
+// docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0).
+//
+// Mirrors the verific/read_verilog file list construction in getSynthesisCommands()
+// (m_useVerific branch), but stops after `hierarchy -top` + `write_json` -- no
+// `flatten -scopename`, no synth_ql -- so instances synthesis later deletes or merges
+// across boundaries are still visible in the emitted JSON. Never pass -noattr: that
+// would strip the src/hdlname attributes elab_instances.py depends on.
+std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topModule) {
+  std::string script;
+
+  if (m_useVerific) {
+    for (auto msg_sev : MsgSeverityMap()) {
+      switch (msg_sev.second) {
+        case MsgSeverity::Ignore:
+          script += "verific -set-ignore " + msg_sev.first + "\n";
+          break;
+        case MsgSeverity::Info:
+          script += "verific -set-info " + msg_sev.first + "\n";
+          break;
+        case MsgSeverity::Warning:
+          script += "verific -set-warning " + msg_sev.first + "\n";
+          break;
+        case MsgSeverity::Error:
+          script += "verific -set-error " + msg_sev.first + "\n";
+          break;
+      }
+    }
+
+    // workaround for enabling usage of '-lib' option, suggested by yosyshq
+    script += std::string("verific -cfg veri_create_empty_box 1\n");
+
+    std::string includes;
+    for (auto path : ProjManager()->includePathList()) {
+      includes += FileUtils::AdjustPath(path) + " ";
+    }
+    if (!includes.empty()) {
+      script += "verific -vlog-incdir " + includes + "\n";
+    }
+
+    std::filesystem::path design_sources_dir_path =
+        ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
+                                        ProjManager()->projectName(),
+                                        ProjManager()->getDesignActiveFileSet().toStdString());
+    script += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
+
+    std::filesystem::path tcl_script_dir_path = QLSettingsManager::getTCLScriptDirPath();
+    if (!tcl_script_dir_path.empty() && !copyFilesOnAdd()) {
+      script += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
+    }
+
+    std::string libraries;
+    for (auto path : ProjManager()->libraryPathList()) {
+      libraries += FileUtils::AdjustPath(path) + " ";
+    }
+    if (!libraries.empty()) {
+      script += "verific -vlog-libdir " + libraries + "\n";
+    }
+
+    for (auto ext : ProjManager()->libraryExtensionList()) {
+      script += "verific -vlog-libext " + ext + "\n";
+    }
+
+    std::string macros;
+    for (auto& macro_value : ProjManager()->macroList()) {
+      macros += macro_value.first + "=" + macro_value.second + " ";
+    }
+    if (!macros.empty()) {
+      script += "verific -vlog-define " + macros + "\n";
+    }
+
+    auto topModuleLib = ProjManager()->DesignTopModuleLib();
+    auto commandsLibs = ProjManager()->DesignLibraries();
+    std::string importLibs;
+    auto importDesignFilesLibs = false;
+
+    size_t filesIndex{0};
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string lang;
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+          lang = "-vhdl87";
+          break;
+        case Design::Language::VHDL_1993:
+          lang = "-vhdl93";
+          break;
+        case Design::Language::VHDL_2000:
+          lang = "-vhdl2k";
+          break;
+        case Design::Language::VHDL_2008:
+          lang = "-vhdl2008";
+          break;
+        case Design::Language::VHDL_2019:
+          lang = "-vhdl2019";
+          break;
+        case Design::Language::VERILOG_1995:
+          lang = "-vlog95";
+          break;
+        case Design::Language::VERILOG_2001:
+          lang = "-vlog2k";
+          importDesignFilesLibs = true;
+          break;
+        case Design::Language::SYSTEMVERILOG_2005:
+          lang = "-sv2005";
+          importDesignFilesLibs = true;
+          break;
+        case Design::Language::SYSTEMVERILOG_2009:
+          lang = "-sv2009";
+          importDesignFilesLibs = true;
+          break;
+        case Design::Language::SYSTEMVERILOG_2012:
+          lang = "-sv2012";
+          importDesignFilesLibs = true;
+          break;
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-sv";
+          importDesignFilesLibs = true;
+          break;
+        case Design::Language::VERILOG_NETLIST:
+          lang = "";
+          break;
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Elaboration: unsupported file format: BLIF");
+          return {};
+        case Design::Language::OTHER:
+          continue;
+      }
+
+      std::string designLibraries;
+      if (filesIndex < commandsLibs.size()) {
+        const auto& filesCommandsLibs = commandsLibs[filesIndex];
+        for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
+          auto libName = filesCommandsLibs.second[i];
+          if (!libName.empty()) {
+            designLibraries += "-work " + libName + " ";
+            if (importDesignFilesLibs && libName != topModuleLib) {
+              importLibs += "-L " + libName + " ";
+            }
+          }
+        }
+      }
+      ++filesIndex;
+
+      if (designLibraries.empty()) {
+        script += "verific " + lang + " " + lang_file.second + "\n";
+      } else {
+        script += "verific " + designLibraries + lang + " " + lang_file.second + "\n";
+      }
+    }
+
+    std::string topModuleLibImport =
+        topModuleLib.empty() ? std::string{} : "-work " + topModuleLib + " ";
+    script += "verific " + topModuleLibImport + importLibs + "-import " + topModule + "\n";
+  } else {
+    // Default Yosys parser -- cannot read VHDL at all (elab_instances.py's docstring).
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      std::string lang;
+      switch (lang_file.first.language) {
+        case Design::Language::VHDL_1987:
+        case Design::Language::VHDL_1993:
+        case Design::Language::VHDL_2000:
+        case Design::Language::VHDL_2008:
+        case Design::Language::VHDL_2019:
+          ErrorMessage(
+              "Elaboration requires Verific for VHDL sources -- enable "
+              "'verific' in Settings.");
+          return {};
+        case Design::Language::VERILOG_1995:
+        case Design::Language::VERILOG_2001:
+        case Design::Language::SYSTEMVERILOG_2005:
+          break;
+        case Design::Language::SYSTEMVERILOG_2009:
+        case Design::Language::SYSTEMVERILOG_2012:
+        case Design::Language::SYSTEMVERILOG_2017:
+          lang = "-sv";
+          break;
+        case Design::Language::VERILOG_NETLIST:
+        case Design::Language::BLIF:
+        case Design::Language::EBLIF:
+          ErrorMessage("Elaboration: unsupported file format");
+          return {};
+        case Design::Language::OTHER:
+          continue;
+      }
+      script += "read_verilog " + lang + " " + lang_file.second + "\n";
+    }
+  }
+
+  script += "hierarchy -top " + topModule + "\n";
+  script += "write_json " + topModule + "_elab.json\n";
+  return script;
+}
+
+bool CompilerOpenFPGA_ql::RunElaboration() {
+  const std::string topModule = ProjManager()->DesignTopModule();
+
+  // Elaboration doesn't care which tool will eventually synthesize; it always reads
+  // the RTL directly (pipeline.md: "P0/P0b unaffected -- elaborates the RTL directly,
+  // never touches the front end"). Re-derive m_useVerific here rather than depending on
+  // getSynthesisCommands() having already set it -- EnsureElaborated() runs before it.
+  if (QLSettingsManager::getStringValue("general", "options", "verific") == "checked" &&
+      m_projManager->synthesisTool() != Synplify &&
+      m_projManager->projectType() != PostMapSynplify) {
+    m_useVerific = true;
+  } else {
+    m_useVerific = false;
+  }
+
+  std::string script = BuildElaborationScript(topModule);
+  if (script.empty()) {
+    return false;  // BuildElaborationScript() already reported the error
+  }
+
+  std::filesystem::path script_path =
+      std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.ys");
+  std::ofstream ofs(script_path);
+  ofs << script;
+  ofs.close();
+
+  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
+#if(AURORA_USE_TABBYCAD == 1)
+  if (m_useVerific) {
+    yosys_executable_path = GetSession()->Context()->BinaryPath() /
+                            ".." /
+                            "tabby" /
+                            "bin" /
+                            "yosys_verific";
+  }
+#endif // #if(AURORA_USE_TABBYCAD == 1)
+
+  std::string command = yosys_executable_path.string() + " -s " + script_path.string() +
+                         " -l " + topModule + "_elab.log";
+  Message("Elaboration command: " + command);
+  int status = ExecuteAndMonitorSystemCommand(command);
+  if (status) {
+    ErrorMessage("Design " + ProjManager()->projectName() + " elaboration failed");
+    return false;
+  }
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::RunElabInstances() {
+  const std::string topModule = ProjManager()->DesignTopModule();
+  std::filesystem::path elab_json_path =
+      std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.json");
+  if (!FileUtils::FileExists(elab_json_path)) {
+    ErrorMessage("Elaboration did not produce " + elab_json_path.string());
+    return false;
+  }
+
+  std::filesystem::path elab_instances_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("elab_instances.py");
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " Instance-tree derivation (elab_instances.py) failed!");
+    return false;
+  }
+
+  std::filesystem::path instances_json_path =
+      std::filesystem::path(ProjManager()->projectPath()) / "instances.json";
+
+  std::vector<std::string> args;
+  args.push_back(elab_instances_script_path.string());
+  args.push_back(elab_json_path.string());
+  args.push_back("--top");
+  args.push_back(topModule);
+  args.push_back("-o");
+  args.push_back(instances_json_path.string());
+  if (FileUtils::FileExists(instances_json_path)) {
+    // last_status (stage P4 verdicts) survives re-elaboration until the next
+    // validation run overwrites it.
+    args.push_back("--prior");
+    args.push_back(instances_json_path.string());
+  }
+
+  int status =
+      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
+          .realCode;
+  if (status != 0) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " instance-tree derivation (elab_instances.py) failed");
+    return false;
+  }
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::EnsureElaborated() {
+  const std::string topModule = ProjManager()->DesignTopModule();
+  std::filesystem::path instances_json_path =
+      std::filesystem::path(ProjManager()->projectPath()) / "instances.json";
+
+  if (!m_designDirty && FileUtils::FileExists(instances_json_path)) {
+    return true;  // nothing changed since the last successful elaboration
+  }
+
+  if (topModule.empty() || ProjManager()->DesignFiles().empty()) {
+    // Design isn't complete yet (e.g. mid project setup). Leave m_designDirty set so
+    // this retries the next time EnsureElaborated() runs.
+    return true;
+  }
+
+  Message("##################################################");
+  Message("Elaborating design for instance discovery: " +
+          ProjManager()->projectName());
+  Message("##################################################");
+
+  if (!RunElaboration()) return false;
+  if (!RunElabInstances()) return false;
+
+  m_designDirty = false;
+  return true;
+}
+
 bool CompilerOpenFPGA_ql::Synthesize() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -1769,6 +2095,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
   }
 #endif // #if UPSTREAM_UNUSED
+
+  // [aurora2#1725 stage P0] instance discovery -- lazily (re-)derive instances.json
+  // before synthesis dissolves the RTL hierarchy. See EnsureElaborated().
+  if (!EnsureElaborated()) return false;
 
   const std::unordered_map<int, CommandWrapperPtr> commandsMap = getSynthesisCommands();
 

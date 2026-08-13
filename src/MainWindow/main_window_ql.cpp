@@ -2267,11 +2267,27 @@ void MainWindow::floorPlanningActionTriggered()
 
   if (floorPlanningAction->isChecked()) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+    // [aurora2#1725 stage P0] instance discovery -- best-effort (re)derive
+    // instances.json here too, so the RTL hierarchy is available even if the user
+    // opens FloorPlanning before ever running synthesis. Failure is already reported
+    // via ErrorMessage() inside EnsureElaborated() and must not block this handler,
+    // which is why the result isn't checked here.
+    compiler->EnsureElaborated();
+
     std::filesystem::path postSynthVerilogFilePath = compiler->getPostSynthVerilogFilePath();
+    std::filesystem::path instancesJsonPath =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) / "instances.json";
+    const bool hasPostSynth = FileUtils::FileExists(postSynthVerilogFilePath);
+    // [aurora2#1725 stage P0] instance discovery -- pre-synthesis, this is the only
+    // signal that the design elaborates at all. It is not yet read into the tree
+    // (RtlInstanceModel wiring is a separate, later change) -- it only decides
+    // whether to open with an empty tree instead of hard-blocking below.
+    const bool hasInstancesJson = FileUtils::FileExists(instancesJsonPath);
 
     // post synth verilog test — this is now the sole netlist source (no VPR
     // invocation is needed to populate the FloorPlanning UI, see #1725)
-    if (!FileUtils::FileExists(postSynthVerilogFilePath)) {
+    if (!hasPostSynth && !hasInstancesJson) {
       QMessageBox::critical(this, "Floor Planning cannot be started.",
         QString("%1 file is missing.\nPlease run SYNTHESIS task first and then activate Floor Planning again.")
         .arg(QString::fromStdString(postSynthVerilogFilePath.string())));
@@ -2299,13 +2315,18 @@ void MainWindow::floorPlanningActionTriggered()
 
     // synchronous local-file parse — no subprocess, no callback
     fp::PostSynthVerilogResourceExtractor resourceExtractor;
-    resourceExtractor.loadAtomNamesFromVerilogFile(postSynthVerilogFilePath);
+    if (hasPostSynth) {
+      resourceExtractor.loadAtomNamesFromVerilogFile(postSynthVerilogFilePath);
 
-    if (resourceExtractor.elements().empty()) {
-      QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(postSynthVerilogFilePath.string())));
-      cleanFloorPlanningUI();
-      return;
+      if (resourceExtractor.elements().empty()) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(postSynthVerilogFilePath.string())));
+        cleanFloorPlanningUI();
+        return;
+      }
     }
+    // else: pre-synthesis open, hasInstancesJson is what let us get this far. There is
+    // no post-synth netlist to extract names from yet, so the widget opens below with
+    // an empty tree (see the hasPostSynth check further down).
 
     if (m_floorPlanningWidget) {
       m_floorPlanningWidget->hide();
@@ -2326,14 +2347,22 @@ void MainWindow::floorPlanningActionTriggered()
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
-    std::vector<std::filesystem::path> rtlSourceFiles;
-    for (const auto& f : compiler->ProjManager()->getDesignFiles())
-      rtlSourceFiles.emplace_back(f.toStdString());
-    auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
-    nameBridge->setVprNetlist(resourceExtractor.elements());
-    nameBridge->loadRtlSources(rtlSourceFiles);
-    m_floorPlanningWidget->setNameBridge(nameBridge);
-    m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
+    if (hasPostSynth) {
+      std::vector<std::filesystem::path> rtlSourceFiles;
+      for (const auto& f : compiler->ProjManager()->getDesignFiles())
+        rtlSourceFiles.emplace_back(f.toStdString());
+      auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
+      nameBridge->setVprNetlist(resourceExtractor.elements());
+      nameBridge->loadRtlSources(rtlSourceFiles);
+      m_floorPlanningWidget->setNameBridge(nameBridge);
+      m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
+    } else {
+      // [aurora2#1725 stage P0] instance discovery -- pre-synthesis: instances.json
+      // exists (hasInstancesJson got us past the gate above) but nothing wires it
+      // into the tree yet -- that's RtlInstanceModel, a separate later change. Open
+      // with an empty tree rather than blocking the user entirely.
+      m_floorPlanningWidget->loadNetList({});
+    }
     // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
     // so we construct path based on json settings location file.
     std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc");
