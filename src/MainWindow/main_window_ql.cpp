@@ -82,6 +82,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FloorPlanning/FloorPlanningWidget.h"
 #include "FloorPlanning/PostSynthVerilogResourceExtractor.h"
 #include "FloorPlanning/PostSynthVerilogNameBridge.h"
+#include "FloorPlanning/RtlInstanceModel.h"
 
 using namespace FOEDAG;
 extern const char* foedag_version_number;
@@ -2279,10 +2280,8 @@ void MainWindow::floorPlanningActionTriggered()
     std::filesystem::path instancesJsonPath =
         std::filesystem::path(compiler->ProjManager()->projectPath()) / "instances.json";
     const bool hasPostSynth = FileUtils::FileExists(postSynthVerilogFilePath);
-    // [aurora2#1725 stage P0] instance discovery -- pre-synthesis, this is the only
-    // signal that the design elaborates at all. It is not yet read into the tree
-    // (RtlInstanceModel wiring is a separate, later change) -- it only decides
-    // whether to open with an empty tree instead of hard-blocking below.
+    // [aurora2#1725 stage P0] instance discovery -- read into the tree below via
+    // RtlInstanceModel (stage P1), pre-synthesis or as a post-synthesis fallback.
     const bool hasInstancesJson = FileUtils::FileExists(instancesJsonPath);
 
     // post synth verilog test — this is now the sole netlist source (no VPR
@@ -2315,6 +2314,13 @@ void MainWindow::floorPlanningActionTriggered()
 
     // synchronous local-file parse — no subprocess, no callback
     fp::PostSynthVerilogResourceExtractor resourceExtractor;
+    // [aurora2#1725 stage P1] RTL hierarchy from instances.json, the elaboration-derived
+    // tree. Tried whenever instances.json exists -- not only pre-synthesis -- because
+    // PostSynthVerilogNameBridge's RTL scraper below only understands Verilog syntax:
+    // for a VHDL design (e.g. fpu_single) it finds zero instances, and without this as
+    // a fallback the post-synthesis branch would open with a silently empty tree.
+    fp::RtlInstanceModel rtlModel;
+    const bool rtlModelLoaded = hasInstancesJson && rtlModel.loadInstances(instancesJsonPath);
     if (hasPostSynth) {
       resourceExtractor.loadAtomNamesFromVerilogFile(postSynthVerilogFilePath);
 
@@ -2323,10 +2329,15 @@ void MainWindow::floorPlanningActionTriggered()
         cleanFloorPlanningUI();
         return;
       }
+    } else if (!rtlModelLoaded) {
+      // pre-synthesis open, hasInstancesJson is what let us get this far, so a load
+      // failure here means a malformed instances.json -- surface it rather than opening
+      // a silent empty tree.
+      QMessageBox::critical(this, "Floor Planning cannot be started.",
+        QString::fromStdString(rtlModel.error()));
+      cleanFloorPlanningUI();
+      return;
     }
-    // else: pre-synthesis open, hasInstancesJson is what let us get this far. There is
-    // no post-synth netlist to extract names from yet, so the widget opens below with
-    // an empty tree (see the hasPostSynth check further down).
 
     if (m_floorPlanningWidget) {
       m_floorPlanningWidget->hide();
@@ -2347,6 +2358,21 @@ void MainWindow::floorPlanningActionTriggered()
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
+    // [aurora2#1725 stage P1] instances.json -> flat path set for the tree, skipping
+    // instances synthesis deleted (a status only ever carried forward from a prior
+    // run's last_status -- P4 doesn't exist yet, so nothing sets it on this pass),
+    // matching toHierarhyElements()'s rule that a deleted instance has no atoms to
+    // constrain.
+    auto rtlModelPaths = [&rtlModel]() {
+      fp::PostSynthVerilogNameBridge::NaturalStringSet paths;
+      for (const auto& instance : rtlModel.instances()) {
+        if (!instance.deleted()) {
+          paths.insert(instance.path);
+        }
+      }
+      return paths;
+    };
+
     if (hasPostSynth) {
       std::vector<std::filesystem::path> rtlSourceFiles;
       for (const auto& f : compiler->ProjManager()->getDesignFiles())
@@ -2354,14 +2380,24 @@ void MainWindow::floorPlanningActionTriggered()
       auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
       nameBridge->setVprNetlist(resourceExtractor.elements());
       nameBridge->loadRtlSources(rtlSourceFiles);
-      m_floorPlanningWidget->setNameBridge(nameBridge);
-      m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
+
+      if (!nameBridge->instPaths().empty()) {
+        m_floorPlanningWidget->setNameBridge(nameBridge);
+        m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
+      } else if (rtlModelLoaded) {
+        // The Verilog-only RTL scraper found nothing -- e.g. a VHDL design like
+        // fpu_single -- fall back to the elaboration-derived tree from instances.json.
+        // No name bridge: it has no instance paths either, so the VPR Names column
+        // would be blank regardless.
+        m_floorPlanningWidget->loadNetList(rtlModelPaths());
+      } else {
+        m_floorPlanningWidget->loadNetList({});
+      }
     } else {
-      // [aurora2#1725 stage P0] instance discovery -- pre-synthesis: instances.json
-      // exists (hasInstancesJson got us past the gate above) but nothing wires it
-      // into the tree yet -- that's RtlInstanceModel, a separate later change. Open
-      // with an empty tree rather than blocking the user entirely.
-      m_floorPlanningWidget->loadNetList({});
+      // [aurora2#1725 stage P1] pre-synthesis: build the tree from instances.json via
+      // RtlInstanceModel, the RTL hierarchy straight from elaboration. No name bridge:
+      // there is no netlist yet, so the VPR Names column stays blank.
+      m_floorPlanningWidget->loadNetList(rtlModelPaths());
     }
     // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
     // so we construct path based on json settings location file.
