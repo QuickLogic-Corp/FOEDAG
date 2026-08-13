@@ -77,7 +77,7 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
-#include "FloorPlanning/PostSynthVerilogResourceExtractor.h"
+#include "FloorPlanning/RtlInstanceModel.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -1916,6 +1916,16 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
   }
 
   script += "hierarchy -top " + topModule + "\n";
+  // write_json refuses a design that still has behavioral "process" nodes -- measured:
+  // any always-block module read through the plain read_verilog frontend (m_useVerific
+  // false) hits "ERROR: ... contains processes, which are not supported by JSON backend
+  // (run `proc` first)." Verific-imported designs elaborate straight to structural
+  // RTLIL and would not need this, but running it unconditionally is harmless there and
+  // keeps this one script working for both frontends. proc only restructures behavioral
+  // code into structural primitives ($mux/$dff/...) inside each module -- it does not
+  // touch cross-module boundaries, rename/merge instances, or drop the src/hdlname
+  // attributes elab_instances.py depends on, so this stays elaboration, not synthesis.
+  script += "proc\n";
   script += "write_json " + topModule + "_elab.json\n";
   return script;
 }
@@ -7370,32 +7380,22 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  // Same file, same extractor the FloorPlanning UI itself uses (Goal 4 of
-  // #1725): the existence check below must recognize exactly the names the
-  // UI let the user select, not a name space derived from a second,
-  // independent parser of a different file. Plain _post_synth.blif carries
-  // no cell-instance identity at all, so re-parsing it here (as the prior
-  // FOEDAG::BlifParser::load()-based approach did) could never recognize a
-  // leaf-instance name sourced from Verilog in the first place.
-  std::filesystem::path netlist_path = getPostSynthVerilogFilePath();
-
-  if (!fs::exists(netlist_path)){
-    ErrorMessage("Post Synthesis Verilog Was Not Found!\n");
-    ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
-    return false;
-  }
-
-  fp::PostSynthVerilogResourceExtractor resourceExtractor;
-  resourceExtractor.loadAtomNamesFromVerilogFile(netlist_path);
-  m_blifParser.loadFromNames(resourceExtractor.elements());
-  //m_blifParser.printHierachy(); // debug
-  
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
 
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
+
+  // [aurora2#1725 stage P5] instances.json (P0b) is the only trustworthy answer to
+  // "is this .qdc token a whole RTL instance, or an exact atom/net name?" -- e.g.
+  // "out[0]"/"$false"/"$undef" in mult_16_signed_floorplanning_dsp.qdc are real leaf
+  // atom names and must stay literal, while "i_mul_24" without a "." + "*" suffix is a
+  // whole instance and must not reach VPR as a literal (see the set_region loop below).
+  // Best-effort: a missing/unloadable instances.json just means every pattern below is
+  // treated as an already-exact atom/net name, matching the pre-existing behavior.
+  fp::RtlInstanceModel rtlModel;
+  rtlModel.loadInstances(std::filesystem::path(ProjManager()->projectPath()) / "instances.json");
 
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
@@ -7437,13 +7437,27 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
         std::vector<std::string> elements;
         std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
         for (const std::string& pattern: patterns) {
-          std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
-          if (false/*patternElements.empty()*/) {
-            ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
-            return false;
-          } else {
-            elements.push_back(pattern);
-          }
+          // [aurora2#1725 stage P5] Mode A (wildcard) is mandatory for a whole RTL
+          // instance: mode B (enumerating atom names) is not implementable here --
+          // Yosys cell names and VPR atom names are different namespaces with no
+          // overlap (measured on i_mul_24: 535 Yosys cells vs 627 VPR atoms, zero
+          // shared). A bare instance path is never itself a VPR atom name -- real atoms
+          // are always "<path>.<signal>" -- so without the "." + "*" suffix this would
+          // reach VPR as a literal name_pattern and silently match nothing (see
+          // generate_floorplanning.py's add_atom_pattern). But not every token here is
+          // an instance: e.g. "out[0]"/"$false"/"$undef" are exact leaf atom/net names
+          // and must stay literal. instances.json is what tells the two apart.
+          //
+          // isInstanceOrAncestor(), not find(): a SystemVerilog generate-block label
+          // like "cluster[0]" is never itself a recorded instance -- only
+          // "cluster[0].clb", the module instantiated inside it, is -- but a bare
+          // "cluster[0]" is still a real whole-subtree RTL selection and still needs
+          // the wildcard suffix. Measured on shiftreg.sv (tests/testcases/
+          // shiftreg_floorplanning_wildcard/single_instance): instances.json lists only
+          // "cluster[0].clb", never "cluster[0]".
+          const bool alreadyGlob = pattern.find('*') != std::string::npos;
+          const bool isWholeInstance = !alreadyGlob && rtlModel.isInstanceOrAncestor(pattern);
+          elements.push_back(isWholeInstance ? pattern + ".*" : pattern);
         }
 
         std::string partition;

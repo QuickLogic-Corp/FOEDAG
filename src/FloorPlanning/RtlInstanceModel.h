@@ -64,6 +64,15 @@ public:
     const std::vector<RtlInstance>& instances() const { return m_instances; }
     const RtlInstance* find(const std::string& path) const;
 
+    // [aurora2#1725 stage P5] True if "path" names a real instance itself, OR is a
+    // strict ancestor of one -- e.g. a SystemVerilog generate-block label like
+    // "cluster[0]" is never itself a recorded instance (only "cluster[0].clb", the
+    // actual module instantiation inside it, is), but a whole-subtree selection under
+    // that label is still real RTL and still needs the "." + "*" wildcard suffix at
+    // emission time. False for a plain leaf atom/net name (e.g. "out[0]") that instances
+    // does not know about at all.
+    bool isInstanceOrAncestor(const std::string& path) const;
+
     // Paths with no parent in the model, i.e. the top level of the tree.
     std::vector<std::string> roots() const;
 

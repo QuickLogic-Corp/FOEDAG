@@ -160,6 +160,19 @@ const RtlInstance* RtlInstanceModel::find(const std::string& path) const
     return found == m_byPath.end() ? nullptr : &m_instances[found->second];
 }
 
+bool RtlInstanceModel::isInstanceOrAncestor(const std::string& path) const
+{
+    if (m_byPath.find(path) != m_byPath.end()) {
+        return true;
+    }
+    // m_byPath is ordered by path, so every path with "path." as a prefix (if any)
+    // sorts immediately at or after "path." itself -- one lookup, no linear scan.
+    const std::string prefix = path + ".";
+    const auto next = m_byPath.lower_bound(prefix);
+    return next != m_byPath.end()
+        && next->first.compare(0, prefix.size(), prefix) == 0;
+}
+
 std::vector<std::string> RtlInstanceModel::roots() const
 {
     std::vector<std::string> result;

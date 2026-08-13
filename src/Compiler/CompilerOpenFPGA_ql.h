@@ -29,7 +29,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 #include "Compiler/Compiler.h"
-#include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
 #include "QLDeviceManager.h"
@@ -292,7 +291,6 @@ private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
 
-  BlifParser m_blifParser;
   TaskCompilationStateManager m_taskCompilationStateManager;
 
   // [aurora2#1725 stage P0] instance discovery -- helpers for EnsureElaborated().
