@@ -2860,6 +2860,30 @@ bool pathIsInside(const std::filesystem::path& candidate, const std::filesystem:
   return true;
 }
 
+// run a command and return its stdout.
+//
+// FileUtils::ExecuteSystemCommand writes a "Command: ..." preamble line into the output
+// stream before the process output (FileUtils.cpp:418), which corrupts anything parsed from
+// it. strip that here, in one place, rather than at each call site.
+bool runCommandCaptureOutput(const std::string& command,
+                             const std::vector<std::string>& args,
+                             std::string& out_text) {
+
+  std::ostringstream command_output;
+  int status = FileUtils::ExecuteSystemCommand(command, args, &command_output, -1).code;
+
+  out_text = command_output.str();
+
+  const std::string preamble = "Command: ";
+  if(out_text.compare(0, preamble.size(), preamble) == 0) {
+    std::string::size_type first_newline = out_text.find('\n');
+    out_text = (first_newline == std::string::npos) ? std::string()
+                                                    : out_text.substr(first_newline + 1);
+  }
+
+  return (status == 0);
+}
+
 } // anonymous namespace
 
 
@@ -2936,18 +2960,17 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
   }
 
   // ---- [4] read the manifest WITHOUT extracting -----------------------------------------
-  std::ostringstream manifest_stream;
+  std::string manifest_text;
   std::vector<std::string> manifest_args = {"-xzOf", kit_path_c.string(), "manifest.json"};
-  int manifest_status =
-      FileUtils::ExecuteSystemCommand("tar", manifest_args, &manifest_stream, -1).code;
-  if(manifest_status != 0 || manifest_stream.str().empty()) {
+  bool manifest_ok = runCommandCaptureOutput("tar", manifest_args, manifest_text);
+  if(!manifest_ok || manifest_text.empty()) {
     compiler->ErrorMessage("device kit has no readable manifest.json: " + kit_path_c.string());
     return -1;
   }
 
   json manifest_json;
   try {
-    manifest_json = json::parse(manifest_stream.str());
+    manifest_json = json::parse(manifest_text);
   }
   catch (const json::exception& e) {
     compiler->ErrorMessage(std::string("device kit manifest.json is malformed: ") + e.what());
@@ -3031,15 +3054,15 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
   // ---- [7] reject a kit that would write outside the target ------------------------------
   // list the archive first: an absolute path or a '..' component would let a crafted kit
   // escape the target directory. the checksum only proves the kit is intact, not benign.
-  std::ostringstream listing_stream;
+  std::string listing_text;
   std::vector<std::string> listing_args = {"-tzf", kit_path_c.string()};
-  if(FileUtils::ExecuteSystemCommand("tar", listing_args, &listing_stream, -1).code != 0) {
+  if(!runCommandCaptureOutput("tar", listing_args, listing_text)) {
     compiler->ErrorMessage("could not list the device kit contents: " + kit_path_c.string());
     return -1;
   }
 
   {
-    std::istringstream listing(listing_stream.str());
+    std::istringstream listing(listing_text);
     std::string entry;
     while(std::getline(listing, entry)) {
       if(entry.empty()) {
@@ -3063,11 +3086,11 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
   }
 
   compiler->Message("installing...");
-  std::ostringstream extract_stream;
+  std::string extract_text;
   std::vector<std::string> extract_args = {"-xzf", kit_path_c.string(), "-C", target_path.string()};
-  if(FileUtils::ExecuteSystemCommand("tar", extract_args, &extract_stream, -1).code != 0) {
+  if(!runCommandCaptureOutput("tar", extract_args, extract_text)) {
     compiler->ErrorMessage("could not extract the device kit into: " + target_path.string());
-    compiler->Message(extract_stream.str());
+    compiler->Message(extract_text);
     return -1;
   }
 
