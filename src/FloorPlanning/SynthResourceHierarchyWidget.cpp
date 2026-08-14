@@ -231,6 +231,27 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
 
 void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
 {
+    // [aurora2#1725] Re-derive real atom names for elements that were loaded
+    // without them. QdcSerializer::load() builds each partition's elements from
+    // RTL paths alone (a .qdc has no atom data), so clb/dsp/bram *RequiredCount()
+    // reads back 0 until this runs -- exactly the gap that made re-checking a tree
+    // item "fix" it: fillPartitionWithSelectedElements() does this same lookup,
+    // just only for whichever one partition is currently selected. Cheap and
+    // idempotent: an element that already carries the right vprNames just gets the
+    // same set back, and if m_atomNames is empty (pre-synthesis, no atomsets.json
+    // yet) every element keeps whatever it already had.
+    for (const auto& [id, partition]: partitions) {
+        const HierarhyElements existing = partition->elements();
+        partition->clearElemenets();
+        for (const HierarhyElement& element: existing) {
+            const auto it = m_atomNames.find(element.path);
+            const std::set<std::string> names = (it != m_atomNames.end())
+                ? std::set<std::string>(it->second.begin(), it->second.end())
+                : element.vprNames;
+            partition->addElement(HierarhyElement{element.path, element.isLeaf, names});
+        }
+    }
+
     // intermediate data be captured in lambda
     std::map<std::string, std::string> data;
     for (const auto& [id, partition]: partitions) {
