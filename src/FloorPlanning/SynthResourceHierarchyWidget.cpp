@@ -24,7 +24,7 @@ namespace fp {
 
 namespace {
 
-// Marks rows that exist solely to display individual VPR names (not RTL instances).
+// Marks rows that exist solely to display individual atoms (not RTL instances).
 // These rows are non-checkable leaf children of netlist items.
 static constexpr int kVprDisplayRowRole = Qt::UserRole + 100;
 
@@ -44,6 +44,16 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
     if (item->data(kBusBitRole).toBool())
         return prefix + name;          // "din" + "[0]"  → "din[0]"
     return prefix.empty() ? name : (prefix + "." + name);
+}
+
+// Classifies an atom by the hard-block primitive embedded in its name (see
+// dspv2_sim.v / brams_final_map.v in the device data): every DSP primitive variant
+// is named "QL_DSPV2*", and every BRAM macro techmaps down to "TDP_ECC36K". Anything
+// else (luts, adder_carry, sdffre, ...) packs into ordinary CLB fabric.
+QString classifyAtomType(const std::string& atomName) {
+    if (atomName.find("QL_DSPV2") != std::string::npos) return "dsp";
+    if (atomName.find("TDP_ECC36K") != std::string::npos) return "bram";
+    return "clb";
 }
 
 void uncheckAllRecursive(QStandardItem* item, int col) {
@@ -147,29 +157,29 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         onItemChanged(item, /*reportChanges*/true);
     });
 
-    // Returns the VPR name text for a given tree index (leaf items only).
-    auto vprCopyText = [this](const QModelIndex& idx) -> QString {
+    // Returns the atom name text for a given tree index (leaf items only).
+    auto atomCopyText = [this](const QModelIndex& idx) -> QString {
         if (!idx.isValid()) return {};
-        const QModelIndex vprIdx = m_model->index(idx.row(), Column::VprNames, idx.parent());
-        return vprIdx.data(Qt::DisplayRole).toString();
+        const QModelIndex atomIdx = m_model->index(idx.row(), Column::AtomList, idx.parent());
+        return atomIdx.data(Qt::DisplayRole).toString();
     };
 
-    // Right-click context menu: copy VPR name(s) of the hovered row
+    // Right-click context menu: copy atom name(s) of the hovered row
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_view, &QTreeView::customContextMenuRequested, this, [this, vprCopyText](const QPoint& pos) {
+    connect(m_view, &QTreeView::customContextMenuRequested, this, [this, atomCopyText](const QPoint& pos) {
         const QModelIndex idx = m_view->indexAt(pos);
-        const QString text = vprCopyText(idx);
+        const QString text = atomCopyText(idx);
         if (text.isEmpty()) return;
         QMenu menu;
-        QAction* act = menu.addAction(tr("Copy VPR Name"));
+        QAction* act = menu.addAction(tr("Copy Atom Name"));
         if (menu.exec(m_view->viewport()->mapToGlobal(pos)) == act)
             QApplication::clipboard()->setText(text);
     });
 
-    // Ctrl+C: copy VPR name(s) of the current row
+    // Ctrl+C: copy atom name(s) of the current row
     auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_view);
-    connect(copyShortcut, &QShortcut::activated, this, [this, vprCopyText]() {
-        const QString text = vprCopyText(m_view->currentIndex());
+    connect(copyShortcut, &QShortcut::activated, this, [this, atomCopyText]() {
+        const QString text = atomCopyText(m_view->currentIndex());
         if (!text.isEmpty())
             QApplication::clipboard()->setText(text);
     });
@@ -181,16 +191,17 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
 {
     m_model->clear();
     if (!isPartitionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "VPR Names" << "Partitions");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "Type" << "Partitions");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "VPR Names");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "Type");
         m_view->header()->setVisible(false);
     }
 
     QHeaderView* header = m_view->header();
     header->setStretchLastSection(true);
     header->setSectionResizeMode(Column::Netlist, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(Column::VprNames, QHeaderView::Stretch);
+    header->setSectionResizeMode(Column::AtomList, QHeaderView::Stretch);
+    header->setSectionResizeMode(Column::AtomType, QHeaderView::ResizeToContents);
     if (!isPartitionsColumnHidden()) {
         header->setSectionResizeMode(Column::Partitions, QHeaderView::Stretch);
     }
@@ -199,7 +210,7 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     for (const std::string& element: elements) {
         addPath(element);
     }
-    populateVprNamesColumn();
+    populateAtomColumns();
     blocker.unblock();
 
     // completer
@@ -449,13 +460,15 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 
         QStandardItem* item = new QStandardItem(text);
         applyFlags(item);
-        QStandardItem* vprNamesItem = new QStandardItem("");
-        vprNamesItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        QStandardItem* atomListItem = new QStandardItem("");
+        atomListItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        QStandardItem* atomTypeItem = new QStandardItem("");
+        atomTypeItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         if (isPartitionColumnVisible) {
             QStandardItem* partitionItem = new QStandardItem("");
-            parent->appendRow({item, vprNamesItem, partitionItem});
+            parent->appendRow({item, atomListItem, atomTypeItem, partitionItem});
         } else {
-            parent->appendRow({item, vprNamesItem});
+            parent->appendRow({item, atomListItem, atomTypeItem});
         }
         return item;
     };
@@ -499,7 +512,7 @@ void SynthResourceHierarchyWidget::setAtomNames(std::map<std::string, std::vecto
     m_hasAtomNames = true;
 }
 
-void SynthResourceHierarchyWidget::populateVprNamesColumn()
+void SynthResourceHierarchyWidget::populateAtomColumns()
 {
     if (!m_hasAtomNames) return;
 
@@ -532,25 +545,30 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
             } else if (!names.empty()) {
                 if (isLeaf) {
                     if (names.size() == 1) {
-                        // Single VPR name: show directly in column 2, no child row
-                        if (QStandardItem* vprItem = item->child(row, Column::VprNames))
-                            vprItem->setText(QString::fromStdString(*names.begin()));
+                        // Single atom: show directly in this row, no child row needed
+                        const std::string& name = *names.begin();
+                        if (QStandardItem* atomItem = item->child(row, Column::AtomList))
+                            atomItem->setText(QString::fromStdString(name));
+                        if (QStandardItem* typeItem = item->child(row, Column::AtomType))
+                            typeItem->setText(classifyAtomType(name));
                     } else {
-                        // Multiple VPR names: one child row each so each can be selected and copied
+                        // Multiple atoms: one child row each so each can be selected and copied
                         for (const auto& n : names) {
                             auto* col0 = new QStandardItem();
                             col0->setFlags(Qt::ItemIsEnabled);
                             col0->setData(true, kVprDisplayRowRole);
                             auto* col1 = new QStandardItem(QString::fromStdString(n));
                             col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                            auto* col2 = new QStandardItem(classifyAtomType(n));
+                            col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                             if (partitionsVisible)
-                                child->appendRow({col0, col1, new QStandardItem()});
+                                child->appendRow({col0, col1, col2, new QStandardItem()});
                             else
-                                child->appendRow({col0, col1});
+                                child->appendRow({col0, col1, col2});
                         }
                     }
                 }
-                // Non-leaf: VPR Names cell is intentionally left empty —
+                // Non-leaf: Atom List/Type cells are intentionally left empty —
                 // a comma-separated list of all descendant atoms is unreadable.
             }
             populateRecursive(child, path);

@@ -27,8 +27,9 @@ class SynthResourceHierarchyWidget : public QWidget {
 
     enum Column {
       Netlist = 0,
-      VprNames = 1,
-      Partitions = 2
+      AtomList = 1,
+      AtomType = 2,
+      Partitions = 3
     };
 public:
     enum Flag {
@@ -46,10 +47,8 @@ public:
     }
     void build(const NaturalStringSet& elements);
 
-    // [aurora2#1725] Populates the "VPR Names" column: RTL path -> the atom names it
-    // covers. No data source exists yet -- P3 (atomsets.json) is not implemented -- so
-    // nothing calls this today and the column stays blank. This is the intended hook
-    // for wiring that stage up once it exists.
+    // [aurora2#1725 stage P3] Populates the "Atom List" and "Type" columns: RTL path ->
+    // the atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
@@ -81,7 +80,7 @@ private:
 
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
-    void populateVprNamesColumn();
+    void populateAtomColumns();
 
     void addPath(const std::string&);
     void onItemChanged(QStandardItem*, bool reportChanges);

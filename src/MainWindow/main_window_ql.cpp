@@ -2326,13 +2326,13 @@ void MainWindow::floorPlanningActionTriggered()
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
-    // [aurora2#1725 stage P3] "VPR Names" column: RTL instance -> the exact atoms
-    // belonging to it, straight from atomsets.json (aurora_atomsets.tcl, in-session,
-    // stage P3). Only available post-synthesis; pre-synthesis there's no atom data
-    // yet, so setAtomNames() is simply not called and every leaf stays visible (see
-    // SynthResourceHierarchyWidget::populateVprNamesColumn()'s early-return on
-    // !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
-    // populateVprNamesColumn() itself, so the atom-name map has to already be set.
+    // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
+    // atoms belonging to it, straight from atomsets.json (aurora_atomsets.tcl,
+    // in-session, stage P3). Only available post-synthesis; pre-synthesis there's no
+    // atom data yet, so setAtomNames() is simply not called and every leaf stays
+    // visible (see SynthResourceHierarchyWidget::populateAtomColumns()'s early-return
+    // on !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
+    // populateAtomColumns() itself, so the atom-name map has to already be set.
     std::filesystem::path atomsetsJsonPath =
         std::filesystem::path(compiler->ProjManager()->projectPath()) / "atomsets.json";
     if (FileUtils::FileExists(atomsetsJsonPath)) {

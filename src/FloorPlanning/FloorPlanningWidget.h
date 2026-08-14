@@ -34,8 +34,8 @@ public:
 
     void loadNetList(const NaturalStringSet& elements);
 
-    // [aurora2#1725] Feeds the "VPR Names" column: RTL path -> the atom names it
-    // covers. No data source exists yet -- P3 (atomsets.json) is not implemented.
+    // [aurora2#1725 stage P3] Feeds the "Atom List"/"Type" columns: RTL path -> the
+    // atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
