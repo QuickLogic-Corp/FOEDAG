@@ -46,16 +46,21 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
     return prefix.empty() ? name : (prefix + "." + name);
 }
 
-// [aurora2#1725] Resource summary for the partition view label, e.g. "180 clb, 16
-// dsp" -- clb/dsp/bram omitted individually when zero (a partition with no DSP
-// atoms shouldn't claim "0 dsp"). Reads Partition's own running counts (kept in
-// sync as elements are added -- see Partition::addElement()) rather than
-// recomputing them here, so every consumer of these numbers agrees.
+// [aurora2#1725] Resource summary for the partition view label, e.g. "clb 180 of
+// 224, dsp 16 of 20" -- required vs. available per type, individually omitted when
+// required is zero (a partition with no DSP atoms shouldn't claim "dsp 0 of 20").
+// Reads Partition's own counts (kept in sync as elements/regions change -- see
+// Partition::addElement() and *AvailableCount()) rather than recomputing them here,
+// so every consumer of these numbers agrees. required > available for any of these
+// is also what DeviceGrid::checkIssues() reports as a partition error.
 QString partitionResourceCountsText(const PartitionPtr& partition) {
     QStringList parts;
-    if (partition->clbRequiredCount() != 0) parts << QString("%1 clb").arg(partition->clbRequiredCount());
-    if (partition->dspRequiredCount() != 0) parts << QString("%1 dsp").arg(partition->dspRequiredCount());
-    if (partition->bramRequiredCount() != 0) parts << QString("%1 bram").arg(partition->bramRequiredCount());
+    if (partition->clbRequiredCount() != 0)
+        parts << QString("clb %1 of %2").arg(partition->clbRequiredCount()).arg(partition->clbAvailableCount());
+    if (partition->dspRequiredCount() != 0)
+        parts << QString("dsp %1 of %2").arg(partition->dspRequiredCount()).arg(partition->dspAvailableCount());
+    if (partition->bramRequiredCount() != 0)
+        parts << QString("bram %1 of %2").arg(partition->bramRequiredCount()).arg(partition->bramAvailableCount());
     return parts.join(", ");
 }
 

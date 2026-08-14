@@ -263,6 +263,20 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
+        // [aurora2#1725] required vs. available resources -- a partition whose
+        // regions don't have room for the atoms assigned to it can never be placed,
+        // so this is an error, not a warning, same severity as the presence checks
+        // above.
+        auto checkResource = [&](const char* label, int required, int available) {
+            if (required > available) {
+                m_issues->errors.insert({"Partition '" + partition->name() + "' needs " +
+                                          std::to_string(required) + " " + label + " but only " +
+                                          std::to_string(available) + " available", ""});
+            }
+        };
+        checkResource("clb", partition->clbRequiredCount(), partition->clbAvailableCount());
+        checkResource("dsp", partition->dspRequiredCount(), partition->dspAvailableCount());
+        checkResource("bram", partition->bramRequiredCount(), partition->bramAvailableCount());
     }
 
     // tiles overlapping between different partitions
