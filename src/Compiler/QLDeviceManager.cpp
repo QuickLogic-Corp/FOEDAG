@@ -31,6 +31,7 @@
 #include <thread>
 #include <cstring>
 #include <cstdint>
+#include <cerrno>
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
@@ -3156,6 +3157,15 @@ bool acquireRegistryLock(const std::filesystem::path& lock_file_path) {
       return true;
     }
 
+    // only EEXIST means somebody else holds the lock. anything else (a missing parent
+    // directory, no permission) will never resolve by waiting, so fail immediately instead of
+    // spinning until the timeout and reporting misleading "lock contention".
+    if(errno != EEXIST) {
+      std::cout << "ERROR: cannot create device root registry lock: "
+                << lock_file_path.string() << " (" << std::strerror(errno) << ")" << std::endl;
+      return false;
+    }
+
     // someone holds it. if the lock is old enough that its owner has almost certainly died,
     // break it rather than making the user wait forever on a crashed process.
     std::error_code ec;
@@ -3318,9 +3328,19 @@ bool QLDeviceManager::registerDeviceRoot(const std::filesystem::path& root_dir_p
     return false;
   }
 
+  // the lock lives beside the registry, so its directory must exist before we can take it.
+  // on a machine that has never installed a device there is no ~/.aurora yet.
+  std::error_code registry_dir_ec;
+  std::filesystem::create_directories(registry_file_path.parent_path(), registry_dir_ec);
+  if(registry_dir_ec) {
+    std::cout << "WARNING: could not create " << registry_file_path.parent_path().string()
+              << " (" << registry_dir_ec.message() << ")" << std::endl;
+    return false;
+  }
+
   std::filesystem::path registry_lock_file_path = registry_file_path.string() + ".lock";
   if(!acquireRegistryLock(registry_lock_file_path)) {
-    std::cout << "ERROR: timed out waiting for the device root registry lock: "
+    std::cout << "ERROR: could not take the device root registry lock: "
               << registry_lock_file_path.string() << std::endl;
     return false;
   }
@@ -3358,9 +3378,15 @@ bool QLDeviceManager::unregisterDeviceRoot(const std::filesystem::path& root_dir
     return false;
   }
 
+  std::error_code registry_dir_ec;
+  std::filesystem::create_directories(registry_file_path.parent_path(), registry_dir_ec);
+  if(registry_dir_ec) {
+    return false;
+  }
+
   std::filesystem::path registry_lock_file_path = registry_file_path.string() + ".lock";
   if(!acquireRegistryLock(registry_lock_file_path)) {
-    std::cout << "ERROR: timed out waiting for the device root registry lock: "
+    std::cout << "ERROR: could not take the device root registry lock: "
               << registry_lock_file_path.string() << std::endl;
     return false;
   }
