@@ -124,6 +124,13 @@ void DeviceGrid::refreshPartition(const PartitionPtr& partition)
     }
 }
 
+void DeviceGrid::refreshPartitions()
+{
+    for (const auto& [id, partition]: m_partitions) {
+        refreshPartition(partition);
+    }
+}
+
 bool DeviceGrid::removeRegion(const RegionPtr& region)
 {
   const PartitionPtr& p = partition(region->partitionId());

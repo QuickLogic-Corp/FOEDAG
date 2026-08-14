@@ -42,6 +42,7 @@ public:
     void removePartition(const PartitionPtr&);
     const PartitionPtr& partition(int partitionId) const;
     void refreshPartition(const PartitionPtr&);
+    void refreshPartitions();
 
     bool removeRegion(const RegionPtr&);
 
