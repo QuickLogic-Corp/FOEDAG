@@ -46,14 +46,17 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
     return prefix.empty() ? name : (prefix + "." + name);
 }
 
-// Classifies an atom by the hard-block primitive embedded in its name (see
-// dspv2_sim.v / brams_final_map.v in the device data): every DSP primitive variant
-// is named "QL_DSPV2*", and every BRAM macro techmaps down to "TDP_ECC36K". Anything
-// else (luts, adder_carry, sdffre, ...) packs into ordinary CLB fabric.
-QString classifyAtomType(const std::string& atomName) {
-    if (atomName.find("QL_DSPV2") != std::string::npos) return "dsp";
-    if (atomName.find("TDP_ECC36K") != std::string::npos) return "bram";
-    return "clb";
+// [aurora2#1725] Resource summary for the partition view label, e.g. "180 clb, 16
+// dsp" -- clb/dsp/bram omitted individually when zero (a partition with no DSP
+// atoms shouldn't claim "0 dsp"). Reads Partition's own running counts (kept in
+// sync as elements are added -- see Partition::addElement()) rather than
+// recomputing them here, so every consumer of these numbers agrees.
+QString partitionResourceCountsText(const PartitionPtr& partition) {
+    QStringList parts;
+    if (partition->clbCount() != 0) parts << QString("%1 clb").arg(partition->clbCount());
+    if (partition->dspCount() != 0) parts << QString("%1 dsp").arg(partition->dspCount());
+    if (partition->bramCount() != 0) parts << QString("%1 bram").arg(partition->bramCount());
+    return parts.join(", ");
 }
 
 void uncheckAllRecursive(QStandardItem* item, int col) {
@@ -818,7 +821,15 @@ void SynthResourceHierarchyWidget::updateViewLabel() const {
     if (!m_viewLabelTemplate.isEmpty()) {
       QString label{m_viewLabelTemplate};
         if (m_selectedPartition) {
-            m_lbView->setText(label.replace("%1", QString::fromStdString(m_selectedPartition->name())));
+            label.replace("%1", QString::fromStdString(m_selectedPartition->name()));
+            // [aurora2#1725] "Partition 'name' netlist: 180 clb, 16 dsp" -- appended
+            // rather than templated (%2) because it disappears entirely, not just
+            // going blank, when the partition has no atoms of a given type.
+            const QString counts = partitionResourceCountsText(m_selectedPartition);
+            if (!counts.isEmpty()) {
+                label += " " + counts;
+            }
+            m_lbView->setText(label);
         } else {
             m_lbView->setText(label.replace("'%1'", ""));
         }
