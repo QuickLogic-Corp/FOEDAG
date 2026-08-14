@@ -1042,7 +1042,8 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
           return TCL_ERROR;
         }
         target_dir_path = argv[++i];
-      } else if (compiler->ToLower(tok).compare("force") == 0) {
+      } else if (compiler->ToLower(tok).compare("force") == 0 ||
+                 tok == "-force" || tok == "--force") {
         force = true;
       } else {
         positional.push_back(tok);
@@ -1082,7 +1083,7 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
       std::string tok = compiler->ToLower(std::string(argv[i]));
       if (tok == "dry-run" || tok == "dry_run" || tok == "-dry-run" || tok == "--dry-run") {
         dry_run = true;
-      } else if (tok == "force") {
+      } else if (tok == "force" || tok == "-force" || tok == "--force") {
         force = true;
       } else {
         positional.push_back(argv[i]);

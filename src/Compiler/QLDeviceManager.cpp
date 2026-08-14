@@ -2050,6 +2050,27 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                   std::regex::icase))) {
             continue;
           }
+          // skip 'tileable_rrgraph/' and any spreadsheet in the device tree.
+          // SECURITY: the switchbox_*.xlsx under tileable_rrgraph are the PLAINTEXT source
+          // that the encrypted CSV/** files are generated from. shipping them would hand over
+          // exactly the proprietary routing data the CSV encryption exists to protect.
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]tileable_rrgraph[\/\\].*)",
+                                std::regex::icase))) {
+            continue;
+          }
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*\\.xlsx", std::regex::icase))) {
+            continue;
+          }
+          // skip provenance and readme files. these are upstream bookkeeping, and no device
+          // shipped in the installation carries them - the kit manifest records provenance.
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*\\.sha", std::regex::icase)) ||
+              std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*\\.md", std::regex::icase))) {
+            continue;
+          }
 
           // include all files in 'CSV/' for encryption, required for RRG generation
           if (std::regex_match(dir_entry.path().string(),
@@ -2088,11 +2109,11 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           // decompressed one behind. so match the artifact by name in any form rather than
           // enumerating extensions - and mark it EXCLUDED so it does not get reported as
           // unclassified on every package of those devices.
+          // match the graph BINARY and its compressed/split forms only - the pattern must
+          // contain "bin". matching any extension would also swallow router_lookahead.capnp
+          // and silently disable the .capnp ENCRYPTION rule below.
           if (std::regex_match(dir_entry.path().filename().string(),
-                                  std::regex(".*rr_graph.*",
-                                  std::regex::icase)) ||
-              std::regex_match(dir_entry.path().filename().string(),
-                                  std::regex(".*router_lookahead.*",
+                                  std::regex(".*(rr_graph|router_lookahead)\\..*bin.*",
                                   std::regex::icase))) {
 
             if (is_crr_device) {
@@ -3036,29 +3057,7 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
     }
   }
 
-  // ---- [6] already installed? -----------------------------------------------------------
-  std::filesystem::path installed_device_dir_path =
-      target_path / family / foundry / node / devicename;
-
-  if(std::filesystem::exists(installed_device_dir_path, ec)) {
-    if(!force) {
-      compiler->ErrorMessage("this device is already installed at the target.");
-      compiler->Message("device: " + device_type_string);
-      compiler->Message("path:   " + installed_device_dir_path.string());
-      compiler->Message("Please specify 'force' to replace it.");
-      return -1;
-    }
-    compiler->Message("WARNING: replacing the device already installed at " +
-                      installed_device_dir_path.string());
-    std::filesystem::remove_all(installed_device_dir_path, ec);
-    if(ec) {
-      compiler->ErrorMessage("could not replace the installed device: " + ec.message());
-      return -1;
-    }
-    ec.clear();
-  }
-
-  // ---- [7] reject a kit that would write outside the target ------------------------------
+  // ---- [6] reject a kit that would write outside the target ------------------------------
   // list the archive first: an absolute path or a '..' component would let a crafted kit
   // escape the target directory. the checksum only proves the kit is intact, not benign.
   std::string listing_text;
@@ -3082,6 +3081,31 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
         return -1;
       }
     }
+  }
+
+  // ---- [7] already installed? -----------------------------------------------------------
+  std::filesystem::path installed_device_dir_path =
+      target_path / family / foundry / node / devicename;
+
+  // NOTE this runs AFTER the archive has been validated: with 'force' it deletes the
+  // device that is already installed, and deleting it before knowing the replacement is
+  // usable would leave the customer with nothing.
+  if(std::filesystem::exists(installed_device_dir_path, ec)) {
+    if(!force) {
+      compiler->ErrorMessage("this device is already installed at the target.");
+      compiler->Message("device: " + device_type_string);
+      compiler->Message("path:   " + installed_device_dir_path.string());
+      compiler->Message("Please specify 'force' to replace it.");
+      return -1;
+    }
+    compiler->Message("WARNING: replacing the device already installed at " +
+                      installed_device_dir_path.string());
+    std::filesystem::remove_all(installed_device_dir_path, ec);
+    if(ec) {
+      compiler->ErrorMessage("could not replace the installed device: " + ec.message());
+      return -1;
+    }
+    ec.clear();
   }
 
   // ---- [8] extract. NO re-encryption: the kit is already encrypted ----------------------
