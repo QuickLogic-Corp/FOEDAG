@@ -53,6 +53,11 @@
 
 extern FOEDAG::Session* GlobalSession;
 
+// defined at global scope in foedag_version_number_ql.cpp. declared here rather than inside
+// namespace FOEDAG below: a declaration in the namespace names a different symbol and fails
+// to link.
+extern const char* foedag_version_number;
+
 namespace FOEDAG {
 
 
@@ -2982,7 +2987,6 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
 
   if(!min_aurora_version.empty()) {
 
-    extern const char* foedag_version_number;
     std::string running_aurora_version(foedag_version_number);
 
     if(compareAuroraVersions(running_aurora_version, min_aurora_version) < 0) {
