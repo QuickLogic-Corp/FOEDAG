@@ -2870,8 +2870,14 @@ bool runCommandCaptureOutput(const std::string& command,
                              const std::vector<std::string>& args,
                              std::string& out_text) {
 
+  // capture stderr SEPARATELY. with a null error stream the child's stderr is folded into
+  // stdout, and tar routinely writes warnings there ("Removing leading '../' from member
+  // names") - which would then be parsed as archive content and, in the traversal check,
+  // rejected as an unsafe entry even for a benign kit.
   std::ostringstream command_output;
-  int status = FileUtils::ExecuteSystemCommand(command, args, &command_output, -1).code;
+  std::ostringstream command_error;
+  int status = FileUtils::ExecuteSystemCommand(command, args, &command_output, -1,
+                                               /*workingDir*/ std::string(), &command_error).code;
 
   out_text = command_output.str();
 
