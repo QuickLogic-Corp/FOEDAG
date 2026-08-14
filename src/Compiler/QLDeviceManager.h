@@ -188,6 +188,18 @@ class QLDeviceManager : public QObject {
   // kept for the many call sites that legitimately want a single root.
   std::filesystem::path deviceDataRootDirPath();
 
+  // install a device kit (.tar.gz produced by 'generate_device_kit') into a directory of the
+  // user's choosing, OUTSIDE the Aurora installation, and register that directory so the
+  // device is visible in later sessions without the user setting anything.
+  //
+  // the kit is already encrypted: this places files, it does not transform them. that is why
+  // addDevice() cannot be reused - it re-encrypts on the way in and would need the plaintext
+  // the customer does not have.
+  //
+  // returns 0 on success, -1 on failure. nothing is written to the target unless the archive
+  // checksum, the manifest and the Aurora version check all pass first.
+  int installDevice(std::string kit_archive_path, std::string target_dir_path, bool force);
+
   // --- external device data root registry (per-user) -------------------------------------
   // install_device records the directory it installed into here, so the device stays visible
   // in later sessions without the user setting anything. uninstall_device removes it again.
