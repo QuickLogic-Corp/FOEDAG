@@ -2825,28 +2825,64 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
 
   std::vector<std::filesystem::path> root_device_data_dir_path_list;
 
-  // [1] $AURORA2_DEVICE_DATA_DIR is an EXCLUSIVE override when set and valid.
-  //     this is deliberate and must not change: the device-data validation gate and the
-  //     on-demand benchmark both swap device trees by pointing this at another directory,
-  //     and they rely on it REPLACING the device set rather than adding to it.
+  std::error_code root_ec;
+
+  // the installation's own device_data dir - needed up front to recognise the setup.sh default.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, root_ec);
+  if(root_ec) {
+    installation_root_dir_path_c = installation_root_dir_path;
+    root_ec.clear();
+  }
+
+  // [1] $AURORA2_DEVICE_DATA_DIR is an EXCLUSIVE override - but ONLY when it points somewhere
+  //     other than the installation's own device_data.
+  //
+  //     scripts/setup.sh sets this variable unconditionally, defaulting it to
+  //     "${AURORA2_ROOT}/device_data/", so it is set in every normal session. Treating that
+  //     default as an override would make the exclusive branch permanently active and leave
+  //     multi-root discovery unreachable - registered roots and AURORA2_DEVICE_DATA_PATH would
+  //     silently never be consulted.
+  //
+  //     when a user or CI job points it at a DIFFERENT tree (the device-data validation gate
+  //     and the on-demand benchmark both do exactly this) it stays fully exclusive, replacing
+  //     the device set as before.
   const char* const path_device_data_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
 
-  if (path_device_data_env_str != nullptr) {
+  if (path_device_data_env_str != nullptr && std::string(path_device_data_env_str).size() > 0) {
 
     std::filesystem::path env_root_device_data_dir_path = std::string(path_device_data_env_str);
 
     if(FileUtils::FileExists(env_root_device_data_dir_path)) {
 
-      // exclusive: return immediately, ignoring every other source of roots.
-      root_device_data_dir_path_list.push_back(env_root_device_data_dir_path);
-      return root_device_data_dir_path_list;
-    }
+      // canonicalize before comparing: setup.sh supplies a trailing slash, and the path may
+      // also differ by symlinks or '..' while naming the same directory.
+      std::filesystem::path env_root_device_data_dir_path_c =
+          std::filesystem::canonical(env_root_device_data_dir_path, root_ec);
+      if(root_ec) {
+        env_root_device_data_dir_path_c = env_root_device_data_dir_path;
+        root_ec.clear();
+      }
 
-    // an env var pointing at a path that does not exist used to be silently ignored.
-    // say so instead - a mistyped AURORA2_DEVICE_DATA_DIR otherwise looks like
-    // "my devices vanished" with no explanation.
-    std::cout << "WARNING: AURORA2_DEVICE_DATA_DIR does not exist, ignoring it: "
-              << env_root_device_data_dir_path.string() << std::endl;
+      if(env_root_device_data_dir_path_c != installation_root_dir_path_c) {
+
+        // a genuine override: return immediately, ignoring every other source of roots.
+        root_device_data_dir_path_list.push_back(env_root_device_data_dir_path_c);
+        return root_device_data_dir_path_list;
+      }
+
+      // else: this is just the setup.sh default naming the installation. fall through and
+      // build the additive list, with the installation first as usual.
+    }
+    else {
+
+      // an env var pointing at a path that does not exist used to be silently ignored.
+      // say so instead - a mistyped AURORA2_DEVICE_DATA_DIR otherwise looks like
+      // "my devices vanished" with no explanation.
+      std::cout << "WARNING: AURORA2_DEVICE_DATA_DIR does not exist, ignoring it: "
+                << env_root_device_data_dir_path.string() << std::endl;
+    }
   }
 
   // collected roots are canonicalized and de-duplicated: the same directory reached twice
@@ -2883,7 +2919,7 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
 
   // [2] the installation's device_data dir always comes first among the additive roots:
   //     built-in devices are authoritative and can never be shadowed by an external root.
-  append_root_dir_path(GlobalSession->Context()->DataPath(), "installation", false);
+  append_root_dir_path(installation_root_dir_path, "installation", false);
 
   // [3] roots registered by install_device. a registered root that has been deleted or moved
   //     warns and is skipped - a stale entry must never break startup (REQ-007).
