@@ -950,59 +950,92 @@ void QLDeviceManager::parseDeviceData() {
 
   std::error_code ec;
 
-  // get to the device_data dir path of the installation
-  std::filesystem::path root_device_data_dir_path = deviceDataRootDirPath();
+  // get all the device_data root dir paths to search, in precedence order
+  std::vector<std::filesystem::path> root_device_data_dir_path_list = deviceDataRootDirPathList();
 
   // clear the list before parsing
   device_list.clear();
 
+  // devices already discovered, keyed by device type string, so that the same device
+  // appearing in two roots is reported rather than silently duplicated (REQ-006).
+  std::set<std::string> discovered_device_type_set;
+
   // each dir in the device_data is a family
   //    for each family, check for foundry dirs
-  //      for each foundry, check for node 
-  //        for each node, check for devicename 
+  //      for each foundry, check for node
+  //        for each node, check for devicename
   //          for each family-foundry-node-devicename dir, check the device_variants
-  
+
+  // walk every root. roots earlier in the list win: the installation is first, so a device
+  // shipped with the installation can never be shadowed by an externally installed one.
+  for (const std::filesystem::path& root_device_data_dir_path : root_device_data_dir_path_list) {
+
   // look at the directories inside the device_data_dir_path for 'family' entries
-  for (const std::filesystem::directory_entry& dir_entry_family : 
-                    std::filesystem::directory_iterator(root_device_data_dir_path)) {
-    
+  // NOTE: the error_code overload is required here - a registered root that has been
+  // deleted or made unreadable must warn and be skipped, never abort startup (REQ-007).
+  std::filesystem::directory_iterator root_dir_iterator =
+                    std::filesystem::directory_iterator(root_device_data_dir_path, ec);
+  if(ec) {
+    std::cout << "WARNING: skipping unreadable device data root: "
+              << root_device_data_dir_path.string() << " (" << ec.message() << ")" << std::endl;
+    ec.clear();
+    continue;
+  }
+
+  for (const std::filesystem::directory_entry& dir_entry_family : root_dir_iterator) {
+
     if(dir_entry_family.is_directory()) {
-      
+
       // we would see family at this level
       family = dir_entry_family.path().filename().string();
 
       // look at the directories inside the 'family' dir for 'foundry' entries
-      for (const std::filesystem::directory_entry& dir_entry_foundry : 
-                    std::filesystem::directory_iterator(dir_entry_family.path())) {
+      for (const std::filesystem::directory_entry& dir_entry_foundry :
+                    std::filesystem::directory_iterator(dir_entry_family.path(), ec)) {
 
         if(dir_entry_foundry.is_directory()) {
-      
+
           // we would see foundry at this level
           foundry = dir_entry_foundry.path().filename().string();
 
           // look at the directories inside the 'foundry' dir for 'node' entries
-          for (const std::filesystem::directory_entry& dir_entry_node : 
-                          std::filesystem::directory_iterator(dir_entry_foundry.path())) {
+          for (const std::filesystem::directory_entry& dir_entry_node :
+                          std::filesystem::directory_iterator(dir_entry_foundry.path(), ec)) {
 
             if(dir_entry_node.is_directory()) {
-            
+
               // we would see devicenames at this level
               node = dir_entry_node.path().filename().string();
 
               // look at the directories inside the 'node' dir for 'devicename' entries
-              for (const std::filesystem::directory_entry& dir_entry_devicename : 
-                              std::filesystem::directory_iterator(dir_entry_node.path())) {
+              for (const std::filesystem::directory_entry& dir_entry_devicename :
+                              std::filesystem::directory_iterator(dir_entry_node.path(), ec)) {
 
                 if(dir_entry_devicename.is_directory()) {
-                
+
                   // we would see devices at this level
                   devicename = dir_entry_devicename.path().filename().string();
 
-                  // get all the device_variants for this device:
-                  std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+                  // if this device type was already found in an earlier (higher precedence)
+                  // root, report the shadowing and keep the first one. resolving this
+                  // silently is what makes "why is my flow using the wrong device data?"
+                  // impossible to debug.
+                  std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
+                  if(discovered_device_type_set.count(device_type_string) > 0) {
+                    std::cout << "WARNING: ignoring shadowed device: " << device_type_string << std::endl;
+                    std::cout << "         already found in a higher precedence device data root;" << std::endl;
+                    std::cout << "         ignored copy: " << dir_entry_devicename.path().string() << std::endl;
+                    continue;
+                  }
+
+                  // get all the device_variants for this device, resolved against the
+                  // device dir we are actually standing in - NOT re-derived from a global
+                  // root, which would read another root's files for a shadowed device.
+                  std::vector<QLDeviceVariant> device_variants = listDeviceVariantsInDeviceDirectory(family,
                                                                                     foundry,
                                                                                     node,
-                                                                                    devicename);
+                                                                                    devicename,
+                                                                                    dir_entry_devicename.path());
 
                   if(device_variants.empty()) {
                     // display error, but continue with other devices.
@@ -1016,8 +1049,12 @@ void QLDeviceManager::parseDeviceData() {
                     device.node = node;
                     device.devicename = devicename;
                     device.device_variants = device_variants;
+                    // remember which root this device came from, so that every path and key
+                    // lookup for it resolves against its own root.
+                    device.device_root_path = root_device_data_dir_path;
 
                     device_list.push_back(device);
+                    discovered_device_type_set.insert(device_type_string);
                   }
                 }
               }
@@ -1027,6 +1064,8 @@ void QLDeviceManager::parseDeviceData() {
       }
     }
   }
+
+  } // for each device_data root
 
 
   // parse resources information for each device variant in the device_list:
@@ -1270,12 +1309,15 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
     device_variant.p_v_t_corner = p_v_t_corner;
 
     // list and store all the layouts available in this device_variant:
+    // pass the device dir we were given: this device may live in an external root, and its
+    // encrypted vpr.xml can only be decrypted with the _Supp.db sitting beside it.
     device_variant.device_variant_layouts = listDeviceVariantLayouts(family,
                                                                      foundry,
                                                                      node,
                                                                      devicename,
                                                                      voltage_threshold,
-                                                                     p_v_t_corner);
+                                                                     p_v_t_corner,
+                                                                     device_data_dir_path_c);
 
     // add the variant to the list
     device_variants.push_back(device_variant);
@@ -1291,9 +1333,10 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
     std::string node,
     std::string devicename) {
 
-  // get to the device_data dir path of the installation
-  std::filesystem::path root_device_data_dir_path = 
-     deviceDataRootDirPath();
+  // get to the device_data dir path of the root that owns THIS device (falls back to the
+  // first root when the device is not in device_list yet)
+  std::filesystem::path root_device_data_dir_path =
+     deviceTypeRootDirPath(family, foundry, node, devicename);
 
   // calculate the device_data dir path for specified device
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
@@ -1310,13 +1353,20 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
                                                                              std::string node,
                                                                              std::string devicename,
                                                                              std::string voltage_threshold,
-                                                                             std::string p_v_t_corner) {
+                                                                             std::string p_v_t_corner,
+                                                                             std::filesystem::path device_data_dir_path) {
   std::vector<QLDeviceVariantLayout> device_variant_layouts = {};
-  
-  std::filesystem::path root_device_data_dir_path = 
-      deviceDataRootDirPath();
-  
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
+
+  // the caller normally supplies the device dir (it is mandatory while parsing device data,
+  // because the _Supp.db used to decrypt vpr.xml lives in that dir). when it is not given,
+  // resolve it against the root that owns this device.
+  if(device_data_dir_path.empty()) {
+
+    std::filesystem::path root_device_data_dir_path =
+        deviceTypeRootDirPath(family, foundry, node, devicename);
+
+    device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
+  }
 
   std::filesystem::path device_variant_dir = device_data_dir_path / voltage_threshold / p_v_t_corner;
 
@@ -2463,6 +2513,27 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
         //Message("\n");
     }
 
+    // the device may already exist in a LOWER precedence root (e.g. one registered by
+    // install_device). adding it here is allowed - the installation is authoritative - but
+    // the user needs to know the other copy is about to become invisible, otherwise a stale
+    // externally installed device silently stops being the one the flow uses.
+    for (const QLDeviceType& existing_device: device_list) {
+
+      if(existing_device.family == family &&
+         existing_device.foundry == foundry &&
+         existing_device.node == node &&
+         existing_device.devicename == devicename &&
+         !existing_device.device_root_path.empty() &&
+         existing_device.device_root_path != deviceDataRootDirPath()) {
+
+        compiler->Message("\nNOTE: this device also exists in another device data root, which will now be shadowed.");
+        compiler->Message("device:        " + device);
+        compiler->Message("shadowed root: " + existing_device.device_root_path.string());
+        compiler->Message("\n");
+        break;
+      }
+    }
+
     int status = encryptDevice(family, foundry, node, devicename,
                                device_data_source, target_device_data_dir_path.string());
 
@@ -2477,34 +2548,90 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
   }
 
 
- std::filesystem::path QLDeviceManager::deviceDataRootDirPath() {
+std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() {
 
-  std::filesystem::path root_device_data_dir_path;
+  std::vector<std::filesystem::path> root_device_data_dir_path_list;
 
-  // allow user to override the root device data path using an env variable.
-  // read env var
+  // [1] $AURORA2_DEVICE_DATA_DIR is an EXCLUSIVE override when set and valid.
+  //     this is deliberate and must not change: the device-data validation gate and the
+  //     on-demand benchmark both swap device trees by pointing this at another directory,
+  //     and they rely on it REPLACING the device set rather than adding to it.
   const char* const path_device_data_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
 
   if (path_device_data_env_str != nullptr) {
 
-    // convert to std::filesystem::path and check if the path exists
-    root_device_data_dir_path = std::string(path_device_data_env_str);
+    std::filesystem::path env_root_device_data_dir_path = std::string(path_device_data_env_str);
 
-    if(!FileUtils::FileExists(root_device_data_dir_path)) {
+    if(FileUtils::FileExists(env_root_device_data_dir_path)) {
 
-      root_device_data_dir_path.clear();
+      // exclusive: return immediately, ignoring every other source of roots.
+      root_device_data_dir_path_list.push_back(env_root_device_data_dir_path);
+      return root_device_data_dir_path_list;
+    }
+
+    // an env var pointing at a path that does not exist used to be silently ignored.
+    // say so instead - a mistyped AURORA2_DEVICE_DATA_DIR otherwise looks like
+    // "my devices vanished" with no explanation.
+    std::cout << "WARNING: AURORA2_DEVICE_DATA_DIR does not exist, ignoring it: "
+              << env_root_device_data_dir_path.string() << std::endl;
+  }
+
+  // [2] the installation's device_data dir always comes first among the additive roots:
+  //     built-in devices are authoritative and can never be shadowed by an external root.
+  root_device_data_dir_path_list.push_back(GlobalSession->Context()->DataPath());
+
+  // [3] roots registered by install_device, and
+  // [4] $AURORA2_DEVICE_DATA_PATH (additive)
+  // are appended here once the registry lands (A2).
+
+  return root_device_data_dir_path_list;
+}
+
+
+ std::filesystem::path QLDeviceManager::deviceDataRootDirPath() {
+
+  // the first root is the one that owns newly added devices, and the fallback for any
+  // device whose own root is not known.
+  std::vector<std::filesystem::path> root_device_data_dir_path_list = deviceDataRootDirPathList();
+
+  if(root_device_data_dir_path_list.empty()) {
+
+    // deviceDataRootDirPathList() always yields at least the installation root, so this is
+    // unreachable in practice - but returning a default-constructed path is safer than
+    // dereferencing an empty container.
+    return std::filesystem::path();
+  }
+
+  return root_device_data_dir_path_list.front();
+}
+
+
+std::filesystem::path QLDeviceManager::deviceTypeRootDirPath(const std::string& family,
+                                                             const std::string& foundry,
+                                                             const std::string& node,
+                                                             const std::string& devicename) {
+
+  // a device's root is a property of the device TYPE, so match on the 4 coordinates only.
+  // note this deliberately does not go through deviceTypeTreeElement(), which additionally
+  // requires a matching variant + layout and would fail for a device_target that carries no
+  // layout - and would be a triple-nested scan on a path that is called very often.
+  for (const QLDeviceType& device: device_list) {
+
+    if(device.family == family &&
+       device.foundry == foundry &&
+       device.node == node &&
+       device.devicename == devicename) {
+
+      if(!device.device_root_path.empty()) {
+        return device.device_root_path;
+      }
+      break;
     }
   }
 
-  // if we did not get the path from the env var
-  if(root_device_data_dir_path.empty()) {
-
-    // use the device_data dir path of the installation
-    root_device_data_dir_path = 
-        GlobalSession->Context()->DataPath();
-  }
-
-  return root_device_data_dir_path;
+  // not in device_list yet (parseDeviceData() still running), or discovered before roots
+  // were recorded: fall back to the first root.
+  return deviceDataRootDirPath();
 }
 
 
@@ -2711,13 +2838,19 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
     device_target = this->device_target;
   }
 
-  device_type_dir_path = 
-      std::filesystem::path(deviceDataRootDirPath() /
+  // resolve against the root this device was actually discovered under, so that a device
+  // installed into an external directory reads its own files - and, critically, its own
+  // _Supp.db key database, which every decrypt path derives from this dir.
+  device_type_dir_path =
+      std::filesystem::path(deviceTypeRootDirPath(device_target.device_variant.family,
+                                                  device_target.device_variant.foundry,
+                                                  device_target.device_variant.node,
+                                                  device_target.device_variant.devicename) /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /
                             device_target.device_variant.devicename);
-  
+
   return device_type_dir_path;
 }
 
@@ -2732,8 +2865,12 @@ std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget devic
     device_target = this->device_target;
   }
 
+  // same per-device root resolution as deviceTypeDirPath()
   device_variant_dir_path =
-      std::filesystem::path(deviceDataRootDirPath() /
+      std::filesystem::path(deviceTypeRootDirPath(device_target.device_variant.family,
+                                                  device_target.device_variant.foundry,
+                                                  device_target.device_variant.node,
+                                                  device_target.device_variant.devicename) /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /

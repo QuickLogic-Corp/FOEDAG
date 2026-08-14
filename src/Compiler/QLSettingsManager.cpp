@@ -1155,9 +1155,15 @@ void QLSettingsManager::updateJSONSettingsForDeviceTarget(QLDeviceTarget device_
   // if the device-type has changed (family/foundry/node/devicename) then the Settings may no longer be compatible
   // and we have to 'reset' the settings from the template JSON for the new device-type
 
-  std::filesystem::path root_device_data_dir_path = 
-      QLDeviceManager::getInstance()->deviceDataRootDirPath();
-  
+  // resolve against the root that owns this device rather than a global one: the device may
+  // have been installed into an external directory, and its templates live beside it.
+  // (this keeps multi-root knowledge confined to QLDeviceManager - see NFR-001.)
+  std::filesystem::path root_device_data_dir_path =
+      QLDeviceManager::getInstance()->deviceTypeRootDirPath(family_updated,
+                                                            foundry_updated,
+                                                            node_updated,
+                                                            devicename_updated);
+
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family_updated / foundry_updated / node_updated / devicename_updated;
 
   std::filesystem::path settings_json_template_filepath = device_data_dir_path / "aurora" / "settings_template.json";

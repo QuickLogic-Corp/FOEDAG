@@ -109,12 +109,18 @@ class QLDeviceManager : public QObject {
                                                  std::string node,
                                                  std::string devicename,
                                                  std::filesystem::path device_data_dir_path);
+  // 'device_data_dir_path' is the device-type directory (<root>/<family>/<foundry>/<node>/<devicename>)
+  // that this variant belongs to. it MUST be supplied while parsing device data, because the
+  // encrypted vpr.xml is decrypted using the _Supp.db key database that sits in that same
+  // directory - deriving it from a global root would read the wrong device's key under
+  // multi-root discovery. when left empty, the owning root is looked up by device coordinates.
   std::vector<QLDeviceVariantLayout> listDeviceVariantLayouts(std::string family,
                                                             std::string foundry,
                                                             std::string node,
                                                             std::string devicename,
                                                             std::string voltage_threshold,
-                                                            std::string p_v_t_corner);
+                                                            std::string p_v_t_corner,
+                                                            std::filesystem::path device_data_dir_path = std::filesystem::path());
   std::string DeviceString(std::string family,
                            std::string foundry,
                            std::string node,
@@ -165,7 +171,30 @@ class QLDeviceManager : public QObject {
   // device files access API to have a uniform way of getting the required files
   public:
 
+  // the ordered list of device-data roots that are searched for devices.
+  // order (highest precedence first):
+  //   [1] $AURORA2_DEVICE_DATA_DIR - when set and valid this is EXCLUSIVE: it replaces the
+  //       whole list, preserving the long-standing drop-in-place override behaviour that CI
+  //       and the device-data validation gate rely on.
+  //   [2] the installation's device_data dir (built-in devices, authoritative)
+  //   [3] roots registered by install_device (per-user registry)
+  //   [4] $AURORA2_DEVICE_DATA_PATH - additive, ':'-separated
+  // roots that do not exist are dropped here (with a warning), so callers never have to
+  // guard against a stale registry entry or a mistyped env var.
+  std::vector<std::filesystem::path> deviceDataRootDirPathList();
+
+  // first entry of deviceDataRootDirPathList(), i.e. the root that "owns" newly added
+  // devices and the fallback when a device's own root is not known.
+  // kept for the many call sites that legitimately want a single root.
   std::filesystem::path deviceDataRootDirPath();
+
+  // the root that the given device was actually discovered under, looked up from device_list
+  // by device coordinates. falls back to deviceDataRootDirPath() when the device is not (yet)
+  // in the list - which is the case while parseDeviceData() is still running.
+  std::filesystem::path deviceTypeRootDirPath(const std::string& family,
+                                              const std::string& foundry,
+                                              const std::string& node,
+                                              const std::string& devicename);
 
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
 
