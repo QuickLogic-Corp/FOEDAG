@@ -3233,15 +3233,22 @@ int QLDeviceManager::uninstallDevice(std::string family, std::string foundry, st
   }
 
   // if this root holds no further devices, stop searching it.
+  //
+  // ask the FILESYSTEM, not device_list: a device in this root that is shadowed by one in a
+  // higher precedence root is deliberately absent from device_list, so trusting the list here
+  // would deregister a root that still holds devices - and they would become invisible if the
+  // shadowing device were ever removed.
   bool root_has_devices = false;
-  for (const QLDeviceType& device: device_list) {
-    if(device.device_root_path == device_root_dir_path &&
-       !(device.family == family && device.foundry == foundry &&
-         device.node == node && device.devicename == devicename)) {
+  for (const std::filesystem::directory_entry& remaining_entry :
+           std::filesystem::recursive_directory_iterator(device_root_dir_path,
+               std::filesystem::directory_options::skip_permission_denied, ec)) {
+    if(remaining_entry.is_regular_file(ec) &&
+       remaining_entry.path().filename() == "config.json") {
       root_has_devices = true;
       break;
     }
   }
+  ec.clear();
 
   if(!root_has_devices) {
     if(unregisterDeviceRoot(device_root_dir_path)) {
