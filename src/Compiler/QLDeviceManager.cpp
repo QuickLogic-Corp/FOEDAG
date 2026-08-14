@@ -3092,11 +3092,12 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
   // usable would leave the customer with nothing.
   if(std::filesystem::exists(installed_device_dir_path, ec)) {
     if(!force) {
-      compiler->ErrorMessage("this device is already installed at the target.");
-      compiler->Message("device: " + device_type_string);
+      // idempotent: installing an already-installed device is a NO-OP that SUCCEEDS, so
+      // re-running an install script does not fail (REQ-030). use 'force' to replace it.
+      compiler->Message("device is already installed, nothing to do: " + device_type_string);
       compiler->Message("path:   " + installed_device_dir_path.string());
-      compiler->Message("Please specify 'force' to replace it.");
-      return -1;
+      compiler->Message("Specify 'force' to replace it with this kit.");
+      return 0;
     }
     compiler->Message("WARNING: replacing the device already installed at " +
                       installed_device_dir_path.string());
