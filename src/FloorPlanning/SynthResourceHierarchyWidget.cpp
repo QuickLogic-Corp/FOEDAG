@@ -53,9 +53,9 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
 // recomputing them here, so every consumer of these numbers agrees.
 QString partitionResourceCountsText(const PartitionPtr& partition) {
     QStringList parts;
-    if (partition->clbCount() != 0) parts << QString("%1 clb").arg(partition->clbCount());
-    if (partition->dspCount() != 0) parts << QString("%1 dsp").arg(partition->dspCount());
-    if (partition->bramCount() != 0) parts << QString("%1 bram").arg(partition->bramCount());
+    if (partition->clbRequiredCount() != 0) parts << QString("%1 clb").arg(partition->clbRequiredCount());
+    if (partition->dspRequiredCount() != 0) parts << QString("%1 dsp").arg(partition->dspRequiredCount());
+    if (partition->bramRequiredCount() != 0) parts << QString("%1 bram").arg(partition->bramRequiredCount());
     return parts.join(", ");
 }
 
