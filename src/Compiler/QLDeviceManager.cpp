@@ -2858,6 +2858,246 @@ bool pathIsInside(const std::filesystem::path& candidate, const std::filesystem:
 } // anonymous namespace
 
 
+int QLDeviceManager::installDevice(std::string kit_archive_path,
+                                   std::string target_dir_path,
+                                   bool force) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::error_code ec;
+
+  // ORDER MATTERS THROUGHOUT: every check below runs BEFORE anything is written to the
+  // target, so a bad kit never leaves a half-installed device behind.
+
+  // ---- [1] the kit itself -------------------------------------------------------------
+  std::filesystem::path kit_path(kit_archive_path);
+  if(!std::filesystem::is_regular_file(kit_path, ec)) {
+    compiler->ErrorMessage("device kit not found: " + kit_path.string());
+    return -1;
+  }
+  std::filesystem::path kit_path_c = std::filesystem::canonical(kit_path, ec);
+  if(ec) { kit_path_c = kit_path; ec.clear(); }
+
+  // ---- [2] the target must be OUTSIDE the Aurora installation ---------------------------
+  // enforced on the input rather than trusting the user to pick well: the whole point of the
+  // feature is that installing a device never modifies the Aurora installation.
+  std::filesystem::path target_path(target_dir_path);
+  if(target_path.empty()) {
+    compiler->ErrorMessage("please specify a target directory to install the device into.");
+    return -1;
+  }
+
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::filesystem::path installation_dir_path = installation_root_dir_path.parent_path();
+
+  if(pathIsInside(target_path, installation_dir_path)) {
+    compiler->ErrorMessage("refusing to install into the Aurora installation.");
+    compiler->Message("target:       " + target_path.string());
+    compiler->Message("installation: " + installation_dir_path.string());
+    compiler->Message("Please choose a directory outside the Aurora installation - installing a");
+    compiler->Message("device must never modify the installation itself.");
+    return -1;
+  }
+
+  // ---- [3] integrity: verify the .sha256 sidecar ----------------------------------------
+  std::filesystem::path kit_checksum_path = kit_path_c.string() + ".sha256";
+  if(!std::filesystem::is_regular_file(kit_checksum_path, ec)) {
+    compiler->ErrorMessage("checksum file not found: " + kit_checksum_path.string());
+    compiler->Message("A device kit must be accompanied by its .sha256 file.");
+    return -1;
+  }
+
+  std::string expected_sha256;
+  {
+    std::ifstream checksum_ifstream(kit_checksum_path.string());
+    checksum_ifstream >> expected_sha256;
+  }
+  if(expected_sha256.empty()) {
+    compiler->ErrorMessage("could not read checksum from: " + kit_checksum_path.string());
+    return -1;
+  }
+
+  compiler->Message("verifying kit checksum...");
+  std::string actual_sha256 = sha256OfFile(kit_path_c);
+  if(actual_sha256.empty()) {
+    compiler->ErrorMessage("could not read the device kit: " + kit_path_c.string());
+    return -1;
+  }
+  if(actual_sha256 != expected_sha256) {
+    compiler->ErrorMessage("device kit checksum MISMATCH - the kit is corrupt or was modified.");
+    compiler->Message("expected: " + expected_sha256);
+    compiler->Message("actual:   " + actual_sha256);
+    return -1;
+  }
+
+  // ---- [4] read the manifest WITHOUT extracting -----------------------------------------
+  std::ostringstream manifest_stream;
+  std::vector<std::string> manifest_args = {"-xzOf", kit_path_c.string(), "manifest.json"};
+  int manifest_status =
+      FileUtils::ExecuteSystemCommand("tar", manifest_args, &manifest_stream, -1).code;
+  if(manifest_status != 0 || manifest_stream.str().empty()) {
+    compiler->ErrorMessage("device kit has no readable manifest.json: " + kit_path_c.string());
+    return -1;
+  }
+
+  json manifest_json;
+  try {
+    manifest_json = json::parse(manifest_stream.str());
+  }
+  catch (const json::exception& e) {
+    compiler->ErrorMessage(std::string("device kit manifest.json is malformed: ") + e.what());
+    return -1;
+  }
+
+  if(!manifest_json.contains("device") ||
+     !manifest_json["device"].contains("family") ||
+     !manifest_json["device"].contains("foundry") ||
+     !manifest_json["device"].contains("node") ||
+     !manifest_json["device"].contains("devicename")) {
+    compiler->ErrorMessage("device kit manifest.json does not describe a device.");
+    return -1;
+  }
+
+  std::string family = manifest_json["device"]["family"].get<std::string>();
+  std::string foundry = manifest_json["device"]["foundry"].get<std::string>();
+  std::string node = manifest_json["device"]["node"].get<std::string>();
+  std::string devicename = manifest_json["device"]["devicename"].get<std::string>();
+  std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
+
+  std::string customer_id =
+      manifest_json.contains("customer_id") ? manifest_json["customer_id"].get<std::string>() : "";
+
+  compiler->Message("device:      " + device_type_string);
+  if(!customer_id.empty()) {
+    compiler->Message("customer:    " + customer_id);
+  }
+
+  // ---- [5] version gate -----------------------------------------------------------------
+  // refuse up front rather than letting the flow fail cryptically later. a kit built today
+  // cannot be read by an Aurora older than the crypto stack it was produced with.
+  std::string min_aurora_version =
+      manifest_json.contains("min_aurora_version")
+          ? manifest_json["min_aurora_version"].get<std::string>()
+          : std::string();
+
+  if(!min_aurora_version.empty()) {
+
+    extern const char* foedag_version_number;
+    std::string running_aurora_version(foedag_version_number);
+
+    if(compareAuroraVersions(running_aurora_version, min_aurora_version) < 0) {
+
+      if(!force) {
+        compiler->ErrorMessage("this Aurora is too old to use this device kit.");
+        compiler->Message("this Aurora:        " + running_aurora_version);
+        compiler->Message("kit needs at least: " + min_aurora_version);
+        compiler->Message("Please upgrade Aurora, or re-run with 'force' to install anyway");
+        compiler->Message("(the device is unlikely to work).");
+        return -1;
+      }
+
+      compiler->Message("\nWARNING: this Aurora (" + running_aurora_version + ") is older than the kit's");
+      compiler->Message("minimum (" + min_aurora_version + "). Installing anyway because 'force' was given;");
+      compiler->Message("the device is unlikely to work.");
+    }
+  }
+
+  // ---- [6] already installed? -----------------------------------------------------------
+  std::filesystem::path installed_device_dir_path =
+      target_path / family / foundry / node / devicename;
+
+  if(std::filesystem::exists(installed_device_dir_path, ec)) {
+    if(!force) {
+      compiler->ErrorMessage("this device is already installed at the target.");
+      compiler->Message("device: " + device_type_string);
+      compiler->Message("path:   " + installed_device_dir_path.string());
+      compiler->Message("Please specify 'force' to replace it.");
+      return -1;
+    }
+    compiler->Message("WARNING: replacing the device already installed at " +
+                      installed_device_dir_path.string());
+    std::filesystem::remove_all(installed_device_dir_path, ec);
+    if(ec) {
+      compiler->ErrorMessage("could not replace the installed device: " + ec.message());
+      return -1;
+    }
+    ec.clear();
+  }
+
+  // ---- [7] reject a kit that would write outside the target ------------------------------
+  // list the archive first: an absolute path or a '..' component would let a crafted kit
+  // escape the target directory. the checksum only proves the kit is intact, not benign.
+  std::ostringstream listing_stream;
+  std::vector<std::string> listing_args = {"-tzf", kit_path_c.string()};
+  if(FileUtils::ExecuteSystemCommand("tar", listing_args, &listing_stream, -1).code != 0) {
+    compiler->ErrorMessage("could not list the device kit contents: " + kit_path_c.string());
+    return -1;
+  }
+
+  {
+    std::istringstream listing(listing_stream.str());
+    std::string entry;
+    while(std::getline(listing, entry)) {
+      if(entry.empty()) {
+        continue;
+      }
+      if(entry.front() == '/' || entry.find("..") != std::string::npos ||
+         (entry.size() > 1 && entry[1] == ':')) {
+        compiler->ErrorMessage("device kit contains an unsafe path, refusing to extract:");
+        compiler->Message("entry: " + entry);
+        return -1;
+      }
+    }
+  }
+
+  // ---- [8] extract. NO re-encryption: the kit is already encrypted ----------------------
+  std::filesystem::create_directories(target_path, ec);
+  if(ec) {
+    compiler->ErrorMessage("could not create the target directory: " + target_path.string() +
+                           " (" + ec.message() + ")");
+    return -1;
+  }
+
+  compiler->Message("installing...");
+  std::ostringstream extract_stream;
+  std::vector<std::string> extract_args = {"-xzf", kit_path_c.string(), "-C", target_path.string()};
+  if(FileUtils::ExecuteSystemCommand("tar", extract_args, &extract_stream, -1).code != 0) {
+    compiler->ErrorMessage("could not extract the device kit into: " + target_path.string());
+    compiler->Message(extract_stream.str());
+    return -1;
+  }
+
+  if(!std::filesystem::exists(installed_device_dir_path, ec)) {
+    compiler->ErrorMessage("the device kit did not contain the device it describes: " +
+                           device_type_string);
+    return -1;
+  }
+
+  // the manifest is metadata about the delivery, not device data - keep it beside the device
+  // tree rather than leaving it at the root of the user's chosen directory.
+  std::filesystem::path extracted_manifest_path = target_path / "manifest.json";
+  if(std::filesystem::exists(extracted_manifest_path, ec)) {
+    std::filesystem::rename(extracted_manifest_path,
+                            installed_device_dir_path / "kit_manifest.json", ec);
+    ec.clear();
+  }
+
+  // ---- [9] remember the root so the device is visible in later sessions ------------------
+  if(!registerDeviceRoot(target_path)) {
+    compiler->Message("\nWARNING: the device was installed but could not be remembered.");
+    compiler->Message("Set AURORA2_DEVICE_DATA_PATH=" + target_path.string() + " to use it.");
+  }
+
+  // make the newly installed device visible to this session too.
+  parseDeviceData();
+
+  compiler->Message("\ndevice installed ok: " + device_type_string);
+  compiler->Message("path: " + installed_device_dir_path.string());
+
+  return 0;
+}
+
+
 // ---------------------------------------------------------------------------------------
 // external device data root registry
 // ---------------------------------------------------------------------------------------

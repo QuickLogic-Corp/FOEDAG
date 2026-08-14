@@ -1017,6 +1017,55 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
 
+  // install_device <kit.tar.gz> -target <dir> [force]
+  //
+  // installs a device kit produced by 'generate_device_kit' into a directory of the user's
+  // choosing, OUTSIDE the Aurora installation, and remembers that directory so the device is
+  // available in later sessions without any environment setup.
+  //
+  // 'force' overrides two separate things and both are reported: replacing a device already
+  // installed at the target, and installing despite the kit needing a newer Aurora.
+  auto install_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    // separate positional args from the '-target <dir>' flag and the trailing 'force'
+    std::vector<std::string> positional;
+    std::string target_dir_path;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = argv[i];
+      if (tok == "-target" || tok == "--target") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("-target requires a directory");
+          return TCL_ERROR;
+        }
+        target_dir_path = argv[++i];
+      } else if (compiler->ToLower(tok).compare("force") == 0) {
+        force = true;
+      } else {
+        positional.push_back(tok);
+      }
+    }
+
+    if (positional.size() != 1 || target_dir_path.empty()) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    install_device <device_kit.tar.gz> -target <install_dir_path> [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->installDevice(positional[0], target_dir_path,
+                                                              force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("install_device", install_device, this, 0);
+
+
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.
   auto route_and_sta = [](void* clientData, Tcl_Interp* interp, int argc,
