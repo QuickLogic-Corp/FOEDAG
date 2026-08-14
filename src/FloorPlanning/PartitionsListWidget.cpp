@@ -2,40 +2,53 @@
 
 #include <QVBoxLayout>
 #include <QLabel>
+#include <QHeaderView>
 
 namespace fp {
 
 PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     : QWidget(parent),
-    m_listWidget(new QListWidget)
+    m_tableWidget(new QTableWidget)
 {
     QVBoxLayout* layout = new QVBoxLayout(this);
     const int m = FP_UI_MARGIN;
     layout->setContentsMargins(m,m,m,m);
     layout->setSpacing(m);
     layout->addWidget(new QLabel(tr("Partitions:")));
-    layout->addWidget(m_listWidget);
+    layout->addWidget(m_tableWidget);
 
-    m_listWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tableWidget->setColumnCount(4);
+    m_tableWidget->setHorizontalHeaderLabels({tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM")});
+    m_tableWidget->verticalHeader()->setVisible(false);
+    m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Name, QHeaderView::Stretch);
+    m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Clb, QHeaderView::ResizeToContents);
+    m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Dsp, QHeaderView::ResizeToContents);
+    m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Bram, QHeaderView::ResizeToContents);
 
-    m_listWidget->setEditTriggers(
+    m_tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
+
+    m_tableWidget->setEditTriggers(
         QAbstractItemView::DoubleClicked |
         QAbstractItemView::EditKeyPressed
         );
 
-    connect(m_listWidget, &QListWidget::itemSelectionChanged,
+    connect(m_tableWidget, &QTableWidget::itemSelectionChanged,
             this, [this]{
-                QList<QListWidgetItem*> items = m_listWidget->selectedItems();
+                const QList<QTableWidgetItem*> items = m_tableWidget->selectedItems();
                 if (!items.isEmpty()) {
-                    QListWidgetItem* item = items.first();
-                    const int id = getId(item->text());
+                    QTableWidgetItem* nameItem = m_tableWidget->item(items.first()->row(), Column::Name);
+                    if (!nameItem) return;
+                    const int id = getId(nameItem->text());
                     m_selectedIdBackupOpt = id;
                     emit selectionChanged(id);
                 }
             });
 
-    connect(m_listWidget, &QListWidget::itemChanged,
-            this, [this](QListWidgetItem* item) {
+    connect(m_tableWidget, &QTableWidget::itemChanged,
+            this, [this](QTableWidgetItem* item) {
+                if (!item || item->column() != Column::Name) return;
+
                 QString oldText = item->data(Qt::UserRole).toString();
                 QString candidate = item->text();
 
@@ -63,26 +76,42 @@ bool PartitionsListWidget::isPartitionNameUnique(const QString& candidate) const
 void PartitionsListWidget::unselectPartition()
 {
     m_selectedIdBackupOpt.reset();
-    m_listWidget->clearSelection();
+    m_tableWidget->clearSelection();
 }
 
 void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
 {
-    m_listWidget->clear();
+    m_tableWidget->clearContents();
+    m_tableWidget->setRowCount(static_cast<int>(partitions.size()));
     m_names2ids.clear();
 
-    QListWidgetItem* autoSelectedItem{nullptr};
+    int row = 0;
+    QTableWidgetItem* autoSelectedItem{nullptr};
     for (const auto& [id, partition]: partitions) {
         std::string name = partition->name();
-        QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(name));
-        item->setFlags(item->flags() | Qt::ItemIsEditable);
-        item->setData(Qt::UserRole, QString::fromStdString(name));
-        m_listWidget->addItem(item);
+
+        auto* nameItem = new QTableWidgetItem(QString::fromStdString(name));
+        nameItem->setFlags(nameItem->flags() | Qt::ItemIsEditable);
+        nameItem->setData(Qt::UserRole, QString::fromStdString(name));
+        m_tableWidget->setItem(row, Column::Name, nameItem);
+
+        // [aurora2#1725] "required/available", e.g. "180/224" -- read-only, unlike
+        // the view label these are always shown, even 0/available, since a table
+        // column can't disappear per-row the way free text can.
+        auto resourceItem = [](int required, int available) {
+            auto* item = new QTableWidgetItem(QString("%1/%2").arg(required).arg(available));
+            item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            return item;
+        };
+        m_tableWidget->setItem(row, Column::Clb, resourceItem(partition->clbRequiredCount(), partition->clbAvailableCount()));
+        m_tableWidget->setItem(row, Column::Dsp, resourceItem(partition->dspRequiredCount(), partition->dspAvailableCount()));
+        m_tableWidget->setItem(row, Column::Bram, resourceItem(partition->bramRequiredCount(), partition->bramAvailableCount()));
 
         m_names2ids[name] = id;
         if (m_selectedIdBackupOpt && (id == m_selectedIdBackupOpt.value())) {
-            autoSelectedItem = item;
+            autoSelectedItem = nameItem;
         }
+        ++row;
     }
 
     if (autoSelectedItem) {
@@ -93,19 +122,22 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
 void PartitionsListWidget::onPartitionSelectedOutside(const PartitionPtr& partition)
 {
     m_selectedIdBackupOpt = partition->id();
-    QList<QListWidgetItem*> items = m_listWidget->findItems(QString::fromStdString(partition->name()), Qt::MatchExactly);
-    if (!items.isEmpty()) {
-        QListWidgetItem* item = items.first();
+    const QList<QTableWidgetItem*> items = m_tableWidget->findItems(QString::fromStdString(partition->name()), Qt::MatchExactly);
+    for (QTableWidgetItem* item : items) {
+        if (item->column() != Column::Name) continue;
         setSelectedItemSilently(item);
-        m_listWidget->scrollToItem(item);
+        m_tableWidget->scrollToItem(item);
+        break;
     }
 }
 
-void PartitionsListWidget::setSelectedItemSilently(QListWidgetItem* item)
+void PartitionsListWidget::setSelectedItemSilently(QTableWidgetItem* item)
 {
     blockSignals(true);
-    m_listWidget->setCurrentItem(item);
-    item->setSelected(true);
+    m_tableWidget->setCurrentItem(item);
+    // selectRow(), not item->setSelected(true): SelectRows behavior needs the whole
+    // row highlighted, not just the one cell.
+    m_tableWidget->selectRow(item->row());
     blockSignals(false);
 }
 

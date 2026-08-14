@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QListWidget>
+#include <QTableWidget>
 
 #include "Partition.h"
 
@@ -25,14 +25,19 @@ public slots:
     void unselectPartition();
 
 private:
-    QListWidget* m_listWidget{nullptr};
+    // [aurora2#1725] Name (editable, drives rename/selection) + required/available
+    // resource columns, read-only, one row per partition. Column::Name must stay 0:
+    // rename/selection/lookup all key off the item in that column.
+    enum Column { Name = 0, Clb = 1, Dsp = 2, Bram = 3 };
+
+    QTableWidget* m_tableWidget{nullptr};
 
     std::optional<int> m_selectedIdBackupOpt;
     int getId(const QString& name);
 
     std::unordered_map<std::string, int> m_names2ids;
     bool isPartitionNameUnique(const QString& candidate) const;
-    void setSelectedItemSilently(QListWidgetItem* item);
+    void setSelectedItemSilently(QTableWidgetItem* item);
 };
 
 }  // namespace fp
