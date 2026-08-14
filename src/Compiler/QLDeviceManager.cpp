@@ -3140,6 +3140,13 @@ int QLDeviceManager::uninstallDevice(std::string family, std::string foundry, st
   std::error_code ec;
   std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
 
+  // make sure devices have been discovered. this can be called on a fresh interpreter where
+  // nothing has populated device_list yet, and an empty list would look exactly like
+  // "the device is not installed".
+  if(device_list.empty()) {
+    parseDeviceData();
+  }
+
   // find the device and, crucially, the root it was discovered under. we delete from THAT
   // root only - never from a path reconstructed from a global root, which could point at a
   // different copy of the same device.
