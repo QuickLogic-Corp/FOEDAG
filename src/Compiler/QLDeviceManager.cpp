@@ -1965,6 +1965,10 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     std::vector<std::filesystem::path> source_device_data_file_list_to_encrypt;
     std::vector<std::filesystem::path> source_device_data_file_list_to_copy;
 
+    // files that matched no classification rule at all. reported individually as they are
+    // found, and summarised at the end so the count is not lost in the packaging output.
+    int unclassified_file_count = 0;
+
     // include pin_table csv files for copy
     std::filesystem::path device_target_config_json_filepath = source_device_data_dir_path / std::string("config.json");
     std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
@@ -1997,6 +2001,18 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
       }
 
       if(dir_entry.is_regular_file(ec)) {
+
+          // every regular file must end up in exactly one of three buckets: encrypted, copied,
+          // or DELIBERATELY EXCLUDED. anything matching no rule is reported at the end of this
+          // block instead of being silently dropped - silent drops are how a device could be
+          // packaged without its routing graph and nobody notice (aurora2#2189).
+          // deliberate exclusions 'continue' out of the block and are never reported.
+          //
+          // classification is detected by watching the two lists rather than by a flag each
+          // rule has to remember to set: several rules deliberately fall through to later ones,
+          // and a flag would silently rot the first time a rule is added without it.
+          const size_t encrypt_list_size_before = source_device_data_file_list_to_encrypt.size();
+          const size_t copy_list_size_before = source_device_data_file_list_to_copy.size();
 
           // skip entries which are in specific directories in device data:
           // skip '/extra/' or '\extra\'
@@ -2039,27 +2055,55 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
               continue;  // prevent matching further copy rules
           }
 
-          // include all files in 'examples/' for copy
+          // EXCLUDE everything under 'examples/'. example designs are not device data: they
+          // are maintained in the shared benchmarks library and generated into the release by
+          // Aurora, so a device package must not carry its own copy.
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]examples[\/\\].*)",
                                 std::regex::icase))) {
-            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            continue;
           }
 
-          // include rr_graph.bin and router_lookahead.bin files for copy,
-          // but only for non-CRR devices.  CRR devices generate the rr_graph
-          // dynamically from encrypted SB_MAPS + switchbox templates at runtime;
-          // including a pre-built rr_graph.bin would cause VPR to skip that path.
-          if (!is_crr_device) {
+          // routing graph / router lookahead handling.
+          //
+          // for a CRR device these MUST NOT be packaged, in ANY form: the device regenerates
+          // its routing graph at runtime from the encrypted SB_MAPS + switchbox templates, and
+          // shipping a pre-built graph would make VPR load that instead and bypass the
+          // encrypted path entirely - silently defeating the encryption the package exists to
+          // provide. this is a security property, not tidiness.
+          //
+          // note the source tree of some CRR devices (IDAHO-2025Q4-*) really does contain
+          // these files, compressed and/or split, and a previous build may also have left a
+          // decompressed one behind. so match the artifact by name in any form rather than
+          // enumerating extensions - and mark it EXCLUDED so it does not get reported as
+          // unclassified on every package of those devices.
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*rr_graph.*",
+                                  std::regex::icase)) ||
+              std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*router_lookahead.*",
+                                  std::regex::icase))) {
+
+            if (is_crr_device) {
+              // deliberately excluded
+              continue;
+            }
+
+            // non-CRR devices depend on a pre-built graph, so copy the assembled binaries.
+            // (non-CRR devices are out of scope for the device kit today; this keeps
+            // add_device working for them.)
             if (std::regex_match(dir_entry.path().filename().string(),
                                     std::regex(".*rr_graph\\.bin",
-                                    std::regex::icase))) {
-                source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
-            }
-            if (std::regex_match(dir_entry.path().filename().string(),
+                                    std::regex::icase)) ||
+                std::regex_match(dir_entry.path().filename().string(),
                                     std::regex(".*router_lookahead\\.bin",
                                     std::regex::icase))) {
                 source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            }
+            else {
+              // a compressed/split graph archive for a non-CRR device: not usable as-is.
+              // excluded deliberately rather than dropped silently.
+              continue;
             }
           }
 
@@ -2171,6 +2215,23 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                 std::regex(".+\\.au",
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
+          // nothing claimed this file. it is NOT silently dropped - report it, so a new kind
+          // of device data file cannot go missing from a package unnoticed. deliberate
+          // exclusions never reach here; they 'continue' above.
+          if(source_device_data_file_list_to_encrypt.size() == encrypt_list_size_before &&
+             source_device_data_file_list_to_copy.size() == copy_list_size_before) {
+
+            std::error_code relative_ec;
+            std::filesystem::path unclassified_relative_path =
+                std::filesystem::relative(dir_entry.path(), source_device_data_dir_path_c, relative_ec);
+
+            compiler->Message(std::string("WARNING: file matches no encrypt/copy/exclude rule, "
+                                          "it will NOT be in the device package: ") +
+                              (relative_ec ? dir_entry.path().string()
+                                           : unclassified_relative_path.string()));
+            unclassified_file_count++;
           }
       }
 
@@ -2429,6 +2490,14 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
         compiler->ErrorMessage(msg);
         return -1;
       }
+    }
+
+    // surface the unclassified count alongside the result: individual warnings scroll past in
+    // a long packaging run, and "0 unclassified" is the line that says the package is complete.
+    if(unclassified_file_count > 0) {
+      compiler->Message("\nWARNING: " + std::to_string(unclassified_file_count) +
+                        " file(s) matched no encrypt/copy/exclude rule and are NOT in the device package.");
+      compiler->Message("Add a rule for them in QLDeviceManager::encryptDevice() if they are device data.");
     }
 
     compiler->Message("\ndevice encrypted ok: " + device);
