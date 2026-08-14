@@ -37,9 +37,6 @@ set (SRC_LIST
   CheckableButton.cpp
   # widgets
   DeviceGridDescriptor.cpp
-  SynthResourceExtractor.cpp
-  PostSynthVerilogResourceExtractor.cpp
-  PostSynthVerilogNameBridge.cpp
   QdcSerializer.cpp
   RtlInstanceModel.cpp
   DeviceGrid.cpp
@@ -61,9 +58,6 @@ set (HDR_LIST
   # widgets
   DeviceGridDescriptor.h
   TileDescriptor.h
-  SynthResourceExtractor.h
-  PostSynthVerilogResourceExtractor.h
-  PostSynthVerilogNameBridge.h
   QdcSerializer.h
   RtlInstanceModel.h
   DeviceGrid.h
@@ -71,6 +65,7 @@ set (HDR_LIST
   Partition.h
   Region.h
   HierarhyElement.h
+  NaturalSort.h
   PointAnimation.h
 )
 

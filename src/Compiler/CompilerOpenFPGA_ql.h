@@ -303,6 +303,15 @@ private:
   bool RunElaboration();
   bool RunElabInstances();
 
+  // [aurora2#1725 stage P4] validation gate -- grades every instance elaboration found
+  // (complete/partial/deleted/failed) against the just-written synthesis outputs, via
+  // scripts/validate_instances.py, producing validation.json. Best-effort: atomsets.json
+  // only exists for devices whose template already has the P2/P3 blocks (not all of them
+  // yet), so a missing input here just skips this stage rather than failing synthesis,
+  // which has already succeeded by the time this runs.
+  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P4).
+  bool RunValidateInstances();
+
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();

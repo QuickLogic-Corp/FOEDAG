@@ -177,13 +177,13 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     setEnabled(false);
 }
 
-void SynthResourceHierarchyWidget::build(const PostSynthVerilogNameBridge::NaturalStringSet& elements)
+void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
 {
     m_model->clear();
     if (!isPartitionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Netlist" << "VPR Names" << "Partitions");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "VPR Names" << "Partitions");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition netlist" << "VPR Names");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "VPR Names");
         m_view->header()->setVisible(false);
     }
 
@@ -354,10 +354,8 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
 
 void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const PartitionPtr& partition) const
 {
-    const PostSynthVerilogNameBridge* bridge = m_nameBridge.get();
-
     std::function<void(QStandardItem*, const std::string&, const PartitionPtr&)> fillPartitionSelectedElementsRecursive =
-        [&fillPartitionSelectedElementsRecursive, bridge](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
+        [&fillPartitionSelectedElementsRecursive, this](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
     {
         if (!item) return;
 
@@ -376,10 +374,10 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
             }
         }
 
-        auto vprNames = [bridge](const std::string& p) -> std::set<std::string> {
-            if (!bridge) return {};
-            const auto r = bridge->resolveToVprNames(p);
-            return {r.begin(), r.end()};
+        auto vprNames = [this](const std::string& p) -> std::set<std::string> {
+            const auto it = m_atomNames.find(p);
+            if (it == m_atomNames.end()) return {};
+            return {it->second.begin(), it->second.end()};
         };
 
         if (isLeaf) {
@@ -495,9 +493,15 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
     m_rawElements.insert(dottedPath);
 }
 
+void SynthResourceHierarchyWidget::setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames)
+{
+    m_atomNames = std::move(atomNames);
+    m_hasAtomNames = true;
+}
+
 void SynthResourceHierarchyWidget::populateVprNamesColumn()
 {
-    if (!m_nameBridge) return;
+    if (!m_hasAtomNames) return;
 
     const bool partitionsVisible = !isPartitionsColumnHidden();
 
@@ -512,7 +516,8 @@ void SynthResourceHierarchyWidget::populateVprNamesColumn()
 
             const std::string path = buildChildPath(prefix, child);
 
-            const auto names = m_nameBridge->resolveToVprNames(path);
+            const auto it = m_atomNames.find(path);
+            const std::vector<std::string> names = (it != m_atomNames.end()) ? it->second : std::vector<std::string>{};
             const bool isLeaf = (child->rowCount() == 0);
 
             if (isLeaf && names.empty()) {

@@ -1,17 +1,19 @@
 #pragma once
 
 #include "Partition.h"
-#include "PostSynthVerilogNameBridge.h"
+#include "NaturalSort.h"
 
 #include <QWidget>
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QLabel>
 
+#include <map>
 #include <memory>
 #include <set>
 #include <unordered_set>
 #include <string>
+#include <vector>
 
 class QLineEdit;
 class QCheckBox;
@@ -42,8 +44,13 @@ public:
         m_lbView->setVisible(true);
         updateViewLabel();
     }
-    void build(const PostSynthVerilogNameBridge::NaturalStringSet& elements);
-    void setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge) { m_nameBridge = std::move(bridge); }
+    void build(const NaturalStringSet& elements);
+
+    // [aurora2#1725] Populates the "VPR Names" column: RTL path -> the atom names it
+    // covers. No data source exists yet -- P3 (atomsets.json) is not implemented -- so
+    // nothing calls this today and the column stays blank. This is the intended hook
+    // for wiring that stage up once it exists.
+    void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
 
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void selectPartition(const PartitionPtr&);
@@ -63,7 +70,14 @@ private:
 
     PartitionPtr m_selectedPartition;
     std::unordered_set<std::string> m_rawElements;
-    std::shared_ptr<PostSynthVerilogNameBridge> m_nameBridge;
+
+    // Unset (m_hasAtomNames == false) means "no data source connected" -- the whole
+    // column stays blank, nothing gets hidden. Once set() (even to an empty map, e.g.
+    // atomsets.json legitimately found no atoms), a leaf with no entry is a real
+    // "optimised away" case and gets hidden. Distinguishing these is why this isn't
+    // just an empty-map check.
+    bool m_hasAtomNames = false;
+    std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
 
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;

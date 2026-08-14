@@ -321,17 +321,17 @@ void FloorPlanningWidget::updateSaveQdcButtonEnability()
     m_bnSaveQdc->setEnabled(m_deviceWidget->isSaveQdcAllowed());
 }
 
-void FloorPlanningWidget::loadNetList(const PostSynthVerilogNameBridge::NaturalStringSet& elements)
+void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
 {
     m_synthResourcesWidget->build(elements);
     m_partitionResourcesWidget->build(elements);
     m_busyOverlayWidget->hide();
 }
 
-void FloorPlanningWidget::setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge)
+void FloorPlanningWidget::setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames)
 {
-    m_synthResourcesWidget->setNameBridge(bridge);
-    m_partitionResourcesWidget->setNameBridge(bridge);
+    m_synthResourcesWidget->setAtomNames(atomNames);
+    m_partitionResourcesWidget->setAtomNames(std::move(atomNames));
 }
 
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)

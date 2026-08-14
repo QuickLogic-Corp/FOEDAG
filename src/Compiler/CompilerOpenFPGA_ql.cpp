@@ -1990,6 +1990,7 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
   std::filesystem::path elab_instances_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
+      std::filesystem::path("..") /
       std::filesystem::path("scripts") /
       std::filesystem::path("elab_instances.py");
 
@@ -2059,6 +2060,93 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
   if (!RunElabInstances()) return false;
 
   m_designDirty = false;
+  return true;
+}
+
+// [aurora2#1725 stage P4] validation gate -- see scripts/validate_instances.py's
+// docstring and docs/specs/region-based-placement-synthesis-integration/pipeline.md
+// (A.P4). Called from Synthesize() after the Yosys tool has actually run (Synplify
+// falls through to it too -- pipeline.md: "Yosys still reads Synplify's top.vm, still
+// runs synth_ql"), so atomsets.json / <top>_post_synth_debug.json are as fresh as the
+// BLIF that was just written.
+bool CompilerOpenFPGA_ql::RunValidateInstances() {
+  const std::string topModule = ProjManager()->DesignTopModule();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  // aurora_atomsets.tcl (invoked from the device template) writes this relative to the
+  // yosys process's cwd, which is the project directory. Not every device template has
+  // the P2/P3 blocks yet, so a missing file just means this stage isn't available for
+  // the current device -- skip quietly rather than treating it as a failure.
+  std::filesystem::path atomsets_path = projectPath / "atomsets.json";
+  if (!FileUtils::FileExists(atomsets_path)) {
+    return true;
+  }
+
+  std::filesystem::path debug_json_path =
+      projectPath / (topModule + "_post_synth_debug.json");
+  if (!FileUtils::FileExists(debug_json_path)) {
+    return true;
+  }
+
+  std::filesystem::path validate_instances_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("validate_instances.py");
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping instance validation "
+                 "(validate_instances.py).");
+    return true;  // best-effort: not required for synthesis to have succeeded
+  }
+
+  std::filesystem::path instances_json_path = projectPath / "instances.json";
+  std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
+  // [aurora2#1725 stage P2b] optional; validate_instances.py records check 3 as
+  // "unknown" and grades on the rest when this is absent.
+  std::filesystem::path namemap_hier_path = projectPath / "namemap_hier.csv";
+  std::filesystem::path validation_json_path = projectPath / "validation.json";
+
+  std::vector<std::string> args;
+  args.push_back(validate_instances_script_path.string());
+  args.push_back("--atomsets");
+  args.push_back(atomsets_path.string());
+  args.push_back("--debug-json");
+  args.push_back(debug_json_path.string());
+  if (FileUtils::FileExists(instances_json_path)) {
+    // Needed to see instances synthesis deleted entirely -- they have no atoms, so
+    // atomsets.json alone would never mention them.
+    args.push_back("--instances");
+    args.push_back(instances_json_path.string());
+  }
+  if (FileUtils::FileExists(synth_log_path)) {
+    args.push_back("--synth-log");
+    args.push_back(synth_log_path.string());
+  }
+  if (FileUtils::FileExists(namemap_hier_path)) {
+    args.push_back("--namemap-hier");
+    args.push_back(namemap_hier_path.string());
+  }
+  args.push_back("-o");
+  args.push_back(validation_json_path.string());
+
+  int status =
+      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
+          .realCode;
+  if (status != 0) {
+    // Best-effort: synthesis has already succeeded by the time this runs, so a
+    // validation failure is reported but must not fail the build over it.
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " instance validation (validate_instances.py) failed");
+  }
   return true;
 }
 
@@ -2146,6 +2234,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   if (!DesignChanged(yosysScript, script_path, output_path)) {
     Message("Design didn't change: " + ProjManager()->projectName() +
             ", skipping synthesis.");
+    // [aurora2#1725 stage P4] re-run even on a skip: instances.json may have changed
+    // (see EnsureElaborated() above) since the last time this ran, and validation.json
+    // should reflect it. Best-effort, result not checked -- see RunValidateInstances().
+    RunValidateInstances();
     return true;
   }
   #endif
@@ -2169,6 +2261,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
     m_state = State::Synthesized;
+    // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
+    // still runs even though synthesis itself didn't.
+    RunValidateInstances();
     return true;
   }
   // incr compilation
@@ -2191,6 +2286,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
+    // [aurora2#1725 stage P4] validation gate -- grade every instance against the
+    // synthesis output just produced. Best-effort, result not checked -- see
+    // RunValidateInstances().
+    RunValidateInstances();
     return true;
   }
 }
@@ -3611,7 +3710,8 @@ bool CompilerOpenFPGA_ql::Packing() {
     std::filesystem::path blif_filepath = 
             std::filesystem::canonical(GlobalSession->Context()->DataPath() /
             std::filesystem::path("..") /
-            std::filesystem::path("scripts") / 
+            std::filesystem::path("..") /
+            std::filesystem::path("scripts") /
             "and2.blif");
 
     m_autoLayoutGeneratedRRGraphBinPath = 
@@ -4400,6 +4500,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   Message("Design " + ProjManager()->projectName() + " is placed");
    std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
+    std::filesystem::path("..") /
     std::filesystem::path("..") /
     std::filesystem::path("scripts") /
     std::filesystem::path("place2pcf.py");
@@ -6930,6 +7031,7 @@ bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
   // Vendored encoder, resolved via the same scripts root as other utilities.
   const std::filesystem::path script =
       GetSession()->Context()->DataPath() / std::filesystem::path("..") /
+      std::filesystem::path("..") /
       std::filesystem::path("scripts") / std::filesystem::path("bitstream") /
       std::filesystem::path("aurora_bitstream_encode.py");
 
@@ -7510,6 +7612,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
       std::filesystem::path("generate_floorplanning.py");
@@ -10059,6 +10162,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     std::filesystem::path aurora_yosys_import_script_path =
         GetSession()->Context()->DataPath() /
         std::filesystem::path("..") /
+        std::filesystem::path("..") /
         std::filesystem::path("scripts") /
         std::filesystem::path("aurora_yosys_import.tcl");
 
@@ -10101,6 +10205,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   std::filesystem::path aurora_rehier_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
+      std::filesystem::path("..") /
       std::filesystem::path("scripts") /
       std::filesystem::path("aurora_rehier.tcl");
 
@@ -10122,9 +10227,33 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   std::filesystem::path aurora_atomsets_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
+      std::filesystem::path("..") /
       std::filesystem::path("scripts") /
       std::filesystem::path("aurora_atomsets.tcl");
 
+  // [aurora2#1725 stage P3] NOT wired to pass the instance list from instances.json
+  // (P0b), despite that being the documented intent (aurora_atomsets.tcl's own
+  // header: "Pass the list from stage P0b's instances.json to also report instances
+  // that produced ZERO atoms"). Blocked structurally: the device template's own line
+  // already appends fixed positional arguments after this substitution --
+  // aurora_template_script.ys: "${CALL_TCL_ATOMSETS_SCRIPT} atomsets.json --blif
+  // ${OUTPUT_BLIF}" -- with no placeholder for an instance list, and
+  // aurora_atomsets.tcl parses argv positionally (out_path first, then optional
+  // --blif, then instances). Any instance list this code appends either duplicates
+  // those two fixed arguments (if appended after them, which this substitution can't
+  // do -- it precedes them in the template line) or corrupts out_path/blif_path
+  // parsing (if appended here, before them, since the template's "atomsets.json"
+  // would then land mid-argv and be misread as a 14th instance -- measured on
+  // fpu_single, confirmed both ways). Fixing this for real needs either editing the
+  // device_data template (separate submodule) to add an instance-list placeholder in
+  // the right position, or reworking aurora_atomsets.tcl to take the list some
+  // other way (e.g. a file) instead of positional argv.
+  //
+  // Not required for P4 in practice: validate_instances.py's own --instances flag
+  // (see RunValidateInstances()) already compensates -- it overrides the graded
+  // universe with instances.json's full list, so a deleted (zero-atom) instance
+  // absent from atomsets.json is still correctly graded "deleted". Confirmed on
+  // fpu_single: i_serial_mul graded deleted correctly even without this.
   yosysScript->apply("${CALL_TCL_ATOMSETS_SCRIPT}", std::string("tcl") +
                                                     std::string(" ") +
                                                     aurora_atomsets_script_path.string());

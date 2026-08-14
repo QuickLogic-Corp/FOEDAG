@@ -5,11 +5,12 @@
 #include "DeviceGridDescriptor.h"
 #include "DeviceGrid.h"
 #include "Partition.h"
-#include "PostSynthVerilogNameBridge.h"
+#include "NaturalSort.h"
 
 #include <map>
 #include <memory>
 #include <set>
+#include <vector>
 
 class QPushButton;
 
@@ -31,8 +32,11 @@ public:
     explicit FloorPlanningWidget(const QString& projectName, QWidget* parent = nullptr);
     ~FloorPlanningWidget();
 
-    void loadNetList(const PostSynthVerilogNameBridge::NaturalStringSet& elements);
-    void setNameBridge(std::shared_ptr<PostSynthVerilogNameBridge> bridge);
+    void loadNetList(const NaturalStringSet& elements);
+
+    // [aurora2#1725] Feeds the "VPR Names" column: RTL path -> the atom names it
+    // covers. No data source exists yet -- P3 (atomsets.json) is not implemented.
+    void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 

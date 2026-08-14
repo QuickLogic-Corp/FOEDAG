@@ -80,8 +80,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/QLSettingsManager.h"
 
 #include "FloorPlanning/FloorPlanningWidget.h"
-#include "FloorPlanning/PostSynthVerilogResourceExtractor.h"
-#include "FloorPlanning/PostSynthVerilogNameBridge.h"
 #include "FloorPlanning/RtlInstanceModel.h"
 
 using namespace FOEDAG;
@@ -2276,20 +2274,16 @@ void MainWindow::floorPlanningActionTriggered()
     // which is why the result isn't checked here.
     compiler->EnsureElaborated();
 
-    std::filesystem::path postSynthVerilogFilePath = compiler->getPostSynthVerilogFilePath();
+    // [aurora2#1725 stage P1] instances.json (RtlInstanceModel) is the sole source of
+    // the tree below, pre- or post-synthesis alike -- a real Yosys/Verific elaboration,
+    // language-agnostic unlike the RTL-source text scrapers this replaced (which only
+    // understood Verilog and found nothing at all for a VHDL design like fpu_single).
     std::filesystem::path instancesJsonPath =
         std::filesystem::path(compiler->ProjManager()->projectPath()) / "instances.json";
-    const bool hasPostSynth = FileUtils::FileExists(postSynthVerilogFilePath);
-    // [aurora2#1725 stage P0] instance discovery -- read into the tree below via
-    // RtlInstanceModel (stage P1), pre-synthesis or as a post-synthesis fallback.
-    const bool hasInstancesJson = FileUtils::FileExists(instancesJsonPath);
-
-    // post synth verilog test — this is now the sole netlist source (no VPR
-    // invocation is needed to populate the FloorPlanning UI, see #1725)
-    if (!hasPostSynth && !hasInstancesJson) {
+    fp::RtlInstanceModel rtlModel;
+    if (!rtlModel.loadInstances(instancesJsonPath)) {
       QMessageBox::critical(this, "Floor Planning cannot be started.",
-        QString("%1 file is missing.\nPlease run SYNTHESIS task first and then activate Floor Planning again.")
-        .arg(QString::fromStdString(postSynthVerilogFilePath.string())));
+        QString::fromStdString(rtlModel.error()));
       cleanFloorPlanningUI();
       return;
     }
@@ -2308,33 +2302,6 @@ void MainWindow::floorPlanningActionTriggered()
 
     if (descriptor->hasError()) {
       QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
-      cleanFloorPlanningUI();
-      return;
-    }
-
-    // synchronous local-file parse — no subprocess, no callback
-    fp::PostSynthVerilogResourceExtractor resourceExtractor;
-    // [aurora2#1725 stage P1] RTL hierarchy from instances.json, the elaboration-derived
-    // tree. Tried whenever instances.json exists -- not only pre-synthesis -- because
-    // PostSynthVerilogNameBridge's RTL scraper below only understands Verilog syntax:
-    // for a VHDL design (e.g. fpu_single) it finds zero instances, and without this as
-    // a fallback the post-synthesis branch would open with a silently empty tree.
-    fp::RtlInstanceModel rtlModel;
-    const bool rtlModelLoaded = hasInstancesJson && rtlModel.loadInstances(instancesJsonPath);
-    if (hasPostSynth) {
-      resourceExtractor.loadAtomNamesFromVerilogFile(postSynthVerilogFilePath);
-
-      if (resourceExtractor.elements().empty()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(postSynthVerilogFilePath.string())));
-        cleanFloorPlanningUI();
-        return;
-      }
-    } else if (!rtlModelLoaded) {
-      // pre-synthesis open, hasInstancesJson is what let us get this far, so a load
-      // failure here means a malformed instances.json -- surface it rather than opening
-      // a silent empty tree.
-      QMessageBox::critical(this, "Floor Planning cannot be started.",
-        QString::fromStdString(rtlModel.error()));
       cleanFloorPlanningUI();
       return;
     }
@@ -2363,42 +2330,14 @@ void MainWindow::floorPlanningActionTriggered()
     // run's last_status -- P4 doesn't exist yet, so nothing sets it on this pass),
     // matching toHierarhyElements()'s rule that a deleted instance has no atoms to
     // constrain.
-    auto rtlModelPaths = [&rtlModel]() {
-      fp::PostSynthVerilogNameBridge::NaturalStringSet paths;
-      for (const auto& instance : rtlModel.instances()) {
-        if (!instance.deleted()) {
-          paths.insert(instance.path);
-        }
-      }
-      return paths;
-    };
-
-    if (hasPostSynth) {
-      std::vector<std::filesystem::path> rtlSourceFiles;
-      for (const auto& f : compiler->ProjManager()->getDesignFiles())
-        rtlSourceFiles.emplace_back(f.toStdString());
-      auto nameBridge = std::make_shared<fp::PostSynthVerilogNameBridge>();
-      nameBridge->setVprNetlist(resourceExtractor.elements());
-      nameBridge->loadRtlSources(rtlSourceFiles);
-
-      if (!nameBridge->instPaths().empty()) {
-        m_floorPlanningWidget->setNameBridge(nameBridge);
-        m_floorPlanningWidget->loadNetList(nameBridge->instPaths());
-      } else if (rtlModelLoaded) {
-        // The Verilog-only RTL scraper found nothing -- e.g. a VHDL design like
-        // fpu_single -- fall back to the elaboration-derived tree from instances.json.
-        // No name bridge: it has no instance paths either, so the VPR Names column
-        // would be blank regardless.
-        m_floorPlanningWidget->loadNetList(rtlModelPaths());
-      } else {
-        m_floorPlanningWidget->loadNetList({});
-      }
-    } else {
-      // [aurora2#1725 stage P1] pre-synthesis: build the tree from instances.json via
-      // RtlInstanceModel, the RTL hierarchy straight from elaboration. No name bridge:
-      // there is no netlist yet, so the VPR Names column stays blank.
-      m_floorPlanningWidget->loadNetList(rtlModelPaths());
+    fp::NaturalStringSet paths;
+    for (const auto& element : rtlModel.toHierarhyElements()) {
+      paths.insert(element.path);
     }
+    m_floorPlanningWidget->loadNetList(paths);
+    // [aurora2#1725] "VPR Names" column stays blank until P3 (atomsets.json) exists --
+    // see FloorPlanningWidget::setAtomNames().
+
     // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
     // so we construct path based on json settings location file.
     std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc");
