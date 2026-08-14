@@ -81,6 +81,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "FloorPlanning/FloorPlanningWidget.h"
 #include "FloorPlanning/RtlInstanceModel.h"
+#include "nlohmann_json/json.hpp"
 
 using namespace FOEDAG;
 extern const char* foedag_version_number;
@@ -2325,18 +2326,52 @@ void MainWindow::floorPlanningActionTriggered()
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
+    // [aurora2#1725 stage P3] "VPR Names" column: RTL instance -> the exact atoms
+    // belonging to it, straight from atomsets.json (aurora_atomsets.tcl, in-session,
+    // stage P3). Only available post-synthesis; pre-synthesis there's no atom data
+    // yet, so setAtomNames() is simply not called and every leaf stays visible (see
+    // SynthResourceHierarchyWidget::populateVprNamesColumn()'s early-return on
+    // !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
+    // populateVprNamesColumn() itself, so the atom-name map has to already be set.
+    std::filesystem::path atomsetsJsonPath =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) / "atomsets.json";
+    if (FileUtils::FileExists(atomsetsJsonPath)) {
+      std::ifstream atomsetsStream(atomsetsJsonPath);
+      nlohmann::json atomsetsDoc;
+      bool parsedOk = true;
+      try {
+        atomsetsStream >> atomsetsDoc;
+      } catch (const std::exception&) {
+        parsedOk = false;
+      }
+      if (parsedOk && atomsetsDoc.contains("atomsets") && atomsetsDoc["atomsets"].is_object()) {
+        std::map<std::string, std::vector<std::string>, fp::NaturalLess> atomNames;
+        for (auto it = atomsetsDoc["atomsets"].begin(); it != atomsetsDoc["atomsets"].end(); ++it) {
+          std::vector<std::string> atoms;
+          if (it.value().contains("atoms") && it.value()["atoms"].is_array()) {
+            for (const auto& atom : it.value()["atoms"]) {
+              if (atom.is_string()) {
+                atoms.push_back(atom.get<std::string>());
+              }
+            }
+          }
+          atomNames[it.key()] = std::move(atoms);
+        }
+        m_floorPlanningWidget->setAtomNames(std::move(atomNames));
+      }
+    }
+
     // [aurora2#1725 stage P1] instances.json -> flat path set for the tree, skipping
-    // instances synthesis deleted (a status only ever carried forward from a prior
-    // run's last_status -- P4 doesn't exist yet, so nothing sets it on this pass),
-    // matching toHierarhyElements()'s rule that a deleted instance has no atoms to
-    // constrain.
+    // instances synthesis deleted. validate_instances.py (stage P4) grades each
+    // instance into validation.json, but that verdict isn't merged into
+    // RtlInstanceModel here yet -- last_status is only what elab_instances.py carried
+    // forward from a prior run's instances.json, matching toHierarhyElements()'s rule
+    // that a deleted instance has no atoms to constrain.
     fp::NaturalStringSet paths;
     for (const auto& element : rtlModel.toHierarhyElements()) {
       paths.insert(element.path);
     }
     m_floorPlanningWidget->loadNetList(paths);
-    // [aurora2#1725] "VPR Names" column stays blank until P3 (atomsets.json) exists --
-    // see FloorPlanningWidget::setAtomNames().
 
     // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
     // so we construct path based on json settings location file.
