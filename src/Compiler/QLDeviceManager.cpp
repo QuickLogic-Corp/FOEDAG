@@ -3132,6 +3132,125 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
 }
 
 
+int QLDeviceManager::uninstallDevice(std::string family, std::string foundry, std::string node,
+                                     std::string devicename, bool dry_run, bool force) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::error_code ec;
+  std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
+
+  // find the device and, crucially, the root it was discovered under. we delete from THAT
+  // root only - never from a path reconstructed from a global root, which could point at a
+  // different copy of the same device.
+  std::filesystem::path device_root_dir_path;
+  bool device_found = false;
+
+  for (const QLDeviceType& device: device_list) {
+    if(device.family == family && device.foundry == foundry &&
+       device.node == node && device.devicename == devicename) {
+      device_root_dir_path = device.device_root_path;
+      device_found = true;
+      break;
+    }
+  }
+
+  if(!device_found) {
+    compiler->ErrorMessage("device is not installed: " + device_type_string);
+    compiler->Message("Use 'list_devices' to see what is installed.");
+    return -1;
+  }
+
+  // never delete from the Aurora installation: built-in devices are part of the install and
+  // are not ours to remove.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, ec);
+  if(ec) { installation_root_dir_path_c = installation_root_dir_path; ec.clear(); }
+
+  if(device_root_dir_path == installation_root_dir_path_c ||
+     pathIsInside(device_root_dir_path, installation_root_dir_path_c)) {
+    compiler->ErrorMessage("refusing to uninstall a device that is part of the Aurora installation.");
+    compiler->Message("device: " + device_type_string);
+    compiler->Message("root:   " + device_root_dir_path.string());
+    compiler->Message("Only devices installed with 'install_device' can be uninstalled.");
+    return -1;
+  }
+
+  std::filesystem::path device_dir_path =
+      device_root_dir_path / family / foundry / node / devicename;
+
+  if(!std::filesystem::exists(device_dir_path, ec)) {
+    compiler->ErrorMessage("device directory not found: " + device_dir_path.string());
+    return -1;
+  }
+  ec.clear();
+
+  // say exactly what will be removed, always - this deletes from the user's own directory.
+  compiler->Message("device:       " + device_type_string);
+  compiler->Message("will remove:  " + device_dir_path.string());
+
+  if(dry_run) {
+    compiler->Message("\n(dry run - nothing was removed)");
+    return 0;
+  }
+
+  if(!force) {
+    // there is no interactive prompt in batch mode, so require the caller to be explicit
+    // rather than deleting on the strength of the command alone.
+    compiler->ErrorMessage("refusing to delete without confirmation.");
+    compiler->Message("Re-run with 'force' to remove it, or 'dry-run' to see what would go.");
+    return -1;
+  }
+
+  std::uintmax_t removed_count = std::filesystem::remove_all(device_dir_path, ec);
+  if(ec) {
+    compiler->ErrorMessage("could not remove the device: " + ec.message());
+    return -1;
+  }
+  compiler->Message("removed " + std::to_string(removed_count) + " file(s)/dir(s).");
+
+  // prune now-empty parents (node, foundry, family) but ONLY within this root, and only while
+  // they are empty: the user's directory may hold their own files and other devices.
+  std::filesystem::path parent_dir_path = device_dir_path.parent_path();
+  while(parent_dir_path != device_root_dir_path &&
+        pathIsInside(parent_dir_path, device_root_dir_path)) {
+
+    if(!std::filesystem::is_empty(parent_dir_path, ec) || ec) {
+      ec.clear();
+      break;
+    }
+    std::filesystem::remove(parent_dir_path, ec);
+    if(ec) { ec.clear(); break; }
+    parent_dir_path = parent_dir_path.parent_path();
+  }
+
+  // if this root holds no further devices, stop searching it.
+  bool root_has_devices = false;
+  for (const QLDeviceType& device: device_list) {
+    if(device.device_root_path == device_root_dir_path &&
+       !(device.family == family && device.foundry == foundry &&
+         device.node == node && device.devicename == devicename)) {
+      root_has_devices = true;
+      break;
+    }
+  }
+
+  if(!root_has_devices) {
+    if(unregisterDeviceRoot(device_root_dir_path)) {
+      compiler->Message("no devices remain in " + device_root_dir_path.string() +
+                        ", stopped searching it.");
+    }
+  }
+
+  // refresh so the removed device disappears from this session too.
+  parseDeviceData();
+
+  compiler->Message("\ndevice uninstalled ok: " + device_type_string);
+  return 0;
+}
+
+
 // ---------------------------------------------------------------------------------------
 // external device data root registry
 // ---------------------------------------------------------------------------------------

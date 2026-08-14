@@ -1065,6 +1065,47 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("install_device", install_device, this, 0);
 
+  // uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]
+  //
+  // removes a device installed with install_device and stops searching its directory once no
+  // devices remain there. this DELETES from a directory the user chose, so it always prints
+  // what it is about to remove, refuses without 'force', and offers 'dry-run'.
+  auto uninstall_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    std::vector<std::string> positional;
+    bool dry_run = false;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = compiler->ToLower(std::string(argv[i]));
+      if (tok == "dry-run" || tok == "dry_run" || tok == "-dry-run" || tok == "--dry-run") {
+        dry_run = true;
+      } else if (tok == "force") {
+        force = true;
+      } else {
+        positional.push_back(argv[i]);
+      }
+    }
+
+    if (positional.size() != 4) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->uninstallDevice(
+        positional[0], positional[1], positional[2], positional[3], dry_run, force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("uninstall_device", uninstall_device, this, 0);
+
+
 
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.

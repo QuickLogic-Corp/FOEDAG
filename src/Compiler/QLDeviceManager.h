@@ -200,6 +200,15 @@ class QLDeviceManager : public QObject {
   // checksum, the manifest and the Aurora version check all pass first.
   int installDevice(std::string kit_archive_path, std::string target_dir_path, bool force);
 
+  // remove a device that was installed with install_device, and deregister its root once no
+  // devices remain under it.
+  //
+  // this is the only destructive command in the feature: it deletes from a directory the USER
+  // named, not one Aurora owns. so it refuses to touch the installation, deletes only paths it
+  // can attribute to the device, and supports a dry run.
+  int uninstallDevice(std::string family, std::string foundry, std::string node,
+                      std::string devicename, bool dry_run, bool force);
+
   // --- external device data root registry (per-user) -------------------------------------
   // install_device records the directory it installed into here, so the device stays visible
   // in later sessions without the user setting anything. uninstall_device removes it again.
