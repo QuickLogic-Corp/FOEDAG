@@ -46,24 +46,6 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
     return prefix.empty() ? name : (prefix + "." + name);
 }
 
-// [aurora2#1725] Resource summary for the partition view label, e.g. "clb 180 of
-// 224, dsp 16 of 20" -- required vs. available per type, individually omitted when
-// required is zero (a partition with no DSP atoms shouldn't claim "dsp 0 of 20").
-// Reads Partition's own counts (kept in sync as elements/regions change -- see
-// Partition::addElement() and *AvailableCount()) rather than recomputing them here,
-// so every consumer of these numbers agrees. required > available for any of these
-// is also what DeviceGrid::checkIssues() reports as a partition error.
-QString partitionResourceCountsText(const PartitionPtr& partition) {
-    QStringList parts;
-    if (partition->clbRequiredCount() != 0)
-        parts << QString("clb %1 of %2").arg(partition->clbRequiredCount()).arg(partition->clbAvailableCount());
-    if (partition->dspRequiredCount() != 0)
-        parts << QString("dsp %1 of %2").arg(partition->dspRequiredCount()).arg(partition->dspAvailableCount());
-    if (partition->bramRequiredCount() != 0)
-        parts << QString("bram %1 of %2").arg(partition->bramRequiredCount()).arg(partition->bramAvailableCount());
-    return parts.join(", ");
-}
-
 void uncheckAllRecursive(QStandardItem* item, int col) {
     if (!item) {
         return;
@@ -826,15 +808,10 @@ void SynthResourceHierarchyWidget::updateViewLabel() const {
     if (!m_viewLabelTemplate.isEmpty()) {
       QString label{m_viewLabelTemplate};
         if (m_selectedPartition) {
-            label.replace("%1", QString::fromStdString(m_selectedPartition->name()));
-            // [aurora2#1725] "Partition 'name' netlist: 180 clb, 16 dsp" -- appended
-            // rather than templated (%2) because it disappears entirely, not just
-            // going blank, when the partition has no atoms of a given type.
-            const QString counts = partitionResourceCountsText(m_selectedPartition);
-            if (!counts.isEmpty()) {
-                label += " " + counts;
-            }
-            m_lbView->setText(label);
+            // [aurora2#1725] Required-of-available clb/dsp/bram used to be appended
+            // here; now shown in PartitionsListWidget's CLB/DSP/BRAM columns instead,
+            // so this label goes back to just the name.
+            m_lbView->setText(label.replace("%1", QString::fromStdString(m_selectedPartition->name())));
         } else {
             m_lbView->setText(label.replace("'%1'", ""));
         }
