@@ -27,6 +27,14 @@
 #include <regex>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <thread>
+#include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <qlcrypt/qlcrypt.hpp>
 #include "CompilerOpenFPGA_ql.h"
@@ -2548,6 +2556,271 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
   }
 
 
+// ---------------------------------------------------------------------------------------
+// external device data root registry
+// ---------------------------------------------------------------------------------------
+
+namespace {
+
+// the registry is a small shared file that two Aurora processes can reach at the same time
+// (e.g. two install_device runs). a naive read-modify-write loses entries or, worse, leaves a
+// half-written file behind. so: take an advisory lock, write a temp file, rename it over.
+
+const int DEVICE_ROOT_REGISTRY_VERSION = 1;
+const int REGISTRY_LOCK_TIMEOUT_SECONDS = 5;
+// a lock older than this is assumed to be from a process that died holding it.
+const int REGISTRY_LOCK_STALE_SECONDS = 60;
+
+// create <registry>.lock exclusively, retrying until the timeout. returns false when the lock
+// could not be taken, so the caller reports failure rather than racing.
+bool acquireRegistryLock(const std::filesystem::path& lock_file_path) {
+
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(REGISTRY_LOCK_TIMEOUT_SECONDS);
+
+  while(true) {
+
+    // O_EXCL creation is the lock: it succeeds for exactly one process.
+    int lock_fd = ::open(lock_file_path.string().c_str(), O_CREAT | O_EXCL | O_RDWR, 0644);
+    if(lock_fd >= 0) {
+      ::close(lock_fd);
+      return true;
+    }
+
+    // someone holds it. if the lock is old enough that its owner has almost certainly died,
+    // break it rather than making the user wait forever on a crashed process.
+    std::error_code ec;
+    auto lock_write_time = std::filesystem::last_write_time(lock_file_path, ec);
+    if(!ec) {
+      auto lock_age = std::filesystem::file_time_type::clock::now() - lock_write_time;
+      if(lock_age > std::chrono::seconds(REGISTRY_LOCK_STALE_SECONDS)) {
+        std::cout << "WARNING: breaking stale device root registry lock: "
+                  << lock_file_path.string() << std::endl;
+        std::filesystem::remove(lock_file_path, ec);
+        continue;
+      }
+    }
+
+    if(std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
+void releaseRegistryLock(const std::filesystem::path& lock_file_path) {
+  std::error_code ec;
+  std::filesystem::remove(lock_file_path, ec);
+}
+
+} // anonymous namespace
+
+
+std::filesystem::path QLDeviceManager::deviceRootRegistryFilePath() {
+
+  // per-user, never machine-global: one user installing a device must not change what another
+  // user sees.
+#ifdef _WIN32
+  const char* const home_dir_env_str = std::getenv("USERPROFILE");
+#else
+  const char* const home_dir_env_str = std::getenv("HOME");
+#endif
+
+  if(home_dir_env_str == nullptr || std::string(home_dir_env_str).empty()) {
+    // no usable home: the registry is simply unavailable. callers degrade to env-var-only
+    // operation rather than failing (NFR-005).
+    return std::filesystem::path();
+  }
+
+  return std::filesystem::path(home_dir_env_str) / ".aurora" / "device_roots.json";
+}
+
+
+std::vector<std::filesystem::path> QLDeviceManager::readDeviceRootRegistry() {
+
+  std::vector<std::filesystem::path> registered_root_dir_path_list;
+
+  std::filesystem::path registry_file_path = deviceRootRegistryFilePath();
+
+  if(registry_file_path.empty() || !FileUtils::FileExists(registry_file_path)) {
+    // no home dir, or nothing registered yet - both are normal.
+    return registered_root_dir_path_list;
+  }
+
+  try {
+
+    std::ifstream registry_ifstream(registry_file_path.string());
+    json registry_json = json::parse(registry_ifstream);
+
+    if(registry_json.contains("roots") && registry_json["roots"].is_array()) {
+
+      for (const auto& root_entry: registry_json["roots"]) {
+        if(root_entry.is_string()) {
+          std::string root_dir_path_str = root_entry.get<std::string>();
+          if(!root_dir_path_str.empty()) {
+            registered_root_dir_path_list.push_back(std::filesystem::path(root_dir_path_str));
+          }
+        }
+      }
+    }
+  }
+  catch (const json::exception& e) {
+
+    // a corrupt registry must not make Aurora unusable - report it and carry on with the
+    // built-in devices.
+    std::cout << "WARNING: could not read device root registry, ignoring it: "
+              << registry_file_path.string() << " (" << e.what() << ")" << std::endl;
+    registered_root_dir_path_list.clear();
+  }
+
+  return registered_root_dir_path_list;
+}
+
+
+// write the registry atomically: temp file -> rename. the rename is what guarantees a reader
+// never sees a partially written registry.
+static bool writeDeviceRootRegistryFile(const std::filesystem::path& registry_file_path,
+                                        const std::vector<std::filesystem::path>& root_dir_path_list) {
+
+  std::error_code ec;
+  std::filesystem::create_directories(registry_file_path.parent_path(), ec);
+  if(ec) {
+    std::cout << "ERROR: could not create device root registry directory: "
+              << registry_file_path.parent_path().string() << " (" << ec.message() << ")" << std::endl;
+    return false;
+  }
+
+  json registry_json;
+  registry_json["version"] = DEVICE_ROOT_REGISTRY_VERSION;
+  registry_json["roots"] = json::array();
+  for (const std::filesystem::path& root_dir_path: root_dir_path_list) {
+    registry_json["roots"].push_back(root_dir_path.string());
+  }
+
+  std::filesystem::path registry_temp_file_path =
+      registry_file_path.string() + ".tmp." + std::to_string(
+#ifdef _WIN32
+          ::_getpid()
+#else
+          ::getpid()
+#endif
+      );
+
+  {
+    std::ofstream registry_ofstream(registry_temp_file_path.string(), std::ios::trunc);
+    if(!registry_ofstream.is_open()) {
+      std::cout << "ERROR: could not write device root registry: "
+                << registry_temp_file_path.string() << std::endl;
+      return false;
+    }
+    registry_ofstream << registry_json.dump(2) << std::endl;
+    registry_ofstream.flush();
+    if(!registry_ofstream.good()) {
+      std::cout << "ERROR: failed writing device root registry: "
+                << registry_temp_file_path.string() << std::endl;
+      registry_ofstream.close();
+      std::filesystem::remove(registry_temp_file_path, ec);
+      return false;
+    }
+  }
+
+  // replace the live registry in one step.
+  std::filesystem::rename(registry_temp_file_path, registry_file_path, ec);
+  if(ec) {
+    std::cout << "ERROR: could not replace device root registry: "
+              << registry_file_path.string() << " (" << ec.message() << ")" << std::endl;
+    std::filesystem::remove(registry_temp_file_path, ec);
+    return false;
+  }
+
+  return true;
+}
+
+
+bool QLDeviceManager::registerDeviceRoot(const std::filesystem::path& root_dir_path) {
+
+  std::filesystem::path registry_file_path = deviceRootRegistryFilePath();
+  if(registry_file_path.empty()) {
+    std::cout << "WARNING: no usable home directory, cannot remember this device data root."
+              << std::endl;
+    std::cout << "         set AURORA2_DEVICE_DATA_PATH=" << root_dir_path.string()
+              << " to use it." << std::endl;
+    return false;
+  }
+
+  std::filesystem::path registry_lock_file_path = registry_file_path.string() + ".lock";
+  if(!acquireRegistryLock(registry_lock_file_path)) {
+    std::cout << "ERROR: timed out waiting for the device root registry lock: "
+              << registry_lock_file_path.string() << std::endl;
+    return false;
+  }
+
+  // canonicalize so that the same directory reached by different paths registers once.
+  std::error_code ec;
+  std::filesystem::path root_dir_path_c = std::filesystem::canonical(root_dir_path, ec);
+  if(ec) {
+    root_dir_path_c = root_dir_path;
+  }
+
+  std::vector<std::filesystem::path> registered_root_dir_path_list = readDeviceRootRegistry();
+
+  for (const std::filesystem::path& registered_root_dir_path: registered_root_dir_path_list) {
+    if(registered_root_dir_path == root_dir_path_c) {
+      // already registered: nothing to do, and this is not an error (install is idempotent).
+      releaseRegistryLock(registry_lock_file_path);
+      return true;
+    }
+  }
+
+  registered_root_dir_path_list.push_back(root_dir_path_c);
+
+  bool status = writeDeviceRootRegistryFile(registry_file_path, registered_root_dir_path_list);
+
+  releaseRegistryLock(registry_lock_file_path);
+  return status;
+}
+
+
+bool QLDeviceManager::unregisterDeviceRoot(const std::filesystem::path& root_dir_path) {
+
+  std::filesystem::path registry_file_path = deviceRootRegistryFilePath();
+  if(registry_file_path.empty()) {
+    return false;
+  }
+
+  std::filesystem::path registry_lock_file_path = registry_file_path.string() + ".lock";
+  if(!acquireRegistryLock(registry_lock_file_path)) {
+    std::cout << "ERROR: timed out waiting for the device root registry lock: "
+              << registry_lock_file_path.string() << std::endl;
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::path root_dir_path_c = std::filesystem::canonical(root_dir_path, ec);
+  if(ec) {
+    root_dir_path_c = root_dir_path;
+  }
+
+  std::vector<std::filesystem::path> registered_root_dir_path_list = readDeviceRootRegistry();
+  std::vector<std::filesystem::path> remaining_root_dir_path_list;
+
+  for (const std::filesystem::path& registered_root_dir_path: registered_root_dir_path_list) {
+    // compare against both the canonical and the raw path: a root that has already been
+    // deleted cannot be canonicalized, and must still be removable from the registry.
+    if(registered_root_dir_path != root_dir_path_c &&
+       registered_root_dir_path != root_dir_path) {
+      remaining_root_dir_path_list.push_back(registered_root_dir_path);
+    }
+  }
+
+  bool status = writeDeviceRootRegistryFile(registry_file_path, remaining_root_dir_path_list);
+
+  releaseRegistryLock(registry_lock_file_path);
+  return status;
+}
+
+
 std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() {
 
   std::vector<std::filesystem::path> root_device_data_dir_path_list;
@@ -2576,13 +2849,72 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
               << env_root_device_data_dir_path.string() << std::endl;
   }
 
+  // collected roots are canonicalized and de-duplicated: the same directory reached twice
+  // (e.g. the installation also listed in AURORA2_DEVICE_DATA_PATH) would otherwise be walked
+  // twice and make every one of its devices look "shadowed".
+  std::set<std::string> seen_root_dir_path_set;
+
+  auto append_root_dir_path = [&](const std::filesystem::path& root_dir_path,
+                                  const std::string& source_description,
+                                  bool warn_when_missing) {
+
+    if(root_dir_path.empty()) {
+      return;
+    }
+
+    if(!FileUtils::FileExists(root_dir_path)) {
+      if(warn_when_missing) {
+        std::cout << "WARNING: skipping device data root that no longer exists ("
+                  << source_description << "): " << root_dir_path.string() << std::endl;
+      }
+      return;
+    }
+
+    std::error_code ec;
+    std::filesystem::path root_dir_path_c = std::filesystem::canonical(root_dir_path, ec);
+    if(ec) {
+      root_dir_path_c = root_dir_path;
+    }
+
+    if(seen_root_dir_path_set.insert(root_dir_path_c.string()).second) {
+      root_device_data_dir_path_list.push_back(root_dir_path_c);
+    }
+  };
+
   // [2] the installation's device_data dir always comes first among the additive roots:
   //     built-in devices are authoritative and can never be shadowed by an external root.
-  root_device_data_dir_path_list.push_back(GlobalSession->Context()->DataPath());
+  append_root_dir_path(GlobalSession->Context()->DataPath(), "installation", false);
 
-  // [3] roots registered by install_device, and
-  // [4] $AURORA2_DEVICE_DATA_PATH (additive)
-  // are appended here once the registry lands (A2).
+  // [3] roots registered by install_device. a registered root that has been deleted or moved
+  //     warns and is skipped - a stale entry must never break startup (REQ-007).
+  for (const std::filesystem::path& registered_root_dir_path: readDeviceRootRegistry()) {
+    append_root_dir_path(registered_root_dir_path, "registered by install_device", true);
+  }
+
+  // [4] $AURORA2_DEVICE_DATA_PATH - additive, ':'-separated on every platform (MSYS2 builds
+  //     use POSIX-style paths, consistent with the rest of the toolchain).
+  const char* const path_device_data_search_env_str = std::getenv("AURORA2_DEVICE_DATA_PATH");
+
+  if(path_device_data_search_env_str != nullptr) {
+
+    std::string path_device_data_search_str(path_device_data_search_env_str);
+    std::string::size_type entry_begin = 0;
+
+    while(entry_begin <= path_device_data_search_str.size()) {
+
+      std::string::size_type entry_end = path_device_data_search_str.find(':', entry_begin);
+      if(entry_end == std::string::npos) {
+        entry_end = path_device_data_search_str.size();
+      }
+
+      std::string entry = path_device_data_search_str.substr(entry_begin, entry_end - entry_begin);
+      if(!entry.empty()) {
+        append_root_dir_path(std::filesystem::path(entry), "AURORA2_DEVICE_DATA_PATH", true);
+      }
+
+      entry_begin = entry_end + 1;
+    }
+  }
 
   return root_device_data_dir_path_list;
 }

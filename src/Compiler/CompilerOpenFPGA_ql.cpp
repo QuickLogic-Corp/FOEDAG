@@ -977,9 +977,27 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   auto list_devices = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
 
-  std::vector <QLDeviceType>device_list = QLDeviceManager::getInstance(true)->device_list;
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance(true);
+
+  std::vector <QLDeviceType>device_list = device_manager->device_list;
+
+  // devices can now come from more than one device data root (the installation plus any
+  // directory a kit was installed into), so report where each one actually came from -
+  // otherwise two same-named devices are indistinguishable in this listing.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::error_code ec;
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, ec);
+  if(ec) {
+    installation_root_dir_path_c = installation_root_dir_path;
+  }
 
   for (QLDeviceType device: device_list) {
+
+    // the extra columns are appended, so anything reading the original 7 is unaffected.
+    std::string device_root_origin =
+        (device.device_root_path == installation_root_dir_path_c) ? "built-in" : "external";
+
     for (QLDeviceVariant device_variant: device.device_variants) {
       for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
         std::cout << device_variant.family << ","
@@ -988,11 +1006,13 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                   << device_variant.devicename << ","
                   << device_variant.voltage_threshold << ","
                   << device_variant.p_v_t_corner << ","
-                  << device_variant_layout.name << std::endl;
+                  << device_variant_layout.name << ","
+                  << device_root_origin << ","
+                  << device.device_root_path.string() << std::endl;
       }
     }
   }
-  
+
   return TCL_OK;
   };
   interp->registerCmd("list_devices", list_devices, this, 0);

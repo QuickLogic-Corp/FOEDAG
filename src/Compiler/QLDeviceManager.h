@@ -188,6 +188,23 @@ class QLDeviceManager : public QObject {
   // kept for the many call sites that legitimately want a single root.
   std::filesystem::path deviceDataRootDirPath();
 
+  // --- external device data root registry (per-user) -------------------------------------
+  // install_device records the directory it installed into here, so the device stays visible
+  // in later sessions without the user setting anything. uninstall_device removes it again.
+
+  // <home>/.aurora/device_roots.json. empty when there is no usable home directory, in which
+  // case the registry degrades to "not available" rather than failing.
+  std::filesystem::path deviceRootRegistryFilePath();
+
+  // registered roots, in registration order. a malformed registry is reported and treated as
+  // empty rather than aborting - a corrupt config file must not make Aurora unusable.
+  std::vector<std::filesystem::path> readDeviceRootRegistry();
+
+  // add/remove a root. both are atomic and safe against concurrent Aurora processes.
+  // adding an already-registered root succeeds without duplicating it.
+  bool registerDeviceRoot(const std::filesystem::path& root_dir_path);
+  bool unregisterDeviceRoot(const std::filesystem::path& root_dir_path);
+
   // the root that the given device was actually discovered under, looked up from device_list
   // by device coordinates. falls back to deviceDataRootDirPath() when the device is not (yet)
   // in the list - which is the case while parseDeviceData() is still running.
