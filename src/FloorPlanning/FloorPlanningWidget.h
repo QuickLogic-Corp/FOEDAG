@@ -93,6 +93,9 @@ private:
     void checkErrors();
     void onNotify(QString, QString);
 
+    // [aurora2#1725] Shared by the Save QDC button and the Ctrl+S shortcut.
+    void saveQdc();
+
     void updateSaveQdcButtonEnability();
 };
 

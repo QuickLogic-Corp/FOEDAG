@@ -17,6 +17,7 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QSettings>
+#include <QShortcut>
 #include <QSplitter>
 #include <QStyle>
 #include <QKeyEvent>
@@ -117,16 +118,15 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     bnLoadQdc->setToolTip(tr("Load QDC"));
 
     m_bnSaveQdc = new QPushButton(QIcon(":/save-action.png"), "");
-    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, [this]() {
-        if (m_deviceWidget->saveQdc()) {
-            m_bnSaveQdc->setEnabled(false);
-            emit qdcFileSaved();
-        } else {
-            onNotify("Fail to save QDC", "");
-        }
-    });
-    m_bnSaveQdc->setToolTip(tr("Save QDC"));
+    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, [this]() { saveQdc(); });
+    m_bnSaveQdc->setToolTip(tr("Save QDC (Ctrl+S)"));
     m_bnSaveQdc->setEnabled(false);
+
+    // [aurora2#1725] Ctrl+S saves, same as the button. Scoped to this window (a QShortcut on
+    // a widget defaults to Qt::WindowShortcut), so it cannot reach the main window's own
+    // Ctrl+S while FloorPlanning has focus, nor fire when it does not.
+    auto* saveShortcut = new QShortcut(QKeySequence::Save, this);
+    connect(saveShortcut, &QShortcut::activated, this, [this]() { saveQdc(); });
 
     QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/add.png"), "");
     connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
@@ -476,6 +476,27 @@ void FloorPlanningWidget::createNewPartition()
 void FloorPlanningWidget::onNotify(QString title, QString msg)
 {
     QMessageBox::warning(this, title, msg);
+}
+
+void FloorPlanningWidget::saveQdc()
+{
+    // [aurora2#1725] The button and Ctrl+S go through here, so the two cannot drift apart.
+    // The button is disabled while the floorplan has errors, and the shortcut has no such
+    // visual state, so it says why rather than doing nothing: a keystroke that silently
+    // achieves nothing reads as a broken shortcut.
+    if (!m_deviceWidget->isSaveQdcAllowed()) {
+        onNotify(tr("Cannot save QDC"),
+                 tr("The floorplan has errors. Resolve the errors listed in Issues, or turn off "
+                    "\"Treat warnings as errors\" in Options if that is what promoted them."));
+        return;
+    }
+
+    if (m_deviceWidget->saveQdc()) {
+        m_bnSaveQdc->setEnabled(false);
+        emit qdcFileSaved();
+    } else {
+        onNotify(tr("Fail to save QDC"), "");
+    }
 }
 
 void FloorPlanningWidget::resizeEvent(QResizeEvent* event)
