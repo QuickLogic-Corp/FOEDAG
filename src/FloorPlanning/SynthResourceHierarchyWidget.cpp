@@ -256,22 +256,29 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
         }
     }
 
-    // intermediate data be captured in lambda
-    std::map<std::string, std::string> data;
+    // intermediate data be captured in lambda: path -> the partitions naming that exact path
+    std::map<std::string, std::set<std::string>> data;
     for (const auto& [id, partition]: partitions) {
-        const std::string partitionName{partition->name()};
         for (const HierarhyElement& element: partition->elements()) {
-            if (data.find(element.path) == data.end()) {
-                data[element.path] = partitionName;
-            } else {
-                data[element.path] += "," + partitionName;
-            }
+            data[element.path].insert(partition->name());
         }
     }
 
     const bool isPartitionsColumnVisible = !isPartitionsColumnHidden();
-    std::function<void(QStandardItem*, const std::string&)> setPartitionRecursive =
-        [&data, &setPartitionRecursive, isPartitionsColumnVisible](QStandardItem* item, const std::string& prefix)
+
+    // [aurora2#1725] An element covers its whole subtree -- that is what the .qdc's
+    // "<path>.*" form means -- so a row belongs to every partition naming it OR any of its
+    // ancestors, and the column has to say so. Put partition1 on an instance and partition2
+    // on something nested inside it and the nested row really is in both: selecting
+    // partition1 shows it checked because its ancestor is checked, while selecting
+    // partition2 shows it checked in its own right. Listing only the exact match hid that
+    // second claim, so the row looked cleanly owned by partition2 and the double constraint
+    // -- unsatisfiable for VPR, since a cluster cannot sit in two regions -- was invisible.
+    // Inherited names are threaded down the walk rather than re-derived per row.
+    std::function<void(QStandardItem*, const std::string&, const std::set<std::string>&)> setPartitionRecursive =
+        [&data, &setPartitionRecursive, isPartitionsColumnVisible](QStandardItem* item,
+                                                                  const std::string& prefix,
+                                                                  const std::set<std::string>& fromAncestors)
     {
         if (!item) {
             return;
@@ -286,23 +293,28 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
 
             const std::string fullPath = buildChildPath(prefix, child);
 
+            std::set<std::string> covering{fromAncestors};
+            if (auto it = data.find(fullPath); it != data.end()) {
+                covering.insert(it->second.begin(), it->second.end());
+            }
+
             if (isPartitionsColumnVisible) {
                 QStandardItem* partitionItem = item->child(row, Column::Partitions);
                 if (partitionItem) {
-                    if (auto it = data.find(fullPath); it != data.end()) {
-                        partitionItem->setText(QString::fromStdString(it->second));
-                    } else {
-                        partitionItem->setText(QString());
+                    std::string text;
+                    for (const std::string& name: covering) {
+                        text += (text.empty() ? "" : ",") + name;
                     }
+                    partitionItem->setText(QString::fromStdString(text));
                 }
             }
 
-            setPartitionRecursive(child, fullPath);
+            setPartitionRecursive(child, fullPath, covering);
         }
     };
 
     QSignalBlocker blockModel(m_model);     // Block model signals to avoid massive itemChanged cascades
-    setPartitionRecursive(m_model->invisibleRootItem(), "");
+    setPartitionRecursive(m_model->invisibleRootItem(), "", {});
     blockModel.unblock();
 
     m_view->viewport()->update();
