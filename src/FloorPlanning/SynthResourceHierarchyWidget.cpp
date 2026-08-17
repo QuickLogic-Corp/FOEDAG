@@ -728,6 +728,10 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
 
     const bool partitionsVisible = !isPartitionsColumnHidden();
 
+    // [aurora2#1725] Leaves with no atoms are tallied here, not logged: FloorPlanningWidget
+    // reads the tally back and reports it once, rather than once per tree.
+    m_atomMappingReport = AtomMappingReport{};
+
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
         [&populateRecursive, this, partitionsVisible](QStandardItem* item, const std::string& prefix)
     {
@@ -744,14 +748,20 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
             const bool isLeaf = (child->rowCount() == 0);
 
             if (isLeaf && names.empty()) {
-                // This RTL leaf has no matching VPR atom — it exists in the source
-                // but was optimised away or renamed by synthesis.  Hide it so the
-                // user only sees items that can actually be placed, and log it for
-                // debugging so the gap is visible in the build output.
+                // This RTL leaf has no matching VPR atom — it exists in the source but was
+                // optimised away or renamed by synthesis. Hide it so the user only sees items
+                // that can actually be placed; applyInstanceVerdicts() brings it back greyed
+                // out if stage P4 graded it, which is the better explanation.
                 const QModelIndex parentIdx = (item == m_model->invisibleRootItem())
                     ? QModelIndex() : item->index();
                 m_view->setRowHidden(row, parentIdx, true);
-                fprintf(stderr, "  [unmapped netlist] %s\n", path.c_str());
+
+                const auto graded = m_verdicts.find(path);
+                if ((graded != m_verdicts.end()) && (graded->second.verdict == "deleted")) {
+                    ++m_atomMappingReport.explainedByVerdict;
+                } else {
+                    m_atomMappingReport.unexplained.push_back(path);
+                }
             } else if (!names.empty()) {
                 if (isLeaf) {
                     if (names.size() == 1) {

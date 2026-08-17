@@ -59,6 +59,10 @@ signals:
     void closed();
     void qdcFileSaved();
 
+    // [aurora2#1725] Goes to the compiler log rather than the terminal, so what the panel
+    // found is recorded where the rest of the flow's output is. Connected in main_window_ql.
+    void logMessage(QString message);
+
 protected:
     void resizeEvent(QResizeEvent* event) override final;
     void closeEvent(QCloseEvent* event) override final;
@@ -95,6 +99,12 @@ private:
 
     // [aurora2#1725] Shared by the Save QDC button and the Ctrl+S shortcut.
     void saveQdc();
+    // Load, then clear the unsaved-changes flag the load itself sets.
+    void loadQdc();
+
+    // [aurora2#1725] Whether the floorplan differs from the .qdc on disk. Gates the Save QDC
+    // button, which used to come up enabled straight after a load.
+    bool m_hasUnsavedChanges = false;
 
     void updateSaveQdcButtonEnability();
 };

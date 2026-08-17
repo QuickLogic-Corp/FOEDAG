@@ -114,7 +114,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     toolBarLayout->setSpacing(m);
 
     QPushButton* bnLoadQdc = new QPushButton(QIcon(":/load-action.png"), "");
-    connect(bnLoadQdc, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::loadQdc);
+    connect(bnLoadQdc, &QPushButton::clicked, this, &FloorPlanningWidget::loadQdc);
     bnLoadQdc->setToolTip(tr("Load QDC"));
 
     m_bnSaveQdc = new QPushButton(QIcon(":/save-action.png"), "");
@@ -341,7 +341,10 @@ void FloorPlanningWidget::setQdcFilePath(const std::filesystem::path& path, bool
     loadOptions();
 
     if (load) {
-        m_deviceWidget->loadQdc();
+        loadQdc();   // clears the unsaved-changes flag the load itself would set
+    } else {
+        m_hasUnsavedChanges = false;
+        updateSaveQdcButtonEnability();
     }
 }
 
@@ -389,6 +392,10 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
     m_partitionsListWidget->setEnabled(partitionsNotEmpty);
 
     m_bnRemoveAllPartitions->setEnabled(partitionsNotEmpty);
+
+    // Any partition change is an edit worth saving -- except the ones loadQdc() and
+    // setQdcFilePath() cause, which clear the flag again once the load has finished.
+    m_hasUnsavedChanges = true;
     updateSaveQdcButtonEnability();
 }
 
@@ -404,7 +411,20 @@ void FloorPlanningWidget::onCheckIssuesFinished(DeviceGrid::IssuesPtr issues)
 
 void FloorPlanningWidget::updateSaveQdcButtonEnability()
 {
-    m_bnSaveQdc->setEnabled(m_deviceWidget->isSaveQdcAllowed());
+    // [aurora2#1725] Enabled only when there is something to save. Loading a project, or
+    // loading a .qdc, reaches here through onPartitionsChanged() like any edit does, so
+    // without the flag the button came up enabled on a floorplan identical to the file on
+    // disk -- offering to save what was just read.
+    m_bnSaveQdc->setEnabled(m_hasUnsavedChanges && m_deviceWidget->isSaveQdcAllowed());
+}
+
+void FloorPlanningWidget::loadQdc()
+{
+    m_deviceWidget->loadQdc();
+    // loadQdc() emits partitionsChanged as it repopulates, which marks the floorplan dirty;
+    // it is not, it is exactly what the file says. Clear the flag afterwards, not before.
+    m_hasUnsavedChanges = false;
+    updateSaveQdcButtonEnability();
 }
 
 void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
@@ -412,6 +432,37 @@ void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
     m_synthResourcesWidget->build(elements);
     m_partitionResourcesWidget->build(elements);
     m_busyOverlayWidget->hide();
+
+    // [aurora2#1725] Report the atom-mapping gaps once, into the compiler log. Both trees
+    // compute the same tally, so this reads it from one of them -- logging inside the widget
+    // said everything twice. It used to go to stderr, one line per instance, which on fft256
+    // meant 161 lines nobody could act on: stage P4's verdicts now show those instances greyed
+    // out in the tree, reading "(deleted)" with synthesis's reason in the tooltip.
+    //
+    // The count is still worth recording, and individually the leaves NO verdict accounts
+    // for: those mean atomsets.json and validation.json disagree about the same netlist,
+    // which is a real problem rather than ordinary constant folding. Capped, with the number
+    // dropped stated, so a systematic mismatch cannot masquerade as a short list.
+    const auto& report = m_synthResourcesWidget->atomMappingReport();
+    if (report.total() > 0) {
+        emit logMessage(tr("Floor Planning: %1 RTL instance(s) have no atoms in the netlist: "
+                           "%2 graded 'deleted' by synthesis validation (shown greyed out), "
+                           "%3 unaccounted for")
+                            .arg(report.total())
+                            .arg(report.explainedByVerdict)
+                            .arg(report.unexplained.size()));
+
+        constexpr std::size_t kMaxListed = 10;
+        for (std::size_t i = 0; (i < report.unexplained.size()) && (i < kMaxListed); ++i) {
+            emit logMessage(tr("Floor Planning: no atoms and no verdict for '%1'")
+                                .arg(QString::fromStdString(report.unexplained[i])));
+        }
+        if (report.unexplained.size() > kMaxListed) {
+            emit logMessage(tr("Floor Planning: ... and %1 more instance(s) with no atoms and "
+                               "no verdict, not listed")
+                                .arg(report.unexplained.size() - kMaxListed));
+        }
+    }
 }
 
 void FloorPlanningWidget::setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames)
@@ -481,6 +532,12 @@ void FloorPlanningWidget::onNotify(QString title, QString msg)
 void FloorPlanningWidget::saveQdc()
 {
     // [aurora2#1725] The button and Ctrl+S go through here, so the two cannot drift apart.
+    // Nothing changed means nothing to write: rewriting an identical .qdc would still fire
+    // qdcFileSaved(), and that invalidates the compiled stages downstream.
+    if (!m_hasUnsavedChanges) {
+        return;
+    }
+
     // The button is disabled while the floorplan has errors, and the shortcut has no such
     // visual state, so it says why rather than doing nothing: a keystroke that silently
     // achieves nothing reads as a broken shortcut.
@@ -492,7 +549,8 @@ void FloorPlanningWidget::saveQdc()
     }
 
     if (m_deviceWidget->saveQdc()) {
-        m_bnSaveQdc->setEnabled(false);
+        m_hasUnsavedChanges = false;
+        updateSaveQdcButtonEnability();
         emit qdcFileSaved();
     } else {
         onNotify(tr("Fail to save QDC"), "");

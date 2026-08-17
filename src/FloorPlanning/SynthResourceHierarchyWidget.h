@@ -55,6 +55,19 @@ public:
     // default: the atom names are long and mostly of interest when debugging a mapping.
     void setAtomColumnsVisible(bool visible);
 
+    // [aurora2#1725] What build() found while matching RTL leaves to atoms: the leaves with
+    // no atoms at all, split by whether stage P4 accounts for them. Reported by
+    // FloorPlanningWidget rather than logged from here, because it owns two of these trees
+    // and logging from each said the same thing twice.
+    struct AtomMappingReport {
+        int explainedByVerdict = 0;          // graded 'deleted' -- ordinary constant folding
+        std::vector<std::string> unexplained;  // atomsets.json and validation.json disagree
+        int total() const {
+            return explainedByVerdict + static_cast<int>(unexplained.size());
+        }
+    };
+    const AtomMappingReport& atomMappingReport() const { return m_atomMappingReport; }
+
     // [aurora2#1725 stage P4] Grades the tree: a deleted instance is shown greyed and cannot be checked, a partial
     // one stays selectable but is flagged. Optional -- without it every instance renders as
     // equally usable, which is what the panel did before stage P4 was wired up.
@@ -89,6 +102,7 @@ private:
 
     std::map<std::string, InstanceVerdict> m_verdicts;
     bool m_atomColumnsVisible = false;
+    AtomMappingReport m_atomMappingReport;
 
     // [aurora2#1725] Atoms covered by an RTL path -- its own atomsets.json entry when it
     // has one, else the union of the descendant entries that do (see the .cpp).

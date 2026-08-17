@@ -2334,6 +2334,13 @@ void MainWindow::floorPlanningActionTriggered()
       updateSourceTree();
     });
 
+    // [aurora2#1725] What the panel finds goes to the compiler log, alongside the rest of the
+    // flow's output, rather than to the terminal where a GUI user never sees it.
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::logMessage, this,
+            [compiler](const QString& message){
+      compiler->Message(message.toStdString());
+    });
+
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
     // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
