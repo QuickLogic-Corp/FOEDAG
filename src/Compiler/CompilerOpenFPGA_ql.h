@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 // clang-format off
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -174,6 +175,21 @@ class CompilerOpenFPGA_ql : public Compiler {
   void onQdcFileSaved();
   void onPcfFileSaved();
 
+  /// Register an annotated relative-placement IP netlist (via the
+  /// `ip_add_to_design` Tcl command, either as an explicit .eblif/.blif path
+  /// or auto-discovered from a catalog IP instance's rel_macro/ dir).
+  /// Duplicates are ignored. See
+  /// docs/development/relative_macro_placement/ in aurora2.
+  void AddRelIpBlif(const std::filesystem::path& path) {
+    if (std::find(m_relIpBlifs.begin(), m_relIpBlifs.end(), path) ==
+        m_relIpBlifs.end()) {
+      m_relIpBlifs.push_back(path);
+    }
+  }
+  const std::vector<std::filesystem::path>& RelIpBlifs() const {
+    return m_relIpBlifs;
+  }
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -196,6 +212,12 @@ class CompilerOpenFPGA_ql : public Compiler {
   [[nodiscard]] bool RunBitstreamEncode(uint32_t stages);
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
   bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
+  /// Derive relative-macro constraints from the annotated post-synthesis
+  /// netlist and merge them with the IO floorplan constraints into
+  /// <project>_rpm_constraints.xml. Only called when annotated IP netlists
+  /// are registered; the default flow's <project>_constraints.xml is never
+  /// touched.
+  bool GenerateRelMacroConstraints(const std::string& netlistFile);
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
@@ -239,6 +261,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_aurora_template_script_yosys_path;
   std::filesystem::path m_aurora_template_script_synplify_path;
   std::filesystem::path m_aurora_template_script_openfpga_path;
+  // Annotated relative-placement IP netlists (registered via
+  // ip_add_to_design). Empty in the default flow; every consumer is gated on
+  // this so that projects without relative-placement IPs behave identically
+  // to before.
+  std::vector<std::filesystem::path> m_relIpBlifs;
   /*!
    * \brief m_architectureFile
    * We required from user explicitly specify architecture file.

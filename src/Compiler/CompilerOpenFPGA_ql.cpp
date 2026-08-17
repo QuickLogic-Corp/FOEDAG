@@ -56,6 +56,7 @@
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
 #include "Utils/StringUtils.h"
@@ -669,6 +670,71 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_OK;
   };
   interp->registerCmd("set_channel_width", set_channel_width, this, 0);
+
+  // Re-register ip_add_to_design (base version: Compiler.cpp) with a QL
+  // extension: an argument ending in .eblif/.blif names an annotated
+  // relative-placement IP netlist, which is registered to be linked into the
+  // design at the end of synthesis (synth_quicklogic -rel_ip_blif) and to
+  // drive relative-macro constraint generation before the VPR stages. See
+  // docs/development/relative_macro_placement/ in aurora2. Any other argument
+  // is a catalog IP instance name, handled exactly as the base command does.
+  auto ip_add_to_design = [](void* clientData, Tcl_Interp* interp, int argc,
+                             const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    if (argc < 2) {
+      // Match the base command: error only when the GUI sync layer is
+      // present, silent no-op otherwise.
+      if (compiler->GuiTclSync()) {
+        compiler->ErrorMessage("IP name missed.");
+        return TCL_ERROR;
+      }
+      return TCL_OK;
+    }
+    for (int i = 1; i < argc; i++) {
+      const std::string arg = argv[i];
+      std::filesystem::path path = FileUtils::GetFullPath(arg);
+      const std::string ext = path.extension().string();
+      if (ext == ".eblif" || ext == ".blif") {
+        if (!FileUtils::FileExists(path)) {
+          compiler->ErrorMessage("Annotated IP netlist does not exist: " +
+                                 arg);
+          return TCL_ERROR;
+        }
+        compiler->AddRelIpBlif(path);
+        continue;
+      }
+      // Catalog IP instance: delegate to the base mechanism (GUI-sync layer
+      // adds the instance's src/ files to the design fileset).
+      if (compiler->GuiTclSync()) {
+        std::stringstream out;
+        if (!compiler->GuiTclSync()->TclAddIpToDesign(arg, out)) {
+          compiler->ErrorMessage(out.str());
+          return TCL_ERROR;
+        }
+        // Relative-placement catalog IPs: the generator places the annotated
+        // netlist in the instance's rel_macro/ dir (outside src/, so it is
+        // never added as a design source). Register it for the synthesis
+        // link step. Non-RPM IPs have no rel_macro/ dir and are unaffected.
+        if (IPGenerator* ipGen = compiler->GetIPGenerator()) {
+          if (IPInstance* inst = ipGen->GetIPInstance(arg)) {
+            std::filesystem::path relMacroDir =
+                ipGen->GetBuildDir(inst) / "rel_macro";
+            if (std::filesystem::is_directory(relMacroDir)) {
+              for (const auto& entry :
+                   std::filesystem::directory_iterator(relMacroDir)) {
+                const std::string entryExt = entry.path().extension().string();
+                if (entryExt == ".eblif" || entryExt == ".blif") {
+                  compiler->AddRelIpBlif(entry.path());
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return TCL_OK;
+  };
+  interp->registerCmd("ip_add_to_design", ip_add_to_design, this, nullptr);
 
   auto message_severity = [](void* clientData, Tcl_Interp* interp, int argc,
                              const char* argv[]) -> int {
@@ -2441,7 +2507,16 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
-    if (fs::exists(fp_constraint_filepath_absolute)) {
+    if (!m_relIpBlifs.empty()) {
+      // Relative-placement IPs registered: merge the relative-macro
+      // constraints (derived from the annotated netlist) with the IO
+      // constraints into a separate file. The default flow's
+      // <project>_constraints.xml is left untouched.
+      if (!GenerateRelMacroConstraints(netlistFile)) {
+        return std::make_tuple(std::string(""), std::string(""));
+      }
+      vpr_options += std::string(" --read_vpr_constraints " + ProjManager()->projectName() + "_rpm_constraints.xml");
+    } else if (fs::exists(fp_constraint_filepath_absolute)) {
       vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
     }
   }
@@ -2836,7 +2911,16 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
-    if (fs::exists(fp_constraint_filepath_absolute)) {
+    if (!m_relIpBlifs.empty()) {
+      // Relative-placement IPs registered: merge the relative-macro
+      // constraints (derived from the annotated netlist) with the IO
+      // constraints into a separate file. The default flow's
+      // <project>_constraints.xml is left untouched.
+      if (!GenerateRelMacroConstraints(netlistFile)) {
+        return nullptr;
+      }
+      command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_rpm_constraints.xml"});
+    } else if (fs::exists(fp_constraint_filepath_absolute)) {
       command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
@@ -7230,6 +7314,96 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
 }
 
+bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlistFile) {
+
+  // Relative-placement macro constraints are derived from the REL_* attributes
+  // that synth_quicklogic -rel_ip_blif stamped into the post-synthesis BLIF,
+  // so a non-BLIF PnR netlist cannot carry them.
+  if (netlistFile.size() < 5 ||
+      netlistFile.compare(netlistFile.size() - 5, 5, ".blif") != 0) {
+    ErrorMessage("Relative-placement IPs require a BLIF PnR netlist, got: " +
+                 netlistFile);
+    return false;
+  }
+
+  // Locate the installed script. DataPath varies with the install layout
+  // (<install>/share/aurora in the aurora tree), so probe the plausible
+  // roots: <install>/scripts (aurora layout) and DataPath()/../scripts.
+  std::filesystem::path generate_constraints_script_path;
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  const std::filesystem::path script_rel_path =
+      std::filesystem::path("scripts") /
+      std::filesystem::path("rel_macro_placement") /
+      std::filesystem::path("blif_rel_macro_constraints.py");
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    std::filesystem::path candidate =
+        (root / script_rel_path).lexically_normal();
+    if (fs::exists(candidate)) {
+      generate_constraints_script_path = candidate;
+      break;
+    }
+  }
+  if (generate_constraints_script_path.empty()) {
+    ErrorMessage(
+        "Cannot locate scripts/rel_macro_placement/"
+        "blif_rel_macro_constraints.py in the installation. "
+        "Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  std::filesystem::path project_path = ProjManager()->projectPath();
+  std::filesystem::path netlist_filepath = project_path / netlistFile;
+  std::filesystem::path io_constraints_filepath =
+      project_path / (ProjManager()->projectName() + "_constraints.xml");
+  std::filesystem::path output_filepath =
+      project_path / (ProjManager()->projectName() + "_rpm_constraints.xml");
+
+  if (!fs::exists(netlist_filepath)) {
+    ErrorMessage("Cannot generate relative-macro constraints: " +
+                 netlist_filepath.string() +
+                 " does not exist (run synthesis first)");
+    return false;
+  }
+
+  #ifdef _WIN32
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(generate_constraints_script_path.string());
+  args.push_back("--blif");
+  args.push_back(netlist_filepath.string());
+  // Preserve the IO floorplan constraints by merging into them; without an IO
+  // constraints file the RPM constraints stand alone.
+  if (fs::exists(io_constraints_filepath)) {
+    args.push_back("--merge-into");
+    args.push_back(io_constraints_filepath.string());
+  }
+  args.push_back("-o");
+  args.push_back(output_filepath.string());
+
+  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
+
+  if (status != 0) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  return true;
+}
+
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
   bool status = true;
 #if UPSTREAM_UNUSED
@@ -9833,8 +10007,15 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     // tack on a '/' separator if it is missing to be safe:
     yosys_modules_dir_path_string += "/";
   }
-  yosys_options += " -lib_path " + 
+  yosys_options += " -lib_path " +
                    yosys_modules_dir_path_string;
+
+  // Relative-placement IPs: link each annotated netlist at the end of
+  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration so the
+  // default flow's synthesis script stays byte-identical.
+  for (const auto& rel_ip_blif : m_relIpBlifs) {
+    yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
+  }
 
   // TODO: trim yosys_options at the front
   yosysScript->apply("${YOSYS_OPTIONS}", yosys_options);
