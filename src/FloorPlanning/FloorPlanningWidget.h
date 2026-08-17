@@ -37,6 +37,12 @@ public:
     // [aurora2#1725 stage P3] Feeds the "Atom List"/"Type" columns: RTL path -> the
     // atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
+
+    // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
+    // one tile, so a partition's required clb can be reported in the same unit as what its
+    // regions have available.
+    void setAtomsPerTile(int atomsPerTile) { Partition::setAtomsPerTile(atomsPerTile); }
+
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 

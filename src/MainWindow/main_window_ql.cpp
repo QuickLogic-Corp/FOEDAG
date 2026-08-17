@@ -2344,6 +2344,12 @@ void MainWindow::floorPlanningActionTriggered()
       } catch (const std::exception&) {
         parsedOk = false;
       }
+      // [aurora2#1725] Packing density, needed to report a partition's required clb in
+      // tiles rather than atoms. Absent/garbage leaves fp::Partition's A.13.3 default.
+      if (parsedOk && atomsetsDoc.contains("atoms_per_tile")
+          && atomsetsDoc["atoms_per_tile"].is_number_integer()) {
+        m_floorPlanningWidget->setAtomsPerTile(atomsetsDoc["atoms_per_tile"].get<int>());
+      }
       if (parsedOk && atomsetsDoc.contains("atomsets") && atomsetsDoc["atomsets"].is_object()) {
         std::map<std::string, std::vector<std::string>, fp::NaturalLess> atomNames;
         for (auto it = atomsetsDoc["atomsets"].begin(); it != atomsetsDoc["atomsets"].end(); ++it) {

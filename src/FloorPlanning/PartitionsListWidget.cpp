@@ -95,7 +95,7 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         nameItem->setData(Qt::UserRole, QString::fromStdString(name));
         m_tableWidget->setItem(row, Column::Name, nameItem);
 
-        // [aurora2#1725] "required/available", e.g. "180/224" -- read-only, unlike
+        // [aurora2#1725] "required/available" tiles, e.g. "180/224" -- read-only, unlike
         // the view label these are always shown, even 0/available, since a table
         // column can't disappear per-row the way free text can.
         auto resourceItem = [](int required, int available) {

@@ -277,7 +277,7 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         auto checkResource = [&](const char* label, int required, int available) {
             if (required > available) {
                 m_issues->errors.insert({"Partition '" + partition->name() + "' needs " +
-                                          std::to_string(required) + " " + label + " but only " +
+                                          std::to_string(required) + " " + label + " tiles but only " +
                                           std::to_string(available) + " available", ""});
             }
         };

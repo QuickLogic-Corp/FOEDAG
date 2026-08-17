@@ -14,8 +14,19 @@ namespace fp {
 
 class Partition {
     static int s_idGenerator;
+    static int s_atomsPerTile;
 public:
     static void resetIdGenerator() { s_idGenerator = 0; }
+
+    // [aurora2#1725] atoms_per_tile from atomsets.json -- the packing density hint of
+    // spec A.13.3, the same divisor its est_tiles field uses. Needed because clb atoms
+    // and clb tiles are different units (see clbRequiredCount()). Static, like
+    // s_idGenerator: it describes the netlist every partition is measured against, not
+    // one partition. Left at the A.13.3 default when atomsets.json doesn't say.
+    static void setAtomsPerTile(int atomsPerTile) {
+        s_atomsPerTile = (atomsPerTile > 0) ? atomsPerTile : 1;
+    }
+    static int atomsPerTile() { return s_atomsPerTile; }
 
     Partition(const std::string& name = "");
 
@@ -35,7 +46,7 @@ public:
 
     void clearElemenets() {
         m_elements.clear();
-        m_clbRequiredCount = m_dspRequiredCount = m_bramRequiredCount = 0;
+        m_clbAtomCount = m_dspRequiredCount = m_bramRequiredCount = 0;
     }
     void addElement(const HierarhyElement& element) {
         m_elements.insert(element);
@@ -49,16 +60,29 @@ public:
             const QString type = classifyAtomType(atomName);
             if (type == "dsp") ++m_dspRequiredCount;
             else if (type == "bram") ++m_bramRequiredCount;
-            else ++m_clbRequiredCount;
+            else ++m_clbAtomCount;
         }
     }
 
     const HierarhyElements& elements() const { return m_elements; }
     const std::map<int, RegionPtr> regions() const { return m_regions; }
 
-    int clbRequiredCount() const { return m_clbRequiredCount; }
+    // [aurora2#1725] Every *RequiredCount() is in TILES, the unit *AvailableCount() below
+    // reports, so the two can be compared (PartitionsListWidget's columns, DeviceGrid's
+    // under-provisioned check). A dsp/bram atom IS one tile, but clb atoms are luts and
+    // flops that pack many-to-a-tile, so that count has to be divided down: fft256's whole
+    // "dut" is 19029 clb atoms, which is 1360 tiles at 14 atoms/tile, not 19029 of them.
+    // A sizing hint, deliberately conservative -- the packer fits that design in 799 clb --
+    // but in the same unit as what a region actually offers, which the raw atom count is not.
+    int clbRequiredCount() const {
+        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile;
+    }
     int dspRequiredCount() const { return m_dspRequiredCount; }
     int bramRequiredCount() const { return m_bramRequiredCount; }
+
+    // Raw atom count behind clbRequiredCount(), for anything reporting atoms rather than
+    // the tiles they pack into.
+    int clbAtomCount() const { return m_clbAtomCount; }
 
     // [aurora2#1725] Tile counts by type across every region of this partition --
     // what's physically available, as opposed to *Required*Count() above. Computed
@@ -83,7 +107,7 @@ private:
 
     HierarhyElements m_elements;
     std::map<int, RegionPtr> m_regions;
-    int m_clbRequiredCount = 0;
+    int m_clbAtomCount = 0;
     int m_dspRequiredCount = 0;
     int m_bramRequiredCount = 0;
 

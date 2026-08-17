@@ -8,6 +8,10 @@ namespace fp {
 
 int Partition::s_idGenerator = 0;
 
+// atomsets.json's own default (spec A.13.3). Overridden by setAtomsPerTile() once the
+// project's atomsets.json has been read.
+int Partition::s_atomsPerTile = 14;
+
 Partition::Partition(const std::string& name): m_name(name) {
   m_id = s_idGenerator++;
   setColor(colorFromIndex(m_id));
