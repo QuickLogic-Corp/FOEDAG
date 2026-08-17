@@ -8,17 +8,30 @@
 #include "CheckableButton.h"
 #include "Widgets/RoundProgressWidget.h"
 
+#include <QAction>
 #include <QButtonGroup>
 #include <QColorDialog>
 #include <QHBoxLayout>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QSettings>
 #include <QSplitter>
+#include <QStyle>
 #include <QKeyEvent>
 
 namespace fp {
-	
+
+namespace {
+
+// [aurora2#1725] floorplanning.cfg keys. Grouped, so the file reads as a FloorPlanning
+// section rather than QSettings' anonymous "[General]".
+constexpr auto kCfgTreatWarningsAsErrors = "FloorPlanning/treat_warnings_as_errors";
+constexpr auto kCfgShowAtomColumns = "FloorPlanning/show_atom_list_and_type_columns";
+
+}  // namespace
+
 FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* parent)
     : QWidget(parent)
 {
@@ -213,6 +226,36 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_bnPartitionColor->setToolTip(tr("Change selected partition color"));
     m_bnPartitionColor->setEnabled(false);
 
+    // [aurora2#1725] Options. A standard style icon rather than another PNG resource, and a
+    // menu of checkable actions rather than a dialog, so flipping one costs a single click.
+    // Both default off, and both are persisted in floorplanning.cfg by the handlers below.
+    QPushButton* bnOptions = new QPushButton(style()->standardIcon(QStyle::SP_FileDialogDetailedView), "");
+    bnOptions->setToolTip(tr("Options"));
+    QMenu* optionsMenu = new QMenu(bnOptions);
+
+    m_actTreatWarningsAsErrors = optionsMenu->addAction(tr("Treat warnings as errors"));
+    m_actTreatWarningsAsErrors->setCheckable(true);
+    m_actTreatWarningsAsErrors->setToolTip(
+        tr("Count every advisory as an error, which stops the QDC being saved while any remains."));
+    connect(m_actTreatWarningsAsErrors, &QAction::toggled, this, [this](bool on) {
+        // Re-checks and so refreshes the issues list and the Save QDC button.
+        m_deviceWidget->setTreatWarningsAsErrors(on);
+        saveOptions();
+    });
+
+    m_actShowAtomColumns = optionsMenu->addAction(tr("Show Atom List and Type columns"));
+    m_actShowAtomColumns->setCheckable(true);
+    m_actShowAtomColumns->setToolTip(
+        tr("Show each instance's netlist atom names and their clb/dsp/bram type."));
+    connect(m_actShowAtomColumns, &QAction::toggled, this, [this](bool on) {
+        m_synthResourcesWidget->setAtomColumnsVisible(on);
+        m_partitionResourcesWidget->setAtomColumnsVisible(on);
+        saveOptions();
+    });
+
+    optionsMenu->setToolTipsVisible(true);
+    bnOptions->setMenu(optionsMenu);
+
     const int spacing = 20;
     toolBarLayout->addWidget(bnLoadQdc);
     toolBarLayout->addWidget(m_bnSaveQdc);
@@ -241,6 +284,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     toolBarLayout->addWidget(bnCreateNewPartition);
     toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
     toolBarLayout->addSpacing(spacing);
+    toolBarLayout->addWidget(bnOptions);
 
     bnScrollPartition->setChecked(true);
     m_deviceWidget->setScrollToPartitionWhenSelected(bnScrollPartition->isChecked());
@@ -288,9 +332,51 @@ FloorPlanningWidget::~FloorPlanningWidget()
 void FloorPlanningWidget::setQdcFilePath(const std::filesystem::path& path, bool load)
 {
     m_deviceWidget->setQdcFilePath(path);
+
+    // [aurora2#1725] floorplanning.cfg sits beside the .qdc, where every other floorplanning
+    // artifact lives, and so is per project -- "treat warnings as errors" in particular is a
+    // decision about one floorplan, not a global taste. This is also the first point at which
+    // the directory is known, which is why the options load here rather than in the ctor.
+    m_optionsFilePath = path.parent_path() / "floorplanning.cfg";
+    loadOptions();
+
     if (load) {
         m_deviceWidget->loadQdc();
     }
+}
+
+void FloorPlanningWidget::loadOptions()
+{
+    QSettings cfg(QString::fromStdString(m_optionsFilePath.string()), QSettings::IniFormat);
+    const bool treatWarningsAsErrors = cfg.value(kCfgTreatWarningsAsErrors, false).toBool();
+    const bool showAtomColumns = cfg.value(kCfgShowAtomColumns, false).toBool();
+
+    // Set the actions without firing toggled(): those handlers write the file back, and a
+    // freshly read value has nothing to save. The effects are applied explicitly instead,
+    // which also covers the case where the stored value equals the default and setChecked()
+    // would emit nothing at all.
+    {
+        QSignalBlocker blockWarnings(m_actTreatWarningsAsErrors);
+        QSignalBlocker blockColumns(m_actShowAtomColumns);
+        m_actTreatWarningsAsErrors->setChecked(treatWarningsAsErrors);
+        m_actShowAtomColumns->setChecked(showAtomColumns);
+    }
+
+    m_deviceWidget->setTreatWarningsAsErrors(treatWarningsAsErrors);
+    m_synthResourcesWidget->setAtomColumnsVisible(showAtomColumns);
+    m_partitionResourcesWidget->setAtomColumnsVisible(showAtomColumns);
+}
+
+void FloorPlanningWidget::saveOptions() const
+{
+    if (m_optionsFilePath.empty()) {
+        return;   // no project directory known yet, so nowhere to write
+    }
+
+    QSettings cfg(QString::fromStdString(m_optionsFilePath.string()), QSettings::IniFormat);
+    cfg.setValue(kCfgTreatWarningsAsErrors, m_actTreatWarningsAsErrors->isChecked());
+    cfg.setValue(kCfgShowAtomColumns, m_actShowAtomColumns->isChecked());
+    cfg.sync();
 }
 
 void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)

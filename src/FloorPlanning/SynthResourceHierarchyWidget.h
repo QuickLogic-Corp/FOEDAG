@@ -51,6 +51,10 @@ public:
     // the atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
 
+    // [aurora2#1725] "Show Atom List and Type columns" from the Options menu. Off by
+    // default: the atom names are long and mostly of interest when debugging a mapping.
+    void setAtomColumnsVisible(bool visible);
+
     // [aurora2#1725 stage P4] Grades the tree: a deleted instance is shown greyed and cannot be checked, a partial
     // one stays selectable but is flagged. Optional -- without it every instance renders as
     // equally usable, which is what the panel did before stage P4 was wired up.
@@ -84,6 +88,7 @@ private:
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
+    bool m_atomColumnsVisible = false;
 
     // [aurora2#1725] Atoms covered by an RTL path -- its own atomsets.json entry when it
     // has one, else the union of the descendant entries that do (see the .cpp).

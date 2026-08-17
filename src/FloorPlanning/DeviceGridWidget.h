@@ -66,6 +66,13 @@ public:
         m_device.setDeletedInstances(std::move(deletedInstances));
     }
 
+    // [aurora2#1725] Options menu. Re-checks straight away, so the issues list and the Save
+    // QDC button reflect the new severity without waiting for the next edit.
+    void setTreatWarningsAsErrors(bool treatWarningsAsErrors) {
+        m_device.setTreatWarningsAsErrors(treatWarningsAsErrors);
+        checkIssues();
+    }
+
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelected();

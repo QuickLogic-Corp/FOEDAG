@@ -274,6 +274,8 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     if (m_bnExpandCollapse->isChecked()) {
       m_view->expandAll();
     }
+
+    setAtomColumnsVisible(m_atomColumnsVisible);   // header sections were just rebuilt
 }
 
 void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
@@ -622,6 +624,15 @@ std::set<std::string> SynthResourceHierarchyWidget::atomNamesFor(const std::stri
 void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
 {
     m_verdicts = std::move(verdicts);
+}
+
+void SynthResourceHierarchyWidget::setAtomColumnsVisible(bool visible)
+{
+    m_atomColumnsVisible = visible;
+    // Kept as a member and re-applied from build() too: the model is cleared there, which
+    // rebuilds the header sections and loses their hidden flags.
+    m_view->setColumnHidden(Column::AtomList, !visible);
+    m_view->setColumnHidden(Column::AtomType, !visible);
 }
 
 void SynthResourceHierarchyWidget::applyInstanceVerdicts()

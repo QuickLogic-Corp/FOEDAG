@@ -13,6 +13,7 @@
 #include <vector>
 
 class QPushButton;
+class QAction;
 
 namespace FOEDAG { class RoundProgressWidget; }
 
@@ -77,6 +78,16 @@ private:
     PartitionsListWidget* m_partitionsListWidget{nullptr};
     NewUniqueNameDialog* m_newPartitionNameDialog{nullptr};
     IssuesListWidget* m_issuesListWidget{nullptr};
+
+    // [aurora2#1725] Options menu state, persisted in floorplanning.cfg beside the .qdc.
+    // The actions are the single source of truth for the values -- they are what the user
+    // sets and what saveOptions() reads back.
+    QAction* m_actTreatWarningsAsErrors{nullptr};
+    QAction* m_actShowAtomColumns{nullptr};
+    std::filesystem::path m_optionsFilePath;
+
+    void loadOptions();
+    void saveOptions() const;
 
     void createNewPartition();
     void checkErrors();

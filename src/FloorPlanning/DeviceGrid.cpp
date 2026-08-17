@@ -485,6 +485,15 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
             }
         }
     }
+
+    // [aurora2#1725] Promote every advisory once all of them have been collected, rather
+    // than at each insertion point, so the option cannot be forgotten by a check added later.
+    // The issues list then shows them as errors and hasErrors() blocks saving the .qdc.
+    if (m_treatWarningsAsErrors) {
+        m_issues->errors.insert(m_issues->warnings.begin(), m_issues->warnings.end());
+        m_issues->warnings.clear();
+    }
+
     return m_issues;
 }
 
