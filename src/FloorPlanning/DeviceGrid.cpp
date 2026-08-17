@@ -270,16 +270,29 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
-        // [aurora2#1725] required vs. available resources -- a partition whose
-        // regions don't have room for the atoms assigned to it can never be placed,
-        // so this is an error, not a warning, same severity as the presence checks
-        // above.
-        auto checkResource = [&](const char* label, int required, int available) {
-            if (required > available) {
-                m_issues->errors.insert({"Partition '" + partition->name() + "' needs " +
-                                          std::to_string(required) + " " + label + " tiles but only " +
-                                          std::to_string(available) + " available", ""});
+        // [aurora2#1725] required vs. available resources. A WARNING, not an error: the
+        // required side is an estimate, not a fact. It divides the atom count by
+        // atomsets.json's atoms_per_tile hint, which is deliberately pessimistic -- fft256's
+        // "dut" estimates 1360 clb where the packer needs 799 -- so a partition flagged here
+        // may well place fine, and the packer is the only thing that can settle it. Unlike
+        // the presence checks above (a partition with no region cannot mean anything at all),
+        // this one must not stop the user saving the .qdc and running the flow to find out.
+        auto checkResource = [&](const std::string& label, int required, int available) {
+            if (required <= available) {
+                return;
             }
+            // clb is the estimated one; a dsp/bram atom occupies a whole tile, so there the
+            // shortfall is exact and the region does have to grow.
+            const std::string tip = (label == "clb")
+                ? "Estimated from this partition's clb atoms at "
+                  + std::to_string(Partition::atomsPerTile())
+                  + " atoms per tile, which is deliberately conservative -- packing may still "
+                    "succeed. Enlarge the region if it does not."
+                : "One " + label + " atom occupies one " + label + " tile, so the region has to "
+                  "cover more of them, or some elements belong in another partition.";
+            m_issues->warnings.insert({"Partition '" + partition->name() + "' needs " +
+                                       std::to_string(required) + " " + label + " tiles but only " +
+                                       std::to_string(available) + " available", tip});
         };
         checkResource("clb", partition->clbRequiredCount(), partition->clbAvailableCount());
         checkResource("dsp", partition->dspRequiredCount(), partition->dspAvailableCount());
