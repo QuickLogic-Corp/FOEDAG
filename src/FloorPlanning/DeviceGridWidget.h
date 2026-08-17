@@ -54,6 +54,18 @@ public:
 
     void setScrollToPartitionWhenSelected(bool flag) { m_isScrollToPartitionWhenSelected = flag; }
 
+    // [aurora2#1725] Per-instance count of directly-owned atoms, for DeviceGrid's
+    // unconstrained-own-logic warning. See FloorPlanningWidget::setAtomNames().
+    void setOwnAtomCounts(std::map<std::string, int> ownAtomCounts) {
+        m_device.setOwnAtomCounts(std::move(ownAtomCounts));
+    }
+
+    // [aurora2#1725 stage P4] Instances graded "deleted", for DeviceGrid's report on a .qdc
+    // that still constrains one. See FloorPlanningWidget::setInstanceVerdicts().
+    void setDeletedInstances(std::unordered_set<std::string> deletedInstances) {
+        m_device.setDeletedInstances(std::move(deletedInstances));
+    }
+
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelected();

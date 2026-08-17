@@ -2289,6 +2289,16 @@ void MainWindow::floorPlanningActionTriggered()
       return;
     }
 
+    // [aurora2#1725 stage P4] Merge the verdicts. Written by RunValidateInstances() at the
+    // end of the SYNTHESIS task -- including its "skipped, not required" paths -- so it is
+    // already there by the time this panel opens, on any project that has been synthesised.
+    // Optional by design: pre-synthesis there is no file and every instance stays "unknown",
+    // which renders exactly as the tree did before this was wired up. Failure isn't checked
+    // for the same reason -- a missing or stale verdict must not stop the user floorplanning.
+    std::filesystem::path validationJsonPath =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) / "validation.json";
+    rtlModel.mergeVerdicts(validationJsonPath);
+
     // vpr arch file
     std::shared_ptr<VprArchitectureFileProfider> archFileProviderPtr = std::make_shared<VprArchitectureFileProfider>(compiler);
     if(archFileProviderPtr->get().empty()) {
@@ -2367,15 +2377,23 @@ void MainWindow::floorPlanningActionTriggered()
       }
     }
 
-    // [aurora2#1725 stage P1] instances.json -> flat path set for the tree, skipping
-    // instances synthesis deleted. validate_instances.py (stage P4) grades each
-    // instance into validation.json, but that verdict isn't merged into
-    // RtlInstanceModel here yet -- last_status is only what elab_instances.py carried
-    // forward from a prior run's instances.json, matching toHierarhyElements()'s rule
-    // that a deleted instance has no atoms to constrain.
+    // [aurora2#1725 stage P4] Hand the verdicts to the trees before loadNetList(), which is
+    // what builds them: build() grades each row as it goes.
+    std::map<std::string, fp::InstanceVerdict> verdicts;
+    for (const fp::RtlInstance& instance : rtlModel.instances()) {
+      verdicts[instance.path] = fp::InstanceVerdict{instance.status, instance.statusReason};
+    }
+    m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
+
+    // [aurora2#1725 stage P1] instances.json -> flat path set for the tree. Every instance,
+    // deleted ones included: they are shown greyed out and unselectable rather than dropped,
+    // because whether an instance survives synthesis depends on generics and constant
+    // folding, and an instance that silently vanishes from the tree is indistinguishable
+    // from a mistyped hierarchy path (A.P4). toHierarhyElements() is the element set a
+    // PARTITION may hold, and it still excludes them -- there are no atoms to constrain.
     fp::NaturalStringSet paths;
-    for (const auto& element : rtlModel.toHierarhyElements()) {
-      paths.insert(element.path);
+    for (const fp::RtlInstance& instance : rtlModel.instances()) {
+      paths.insert(instance.path);
     }
     m_floorPlanningWidget->loadNetList(paths);
 

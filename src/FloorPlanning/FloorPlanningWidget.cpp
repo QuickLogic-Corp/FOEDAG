@@ -330,8 +330,42 @@ void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
 
 void FloorPlanningWidget::setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames)
 {
+    // [aurora2#1725] Atoms belonging to an instance DIRECTLY, i.e. not to one of its
+    // sub-instances. An entry's atom list is subtree-inclusive, so an atom is the
+    // instance's own exactly when what follows "<path>." holds no further dot -- the
+    // "dut.i.n0_$lut_Y" case as opposed to "dut.i.sub.n0_$lut_Y". DeviceGrid warns when a
+    // partition takes an instance's sub-instances and leaves this logic unconstrained.
+    std::map<std::string, int> ownAtomCounts;
+    for (const auto& [path, atoms]: atomNames) {
+        const std::size_t tail = path.size() + 1;
+        int own = 0;
+        for (const std::string& atom: atoms) {
+            if ((atom.size() > tail) && (atom.find('.', tail) == std::string::npos)) {
+                ++own;
+            }
+        }
+        ownAtomCounts[path] = own;
+    }
+    m_deviceWidget->setOwnAtomCounts(std::move(ownAtomCounts));
+
     m_synthResourcesWidget->setAtomNames(atomNames);
     m_partitionResourcesWidget->setAtomNames(std::move(atomNames));
+}
+
+void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
+{
+    // The grid only needs to know which instances are dead, to flag a .qdc that still
+    // constrains one -- see DeviceGrid::checkIssues().
+    std::unordered_set<std::string> deleted;
+    for (const auto& [path, graded]: verdicts) {
+        if (graded.verdict == "deleted") {
+            deleted.insert(path);
+        }
+    }
+    m_deviceWidget->setDeletedInstances(std::move(deleted));
+
+    m_synthResourcesWidget->setInstanceVerdicts(verdicts);
+    m_partitionResourcesWidget->setInstanceVerdicts(std::move(verdicts));
 }
 
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)

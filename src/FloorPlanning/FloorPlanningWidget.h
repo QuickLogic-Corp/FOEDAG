@@ -43,6 +43,10 @@ public:
     // regions have available.
     void setAtomsPerTile(int atomsPerTile) { Partition::setAtomsPerTile(atomsPerTile); }
 
+    // [aurora2#1725 stage P4] Per-instance verdicts from validation.json, so the trees can
+    // grey out what synthesis deleted and flag what is only partially trustworthy.
+    void setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts);
+
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 

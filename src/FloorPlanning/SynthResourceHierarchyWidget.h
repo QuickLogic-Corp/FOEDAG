@@ -51,6 +51,11 @@ public:
     // the atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
 
+    // [aurora2#1725 stage P4] Grades the tree: a deleted instance is shown greyed and cannot be checked, a partial
+    // one stays selectable but is flagged. Optional -- without it every instance renders as
+    // equally usable, which is what the panel did before stage P4 was wired up.
+    void setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts);
+
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void selectPartition(const PartitionPtr&);
     void unselectPartition();
@@ -78,6 +83,8 @@ private:
     bool m_hasAtomNames = false;
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
 
+    std::map<std::string, InstanceVerdict> m_verdicts;
+
     // [aurora2#1725] Atoms covered by an RTL path -- its own atomsets.json entry when it
     // has one, else the union of the descendant entries that do (see the .cpp).
     std::set<std::string> atomNamesFor(const std::string& path) const;
@@ -85,6 +92,7 @@ private:
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
     void populateAtomColumns();
+    void applyInstanceVerdicts();
 
     void addPath(const std::string&);
     void onItemChanged(QStandardItem*, bool reportChanges);

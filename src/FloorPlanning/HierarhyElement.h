@@ -21,6 +21,15 @@ inline QString classifyAtomType(const std::string& atomName) {
     return "clb";
 }
 
+// [aurora2#1725 stage P4] One instance's grade from validation.json, as the FloorPlanning
+// trees render it: greyed out when synthesis deleted it, flagged when its atom set is only
+// partially trustworthy. Lives here rather than on a widget because both the netlist tree and
+// the partition tree take it, and FloorPlanningWidget only forward-declares those.
+struct InstanceVerdict {
+    std::string verdict;   // "complete" | "partial" | "deleted" | "unknown"
+    std::string reason;    // why it was deleted, or which check failed
+};
+
 class HierarhyElement {
 public:
     HierarhyElement(const std::string& path): path(path) {}

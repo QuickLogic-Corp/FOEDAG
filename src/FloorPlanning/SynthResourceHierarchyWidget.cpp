@@ -15,6 +15,7 @@
 #include <QClipboard>
 #include <QMenu>
 #include <QShortcut>
+#include <QBrush>
 
 #include <QDebug>
 
@@ -201,6 +202,9 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
         addPath(element);
     }
     populateAtomColumns();
+    // After populateAtomColumns(): a graded instance's verdict is the better explanation
+    // than "no atoms in atomsets.json", so it overrides that hiding.
+    applyInstanceVerdicts();
     blocker.unblock();
 
     // completer
@@ -347,7 +351,14 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
 
             const std::string fullPath = buildChildPath(prefix, child);
 
-            if (partition->elements().contains(fullPath)) {
+            // [aurora2#1725 stage P4] A .qdc written before the instance was deleted -- or
+            // before verdicts were rendered at all -- can still name it. Don't tick it:
+            // setCheckState() writes the check-state role whatever the flags say, so a
+            // greyed, non-checkable row would come back with a checkbox that no other code
+            // path agrees with (every one of them is isCheckable()-gated, so the tick
+            // silently vanished again on the next selection change). The row stays greyed,
+            // and DeviceGrid reports that the partition names dead instances.
+            if (partition->elements().contains(fullPath) && child->isCheckable()) {
                 child->setCheckState(Qt::Checked);
                 onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
 
@@ -546,6 +557,74 @@ std::set<std::string> SynthResourceHierarchyWidget::atomNamesFor(const std::stri
         }
     }
     return names;
+}
+
+void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
+{
+    m_verdicts = std::move(verdicts);
+}
+
+void SynthResourceHierarchyWidget::applyInstanceVerdicts()
+{
+    if (m_verdicts.empty()) return;
+
+    // [aurora2#1725 stage P4] Render what validation.json says about each instance.
+    //
+    // Until this ran, the panel showed every instance as equally usable and merely HID a
+    // leaf that had no atoms -- so an instance synthesis had optimised away was
+    // indistinguishable from a mistyped hierarchy path, and a 'partial' one (emitted, but
+    // with an atom set that may be incomplete) looked perfectly healthy. Both now say so.
+    //
+    // 'deleted' loses its checkbox rather than being disabled outright: the row stays
+    // selectable and copyable, but cannot be put in a partition, because it has no atoms to
+    // constrain. Dropping the check state also keeps it out of the parent's tristate maths
+    // (computeParentState() and the allChildrenChecked() test both skip non-checkable rows),
+    // so one dead sub-instance no longer stops a parent from collapsing to a single element.
+    std::function<void(QStandardItem*, const std::string&)> gradeRecursive =
+        [&gradeRecursive, this](QStandardItem* item, const std::string& prefix)
+    {
+        if (!item) return;
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, Column::Netlist);
+            if (!child || isVprDisplayRow(child)) continue;
+
+            const std::string path = buildChildPath(prefix, child);
+            const auto found = m_verdicts.find(path);
+            if (found != m_verdicts.end()) {
+                const InstanceVerdict& graded = found->second;
+                const QString reason = QString::fromStdString(graded.reason);
+
+                if (graded.verdict == "deleted") {
+                    const QModelIndex parentIdx = (item == m_model->invisibleRootItem())
+                        ? QModelIndex() : item->index();
+                    m_view->setRowHidden(row, parentIdx, false);   // marked, not hidden
+
+                    child->setFlags(child->flags() & ~Qt::ItemIsUserCheckable);
+                    child->setData(QVariant(), Qt::CheckStateRole);
+                    child->setForeground(QBrush(Qt::gray));
+                    child->setToolTip(reason.isEmpty()
+                        ? tr("Deleted by synthesis: no atoms in the netlist.")
+                        : tr("Deleted by synthesis: %1").arg(reason));
+                    if (QStandardItem* atomItem = item->child(row, Column::AtomList)) {
+                        atomItem->setText(tr("(deleted)"));
+                        atomItem->setForeground(QBrush(Qt::gray));
+                    }
+                } else if (graded.verdict == "partial") {
+                    child->setForeground(QBrush(QColor(0xB8, 0x86, 0x0B)));  // dark goldenrod
+                    child->setToolTip(reason.isEmpty()
+                        ? tr("Partially trustworthy: this instance is constrained, but its atom "
+                             "set may be incomplete.")
+                        : tr("Partially trustworthy: this instance is constrained, but its atom "
+                             "set may be incomplete (%1).").arg(reason));
+                }
+            }
+
+            gradeRecursive(child, path);
+        }
+    };
+
+    gradeRecursive(m_model->invisibleRootItem(), "");
 }
 
 void SynthResourceHierarchyWidget::populateAtomColumns()

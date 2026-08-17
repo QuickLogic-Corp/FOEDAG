@@ -266,6 +266,23 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
     m_overlappedConflictingIndexes.clear();
     m_overlappedNonConflictingIndexes.clear();
 
+    // [aurora2#1725] Every path any partition constrains, so the ancestor check below can
+    // tell "this instance is assigned somewhere" from "nobody constrains it".
+    std::unordered_set<std::string> constrainedPaths;
+    for (const auto& [partitionId, partition]: m_partitions) {
+        for (const HierarhyElement& element: partition->elements()) {
+            constrainedPaths.insert(element.path);
+        }
+    }
+
+    // Instance whose own logic nothing constrains -> how many instances inside it are
+    // constrained, and by which partitions. Filled in the loop below, reported after it.
+    struct OwnLogicGap {
+        int nestedConstrained = 0;
+        std::set<std::string> partitionNames;
+    };
+    std::map<std::string, OwnLogicGap> unassignedOwnLogic;
+
     for (const auto& [partitionId, partition]: m_partitions) {
         // element presence
         if (partition->elements().empty()) {
@@ -333,6 +350,78 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                                        + std::to_string(kClbHeadroomPercent)
                                        + "% more clb tiles than the estimate."});
         }
+
+        // [aurora2#1725 stage P4] Elements the .qdc names that synthesis deleted. Loading such
+        // a .qdc is normal -- it may predate the deletion, and whether an instance survives
+        // depends on generics and constant folding -- but the constraint matches no atom, and
+        // the tree cannot show it as checked because the row is not checkable. So report it:
+        // otherwise the entry looks constrained while doing nothing, and disappears without
+        // explanation the next time the partition is edited and saved.
+        int deletedElements = 0;
+        for (const HierarhyElement& element: partition->elements()) {
+            if (m_deletedInstances.count(element.path) != 0) {
+                ++deletedElements;
+            }
+        }
+        if (deletedElements > 0) {
+            m_issues->warnings.insert({"Partition '" + partition->name() + "' names " +
+                                       std::to_string(deletedElements) +
+                                       " instance(s) that synthesis deleted",
+                                       "Those instances have no atoms, so the constraint has no "
+                                       "effect and VPR reports them as 'was not found, skipping "
+                                       "atom'. They are shown greyed out in the tree and cannot "
+                                       "be checked; editing this partition and saving the .qdc "
+                                       "drops them."});
+        }
+
+        // [aurora2#1725] Collect instances whose sub-instances are constrained while they
+        // themselves are not -- see the warning emitted after this loop.
+        for (const HierarhyElement& element: partition->elements()) {
+            std::size_t dot = element.path.rfind('.');
+            while (dot != std::string::npos) {
+                const std::string ancestor = element.path.substr(0, dot);
+                dot = ancestor.rfind('.');
+                if (constrainedPaths.count(ancestor) != 0) {
+                    continue;   // assigned in its own right, so its logic is accounted for
+                }
+                const auto own = m_ownAtomCounts.find(ancestor);
+                if ((own == m_ownAtomCounts.end()) || (own->second <= 0)) {
+                    continue;   // pure hierarchy, no logic of its own to lose
+                }
+                ++unassignedOwnLogic[ancestor].nestedConstrained;
+                unassignedOwnLogic[ancestor].partitionNames.insert(partition->name());
+            }
+        }
+    }
+
+    // [aurora2#1725] Constraining sub-instances of X without constraining X leaves X's OWN
+    // logic -- the cells sitting directly in it, not in any sub-instance -- assigned to
+    // nothing, free for the packer to place anywhere. Nothing downstream catches it: stage P7
+    // grades the instances that were constrained, and an unconstrained one is in no partition
+    // to grade. Measured on fft256, where p1 held 12 sub-instances of dut.instPerm20009 and
+    // p2 held the 13th: 111 of that instance's 271 atoms went unconstrained, and two of its
+    // clusters were placed outside the region, one of them 8 rows away.
+    //
+    // Reported per instance rather than per partition -- with the sub-instances split across
+    // p1 and p2 the same gap would otherwise be announced twice -- and only reported: which
+    // partition should absorb the instance is the user's call, and guessing would silently
+    // redraw their floorplan.
+    for (const auto& [instance, gap]: unassignedOwnLogic) {
+        std::string partitions;
+        for (const std::string& name: gap.partitionNames) {
+            partitions += (partitions.empty() ? "'" : ", '") + name + "'";
+        }
+        m_issues->warnings.insert({"Instance '" + instance + "' is in no partition while " +
+                                   std::to_string(gap.nestedConstrained) +
+                                   " instance(s) inside it are constrained -- its own " +
+                                   std::to_string(m_ownAtomCounts.at(instance)) +
+                                   " atoms are unconstrained",
+                                   "Those atoms sit directly in '" + instance + "' rather than "
+                                   "in one of its sub-instances, so no region holds them and the "
+                                   "packer may place them anywhere. The nested instances are "
+                                   "constrained by " + partitions + ". Assign the whole instance "
+                                   "to one partition, or move its remaining sub-instances into "
+                                   "the same one."});
     }
 
     // tiles overlapping between different partitions
