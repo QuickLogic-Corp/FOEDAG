@@ -2087,13 +2087,17 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
               continue;  // prevent matching further copy rules
           }
 
-          // EXCLUDE everything under 'examples/'. example designs are not device data: they
-          // are maintained in the shared benchmarks library and generated into the release by
-          // Aurora, so a device package must not carry its own copy.
+          // include all files in 'examples/' for copy.
+          //
+          // NOTE: do NOT exclude these here. encryptDevice() is shared - aurora2's own
+          // DEVICE_INSTALL rule calls it for every CRR device when ENABLE_ENCRYPTION=on - so
+          // dropping examples/ here removes them from the INSTALLATION, which breaks the
+          // sanity and feature suites that run <device>/examples/. A device kit must not ship
+          // examples either, but that is the kit generator's job, not this function's.
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]examples[\/\\].*)",
                                 std::regex::icase))) {
-            continue;
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
           // routing graph / router lookahead handling.
