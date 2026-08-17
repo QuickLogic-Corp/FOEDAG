@@ -5,6 +5,17 @@
 
 namespace fp {
 
+namespace {
+
+// [aurora2#1725] How much room above the estimated clb requirement counts as comfortable.
+// Set from the one case measured end to end: dut.instPerm20009 estimated 20 clb tiles and
+// the packer needed 22, i.e. the estimate was 10% low, and 22 left nothing spare. 25% keeps
+// that case flagged while not nagging about regions with real room. A heuristic on top of a
+// heuristic -- the packer remains the only authority.
+constexpr int kClbHeadroomPercent = 25;
+
+}  // namespace
+
 DeviceGrid::DeviceGrid()
 : m_issues(std::make_shared<DeviceGrid::Issues>())
 {
@@ -270,24 +281,28 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
-        // [aurora2#1725] required vs. available resources. A WARNING, not an error: the
-        // required side is an estimate, not a fact. It divides the atom count by
-        // atomsets.json's atoms_per_tile hint, which is deliberately pessimistic -- fft256's
-        // "dut" estimates 1360 clb where the packer needs 799 -- so a partition flagged here
-        // may well place fine, and the packer is the only thing that can settle it. Unlike
-        // the presence checks above (a partition with no region cannot mean anything at all),
-        // this one must not stop the user saving the .qdc and running the flow to find out.
+        // [aurora2#1725] required vs. available resources. WARNINGS, not errors: only the
+        // packer can settle whether a region works, so none of this may stop the user saving
+        // the .qdc and running the flow to find out. Unlike the presence checks above -- a
+        // partition with no region cannot mean anything at all -- these are advisory.
+        //
+        // The clb figure is an ESTIMATE and it is not a safe minimum. It divides the atom
+        // count by atomsets.json's atoms_per_tile hint, while real density measured on
+        // fft256 ranges from 12.2 to 23.8 atoms per clb: the whole unconstrained "dut"
+        // estimates 1360 clb and packs into 799, yet dut.instPerm20009 estimates 20 clb and
+        // the packer needed 22. Carry chains want consecutive slots and the packer caps
+        // cluster input-pin use (measured max 0.68 on this device), so a small pin-heavy
+        // instance packs far less densely than the whole design. dsp/bram carry no such
+        // uncertainty -- one atom occupies one whole tile.
         auto checkResource = [&](const std::string& label, int required, int available) {
             if (required <= available) {
                 return;
             }
-            // clb is the estimated one; a dsp/bram atom occupies a whole tile, so there the
-            // shortfall is exact and the region does have to grow.
             const std::string tip = (label == "clb")
                 ? "Estimated from this partition's clb atoms at "
                   + std::to_string(Partition::atomsPerTile())
-                  + " atoms per tile, which is deliberately conservative -- packing may still "
-                    "succeed. Enlarge the region if it does not."
+                  + " atoms per tile. Real density varies with the logic, so treat this as a "
+                    "rough figure in either direction -- only the packer can decide."
                 : "One " + label + " atom occupies one " + label + " tile, so the region has to "
                   "cover more of them, or some elements belong in another partition.";
             m_issues->warnings.insert({"Partition '" + partition->name() + "' needs " +
@@ -297,6 +312,27 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         checkResource("clb", partition->clbRequiredCount(), partition->clbAvailableCount());
         checkResource("dsp", partition->dspRequiredCount(), partition->dspAvailableCount());
         checkResource("bram", partition->bramRequiredCount(), partition->bramAvailableCount());
+
+        // [aurora2#1725] Enough clb tiles by the estimate, but only just -- which is where
+        // packing actually breaks, precisely because the estimate can sit below what the
+        // packer needs. On fft256, dut.instPerm20009 estimated 20 and filled all 22 clb
+        // tiles it was given: 22 packed with nothing to spare, 20 failed. So a region within
+        // this margin of the estimate deserves saying out loud, even though it is not short.
+        // clb only: dsp/bram need no packing slack.
+        const int clbRequired = partition->clbRequiredCount();
+        const int clbAvailable = partition->clbAvailableCount();
+        if ((clbRequired > 0) && (clbAvailable >= clbRequired)
+            && (clbAvailable < clbRequired + (clbRequired * kClbHeadroomPercent + 99) / 100)) {
+            m_issues->warnings.insert({"Partition '" + partition->name() + "' has " +
+                                       std::to_string(clbAvailable) +
+                                       " clb tiles for an estimated " +
+                                       std::to_string(clbRequired) + " -- little packing slack",
+                                       "The estimate can be lower than what the packer needs, so a "
+                                       "region this tight may fail to pack even though it looks "
+                                       "big enough. Allow roughly "
+                                       + std::to_string(kClbHeadroomPercent)
+                                       + "% more clb tiles than the estimate."});
+        }
     }
 
     // tiles overlapping between different partitions
