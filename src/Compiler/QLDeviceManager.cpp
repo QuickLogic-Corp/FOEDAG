@@ -2089,11 +2089,15 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
 
           // include all files in 'examples/' for copy.
           //
-          // NOTE: do NOT exclude these here. encryptDevice() is shared - aurora2's own
-          // DEVICE_INSTALL rule calls it for every CRR device when ENABLE_ENCRYPTION=on - so
-          // dropping examples/ here removes them from the INSTALLATION, which breaks the
-          // sanity and feature suites that run <device>/examples/. A device kit must not ship
-          // examples either, but that is the kit generator's job, not this function's.
+          // NOTE: do NOT exclude these here. encryptDevice() transforms a device tree in place
+          // for whoever calls it, and aurora2's DEVICE_INSTALL rule calls it for every CRR
+          // device when ENABLE_ENCRYPTION=on. Dropping examples/ here would silently remove
+          // from the INSTALLATION files that exist in the source. A device kit must not ship
+          // examples, but that is the kit generator's job, not this function's.
+          //
+          // Per-device examples/ is being retired (the release ships one device-agnostic
+          // examples/ tree instead). Nothing here requires it to exist: when the directory is
+          // absent no path matches this rule and the loop simply moves on.
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]examples[\/\\].*)",
                                 std::regex::icase))) {
