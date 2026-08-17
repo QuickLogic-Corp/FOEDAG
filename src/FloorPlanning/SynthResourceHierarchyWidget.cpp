@@ -633,6 +633,30 @@ void SynthResourceHierarchyWidget::setAtomColumnsVisible(bool visible)
     // rebuilds the header sections and loses their hidden flags.
     m_view->setColumnHidden(Column::AtomList, !visible);
     m_view->setColumnHidden(Column::AtomType, !visible);
+
+    // A multi-atom leaf gets one child row per atom, and those rows carry nothing but the
+    // two columns just hidden -- their first column is deliberately blank. Hiding only the
+    // columns therefore left a run of empty placeholder rows under such a leaf. Hide the
+    // rows as well, so the tree shows RTL instances and nothing else.
+    std::function<void(QStandardItem*)> applyRecursive =
+        [&applyRecursive, this, visible](QStandardItem* item)
+    {
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, Column::Netlist);
+            if (!child) {
+                continue;
+            }
+            if (isVprDisplayRow(child)) {
+                const QModelIndex parentIdx = (item == m_model->invisibleRootItem())
+                    ? QModelIndex() : item->index();
+                m_view->setRowHidden(row, parentIdx, !visible);
+                continue;   // an atom row has no children of its own
+            }
+            applyRecursive(child);
+        }
+    };
+    applyRecursive(m_model->invisibleRootItem());
 }
 
 void SynthResourceHierarchyWidget::applyInstanceVerdicts()
@@ -865,8 +889,12 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool repor
 
 void SynthResourceHierarchyWidget::showAllItems()
 {
-    static std::function<void(QTreeView*, QStandardItem*, const QModelIndex&)>
-        showAllRecursive = [](QTreeView* view, QStandardItem* item, const QModelIndex& parentIdx)
+    // "All" means all RTL instances. The per-atom display rows stay hidden while their
+    // columns are hidden, otherwise clearing the filter would bring the blank placeholder
+    // rows back (see setAtomColumnsVisible()).
+    const bool showAtomRows = m_atomColumnsVisible;
+    std::function<void(QTreeView*, QStandardItem*, const QModelIndex&)> showAllRecursive =
+        [&showAllRecursive, showAtomRows](QTreeView* view, QStandardItem* item, const QModelIndex& parentIdx)
     {
         if (!item) {
             return;
@@ -874,9 +902,10 @@ void SynthResourceHierarchyWidget::showAllItems()
 
         const int rows = item->rowCount();
         for (int row = 0; row < rows; ++row) {
-            view->setRowHidden(row, parentIdx, false);
-
             QStandardItem* child = item->child(row, Column::Netlist);
+            const bool isAtomRow = isVprDisplayRow(child);
+            view->setRowHidden(row, parentIdx, isAtomRow && !showAtomRows);
+
             if (!child) {
                 continue;
             }
@@ -975,9 +1004,12 @@ void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
             if (!child) {
                 continue;
             }
-            // VPR display rows are not RTL paths; skip them and let them follow parent visibility
+            // VPR display rows are not RTL paths; skip them and let them follow parent
+            // visibility -- unless their columns are hidden, in which case they are the blank
+            // placeholder rows setAtomColumnsVisible() suppresses.
             if (isVprDisplayRow(child)) {
-                m_view->setRowHidden(row, isRoot ? QModelIndex() : item->index(), false);
+                m_view->setRowHidden(row, isRoot ? QModelIndex() : item->index(),
+                                     !m_atomColumnsVisible);
                 continue;
             }
 
