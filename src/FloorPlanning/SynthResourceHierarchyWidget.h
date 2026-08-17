@@ -78,6 +78,10 @@ private:
     bool m_hasAtomNames = false;
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
 
+    // [aurora2#1725] Atoms covered by an RTL path -- its own atomsets.json entry when it
+    // has one, else the union of the descendant entries that do (see the .cpp).
+    std::set<std::string> atomNamesFor(const std::string& path) const;
+
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
     void populateAtomColumns();

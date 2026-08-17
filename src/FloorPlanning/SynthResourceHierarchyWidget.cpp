@@ -244,10 +244,10 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
         const HierarhyElements existing = partition->elements();
         partition->clearElemenets();
         for (const HierarhyElement& element: existing) {
-            const auto it = m_atomNames.find(element.path);
-            const std::set<std::string> names = (it != m_atomNames.end())
-                ? std::set<std::string>(it->second.begin(), it->second.end())
-                : element.vprNames;
+            std::set<std::string> names = atomNamesFor(element.path);
+            if (names.empty()) {
+                names = element.vprNames;
+            }
             partition->addElement(HierarhyElement{element.path, element.isLeaf, names});
         }
     }
@@ -396,11 +396,7 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
             }
         }
 
-        auto vprNames = [this](const std::string& p) -> std::set<std::string> {
-            const auto it = m_atomNames.find(p);
-            if (it == m_atomNames.end()) return {};
-            return {it->second.begin(), it->second.end()};
-        };
+        auto vprNames = [this](const std::string& p) { return atomNamesFor(p); };
 
         if (isLeaf) {
             if (st == Qt::Checked) {
@@ -521,6 +517,35 @@ void SynthResourceHierarchyWidget::setAtomNames(std::map<std::string, std::vecto
 {
     m_atomNames = std::move(atomNames);
     m_hasAtomNames = true;
+}
+
+std::set<std::string> SynthResourceHierarchyWidget::atomNamesFor(const std::string& path) const
+{
+    if (const auto it = m_atomNames.find(path); it != m_atomNames.end()) {
+        return {it->second.begin(), it->second.end()};
+    }
+
+    // [aurora2#1725] No entry of its own, which does NOT mean no atoms: aurora_atomsets.tcl
+    // derives an instance path as everything before a cell name's last dot, so a scope that
+    // holds only sub-instances and no cells directly gets no entry. The top instance is
+    // always such a scope -- on fft256 "dut" had no entry while its children held 19089
+    // atoms -- which is why selecting the root showed 0 required clb/dsp/bram while any
+    // nested selection was fine. The extractor now emits those scopes (hierarchy_closure),
+    // but a project synthesised before that still has the old file, so reconstruct here too.
+    //
+    // Entries are subtree-inclusive (they come from a "c:<inst>.*" prefix select), so the
+    // union over descendants that do have entries is the full set; the std::set absorbs the
+    // overlap between an entry and its own nested entries. Linear scan rather than a
+    // lower_bound range: m_atomNames is ordered by NaturalLess, whose collation is not the
+    // plain byte order a prefix range would need.
+    std::set<std::string> names;
+    const std::string prefix = path + ".";
+    for (const auto& [candidate, atoms] : m_atomNames) {
+        if (candidate.compare(0, prefix.size(), prefix) == 0) {
+            names.insert(atoms.begin(), atoms.end());
+        }
+    }
+    return names;
 }
 
 void SynthResourceHierarchyWidget::populateAtomColumns()
