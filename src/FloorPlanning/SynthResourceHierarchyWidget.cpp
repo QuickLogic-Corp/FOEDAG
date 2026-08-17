@@ -47,6 +47,49 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
     return prefix.empty() ? name : (prefix + "." + name);
 }
 
+// [aurora2#1725] Holds the tree's expand/collapse state across an operation that would
+// otherwise change it. Selecting a partition is not a request to reshape the tree: what the
+// user opened stays open, what they closed stays closed. Two things used to violate that --
+// selectPartition() expanded every element it checked (and nothing ever undid it, so each
+// selection left more of the tree open), and showOnlyCheckedItems()/showAllItems() call
+// expandAll() when the expand/collapse button is on, which the partition view triggers on
+// every selection change.
+//
+// Restoring afterwards rather than suppressing each call: the state is then preserved
+// whatever those helpers do internally, including a full expandAll(). Persistent indexes are
+// safe here because these operations only change check states -- rows are added in build(),
+// which legitimately sets the initial state and does not use this.
+class ExpansionKeeper {
+public:
+    ExpansionKeeper(QTreeView* view, QAbstractItemModel* model): m_view(view) {
+        capture(QModelIndex(), model);
+    }
+    ~ExpansionKeeper() {
+        for (const auto& [index, wasExpanded]: m_state) {
+            if (index.isValid() && (m_view->isExpanded(index) != wasExpanded)) {
+                m_view->setExpanded(index, wasExpanded);
+            }
+        }
+    }
+    ExpansionKeeper(const ExpansionKeeper&) = delete;
+    ExpansionKeeper& operator=(const ExpansionKeeper&) = delete;
+
+private:
+    void capture(const QModelIndex& parent, QAbstractItemModel* model) {
+        const int rows = model->rowCount(parent);
+        for (int row = 0; row < rows; ++row) {
+            const QModelIndex index = model->index(row, 0, parent);
+            if (model->hasChildren(index)) {
+                m_state.emplace_back(QPersistentModelIndex(index), m_view->isExpanded(index));
+                capture(index, model);
+            }
+        }
+    }
+
+    QTreeView* m_view;
+    std::vector<std::pair<QPersistentModelIndex, bool>> m_state;
+};
+
 void uncheckAllRecursive(QStandardItem* item, int col) {
     if (!item) {
         return;
@@ -325,6 +368,8 @@ void SynthResourceHierarchyWidget::unselectPartition()
 {
     setEnabled(false);
 
+    ExpansionKeeper keepExpansion(m_view, m_model);
+
     m_selectedPartition.reset();
 
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
@@ -345,6 +390,8 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
     m_selectedPartition = partition;
 
     setEnabled(true);
+
+    ExpansionKeeper keepExpansion(m_view, m_model);
 
     // check only requested elements + set partition label
     std::function<void(QStandardItem*, const std::string&)> checkAndPartitionRecursive =
@@ -373,9 +420,10 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
             if (partition->elements().contains(fullPath) && child->isCheckable()) {
                 child->setCheckState(Qt::Checked);
                 onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
-
-                // ensure it's visible
-                m_view->expand(child->index());
+                // Deliberately does NOT expand the matched item any more: selecting a
+                // partition must leave the user's expand/collapse state alone (see
+                // ExpansionKeeper), and expanding it here was never undone, so every
+                // selection left another branch open until the whole tree was unfolded.
             }
 
             checkAndPartitionRecursive(child, fullPath);
@@ -771,6 +819,10 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool repor
 
     const bool isParent = (item->rowCount() > 0);
     const Qt::CheckState st = item->checkState();
+
+    // Ticking a box is not a request to reshape the tree either -- the show-only-checked
+    // view calls expandAll() from here via showOnlyCheckedItems().
+    ExpansionKeeper keepExpansion(m_view, m_model);
 
     QSignalBlocker blocker(m_model);
     // if user clicked a parent checkbox -> force all descendants
