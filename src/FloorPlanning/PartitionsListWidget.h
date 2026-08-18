@@ -29,7 +29,10 @@ private:
     // [aurora2#1725] Name (editable, drives rename/selection) + required/available
     // resource columns, read-only, one row per partition. Column::Name must stay 0:
     // rename/selection/lookup all key off the item in that column.
-    enum Column { Name = 0, Clb = 1, Dsp = 2, Bram = 3 };
+    // Placed is the tier-3 measurement -- CLB tiles the placer actually used -- kept in its
+    // own column rather than folded into Clb, because required and placed are different
+    // questions and A.13.5 forbids rendering an estimate and a measurement identically.
+    enum Column { Name = 0, Clb = 1, Dsp = 2, Bram = 3, Placed = 4 };
 
     QTableWidget* m_tableWidget{nullptr};
 

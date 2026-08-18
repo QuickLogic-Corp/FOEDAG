@@ -28,16 +28,21 @@ inline QString classifyAtomType(const std::string& atomName) {
 // Partition::addElement(). Once synthesis has run, atomsets.json gives the real atoms and
 // those are counted directly; this exists for the window before that, where the atom-based
 // path has nothing at all to count and a user is nonetheless drawing regions.
-// design_resources.json also carries lut/ff/carry, and clb_actual at tier 3. They are not
-// read here: the panel's own atom-based tally already covers post-synthesis, and clb_actual
-// is per-INSTANCE while a Partition's counts are per-PARTITION -- an instance can be split
-// across partitions, so the two cannot be compared row for row without a packing-aware
-// split. Surfacing measured-vs-estimated tiles is follow-up work, not a field to park here
-// unused.
+// design_resources.json also carries lut/ff/carry, which are not read here: the panel's own
+// atom-based tally already covers those post-synthesis.
 struct DesignResourceEntry {
     int clbEst = 0;      // already in TILES, the unit Partition::*RequiredCount() reports
     int dsp = 0;
     int bram = 0;
+
+    // [aurora2#1725 stage P7] Tier 3 only: CLB tiles the placer actually used for this
+    // instance. Absent at tiers 1 and 2, where CLBs do not exist yet -- hence the explicit
+    // flag rather than a sentinel, so "not measured" cannot be read as "measured zero".
+    int clbActual = 0;
+    bool hasClbActual = false;
+    // The instance shares at least one cluster with an instance outside its own subtree, so
+    // clbActual counts tiles it does not solely own and summing such rows over-counts.
+    bool clbActualShared = false;
 };
 
 // [aurora2#1725 stage P7] design_resources.json as a whole. `tier` is not decoration: all

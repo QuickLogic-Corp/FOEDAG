@@ -56,8 +56,6 @@ public:
     void clearElemenets() {
         m_elements.clear();
         m_clbAtomCount = m_dspRequiredCount = m_bramRequiredCount = 0;
-        m_clbEstTiles = 0;
-        m_estimated = false;
     }
     void addElement(const HierarhyElement& element) {
         m_elements.insert(element);
@@ -67,44 +65,73 @@ public:
         // "Required" because these come from the atoms assigned to the partition --
         // what the design needs -- as opposed to *Available*Count() below, which is
         // what the partition's regions physically have room for.
-        if (!element.vprNames.empty()) {
-            for (const std::string& atomName : element.vprNames) {
-                const QString type = classifyAtomType(atomName);
-                if (type == "dsp") ++m_dspRequiredCount;
-                else if (type == "bram") ++m_bramRequiredCount;
-                else ++m_clbAtomCount;
-            }
-            return;
+        for (const std::string& atomName : element.vprNames) {
+            const QString type = classifyAtomType(atomName);
+            if (type == "dsp") ++m_dspRequiredCount;
+            else if (type == "bram") ++m_bramRequiredCount;
+            else ++m_clbAtomCount;
         }
+    }
 
-        // [aurora2#1725 stage P7] No atoms for this element. Post-synthesis that means the
-        // element genuinely has none (synthesis deleted it), and 0 is the right answer.
-        // Pre-synthesis it means nothing has been extracted yet -- atomsets.json does not
-        // exist -- and the partition would size at 0 for a design that will not fit.
-        // design_resources.json tier 1 is the only figure available in that window.
-        //
-        // Deliberately NOT used at tier 2/3: atoms exist there and are exact, and those
-        // tiers' entries nest (an ancestor's counts include its descendants'), so mixing
-        // them into a per-partition tally would double-count a partition holding both a
-        // parent and a child. Tier 1's entries are the top module's direct children only,
-        // flat and disjoint, which is what makes this safe.
-        if (!s_designResources.isEstimate()) {
-            return;
+    // [aurora2#1725 stage P7] What design_resources.json contributes to this partition.
+    //
+    // Computed on demand rather than accumulated in addElement(), because tier-1 entries
+    // NEST -- the estimator walks the whole instance tree, so a parent's figures already
+    // include its children's. Adding them incrementally would count a partition holding
+    // both a parent and a child twice; only the maximal elements may contribute.
+    struct ResourceContribution {
+        int clbTiles = 0;      // tier-1 estimate, already in tiles
+        int dsp = 0;
+        int bram = 0;
+        bool estimated = false;
+
+        int clbActual = 0;     // tier-3 measured tiles
+        bool hasActual = false;
+        bool actualShared = false;   // at least one contributor shares clusters
+        bool actualPartial = false;  // some contributor had no measurement
+    };
+
+    ResourceContribution resourceContribution() const {
+        ResourceContribution out;
+        if (!s_designResources.valid() || m_elements.empty()) {
+            return out;
         }
-        const auto it = s_designResources.instances.find(element.path);
-        if (it == s_designResources.instances.end()) {
-            return;  // deeper than the flat tier-1 map goes; no estimate to offer
+        std::set<std::string> paths;
+        for (const HierarhyElement& element : m_elements) {
+            paths.insert(element.path);
         }
-        m_clbEstTiles += it->second.clbEst;   // already in tiles
-        m_dspRequiredCount += it->second.dsp;
-        m_bramRequiredCount += it->second.bram;
-        m_estimated = true;
+        for (const HierarhyElement& element : m_elements) {
+            if (hasAncestorIn(element.path, paths)) {
+                continue;  // already accounted for by the ancestor, since entries nest
+            }
+            const auto it = s_designResources.instances.find(element.path);
+            if (it == s_designResources.instances.end()) {
+                out.actualPartial = true;
+                continue;
+            }
+            // The tier-1 estimate only stands in where there are no atoms at all. Once
+            // atomsets.json exists the atom tally above is exact and must win.
+            if (s_designResources.isEstimate() && element.vprNames.empty()) {
+                out.clbTiles += it->second.clbEst;
+                out.dsp += it->second.dsp;
+                out.bram += it->second.bram;
+                out.estimated = true;
+            }
+            if (it->second.hasClbActual) {
+                out.clbActual += it->second.clbActual;
+                out.hasActual = true;
+                out.actualShared = out.actualShared || it->second.clbActualShared;
+            } else {
+                out.actualPartial = true;
+            }
+        }
+        return out;
     }
 
     // [aurora2#1725 stage P7] True when any part of this partition's counts came from a
     // tier-1 estimate rather than from measured atoms. A.13.5 requires that a consumer
     // never present the two as the same thing, and shape alone cannot tell them apart.
-    bool isEstimated() const { return m_estimated; }
+    bool isEstimated() const { return resourceContribution().estimated; }
 
     const HierarhyElements& elements() const { return m_elements; }
     const std::map<int, RegionPtr> regions() const { return m_regions; }
@@ -116,13 +143,15 @@ public:
     // "dut" is 19029 clb atoms, which is 1360 tiles at 14 atoms/tile, not 19029 of them.
     // A sizing hint, deliberately conservative -- the packer fits that design in 799 clb --
     // but in the same unit as what a region actually offers, which the raw atom count is not.
-    // m_clbEstTiles is already in tiles (design_resources.json's clb_est carries the A.13.2b
-    // safety margin), so it is added after the atom->tile division, not before it.
+    // The estimate contribution is already in tiles (design_resources.json's clb_est
+    // carries the A.13.2b safety margin), so it is added after the atom->tile division,
+    // not before it.
     int clbRequiredCount() const {
-        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile + m_clbEstTiles;
+        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile
+               + resourceContribution().clbTiles;
     }
-    int dspRequiredCount() const { return m_dspRequiredCount; }
-    int bramRequiredCount() const { return m_bramRequiredCount; }
+    int dspRequiredCount() const { return m_dspRequiredCount + resourceContribution().dsp; }
+    int bramRequiredCount() const { return m_bramRequiredCount + resourceContribution().bram; }
 
     // Raw atom count behind clbRequiredCount(), for anything reporting atoms rather than
     // the tiles they pack into.
@@ -154,11 +183,19 @@ private:
     int m_clbAtomCount = 0;
     int m_dspRequiredCount = 0;
     int m_bramRequiredCount = 0;
-    int m_clbEstTiles = 0;      // tier-1 contribution, already in tiles
-    bool m_estimated = false;
 
     void updateRect();
     QColor colorFromIndex(int index) const;
+
+    // Whether any proper ancestor of `path` is also an element of this partition.
+    static bool hasAncestorIn(const std::string& path, const std::set<std::string>& paths) {
+        std::string::size_type dot = path.find('.');
+        while (dot != std::string::npos) {
+            if (paths.count(path.substr(0, dot))) return true;
+            dot = path.find('.', dot + 1);
+        }
+        return false;
+    }
 
     int availableTileCount(Tile::Type type) const {
         int count = 0;

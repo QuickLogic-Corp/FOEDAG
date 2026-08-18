@@ -24,13 +24,15 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     m_lbResourceSource->setVisible(false);
     layout->addWidget(m_lbResourceSource);
 
-    m_tableWidget->setColumnCount(4);
-    m_tableWidget->setHorizontalHeaderLabels({tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM")});
+    m_tableWidget->setColumnCount(5);
+    m_tableWidget->setHorizontalHeaderLabels(
+        {tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM"), tr("Placed")});
     m_tableWidget->verticalHeader()->setVisible(false);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Name, QHeaderView::Stretch);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Clb, QHeaderView::ResizeToContents);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Dsp, QHeaderView::ResizeToContents);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Bram, QHeaderView::ResizeToContents);
+    m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Placed, QHeaderView::ResizeToContents);
 
     m_tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -130,6 +132,36 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         m_tableWidget->setItem(row, Column::Dsp, resourceItem(partition->dspRequiredCount(), partition->dspAvailableCount()));
         m_tableWidget->setItem(row, Column::Bram, resourceItem(partition->bramRequiredCount(), partition->bramAvailableCount()));
 
+        // [aurora2#1725 stage P7] Tier 3: CLB tiles the placer actually used. Blank until a
+        // placement exists, because there is no honest number to show before then.
+        const Partition::ResourceContribution contribution = partition->resourceContribution();
+        auto* placedItem = new QTableWidgetItem();
+        placedItem->setFlags(placedItem->flags() & ~Qt::ItemIsEditable);
+        if (contribution.hasActual) {
+            // ">=" when a contributing instance shares clusters with logic outside its own
+            // subtree: those tiles are counted for both, so the sum is an upper bound.
+            const QString prefix = contribution.actualShared ? QString::fromUtf8("\u2265") : QString();
+            placedItem->setText(prefix + QString::number(contribution.clbActual));
+            QString tip = QObject::tr("Tier 3 -- CLB tiles this partition actually occupies, "
+                                      "from the placement.");
+            if (contribution.actualShared) {
+                tip += QObject::tr(" At least one instance shares clusters with logic outside "
+                                   "it, so those tiles are counted for both and this is an "
+                                   "upper bound.");
+            }
+            if (contribution.actualPartial) {
+                tip += QObject::tr(" Some elements of this partition have no measurement, so "
+                                   "the total is incomplete.");
+            }
+            placedItem->setToolTip(tip);
+        } else {
+            placedItem->setText(QStringLiteral("-"));
+            placedItem->setToolTip(QObject::tr(
+                "No placement measurement yet. Run placement to compare what this partition "
+                "needs against the tiles it actually occupies."));
+        }
+        m_tableWidget->setItem(row, Column::Placed, placedItem);
+
         m_names2ids[name] = id;
         if (m_selectedIdBackupOpt && (id == m_selectedIdBackupOpt.value())) {
             autoSelectedItem = nameItem;
@@ -178,8 +210,11 @@ void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, Partiti
     }
 
     // Only ever a hint, at any tier: CLB required is atoms divided by packing density, not
-    // the tile count the placer will settle on.
+    // the tile count the placer will settle on. "Placed" is where the real figure lives.
     text += tr("  CLB is a sizing hint in tiles, not a placement result.");
+    if (Partition::designResources().tier >= 3) {
+        text += tr("  Placed shows the tier-3 measurement from the placement.");
+    }
 
     m_lbResourceSource->setText(text);
     m_lbResourceSource->setVisible(true);

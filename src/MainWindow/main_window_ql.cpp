@@ -2388,6 +2388,14 @@ bool MainWindow::loadFloorPlanningData(QString& error)
           readInt("clb_est", resourceEntry.clbEst);
           readInt("dsp", resourceEntry.dsp);
           readInt("bram", resourceEntry.bram);
+          // Tier 3 only. The flag is explicit rather than a sentinel so "not measured"
+          // cannot be read as "measured zero" -- at tiers 1 and 2 CLBs do not exist yet.
+          if (entry.contains("clb_actual") && entry["clb_actual"].is_number_integer()) {
+            resourceEntry.clbActual = entry["clb_actual"].get<int>();
+            resourceEntry.hasClbActual = true;
+          }
+          resourceEntry.clbActualShared =
+              entry.value("clb_actual_is_shared_count", false);
           resources.instances[it.key()] = resourceEntry;
         }
       }

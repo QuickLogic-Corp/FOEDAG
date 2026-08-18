@@ -603,3 +603,119 @@ TEST(PartitionResources, ClearingElementsAlsoClearsTheEstimate)
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
+
+// [aurora2#1725 stage P7] tier-1 nesting and tier-3 measured tiles.
+
+namespace {
+
+fp::DesignResourceEntry entryWithActual(int clbEst, int clbActual, bool shared = false)
+{
+    fp::DesignResourceEntry e;
+    e.clbEst = clbEst;
+    e.clbActual = clbActual;
+    e.hasClbActual = true;
+    e.clbActualShared = shared;
+    return e;
+}
+
+}  // namespace
+
+TEST(PartitionResources, NestedTier1EstimatesAreNotCountedTwice)
+{
+    // The tier-1 estimator now walks the whole instance tree, so a parent's figures already
+    // include its children's. A partition holding both must count the parent only.
+    fp::Partition::setDesignResources(makeResources(1, {
+        {"dut", entry(100, 4, 0)},
+        {"dut.a", entry(40, 2, 0)},
+    }));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"dut", true});
+    partition.addElement(fp::HierarhyElement{"dut.a", true});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 100);  // not 140
+    EXPECT_EQ(partition.dspRequiredCount(), 4);    // not 6
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, SiblingsOnDifferentBranchesStillAddUp)
+{
+    // Only ancestors collapse -- two unrelated instances are both maximal.
+    fp::Partition::setDesignResources(makeResources(1, {
+        {"dut.a", entry(40, 1, 0)},
+        {"dut.b", entry(25, 2, 0)},
+    }));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"dut.a", true});
+    partition.addElement(fp::HierarhyElement{"dut.b", true});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 65);
+    EXPECT_EQ(partition.dspRequiredCount(), 3);
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, MeasuredTilesAreReportedSeparatelyFromTheEstimate)
+{
+    // clb_actual is a measurement and clb_est a projection; they must not be conflated.
+    fp::Partition::setDesignResources(makeResources(3, {{"i_a", entryWithActual(40, 37)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_a", true});
+
+    const auto contribution = partition.resourceContribution();
+    EXPECT_TRUE(contribution.hasActual);
+    EXPECT_EQ(contribution.clbActual, 37);
+    EXPECT_FALSE(contribution.actualShared);
+    // Tier 3 is not an estimate, so the required column must not be marked with "~".
+    EXPECT_FALSE(partition.isEstimated());
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, SharedClustersMakeTheMeasuredTotalAnUpperBound)
+{
+    // A cluster holding atoms from two branches is counted for both, so the sum over-counts
+    // and the UI must not present it as exact.
+    fp::Partition::setDesignResources(makeResources(3, {
+        {"i_a", entryWithActual(10, 8, /*shared*/ true)},
+    }));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_a", true});
+
+    EXPECT_TRUE(partition.resourceContribution().actualShared);
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, AnElementWithNoMeasurementMarksTheTotalIncomplete)
+{
+    // Silently summing what IS measured would understate the partition without saying so.
+    fp::Partition::setDesignResources(makeResources(3, {{"i_a", entryWithActual(10, 8)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_a", true});
+    partition.addElement(fp::HierarhyElement{"i_unknown", true});
+
+    const auto contribution = partition.resourceContribution();
+    EXPECT_TRUE(contribution.hasActual);
+    EXPECT_TRUE(contribution.actualPartial);
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, NoPlacementMeansNoMeasuredTiles)
+{
+    // Tiers 1 and 2 have no clb_actual at all; the column must stay empty rather than 0.
+    fp::Partition::setDesignResources(makeResources(2, {{"i_a", entry(10, 0, 0)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_a", true});
+
+    EXPECT_FALSE(partition.resourceContribution().hasActual);
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
