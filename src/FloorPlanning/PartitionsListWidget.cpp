@@ -17,6 +17,13 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     layout->addWidget(new QLabel(tr("Partitions:")));
     layout->addWidget(m_tableWidget);
 
+    // [aurora2#1725 stage P7] Sits under the table and names the source of the CLB/DSP/BRAM
+    // figures. Filled by updateResourceSourceLabel() on every repopulate.
+    m_lbResourceSource = new QLabel;
+    m_lbResourceSource->setWordWrap(true);
+    m_lbResourceSource->setVisible(false);
+    layout->addWidget(m_lbResourceSource);
+
     m_tableWidget->setColumnCount(4);
     m_tableWidget->setHorizontalHeaderLabels({tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM")});
     m_tableWidget->verticalHeader()->setVisible(false);
@@ -110,11 +117,13 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
                                                   .arg(required)
                                                   .arg(available));
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-            if (estimated) {
-                item->setToolTip(QObject::tr(
-                    "Pre-synthesis estimate -- no netlist exists yet. Synthesize for "
-                    "measured figures."));
-            }
+            item->setToolTip(estimated
+                ? QObject::tr("Tier 1 -- pre-synthesis estimate, no netlist exists yet. DSP is "
+                              "exact, CLB is approximate, BRAM is not estimated at all. "
+                              "Synthesize for measured figures.")
+                : QObject::tr("Tier 2 -- counted from the post-synthesis netlist. The CLB "
+                              "figure is still packing-density derived, so it is a sizing "
+                              "hint rather than the tile count the placer will use."));
             return item;
         };
         m_tableWidget->setItem(row, Column::Clb, resourceItem(partition->clbRequiredCount(), partition->clbAvailableCount()));
@@ -131,6 +140,49 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
     if (autoSelectedItem) {
         setSelectedItemSilently(autoSelectedItem);
     }
+
+    updateResourceSourceLabel(partitions);
+}
+
+// [aurora2#1725 stage P7] Name the source of the numbers in the table.
+//
+// Deliberately reports the tier of what is DISPLAYED, which is not the same as the tier of
+// design_resources.json. These columns are fed by the atom-based tally, so a row is tier 2
+// whenever it has atoms; the tier-1 estimate only fills in for rows that have none. A tier-3
+// file on disk does NOT make this table tier 3 -- clb_actual is not shown here, and claiming
+// placed-tile accuracy for a packing-density estimate is exactly the confusion A.13.5 exists
+// to prevent.
+void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, PartitionPtr>& partitions)
+{
+    int estimatedRows = 0;
+    for (const auto& [id, partition]: partitions) {
+        if (partition->isEstimated()) ++estimatedRows;
+    }
+    const int total = static_cast<int>(partitions.size());
+
+    if (total == 0) {
+        m_lbResourceSource->setVisible(false);
+        return;
+    }
+
+    QString text;
+    if (estimatedRows == 0) {
+        text = tr("Resources: tier 2 — counted from the post-synthesis netlist.");
+    } else if (estimatedRows == total) {
+        text = tr("Resources: tier 1 — pre-synthesis estimate (~). "
+                  "DSP exact, CLB approximate, BRAM not estimated. Synthesize to measure.");
+    } else {
+        text = tr("Resources: mixed — %1 of %2 partition(s) are a pre-synthesis estimate (~); "
+                  "the rest are counted from the post-synthesis netlist.")
+                   .arg(estimatedRows).arg(total);
+    }
+
+    // Only ever a hint, at any tier: CLB required is atoms divided by packing density, not
+    // the tile count the placer will settle on.
+    text += tr("  CLB is a sizing hint in tiles, not a placement result.");
+
+    m_lbResourceSource->setText(text);
+    m_lbResourceSource->setVisible(true);
 }
 
 void PartitionsListWidget::onPartitionSelectedOutside(const PartitionPtr& partition)
