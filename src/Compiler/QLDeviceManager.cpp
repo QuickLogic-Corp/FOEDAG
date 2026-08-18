@@ -3139,6 +3139,14 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
     return -1;
   }
 
+  // the kit must actually CONTAIN the device its manifest describes. checking the listing
+  // here, rather than the extracted tree afterwards, is what makes the refusal cost nothing:
+  // a kit whose manifest disagrees with its payload used to be rejected only after ~68MB had
+  // already been written into the user's directory, contrary to "verify before extract".
+  const std::string required_prefix =
+      family + "/" + foundry + "/" + node + "/" + devicename + "/";
+  bool listing_holds_the_device = false;
+
   {
     std::istringstream listing(listing_text);
     std::string entry;
@@ -3152,7 +3160,23 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
         compiler->Message("entry: " + entry);
         return -1;
       }
+      // tar may or may not prefix entries with './'
+      std::string normalised_entry = entry;
+      if(normalised_entry.rfind("./", 0) == 0) {
+        normalised_entry = normalised_entry.substr(2);
+      }
+      if(normalised_entry.rfind(required_prefix, 0) == 0) {
+        listing_holds_the_device = true;
+      }
     }
+  }
+
+  if(!listing_holds_the_device) {
+    compiler->ErrorMessage("the device kit did not contain the device it describes: " +
+                           device_type_string);
+    compiler->Message("expected to find: " + required_prefix);
+    compiler->Message("Nothing was written to the target.");
+    return -1;
   }
 
   // ---- [7] already installed? -----------------------------------------------------------
