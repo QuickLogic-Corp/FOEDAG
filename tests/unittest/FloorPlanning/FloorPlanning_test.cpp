@@ -800,3 +800,60 @@ TEST(QdcSerializer, ATrailingCommentDoesNotBreakTheCommandOnTheSameLine)
     ASSERT_EQ(device.partitions().size(), 1u);
     EXPECT_EQ(device.partitions().at(0)->name(), "p1");
 }
+
+TEST(QdcSerializer, AnUnparsableRegionIsPreservedRatherThanDiscardedOnSave)
+{
+    // The partition used to be added to the device before its regions were parsed, so a bad
+    // coordinate left it holding elements and no region. serialize() skips only partitions
+    // with no ELEMENTS, so the next save rewrote it without the region and the constraint
+    // was gone -- a typo in a hand-edited .qdc silently destroyed what it was written in.
+    const auto qdc = writeQdc("fp_qdc_badregion", "set_region i_a clb(abc,2) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+
+    // Not half-loaded: no partition rather than one that would round-trip without a region.
+    EXPECT_TRUE(device.partitions().empty());
+
+    ASSERT_TRUE(serializer.save(device, qdc));
+    const std::string content = readAll(qdc);
+    EXPECT_NE(content.find("i_a"), std::string::npos);
+    EXPECT_NE(content.find("clb(abc,2)"), std::string::npos);
+    EXPECT_NE(content.find("p1"), std::string::npos);
+}
+
+TEST(QdcSerializer, OneBadRegionDoesNotCostThePartitionItsGoodOnes)
+{
+    // A partition may hold several regions. Restoring the ones that parsed and dropping the
+    // rest would write back a SMALLER partition than the user drew, which is the same silent
+    // loss in a less obvious form.
+    const auto qdc = writeQdc("fp_qdc_mixedregion",
+                              "set_region i_a clb(2,4):clb(4,4),clb(oops,9) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    EXPECT_TRUE(device.partitions().empty());
+
+    ASSERT_TRUE(serializer.save(device, qdc));
+    const std::string content = readAll(qdc);
+    EXPECT_NE(content.find("clb(2,4):clb(4,4)"), std::string::npos) << "the good region must survive";
+    EXPECT_NE(content.find("clb(oops,9)"), std::string::npos) << "so must the one to be fixed";
+}
+
+TEST(QdcSerializer, AValidRegionStillLoadsNormally)
+{
+    // Guard against the fix over-reaching: well-formed input must be unaffected.
+    const auto qdc = writeQdc("fp_qdc_goodregion", "set_region i_a clb(2,4):clb(4,4) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+
+    ASSERT_EQ(device.partitions().size(), 1u);
+    const auto& partition = device.partitions().at(0);
+    EXPECT_EQ(partition->name(), "p1");
+    EXPECT_EQ(partition->elements().size(), 1u);
+    EXPECT_FALSE(partition->regions().empty());
+}

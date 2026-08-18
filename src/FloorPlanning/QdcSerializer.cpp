@@ -7,6 +7,8 @@
 #include <QDebug>
 
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace fp {
 
@@ -266,50 +268,79 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                 partitionName = cmdTokens[3];
             }
 
-            PartitionPtr partition = std::make_shared<Partition>(partitionName);
-            device.addPartition(partition);
+            // [aurora2#1725] Parse every region BEFORE anything reaches the device.
+            //
+            // The partition used to be added first and each region restored as it parsed, so
+            // one bad coordinate left a partition holding elements and no region -- and
+            // serialize() skips only partitions with no ELEMENTS, so the next save rewrote it
+            // without the region and the user's placement constraint was gone for good. A
+            // typo in a hand-edited .qdc silently destroyed the constraint it was in.
+            //
+            // A line we cannot fully parse is kept in m_reservedContent instead, which save()
+            // writes back, so the file survives the round trip untouched and the user can fix
+            // the typo by hand. The partition is not created: a half-loaded one is exactly
+            // what caused the loss.
+            std::vector<std::pair<Tile::Index, Tile::Index>> parsedRegions;
+            bool regionsOk = true;
 
             if (cmdTokens.size() >= 3) {
-                // extract elements
-                std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
-                for (std::string path: pathesDirtyTokens) {
-                    if (FOEDAG::StringUtils::endsWith(path, ".*")) {
-                        FOEDAG::StringUtils::removeSuffix(path, ".*");
-                        partition->addElement(HierarhyElement{path, false});
-                    } else {
-                        partition->addElement(HierarhyElement{path, true});
-                    }
-                }
-
-                // extract regions
                 std::vector<std::string> regionsStr = splitRegionsIgnoringParens(cmdTokens[2], ',');
                 for (const std::string& regionStr: regionsStr) {
                     std::vector<std::string> regionTokens = FOEDAG::StringUtils::tokenize(regionStr, ":");
+                    std::optional<TileDescriptor> bottomLeftOpt;
+                    std::optional<TileDescriptor> topRightOpt;
+
                     if (regionTokens.size() == 1) {
-                        // special case
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
-                        if (bottomLeftGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftIndex = device.toBottomLeftGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            Tile::Index topRightIndex = device.toTopRightGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
-                        } else {
+                        // special case: a single tile is its own bottom-left and top-right
+                        bottomLeftOpt = extractGridCoord(regionTokens[0]);
+                        topRightOpt = bottomLeftOpt;
+                        if (!bottomLeftOpt) {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract start and end points";
                         }
                     } else if (regionTokens.size() == 2) {
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
-                        std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[1]);
-
-                        if (bottomLeftGridCoordTileDescriptorOpt && topRightGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftIndex = device.toBottomLeftGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            Tile::Index topRightIndex = device.toTopRightGridIndex(topRightGridCoordTileDescriptorOpt.value());
-                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
-                        } else {
+                        bottomLeftOpt = extractGridCoord(regionTokens[0]);
+                        topRightOpt = extractGridCoord(regionTokens[1]);
+                        if (!bottomLeftOpt || !topRightOpt) {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract bottomLeft or topRight indexes";
                         }
                     } else {
                         qCritical() << "syntax error for regions" << QString::fromStdString(regionStr);
                     }
+
+                    if (!bottomLeftOpt || !topRightOpt) {
+                        regionsOk = false;
+                        break;
+                    }
+                    parsedRegions.emplace_back(device.toBottomLeftGridIndex(bottomLeftOpt.value()),
+                                               device.toTopRightGridIndex(topRightOpt.value()));
                 }
+            } else {
+                regionsOk = false;
+            }
+
+            if (!regionsOk) {
+                qCritical() << "keeping the unparsable line as-is so saving cannot discard it:"
+                            << QString::fromStdString(line);
+                m_reservedContent += line + "\n";
+                continue;
+            }
+
+            PartitionPtr partition = std::make_shared<Partition>(partitionName);
+            device.addPartition(partition);
+
+            // extract elements
+            std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
+            for (std::string path: pathesDirtyTokens) {
+                if (FOEDAG::StringUtils::endsWith(path, ".*")) {
+                    FOEDAG::StringUtils::removeSuffix(path, ".*");
+                    partition->addElement(HierarhyElement{path, false});
+                } else {
+                    partition->addElement(HierarhyElement{path, true});
+                }
+            }
+
+            for (const auto& [bottomLeftIndex, topRightIndex]: parsedRegions) {
+                device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
             }
         } else {
             m_reservedContent += line + "\n";
