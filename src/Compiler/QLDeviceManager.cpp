@@ -3050,12 +3050,35 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
 
     if(compareAuroraVersions(running_aurora_version, min_aurora_version) < 0) {
 
+      // A pre-release OF the required version (2026.2-rc1 vs a 2026.2 minimum) sorts older by
+      // semver and is refused here, which is deliberate: 2026.2-alpha shipped the LEGACY crypto
+      // stack and genuinely cannot read this kit. But the two cases are indistinguishable from
+      // the version alone, so say which one this is instead of a flat "too old" - an internal
+      // user on an rc build needs to know 'force' is the right answer, not an upgrade.
+      std::vector<long> running_numbers, minimum_numbers;
+      std::string running_prerelease, minimum_prerelease;
+      parseAuroraVersion(running_aurora_version, running_numbers, running_prerelease);
+      parseAuroraVersion(min_aurora_version, minimum_numbers, minimum_prerelease);
+      const bool running_is_prerelease_of_minimum =
+          !running_prerelease.empty() && minimum_prerelease.empty() &&
+          running_numbers == minimum_numbers;
+
       if(!force) {
-        compiler->ErrorMessage("this Aurora is too old to use this device kit.");
-        compiler->Message("this Aurora:        " + running_aurora_version);
-        compiler->Message("kit needs at least: " + min_aurora_version);
-        compiler->Message("Please upgrade Aurora, or re-run with 'force' to install anyway");
-        compiler->Message("(the device is unlikely to work).");
+        if(running_is_prerelease_of_minimum) {
+          compiler->ErrorMessage("this Aurora is a pre-release of the version this kit needs.");
+          compiler->Message("this Aurora:        " + running_aurora_version);
+          compiler->Message("kit needs at least: " + min_aurora_version);
+          compiler->Message("Pre-releases are treated as older than the release they precede,");
+          compiler->Message("because early ones (2026.2-alpha) carry the legacy crypto stack.");
+          compiler->Message("If this build already has the current stack, re-run with 'force'.");
+        }
+        else {
+          compiler->ErrorMessage("this Aurora is too old to use this device kit.");
+          compiler->Message("this Aurora:        " + running_aurora_version);
+          compiler->Message("kit needs at least: " + min_aurora_version);
+          compiler->Message("Please upgrade Aurora, or re-run with 'force' to install anyway");
+          compiler->Message("(the device is unlikely to work).");
+        }
         return -1;
       }
 
@@ -3180,42 +3203,58 @@ int QLDeviceManager::uninstallDevice(std::string family, std::string foundry, st
     parseDeviceData();
   }
 
-  // find the device and, crucially, the root it was discovered under. we delete from THAT
-  // root only - never from a path reconstructed from a global root, which could point at a
-  // different copy of the same device.
-  std::filesystem::path device_root_dir_path;
-  bool device_found = false;
-
-  for (const QLDeviceType& device: device_list) {
-    if(device.family == family && device.foundry == foundry &&
-       device.node == node && device.devicename == devicename) {
-      device_root_dir_path = device.device_root_path;
-      device_found = true;
-      break;
-    }
-  }
-
-  if(!device_found) {
-    compiler->ErrorMessage("device is not installed: " + device_type_string);
-    compiler->Message("Use 'list_devices' to see what is installed.");
-    return -1;
-  }
-
-  // never delete from the Aurora installation: built-in devices are part of the install and
-  // are not ours to remove.
+  // resolve the copy to remove against the device-data roots DIRECTLY, not through device_list.
+  //
+  // device_list carries only the winning copy of a shadowed device. If the customer installs a
+  // kit for a device that also ships built-in, the installation wins, the installed copy is
+  // absent from device_list, and resolving through it would land on the installation and refuse
+  // - leaving the user's own copy both invisible to list_devices and impossible to remove.
+  // Walking the roots finds the copy that is actually theirs.
   std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
   std::filesystem::path installation_root_dir_path_c =
       std::filesystem::canonical(installation_root_dir_path, ec);
   if(ec) { installation_root_dir_path_c = installation_root_dir_path; ec.clear(); }
 
-  if(device_root_dir_path == installation_root_dir_path_c ||
-     pathIsInside(device_root_dir_path, installation_root_dir_path_c)) {
-    compiler->ErrorMessage("refusing to uninstall a device that is part of the Aurora installation.");
-    compiler->Message("device: " + device_type_string);
-    compiler->Message("root:   " + device_root_dir_path.string());
-    compiler->Message("Only devices installed with 'install_device' can be uninstalled.");
+  auto root_is_the_installation = [&](const std::filesystem::path& root_dir_path) {
+    return root_dir_path == installation_root_dir_path_c ||
+           pathIsInside(root_dir_path, installation_root_dir_path_c);
+  };
+
+  std::vector<std::filesystem::path> external_root_dir_path_list;
+  bool installation_holds_device = false;
+
+  for (const std::filesystem::path& root_dir_path : deviceDataRootDirPathList()) {
+    const std::filesystem::path candidate_dir_path =
+        root_dir_path / family / foundry / node / devicename;
+    if(!std::filesystem::exists(candidate_dir_path / "config.json", ec)) { ec.clear(); continue; }
+    ec.clear();
+    if(root_is_the_installation(root_dir_path)) {
+      installation_holds_device = true;
+    }
+    else {
+      external_root_dir_path_list.push_back(root_dir_path);
+    }
+  }
+
+  if(external_root_dir_path_list.empty()) {
+    // never delete from the Aurora installation: built-in devices are part of the install and
+    // are not ours to remove.
+    if(installation_holds_device) {
+      compiler->ErrorMessage("refusing to uninstall a device that is part of the Aurora installation.");
+      compiler->Message("device: " + device_type_string);
+      compiler->Message("root:   " + installation_root_dir_path_c.string());
+      compiler->Message("Only devices installed with 'install_device' can be uninstalled.");
+    }
+    else {
+      compiler->ErrorMessage("device is not installed: " + device_type_string);
+      compiler->Message("Use 'list_devices' to see what is installed.");
+    }
     return -1;
   }
+
+  // highest-precedence installed copy first. any further copies are reported after removal so
+  // the user knows another remains rather than believing the device is gone.
+  std::filesystem::path device_root_dir_path = external_root_dir_path_list.front();
 
   std::filesystem::path device_dir_path =
       device_root_dir_path / family / foundry / node / devicename;
@@ -3229,6 +3268,18 @@ int QLDeviceManager::uninstallDevice(std::string family, std::string foundry, st
   // say exactly what will be removed, always - this deletes from the user's own directory.
   compiler->Message("device:       " + device_type_string);
   compiler->Message("will remove:  " + device_dir_path.string());
+
+  if(external_root_dir_path_list.size() > 1 || installation_holds_device) {
+    // the device will still resolve afterwards, from another copy. say so plainly rather than
+    // letting "removed" imply the device is gone.
+    compiler->Message("note: another copy of this device remains and will still be used:");
+    for(std::size_t i = 1; i < external_root_dir_path_list.size(); ++i) {
+      compiler->Message("      installed: " + external_root_dir_path_list[i].string());
+    }
+    if(installation_holds_device) {
+      compiler->Message("      built-in:  " + installation_root_dir_path_c.string());
+    }
+  }
 
   if(dry_run) {
     compiler->Message("\n(dry run - nothing was removed)");
