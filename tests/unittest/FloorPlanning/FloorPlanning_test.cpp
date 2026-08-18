@@ -719,3 +719,84 @@ TEST(PartitionResources, NoPlacementMeansNoMeasuredTiles)
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
+
+// [aurora2#1725] QdcSerializer round-trip safety. This file persists the user's floorplan,
+// so a defect here loses work rather than merely reporting the wrong number.
+
+namespace {
+
+std::filesystem::path writeQdc(const std::string& dirName, const std::string& content)
+{
+    const auto dir = std::filesystem::temp_directory_path() / dirName;
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "fp.qdc";
+    std::ofstream out(path);
+    out << content;
+    out.close();
+    return path;
+}
+
+std::string readAll(const std::filesystem::path& path)
+{
+    std::ifstream in(path);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+}  // namespace
+
+TEST(QdcSerializer, CommentsSurviveASaveRoundTrip)
+{
+    // readCommands() stripped a comment to an empty string and skipped it, so it never
+    // reached load(); m_reservedContent is filled only from the lines load() receives, so
+    // every comment was destroyed by the next save. The testcase .qdc files carry their
+    // entire rationale in exactly such headers.
+    const auto qdc = writeQdc("fp_qdc_comments",
+                              "# why this floorplan exists\n"
+                              "# second line of the rationale\n"
+                              "\n"
+                              "set_region i_a clb(2,4) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    ASSERT_TRUE(serializer.save(device, qdc));
+
+    const std::string content = readAll(qdc);
+    EXPECT_NE(content.find("# why this floorplan exists"), std::string::npos);
+    EXPECT_NE(content.find("# second line of the rationale"), std::string::npos);
+    // ...and the command itself is still there.
+    EXPECT_NE(content.find("set_region"), std::string::npos);
+}
+
+TEST(QdcSerializer, MalformedCoordinatesAreASyntaxErrorNotACrash)
+{
+    // The .qdc is user-editable, so std::stoi's input is untrusted. Nothing in the load path
+    // catches, and load() runs from a Qt slot, so a typo took the whole IDE down.
+    const auto qdc = writeQdc("fp_qdc_badcoord", "set_region i_a clb(abc,2) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    EXPECT_NO_THROW(serializer.load(device, qdc));
+}
+
+TEST(QdcSerializer, OutOfRangeCoordinatesAreASyntaxErrorNotACrash)
+{
+    // stoi throws out_of_range as readily as invalid_argument.
+    const auto qdc = writeQdc("fp_qdc_bigcoord",
+                              "set_region i_a clb(999999999999999999999,2) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    EXPECT_NO_THROW(serializer.load(device, qdc));
+}
+
+TEST(QdcSerializer, ATrailingCommentDoesNotBreakTheCommandOnTheSameLine)
+{
+    const auto qdc = writeQdc("fp_qdc_trailing", "set_region i_a clb(2,4) p1  # note\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    ASSERT_EQ(device.partitions().size(), 1u);
+    EXPECT_EQ(device.partitions().at(0)->name(), "p1");
+}

@@ -6,6 +6,8 @@
 
 #include <QDebug>
 
+#include <stdexcept>
+
 namespace fp {
 
 bool QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
@@ -333,9 +335,25 @@ std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path
     for (std::string line: lines) {
       line = FOEDAG::StringUtils::trim(line);
 
+      if (line.empty()){
+        continue; // Skip empty line
+      }
+
+      // [aurora2#1725] A whole-line comment is user content, not a command, and it is
+      // returned verbatim so load() can put it in m_reservedContent and save() can write it
+      // back. It used to be stripped to an empty string and skipped here, so it never
+      // reached load() at all -- and since m_reservedContent is filled only from the lines
+      // load() receives, every comment in the .qdc was destroyed by the next save. The
+      // testcase .qdc files carry their entire rationale in such headers.
+      if (line.front() == '#') {
+        commands.push_back(line);
+        continue;
+      }
+
       // drop comment part
       if (auto pos = line.find("#"); pos != std::string::npos) {
         line = line.substr(0, pos); // drop commented part of line
+        line = FOEDAG::StringUtils::trim(line);
       }
 
       if (line.empty()){
@@ -353,9 +371,20 @@ std::optional<TileDescriptor> QdcSerializer::extractGridCoord(const std::string&
     static auto extractGridCoord = [](const std::string& idxStr, Tile::Type type)->std::optional<TileDescriptor> {
         std::vector<std::string> tokens = FOEDAG::StringUtils::tokenize(idxStr, ",");
         if (tokens.size() == 2) {
-            int col = std::stoi(tokens[0]);
-            int row = std::stoi(tokens[1]);
-            return TileDescriptor{Tile::Index(col, row), type};
+            // [aurora2#1725] The .qdc is user-editable, so these tokens are untrusted:
+            // "clb(abc,2)" makes std::stoi throw invalid_argument and a large value makes it
+            // throw out_of_range. Nothing anywhere in the load path catches -- not
+            // QdcSerializer, not DeviceGrid, not FloorPlanningWidget -- and load() runs from
+            // a Qt slot on panel open and on the Load button, so the throw took the IDE down
+            // over a typo. Reported as a syntax error instead, which is what every other
+            // malformed-region path here already does.
+            try {
+                int col = std::stoi(tokens[0]);
+                int row = std::stoi(tokens[1]);
+                return TileDescriptor{Tile::Index(col, row), type};
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
         }
         return std::nullopt;
     };
