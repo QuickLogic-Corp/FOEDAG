@@ -1049,6 +1049,15 @@ void QLDeviceManager::parseDeviceData() {
                     continue;
                   }
 
+                  // a device is defined by its config.json. anything else four levels deep is
+                  // simply not a device - a device-data checkout carries other things at that
+                  // depth (QL-Benchmarks/testcases/<kind>/<design>, .git internals), and
+                  // reporting those as malformed devices buries real errors in noise.
+                  std::error_code config_ec;
+                  if(!std::filesystem::exists(dir_entry_devicename.path() / "config.json", config_ec)) {
+                    continue;
+                  }
+
                   // get all the device_variants for this device, resolved against the
                   // device dir we are actually standing in - NOT re-derived from a global
                   // root, which would read another root's files for a shadowed device.
@@ -1059,7 +1068,8 @@ void QLDeviceManager::parseDeviceData() {
                                                                                     dir_entry_devicename.path());
 
                   if(device_variants.empty()) {
-                    // display error, but continue with other devices.
+                    // it HAS a config.json, so it means to be a device: this one is genuinely
+                    // malformed and worth reporting. continue with the other devices.
                     std::cout << "error in parsing variants for device: " + family + "_" + foundry + "_" + node + "_" + devicename + "\n" << std::endl;
                   }
                   else {
@@ -3688,7 +3698,7 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
   // [1] $AURORA2_DEVICE_DATA_DIR is an EXCLUSIVE override - but ONLY when it points somewhere
   //     other than the installation's own device_data.
   //
-  //     scripts/setup.sh sets this variable unconditionally, defaulting it to
+  //     scripts/setup.sh sets this variable whenever the user has not, defaulting it to
   //     "${AURORA2_ROOT}/device_data/", so it is set in every normal session. Treating that
   //     default as an override would make the exclusive branch permanently active and leave
   //     multi-root discovery unreachable - registered roots and AURORA2_DEVICE_DATA_PATH would
