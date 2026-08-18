@@ -507,7 +507,12 @@ void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerd
 
 void FloorPlanningWidget::setDesignResources(DesignResources resources)
 {
+    // An invalid set means "this project has no design_resources.json". It must still be
+    // stored: Partition holds these statically, so an early return here would leave the
+    // PREVIOUS project's figures in place and size this project's partitions from them --
+    // silently, and marked as though they described this design.
     if (!resources.valid()) {
+        Partition::setDesignResources(DesignResources{});
         return;
     }
 

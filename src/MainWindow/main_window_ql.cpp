@@ -1895,6 +1895,11 @@ void MainWindow::ReShowWindow(QString strProject) {
     m_compiler->finish();
     showMessagesTab();
     showReportsTab();
+    // [aurora2#1725 stage P7] A compile advances design_resources.json (tier 1 -> 2 -> 3)
+    // and rewrites atomsets.json / validation.json. Without this an open panel keeps
+    // showing whatever was on disk when it was opened -- pre-synthesis estimates, marked
+    // "~", that never clear. No-op when the panel is closed.
+    refreshFloorPlanningData();
   });
 
   connect(m_taskManager, &TaskManager::started, this,
@@ -2253,6 +2258,215 @@ void MainWindow::ipConfiguratorActionTriggered() {
   }
 }
 
+
+// [aurora2#1725 stage P7] see the declaration in main_window.h.
+bool MainWindow::loadFloorPlanningData(QString& error)
+{
+  if (!m_floorPlanningWidget) {
+    error = tr("The Floor Planning panel is not open.");
+    return false;
+  }
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+  // [aurora2#1725 stage P0] instance discovery -- best-effort (re)derive instances.json
+  // here too, so the RTL hierarchy is available even if the user opens FloorPlanning
+  // before ever running synthesis. Failure is already reported via ErrorMessage() inside
+  // EnsureElaborated() and must not block this, which is why the result isn't checked.
+  compiler->EnsureElaborated();
+
+  // [aurora2#1725 stage P1] instances.json (RtlInstanceModel) is the sole source of the
+  // tree below, pre- or post-synthesis alike -- a real Yosys/Verific elaboration,
+  // language-agnostic unlike the RTL-source text scrapers this replaced (which only
+  // understood Verilog and found nothing at all for a VHDL design like fpu_single).
+  std::filesystem::path instancesJsonPath =
+      std::filesystem::path(compiler->ProjManager()->projectPath()) / "instances.json";
+  fp::RtlInstanceModel rtlModel;
+  if (!rtlModel.loadInstances(instancesJsonPath)) {
+    error = QString::fromStdString(rtlModel.error());
+    return false;
+  }
+
+  // [aurora2#1725 stage P4] Merge the verdicts. Written by RunValidateInstances() at the
+  // end of the SYNTHESIS task -- including its "skipped, not required" paths -- so it is
+  // already there by the time this panel opens, on any project that has been synthesised.
+  // Optional by design: pre-synthesis there is no file and every instance stays "unknown",
+  // which renders exactly as the tree did before this was wired up. Failure isn't checked
+  // for the same reason -- a missing or stale verdict must not stop the user floorplanning.
+  std::filesystem::path validationJsonPath =
+      std::filesystem::path(compiler->ProjManager()->projectPath()) / "validation.json";
+  rtlModel.mergeVerdicts(validationJsonPath);
+
+  // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
+  // atoms belonging to it, straight from atomsets.json (aurora_atomsets.tcl,
+  // in-session, stage P3). Only available post-synthesis; pre-synthesis there's no
+  // atom data yet, so setAtomNames() is simply not called and every leaf stays
+  // visible (see SynthResourceHierarchyWidget::populateAtomColumns()'s early-return
+  // on !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
+  // populateAtomColumns() itself, so the atom-name map has to already be set.
+  std::filesystem::path atomsetsJsonPath =
+      std::filesystem::path(compiler->ProjManager()->projectPath()) / "atomsets.json";
+  if (FileUtils::FileExists(atomsetsJsonPath)) {
+    std::ifstream atomsetsStream(atomsetsJsonPath);
+    nlohmann::json atomsetsDoc;
+    bool parsedOk = true;
+    try {
+      atomsetsStream >> atomsetsDoc;
+    } catch (const std::exception&) {
+      parsedOk = false;
+    }
+    // [aurora2#1725] Packing density, needed to report a partition's required clb in
+    // tiles rather than atoms. Absent/garbage leaves fp::Partition's A.13.3 default.
+    if (parsedOk && atomsetsDoc.contains("atoms_per_tile")
+        && atomsetsDoc["atoms_per_tile"].is_number_integer()) {
+      m_floorPlanningWidget->setAtomsPerTile(atomsetsDoc["atoms_per_tile"].get<int>());
+    }
+    if (parsedOk && atomsetsDoc.contains("atomsets") && atomsetsDoc["atomsets"].is_object()) {
+      std::map<std::string, std::vector<std::string>, fp::NaturalLess> atomNames;
+      for (auto it = atomsetsDoc["atomsets"].begin(); it != atomsetsDoc["atomsets"].end(); ++it) {
+        std::vector<std::string> atoms;
+        if (it.value().contains("atoms") && it.value()["atoms"].is_array()) {
+          for (const auto& atom : it.value()["atoms"]) {
+            if (atom.is_string()) {
+              atoms.push_back(atom.get<std::string>());
+            }
+          }
+        }
+        atomNames[it.key()] = std::move(atoms);
+      }
+      m_floorPlanningWidget->setAtomNames(std::move(atomNames));
+    }
+  }
+
+  // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
+  // schema whatever point the flow has reached (generate_design_resources.py, A.13.5).
+  // Written by RunDesignResources() at elaboration (tier 1), synthesis (tier 2) and
+  // placement (tier 3). Must be set before loadNetList() below, which builds the trees
+  // and populates every partition: Partition::addElement() reads it as it goes.
+  //
+  // Absent for a project that has never been compiled, and for devices whose template
+  // has no P2/P3 blocks -- both leave the panel exactly as it was before this stage
+  // existed, so a missing file is not an error.
+  // Cleared up front rather than only on success: Partition holds these statically, so a
+  // project with no design_resources.json -- or an unreadable one -- would otherwise keep
+  // sizing its partitions from whichever project was open last.
+  m_floorPlanningWidget->setDesignResources(fp::DesignResources{});
+
+  std::filesystem::path designResourcesPath =
+      std::filesystem::path(compiler->ProjManager()->projectPath()) / "design_resources.json";
+  if (FileUtils::FileExists(designResourcesPath)) {
+    std::ifstream designResourcesStream(designResourcesPath);
+    nlohmann::json designResourcesDoc;
+    bool parsedOk = true;
+    try {
+      designResourcesStream >> designResourcesDoc;
+    } catch (const std::exception&) {
+      parsedOk = false;
+    }
+    if (parsedOk && designResourcesDoc.contains("tier") &&
+        designResourcesDoc["tier"].is_number_integer()) {
+      fp::DesignResources resources;
+      resources.tier = designResourcesDoc["tier"].get<int>();
+      if (designResourcesDoc.contains("tier_name") &&
+          designResourcesDoc["tier_name"].is_string()) {
+        resources.tierName = designResourcesDoc["tier_name"].get<std::string>();
+      }
+      if (designResourcesDoc.contains("instances") &&
+          designResourcesDoc["instances"].is_object()) {
+        const auto& instances = designResourcesDoc["instances"];
+        for (auto it = instances.begin(); it != instances.end(); ++it) {
+          const auto& entry = it.value();
+          if (!entry.is_object()) continue;
+          // Read what the tier actually provides and leave the rest at 0: tier 1 omits
+          // bram deliberately (a guess there is a false positive -- "design has $mem*"
+          // does not mean the netlist keeps a BRAM), and only tier 3 has clb_actual.
+          fp::DesignResourceEntry resourceEntry;
+          auto readInt = [&entry](const char* key, int& target) {
+            if (entry.contains(key) && entry[key].is_number_integer()) {
+              target = entry[key].get<int>();
+            }
+          };
+          readInt("clb_est", resourceEntry.clbEst);
+          readInt("dsp", resourceEntry.dsp);
+          readInt("bram", resourceEntry.bram);
+          resources.instances[it.key()] = resourceEntry;
+        }
+      }
+      m_floorPlanningWidget->setDesignResources(std::move(resources));
+    }
+  }
+
+  // [aurora2#1725 stage P4] Hand the verdicts to the trees before loadNetList(), which is
+  // what builds them: build() grades each row as it goes.
+  std::map<std::string, fp::InstanceVerdict> verdicts;
+  for (const fp::RtlInstance& instance : rtlModel.instances()) {
+    verdicts[instance.path] = fp::InstanceVerdict{instance.status, instance.statusReason};
+  }
+  m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
+
+  // [aurora2#1725 stage P1] instances.json -> flat path set for the tree. Every instance,
+  // deleted ones included: they are shown greyed out and unselectable rather than dropped,
+  // because whether an instance survives synthesis depends on generics and constant
+  // folding, and an instance that silently vanishes from the tree is indistinguishable
+  // from a mistyped hierarchy path (A.P4). toHierarhyElements() is the element set a
+  // PARTITION may hold, and it still excludes them -- there are no atoms to constrain.
+  fp::NaturalStringSet paths;
+  for (const fp::RtlInstance& instance : rtlModel.instances()) {
+    paths.insert(instance.path);
+  }
+  m_floorPlanningWidget->loadNetList(paths);
+
+  // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
+  // so we construct path based on json settings location file.
+  std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc");
+
+  m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
+
+  return true;
+}
+
+// [aurora2#1725 stage P7] see the declaration in main_window.h.
+void MainWindow::refreshFloorPlanningData()
+{
+  // Never opens the panel. A compile finishing is not a reason to put a window on screen;
+  // this only brings an ALREADY-OPEN one up to date.
+  if (!m_floorPlanningWidget) {
+    return;
+  }
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+  // The reload repopulates the partitions from the .qdc on disk, so unsaved edits would go
+  // with it. Ask rather than pick for them.
+  if (m_floorPlanningWidget->hasUnsavedChanges()) {
+    const QMessageBox::StandardButton answer = QMessageBox::warning(
+        this, tr("Floor Planning has unsaved changes"),
+        tr("The compile that just finished produced updated resource data.\n\n"
+           "Reloading the panel replaces the current floorplan with the .qdc on disk, "
+           "discarding your unsaved changes.\n\n"
+           "Note that saving a .qdc invalidates the compiled stages, so the run that just "
+           "finished will be marked out of date."),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Cancel);
+
+    if (answer == QMessageBox::Cancel) {
+      compiler->Message(
+          "Floor Planning: keeping the current view. Its resource figures are from before "
+          "this compile -- reopen the panel to refresh them.");
+      return;
+    }
+    if (answer == QMessageBox::Save) {
+      m_floorPlanningWidget->saveUnsavedChanges();
+    }
+  }
+
+  QString error;
+  if (!loadFloorPlanningData(error)) {
+    // Best-effort: the compile itself succeeded, so a failure to refresh the panel is
+    // reported but must not raise a modal over a run the user may have walked away from.
+    compiler->ErrorMessage("Floor Planning: could not refresh after the compile: " +
+                           error.toStdString());
+  }
+}
+
 void MainWindow::floorPlanningActionTriggered()
 {
   auto cleanFloorPlanningUI = [this]() {
@@ -2268,36 +2482,9 @@ void MainWindow::floorPlanningActionTriggered()
   if (floorPlanningAction->isChecked()) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
 
-    // [aurora2#1725 stage P0] instance discovery -- best-effort (re)derive
-    // instances.json here too, so the RTL hierarchy is available even if the user
-    // opens FloorPlanning before ever running synthesis. Failure is already reported
-    // via ErrorMessage() inside EnsureElaborated() and must not block this handler,
-    // which is why the result isn't checked here.
-    compiler->EnsureElaborated();
-
-    // [aurora2#1725 stage P1] instances.json (RtlInstanceModel) is the sole source of
-    // the tree below, pre- or post-synthesis alike -- a real Yosys/Verific elaboration,
-    // language-agnostic unlike the RTL-source text scrapers this replaced (which only
-    // understood Verilog and found nothing at all for a VHDL design like fpu_single).
-    std::filesystem::path instancesJsonPath =
-        std::filesystem::path(compiler->ProjManager()->projectPath()) / "instances.json";
-    fp::RtlInstanceModel rtlModel;
-    if (!rtlModel.loadInstances(instancesJsonPath)) {
-      QMessageBox::critical(this, "Floor Planning cannot be started.",
-        QString::fromStdString(rtlModel.error()));
-      cleanFloorPlanningUI();
-      return;
-    }
-
-    // [aurora2#1725 stage P4] Merge the verdicts. Written by RunValidateInstances() at the
-    // end of the SYNTHESIS task -- including its "skipped, not required" paths -- so it is
-    // already there by the time this panel opens, on any project that has been synthesised.
-    // Optional by design: pre-synthesis there is no file and every instance stays "unknown",
-    // which renders exactly as the tree did before this was wired up. Failure isn't checked
-    // for the same reason -- a missing or stale verdict must not stop the user floorplanning.
-    std::filesystem::path validationJsonPath =
-        std::filesystem::path(compiler->ProjManager()->projectPath()) / "validation.json";
-    rtlModel.mergeVerdicts(validationJsonPath);
+    // [aurora2#1725 stage P7] Everything read from disk now lives in
+    // loadFloorPlanningData(), called once the widget below exists, so the post-compile
+    // refresh path runs exactly the same load.
 
     // vpr arch file
     std::shared_ptr<VprArchitectureFileProfider> archFileProviderPtr = std::make_shared<VprArchitectureFileProfider>(compiler);
@@ -2343,129 +2530,13 @@ void MainWindow::floorPlanningActionTriggered()
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
-    // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
-    // atoms belonging to it, straight from atomsets.json (aurora_atomsets.tcl,
-    // in-session, stage P3). Only available post-synthesis; pre-synthesis there's no
-    // atom data yet, so setAtomNames() is simply not called and every leaf stays
-    // visible (see SynthResourceHierarchyWidget::populateAtomColumns()'s early-return
-    // on !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
-    // populateAtomColumns() itself, so the atom-name map has to already be set.
-    std::filesystem::path atomsetsJsonPath =
-        std::filesystem::path(compiler->ProjManager()->projectPath()) / "atomsets.json";
-    if (FileUtils::FileExists(atomsetsJsonPath)) {
-      std::ifstream atomsetsStream(atomsetsJsonPath);
-      nlohmann::json atomsetsDoc;
-      bool parsedOk = true;
-      try {
-        atomsetsStream >> atomsetsDoc;
-      } catch (const std::exception&) {
-        parsedOk = false;
-      }
-      // [aurora2#1725] Packing density, needed to report a partition's required clb in
-      // tiles rather than atoms. Absent/garbage leaves fp::Partition's A.13.3 default.
-      if (parsedOk && atomsetsDoc.contains("atoms_per_tile")
-          && atomsetsDoc["atoms_per_tile"].is_number_integer()) {
-        m_floorPlanningWidget->setAtomsPerTile(atomsetsDoc["atoms_per_tile"].get<int>());
-      }
-      if (parsedOk && atomsetsDoc.contains("atomsets") && atomsetsDoc["atomsets"].is_object()) {
-        std::map<std::string, std::vector<std::string>, fp::NaturalLess> atomNames;
-        for (auto it = atomsetsDoc["atomsets"].begin(); it != atomsetsDoc["atomsets"].end(); ++it) {
-          std::vector<std::string> atoms;
-          if (it.value().contains("atoms") && it.value()["atoms"].is_array()) {
-            for (const auto& atom : it.value()["atoms"]) {
-              if (atom.is_string()) {
-                atoms.push_back(atom.get<std::string>());
-              }
-            }
-          }
-          atomNames[it.key()] = std::move(atoms);
-        }
-        m_floorPlanningWidget->setAtomNames(std::move(atomNames));
-      }
+    QString loadError;
+    if (!loadFloorPlanningData(loadError)) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.", loadError);
+      cleanFloorPlanningUI();
+      return;
     }
 
-    // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
-    // schema whatever point the flow has reached (generate_design_resources.py, A.13.5).
-    // Written by RunDesignResources() at elaboration (tier 1), synthesis (tier 2) and
-    // placement (tier 3). Must be set before loadNetList() below, which builds the trees
-    // and populates every partition: Partition::addElement() reads it as it goes.
-    //
-    // Absent for a project that has never been compiled, and for devices whose template
-    // has no P2/P3 blocks -- both leave the panel exactly as it was before this stage
-    // existed, so a missing file is not an error.
-    std::filesystem::path designResourcesPath =
-        std::filesystem::path(compiler->ProjManager()->projectPath()) / "design_resources.json";
-    if (FileUtils::FileExists(designResourcesPath)) {
-      std::ifstream designResourcesStream(designResourcesPath);
-      nlohmann::json designResourcesDoc;
-      bool parsedOk = true;
-      try {
-        designResourcesStream >> designResourcesDoc;
-      } catch (const std::exception&) {
-        parsedOk = false;
-      }
-      if (parsedOk && designResourcesDoc.contains("tier") &&
-          designResourcesDoc["tier"].is_number_integer()) {
-        fp::DesignResources resources;
-        resources.tier = designResourcesDoc["tier"].get<int>();
-        if (designResourcesDoc.contains("tier_name") &&
-            designResourcesDoc["tier_name"].is_string()) {
-          resources.tierName = designResourcesDoc["tier_name"].get<std::string>();
-        }
-        if (designResourcesDoc.contains("instances") &&
-            designResourcesDoc["instances"].is_object()) {
-          const auto& instances = designResourcesDoc["instances"];
-          for (auto it = instances.begin(); it != instances.end(); ++it) {
-            const auto& entry = it.value();
-            if (!entry.is_object()) continue;
-            // Read what the tier actually provides and leave the rest at 0: tier 1 omits
-            // bram deliberately (a guess there is a false positive -- "design has $mem*"
-            // does not mean the netlist keeps a BRAM), and only tier 3 has clb_actual.
-            fp::DesignResourceEntry resourceEntry;
-            auto readInt = [&entry](const char* key, int& target) {
-              if (entry.contains(key) && entry[key].is_number_integer()) {
-                target = entry[key].get<int>();
-              }
-            };
-            readInt("clb_est", resourceEntry.clbEst);
-            readInt("dsp", resourceEntry.dsp);
-            readInt("bram", resourceEntry.bram);
-            if (entry.contains("clb_actual") && entry["clb_actual"].is_number_integer()) {
-              resourceEntry.clbActual = entry["clb_actual"].get<int>();
-              resourceEntry.hasClbActual = true;
-            }
-            resources.instances[it.key()] = resourceEntry;
-          }
-        }
-        m_floorPlanningWidget->setDesignResources(std::move(resources));
-      }
-    }
-
-    // [aurora2#1725 stage P4] Hand the verdicts to the trees before loadNetList(), which is
-    // what builds them: build() grades each row as it goes.
-    std::map<std::string, fp::InstanceVerdict> verdicts;
-    for (const fp::RtlInstance& instance : rtlModel.instances()) {
-      verdicts[instance.path] = fp::InstanceVerdict{instance.status, instance.statusReason};
-    }
-    m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
-
-    // [aurora2#1725 stage P1] instances.json -> flat path set for the tree. Every instance,
-    // deleted ones included: they are shown greyed out and unselectable rather than dropped,
-    // because whether an instance survives synthesis depends on generics and constant
-    // folding, and an instance that silently vanishes from the tree is indistinguishable
-    // from a mistyped hierarchy path (A.P4). toHierarhyElements() is the element set a
-    // PARTITION may hold, and it still excludes them -- there are no atoms to constrain.
-    fp::NaturalStringSet paths;
-    for (const fp::RtlInstance& instance : rtlModel.instances()) {
-      paths.insert(instance.path);
-    }
-    m_floorPlanningWidget->loadNetList(paths);
-
-    // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
-    // so we construct path based on json settings location file.
-    std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc");
-
-    m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
 
     m_floorPlanningWidget->show();
 

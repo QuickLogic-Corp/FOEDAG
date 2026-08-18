@@ -28,12 +28,16 @@ inline QString classifyAtomType(const std::string& atomName) {
 // Partition::addElement(). Once synthesis has run, atomsets.json gives the real atoms and
 // those are counted directly; this exists for the window before that, where the atom-based
 // path has nothing at all to count and a user is nonetheless drawing regions.
+// design_resources.json also carries lut/ff/carry, and clb_actual at tier 3. They are not
+// read here: the panel's own atom-based tally already covers post-synthesis, and clb_actual
+// is per-INSTANCE while a Partition's counts are per-PARTITION -- an instance can be split
+// across partitions, so the two cannot be compared row for row without a packing-aware
+// split. Surfacing measured-vs-estimated tiles is follow-up work, not a field to park here
+// unused.
 struct DesignResourceEntry {
     int clbEst = 0;      // already in TILES, the unit Partition::*RequiredCount() reports
     int dsp = 0;
     int bram = 0;
-    int clbActual = -1;  // tier 3 only; <0 means "not measured"
-    bool hasClbActual = false;
 };
 
 // [aurora2#1725 stage P7] design_resources.json as a whole. `tier` is not decoration: all

@@ -54,6 +54,15 @@ public:
     // A.13.5 requires be surfaced rather than folded silently into the numbers.
     void setDesignResources(DesignResources resources);
 
+    // [aurora2#1725 stage P7] Whether the floorplan differs from the .qdc on disk. Read by
+    // MainWindow before it reloads this panel's data after a compile: a reload repopulates
+    // the partitions from disk, so doing it over unsaved edits would discard them.
+    bool hasUnsavedChanges() const { return m_hasUnsavedChanges; }
+
+    // [aurora2#1725 stage P7] Save on the user's behalf when they answer "Save" to that
+    // prompt. No-ops when there is nothing to write, exactly as the button does.
+    void saveUnsavedChanges() { saveQdc(); }
+
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 
