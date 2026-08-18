@@ -2058,6 +2058,10 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
 
   if (!RunElaboration()) return false;
   if (!RunElabInstances()) return false;
+  // [aurora2#1725 stage P7] tier 1 -- the only sizing figures available before synthesis
+  // runs, and capped at 1 so an RTL edit replaces any tier-2 file left by the previous
+  // revision. Best-effort; see RunDesignResources().
+  RunDesignResources(1);
 
   m_designDirty = false;
   return true;
@@ -2150,6 +2154,85 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   return true;
 }
 
+// [aurora2#1725 stage P7] see the declaration in CompilerOpenFPGA_ql.h for the tier rules.
+bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
+  const std::string topModule = ProjManager()->DesignTopModule();
+  const std::string projectName = ProjManager()->projectName();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  std::filesystem::path elab_json_path = projectPath / (topModule + "_elab.json");
+  std::filesystem::path atomsets_path = projectPath / "atomsets.json";
+  // VPR names these after the project, not the top module -- see Placement(), which
+  // builds the same two paths to decide whether placement can be reused.
+  std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
+  std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
+
+  // Pick the highest tier the inputs support, capped by the calling stage. atomsets.json
+  // only exists for devices whose template has the P2/P3 blocks, so tier 2 is not always
+  // reachable even after a successful synthesis; tier 1 covers that case.
+  const bool useAtomsets = (maxTier >= 2) && FileUtils::FileExists(atomsets_path);
+  const bool usePlacement = (maxTier >= 3) && useAtomsets &&
+                            FileUtils::FileExists(net_path) &&
+                            FileUtils::FileExists(place_path);
+  const bool useElab = !useAtomsets && FileUtils::FileExists(elab_json_path);
+
+  if (!useAtomsets && !useElab) {
+    // Neither input on disk yet. Nothing to report, and nothing has gone wrong.
+    return true;
+  }
+
+  std::filesystem::path design_resources_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("generate_design_resources.py");
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping resource reporting "
+                 "(generate_design_resources.py).");
+    return true;  // best-effort: the compile stage itself has already succeeded
+  }
+
+  std::filesystem::path design_resources_path = projectPath / "design_resources.json";
+
+  std::vector<std::string> args;
+  args.push_back(design_resources_script_path.string());
+  if (useAtomsets) {
+    args.push_back("--atomsets");
+    args.push_back(atomsets_path.string());
+    if (usePlacement) {
+      args.push_back("--net");
+      args.push_back(net_path.string());
+      args.push_back("--place");
+      args.push_back(place_path.string());
+    }
+  } else {
+    args.push_back("--elab");
+    args.push_back(elab_json_path.string());
+  }
+  args.push_back("-o");
+  args.push_back(design_resources_path.string());
+
+  int status =
+      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
+          .realCode;
+  if (status != 0) {
+    // Best-effort, as above: report it, but a resource-report failure must not fail a
+    // compile stage that has already succeeded.
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " resource reporting (generate_design_resources.py) failed");
+  }
+  return true;
+}
+
 bool CompilerOpenFPGA_ql::Synthesize() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -2238,6 +2321,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     // (see EnsureElaborated() above) since the last time this ran, and validation.json
     // should reflect it. Best-effort, result not checked -- see RunValidateInstances().
     RunValidateInstances();
+    RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning
     return true;
   }
   #endif
@@ -2264,6 +2348,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
     // still runs even though synthesis itself didn't.
     RunValidateInstances();
+    RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning
     return true;
   }
   // incr compilation
@@ -2290,6 +2375,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     // synthesis output just produced. Best-effort, result not checked -- see
     // RunValidateInstances().
     RunValidateInstances();
+    // [aurora2#1725 stage P7] tier 2 -- exact per-instance primitive counts, now that
+    // atomsets.json describes the netlist just written.
+    RunDesignResources(2);
     return true;
   }
 }
@@ -4358,6 +4446,9 @@ bool CompilerOpenFPGA_ql::Placement() {
               .string())) {
     m_state = State::Placed;
     Message("Design " + ProjManager()->projectName() + " placement reused");
+    // [aurora2#1725 stage P7] tier 3 -- the .net/.place this path just found up-to-date
+    // are exactly what tier 3 reads, so regenerate even though VPR did not re-run.
+    RunDesignResources(3);
     return true;
   }
 
@@ -4467,6 +4558,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement skipped, not required");
     Message("##################################################");
     m_state = State::Placed;
+    RunDesignResources(3);  // [aurora2#1725 stage P7] tier 3, same reasoning as above
     return true;
   }
 
@@ -4498,6 +4590,10 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
+  // [aurora2#1725 stage P7] tier 3 -- actual placed tiles, the only ground truth the
+  // FloorPlanning UI can compare its estimates against. Runs before the place2pcf.py
+  // block below, which returns early when no pin table is found.
+  RunDesignResources(3);
    std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /

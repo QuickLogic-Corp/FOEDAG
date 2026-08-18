@@ -98,9 +98,23 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         // [aurora2#1725] "required/available" tiles, e.g. "180/224" -- read-only, unlike
         // the view label these are always shown, even 0/available, since a table
         // column can't disappear per-row the way free text can.
-        auto resourceItem = [](int required, int available) {
-            auto* item = new QTableWidgetItem(QString("%1/%2").arg(required).arg(available));
+        //
+        // [aurora2#1725 stage P7] A partition whose counts came from a tier-1 estimate
+        // rather than from measured atoms is marked "~180/224" and says so on hover. The
+        // three tiers share a shape, so without this the panel would show a pre-synthesis
+        // guess in the same cell, in the same format, as a measurement (A.13.5).
+        const bool estimated = partition->isEstimated();
+        auto resourceItem = [estimated](int required, int available) {
+            auto* item = new QTableWidgetItem(QString("%1%2/%3")
+                                                  .arg(estimated ? "~" : "")
+                                                  .arg(required)
+                                                  .arg(available));
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            if (estimated) {
+                item->setToolTip(QObject::tr(
+                    "Pre-synthesis estimate -- no netlist exists yet. Synthesize for "
+                    "measured figures."));
+            }
             return item;
         };
         m_tableWidget->setItem(row, Column::Clb, resourceItem(partition->clbRequiredCount(), partition->clbAvailableCount()));

@@ -312,6 +312,21 @@ private:
   // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P4).
   bool RunValidateInstances();
 
+  // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
+  // schema the FloorPlanning UI sizes regions against, via
+  // scripts/generate_design_resources.py. Best-effort, exactly like RunValidateInstances()
+  // above: a missing input skips the stage rather than failing a compile that has already
+  // succeeded.
+  //
+  // maxTier caps what a given call may produce -- P0b elaboration passes 1, P3 synthesis 2,
+  // P6 placement 3 -- and the tier actually written is the highest the inputs on disk
+  // support, never above the cap. The cap is what makes re-elaboration after an RTL edit
+  // rewrite the file as tier 1 instead of leaving a stale tier-2 one describing a netlist
+  // the sources no longer produce.
+  // See docs/specs/region-based-placement-synthesis-integration/pipeline_appendix.md
+  // (A.13.5).
+  bool RunDesignResources(int maxTier);
+
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();

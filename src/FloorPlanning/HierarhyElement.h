@@ -2,6 +2,7 @@
 
 #include <string>
 #include <set>
+#include <map>
 
 #include <QDebug>
 #include <QString>
@@ -20,6 +21,32 @@ inline QString classifyAtomType(const std::string& atomName) {
     if (atomName.find("TDP_ECC36K") != std::string::npos) return "bram";
     return "clb";
 }
+
+// [aurora2#1725 stage P7] One instance's row from design_resources.json.
+//
+// Only ever consulted for instances that have NO atoms of their own -- see
+// Partition::addElement(). Once synthesis has run, atomsets.json gives the real atoms and
+// those are counted directly; this exists for the window before that, where the atom-based
+// path has nothing at all to count and a user is nonetheless drawing regions.
+struct DesignResourceEntry {
+    int clbEst = 0;      // already in TILES, the unit Partition::*RequiredCount() reports
+    int dsp = 0;
+    int bram = 0;
+    int clbActual = -1;  // tier 3 only; <0 means "not measured"
+    bool hasClbActual = false;
+};
+
+// [aurora2#1725 stage P7] design_resources.json as a whole. `tier` is not decoration: all
+// three tiers share a shape, so it is the only thing distinguishing an estimate from a
+// measurement, and A.13.5 requires it be surfaced rather than silently absorbed.
+struct DesignResources {
+    int tier = 0;                 // 0 = no file loaded, else 1..3
+    std::string tierName;
+    std::map<std::string, DesignResourceEntry> instances;
+
+    bool isEstimate() const { return tier == 1; }
+    bool valid() const { return tier > 0; }
+};
 
 // [aurora2#1725 stage P4] One instance's grade from validation.json, as the FloorPlanning
 // trees render it: greyed out when synthesis deleted it, flagged when its atom set is only

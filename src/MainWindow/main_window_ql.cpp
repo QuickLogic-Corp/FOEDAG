@@ -2384,6 +2384,63 @@ void MainWindow::floorPlanningActionTriggered()
       }
     }
 
+    // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
+    // schema whatever point the flow has reached (generate_design_resources.py, A.13.5).
+    // Written by RunDesignResources() at elaboration (tier 1), synthesis (tier 2) and
+    // placement (tier 3). Must be set before loadNetList() below, which builds the trees
+    // and populates every partition: Partition::addElement() reads it as it goes.
+    //
+    // Absent for a project that has never been compiled, and for devices whose template
+    // has no P2/P3 blocks -- both leave the panel exactly as it was before this stage
+    // existed, so a missing file is not an error.
+    std::filesystem::path designResourcesPath =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) / "design_resources.json";
+    if (FileUtils::FileExists(designResourcesPath)) {
+      std::ifstream designResourcesStream(designResourcesPath);
+      nlohmann::json designResourcesDoc;
+      bool parsedOk = true;
+      try {
+        designResourcesStream >> designResourcesDoc;
+      } catch (const std::exception&) {
+        parsedOk = false;
+      }
+      if (parsedOk && designResourcesDoc.contains("tier") &&
+          designResourcesDoc["tier"].is_number_integer()) {
+        fp::DesignResources resources;
+        resources.tier = designResourcesDoc["tier"].get<int>();
+        if (designResourcesDoc.contains("tier_name") &&
+            designResourcesDoc["tier_name"].is_string()) {
+          resources.tierName = designResourcesDoc["tier_name"].get<std::string>();
+        }
+        if (designResourcesDoc.contains("instances") &&
+            designResourcesDoc["instances"].is_object()) {
+          const auto& instances = designResourcesDoc["instances"];
+          for (auto it = instances.begin(); it != instances.end(); ++it) {
+            const auto& entry = it.value();
+            if (!entry.is_object()) continue;
+            // Read what the tier actually provides and leave the rest at 0: tier 1 omits
+            // bram deliberately (a guess there is a false positive -- "design has $mem*"
+            // does not mean the netlist keeps a BRAM), and only tier 3 has clb_actual.
+            fp::DesignResourceEntry resourceEntry;
+            auto readInt = [&entry](const char* key, int& target) {
+              if (entry.contains(key) && entry[key].is_number_integer()) {
+                target = entry[key].get<int>();
+              }
+            };
+            readInt("clb_est", resourceEntry.clbEst);
+            readInt("dsp", resourceEntry.dsp);
+            readInt("bram", resourceEntry.bram);
+            if (entry.contains("clb_actual") && entry["clb_actual"].is_number_integer()) {
+              resourceEntry.clbActual = entry["clb_actual"].get<int>();
+              resourceEntry.hasClbActual = true;
+            }
+            resources.instances[it.key()] = resourceEntry;
+          }
+        }
+        m_floorPlanningWidget->setDesignResources(std::move(resources));
+      }
+    }
+
     // [aurora2#1725 stage P4] Hand the verdicts to the trees before loadNetList(), which is
     // what builds them: build() grades each row as it goes.
     std::map<std::string, fp::InstanceVerdict> verdicts;

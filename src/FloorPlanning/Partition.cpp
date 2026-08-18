@@ -12,6 +12,10 @@ int Partition::s_idGenerator = 0;
 // project's atomsets.json has been read.
 int Partition::s_atomsPerTile = 14;
 
+// [aurora2#1725 stage P7] Empty until design_resources.json is read; tier 0 means "no file",
+// so addElement()'s estimate path stays off until a tier-1 file actually arrives.
+DesignResources Partition::s_designResources{};
+
 Partition::Partition(const std::string& name): m_name(name) {
   m_id = s_idGenerator++;
   setColor(colorFromIndex(m_id));

@@ -15,8 +15,17 @@ namespace fp {
 class Partition {
     static int s_idGenerator;
     static int s_atomsPerTile;
+    static DesignResources s_designResources;
 public:
     static void resetIdGenerator() { s_idGenerator = 0; }
+
+    // [aurora2#1725 stage P7] design_resources.json, for the pre-synthesis case only.
+    // Static for the same reason s_atomsPerTile is: it describes the design every
+    // partition is measured against, not one partition.
+    static void setDesignResources(DesignResources resources) {
+        s_designResources = std::move(resources);
+    }
+    static const DesignResources& designResources() { return s_designResources; }
 
     // [aurora2#1725] atoms_per_tile from atomsets.json -- the packing density hint of
     // spec A.13.3, the same divisor its est_tiles field uses. Needed because clb atoms
@@ -47,6 +56,8 @@ public:
     void clearElemenets() {
         m_elements.clear();
         m_clbAtomCount = m_dspRequiredCount = m_bramRequiredCount = 0;
+        m_clbEstTiles = 0;
+        m_estimated = false;
     }
     void addElement(const HierarhyElement& element) {
         m_elements.insert(element);
@@ -56,13 +67,44 @@ public:
         // "Required" because these come from the atoms assigned to the partition --
         // what the design needs -- as opposed to *Available*Count() below, which is
         // what the partition's regions physically have room for.
-        for (const std::string& atomName : element.vprNames) {
-            const QString type = classifyAtomType(atomName);
-            if (type == "dsp") ++m_dspRequiredCount;
-            else if (type == "bram") ++m_bramRequiredCount;
-            else ++m_clbAtomCount;
+        if (!element.vprNames.empty()) {
+            for (const std::string& atomName : element.vprNames) {
+                const QString type = classifyAtomType(atomName);
+                if (type == "dsp") ++m_dspRequiredCount;
+                else if (type == "bram") ++m_bramRequiredCount;
+                else ++m_clbAtomCount;
+            }
+            return;
         }
+
+        // [aurora2#1725 stage P7] No atoms for this element. Post-synthesis that means the
+        // element genuinely has none (synthesis deleted it), and 0 is the right answer.
+        // Pre-synthesis it means nothing has been extracted yet -- atomsets.json does not
+        // exist -- and the partition would size at 0 for a design that will not fit.
+        // design_resources.json tier 1 is the only figure available in that window.
+        //
+        // Deliberately NOT used at tier 2/3: atoms exist there and are exact, and those
+        // tiers' entries nest (an ancestor's counts include its descendants'), so mixing
+        // them into a per-partition tally would double-count a partition holding both a
+        // parent and a child. Tier 1's entries are the top module's direct children only,
+        // flat and disjoint, which is what makes this safe.
+        if (!s_designResources.isEstimate()) {
+            return;
+        }
+        const auto it = s_designResources.instances.find(element.path);
+        if (it == s_designResources.instances.end()) {
+            return;  // deeper than the flat tier-1 map goes; no estimate to offer
+        }
+        m_clbEstTiles += it->second.clbEst;   // already in tiles
+        m_dspRequiredCount += it->second.dsp;
+        m_bramRequiredCount += it->second.bram;
+        m_estimated = true;
     }
+
+    // [aurora2#1725 stage P7] True when any part of this partition's counts came from a
+    // tier-1 estimate rather than from measured atoms. A.13.5 requires that a consumer
+    // never present the two as the same thing, and shape alone cannot tell them apart.
+    bool isEstimated() const { return m_estimated; }
 
     const HierarhyElements& elements() const { return m_elements; }
     const std::map<int, RegionPtr> regions() const { return m_regions; }
@@ -74,8 +116,10 @@ public:
     // "dut" is 19029 clb atoms, which is 1360 tiles at 14 atoms/tile, not 19029 of them.
     // A sizing hint, deliberately conservative -- the packer fits that design in 799 clb --
     // but in the same unit as what a region actually offers, which the raw atom count is not.
+    // m_clbEstTiles is already in tiles (design_resources.json's clb_est carries the A.13.2b
+    // safety margin), so it is added after the atom->tile division, not before it.
     int clbRequiredCount() const {
-        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile;
+        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile + m_clbEstTiles;
     }
     int dspRequiredCount() const { return m_dspRequiredCount; }
     int bramRequiredCount() const { return m_bramRequiredCount; }
@@ -110,6 +154,8 @@ private:
     int m_clbAtomCount = 0;
     int m_dspRequiredCount = 0;
     int m_bramRequiredCount = 0;
+    int m_clbEstTiles = 0;      // tier-1 contribution, already in tiles
+    bool m_estimated = false;
 
     void updateRect();
     QColor colorFromIndex(int index) const;

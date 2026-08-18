@@ -505,6 +505,35 @@ void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerd
     m_partitionResourcesWidget->setInstanceVerdicts(std::move(verdicts));
 }
 
+void FloorPlanningWidget::setDesignResources(DesignResources resources)
+{
+    if (!resources.valid()) {
+        return;
+    }
+
+    // A.13.5: all three tiers share a shape, so this line is the only thing telling a user
+    // whether the clb/dsp/bram they are sizing against were measured or guessed. Logged to
+    // the compiler log for the same reason the no-atom report is -- a GUI user never sees
+    // the terminal.
+    if (resources.isEstimate()) {
+        emit logMessage(tr("Floor Planning: resource figures are a PRE-SYNTHESIS ESTIMATE "
+                           "(tier %1, %2) over %3 instance(s). DSP counts are exact; clb is "
+                           "approximate and BRAM is not estimated at all. Synthesize to get "
+                           "measured figures.")
+                            .arg(resources.tier)
+                            .arg(QString::fromStdString(resources.tierName))
+                            .arg(static_cast<int>(resources.instances.size())));
+    } else {
+        emit logMessage(tr("Floor Planning: resource figures are measured (tier %1, %2) "
+                           "over %3 instance(s).")
+                            .arg(resources.tier)
+                            .arg(QString::fromStdString(resources.tierName))
+                            .arg(static_cast<int>(resources.instances.size())));
+    }
+
+    Partition::setDesignResources(std::move(resources));
+}
+
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)
 {
     m_deviceWidget->constructTiles(descriptor);

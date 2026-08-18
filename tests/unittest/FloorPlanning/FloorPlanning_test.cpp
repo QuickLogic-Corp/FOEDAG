@@ -471,3 +471,135 @@ TEST(RtlInstanceModel, VerdictsForUnknownInstancesAreIgnoredNotFatal)
     EXPECT_TRUE(model.mergeVerdicts(verdicts));
     EXPECT_EQ(model.find("i_mul_24")->status, "unknown");
 }
+
+// [aurora2#1725 stage P7] design_resources.json -> Partition sizing.
+//
+// The whole point of the tier-1 path is the window BEFORE synthesis, where no atoms exist
+// and the panel previously sized every partition at 0. These pin the two things that must
+// not regress: that an estimate is used when there is nothing else, and that it is never
+// mixed into or mistaken for measured atom counts.
+
+namespace {
+
+fp::DesignResources makeResources(int tier, std::map<std::string, fp::DesignResourceEntry> instances)
+{
+    fp::DesignResources resources;
+    resources.tier = tier;
+    resources.tierName = (tier == 1) ? "estimate from elaboration (pre-synthesis)"
+                                     : "exact primitives (post-synthesis)";
+    resources.instances = std::move(instances);
+    return resources;
+}
+
+fp::DesignResourceEntry entry(int clbEst, int dsp, int bram)
+{
+    fp::DesignResourceEntry e;
+    e.clbEst = clbEst;
+    e.dsp = dsp;
+    e.bram = bram;
+    return e;
+}
+
+}  // namespace
+
+TEST(PartitionResources, PreSynthesisEstimateSizesAPartitionWithNoAtoms)
+{
+    // Before synthesis there is no atomsets.json, so every element's vprNames is empty and
+    // the atom-based tally has nothing to count. Without the tier-1 fallback this partition
+    // reports 0 clb for a design that needs 40 tiles.
+    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 40);
+    EXPECT_EQ(partition.dspRequiredCount(), 4);
+    EXPECT_TRUE(partition.isEstimated());
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, MeasuredAtomsAreNeverMarkedAsEstimated)
+{
+    // An element that HAS atoms is counted from them, exactly, and the estimate is not
+    // consulted at all -- even though a tier-1 file is loaded and names this instance.
+    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
+    fp::Partition::setAtomsPerTile(14);
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{
+        "i_mul_24", /*isLeaf*/ true,
+        std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 1);  // 3 atoms / 14 per tile, rounded up
+    EXPECT_EQ(partition.dspRequiredCount(), 0);
+    EXPECT_FALSE(partition.isEstimated());
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, PostSynthesisTiersNeverFeedThePerPartitionTally)
+{
+    // Tier 2/3 entries NEST -- an ancestor's counts already include its descendants' -- so
+    // adding them to a per-partition tally would double-count a partition holding both a
+    // parent and a child. Only tier 1, whose entries are flat, may be used this way.
+    fp::Partition::setDesignResources(makeResources(2, {{"i_mul_24", entry(40, 4, 0)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 0);
+    EXPECT_EQ(partition.dspRequiredCount(), 0);
+    EXPECT_FALSE(partition.isEstimated());
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, AnInstanceWithNoEstimateContributesNothing)
+{
+    // A path deeper than the flat tier-1 map goes has no entry. It must contribute 0 rather
+    // than fall back to some other instance's figures.
+    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_mul_24.inner", /*isLeaf*/ true});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 0);
+    EXPECT_FALSE(partition.isEstimated());
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, NoDesignResourcesFileLeavesTheOldBehaviourUntouched)
+{
+    // A project that has never been compiled, or a device whose template has no P2/P3
+    // blocks, must behave exactly as it did before this stage existed.
+    fp::Partition::setDesignResources(fp::DesignResources{});
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
+
+    EXPECT_EQ(partition.clbRequiredCount(), 0);
+    EXPECT_FALSE(partition.isEstimated());
+    EXPECT_FALSE(fp::Partition::designResources().valid());
+}
+
+TEST(PartitionResources, ClearingElementsAlsoClearsTheEstimate)
+{
+    // clearElemenets() is what a reload goes through; a stale estimate surviving it would
+    // be added a second time when the elements come back.
+    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
+    ASSERT_EQ(partition.clbRequiredCount(), 40);
+
+    partition.clearElemenets();
+    EXPECT_EQ(partition.clbRequiredCount(), 0);
+    EXPECT_FALSE(partition.isEstimated());
+
+    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
+    EXPECT_EQ(partition.clbRequiredCount(), 40);  // not 80
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}

@@ -48,6 +48,12 @@ public:
     // grey out what synthesis deleted and flag what is only partially trustworthy.
     void setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts);
 
+    // [aurora2#1725 stage P7] design_resources.json: per-instance clb/dsp/bram plus the
+    // tier that says how they were obtained. Gives the panel sizing figures before
+    // synthesis has run -- until now it had none at all -- and reports the tier, which
+    // A.13.5 requires be surfaced rather than folded silently into the numbers.
+    void setDesignResources(DesignResources resources);
+
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 
