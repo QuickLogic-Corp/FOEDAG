@@ -1,5 +1,7 @@
 #include "QLDeviceManager.h"
 
+#include <cstdlib>   // std::getenv
+
 #include <QObject>
 #include <QWidget>
 #include <QFont>
@@ -2860,6 +2862,35 @@ int compareAuroraVersions(const std::string& lhs, const std::string& rhs) {
   return 0;
 }
 
+// Expand a leading '~' or '~/' to the user's home directory.
+//
+// A Tcl command receives its arguments already word-split, so the shell never expands a tilde
+// inside `aurora --cmd "install_device kit.tar.gz -target ~/devices"` -- bash does not expand
+// '~' inside double quotes unless it starts the word. Without this, that documented form would
+// silently create a directory literally named '~' under the current directory. Only a LEADING
+// tilde is expanded; '~user' is not supported and is left alone.
+std::filesystem::path expandLeadingTilde(const std::filesystem::path& input_path) {
+
+  const std::string input_string = input_path.string();
+  if(input_string.empty() || input_string[0] != '~') {
+    return input_path;
+  }
+  // '~user/...' -- not ours to resolve; leave it untouched rather than guess.
+  if(input_string.size() > 1 && input_string[1] != '/' && input_string[1] != '\\') {
+    return input_path;
+  }
+
+  const char* home_dir = std::getenv("HOME");
+#ifdef _WIN32
+  if(home_dir == nullptr) { home_dir = std::getenv("USERPROFILE"); }
+#endif
+  if(home_dir == nullptr || *home_dir == '\0') {
+    return input_path;                       // no home to expand to: leave it as the user typed it
+  }
+
+  return std::filesystem::path(home_dir) / input_string.substr(input_string.size() > 1 ? 2 : 1);
+}
+
 // true when 'candidate' is inside 'ancestor' (or is it), after resolving symlinks and '..'.
 bool pathIsInside(const std::filesystem::path& candidate, const std::filesystem::path& ancestor) {
 
@@ -2946,7 +2977,7 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
   // ---- [2] the target must be OUTSIDE the Aurora installation ---------------------------
   // enforced on the input rather than trusting the user to pick well: the whole point of the
   // feature is that installing a device never modifies the Aurora installation.
-  std::filesystem::path target_path(target_dir_path);
+  std::filesystem::path target_path = expandLeadingTilde(std::filesystem::path(target_dir_path));
   if(target_path.empty()) {
     compiler->ErrorMessage("please specify a target directory to install the device into.");
     return -1;
