@@ -59,12 +59,25 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
 // whatever those helpers do internally, including a full expandAll(). Persistent indexes are
 // safe here because these operations only change check states -- rows are added in build(),
 // which legitimately sets the initial state and does not use this.
+//
+// It stands down entirely while the expand/collapse button is on. In that mode the user has
+// asked for the whole tree open, so there is no per-node choice of theirs to protect -- and
+// restoring anyway is what made the partition view contradict its own button: the button
+// starts checked there (ShowOnlyCheckedItems), selectPartition() captured the state while
+// the rows were still hidden and collapsed, showOnlyCheckedItems() then expanded them, and
+// this destructor promptly collapsed them again.
 class ExpansionKeeper {
 public:
-    ExpansionKeeper(QTreeView* view, QAbstractItemModel* model): m_view(view) {
-        capture(QModelIndex(), model);
+    ExpansionKeeper(QTreeView* view, QAbstractItemModel* model, bool expandAllActive)
+        : m_view(view), m_keeping(!expandAllActive) {
+        if (m_keeping) {
+            capture(QModelIndex(), model);
+        }
     }
     ~ExpansionKeeper() {
+        if (!m_keeping) {
+            return;
+        }
         for (const auto& [index, wasExpanded]: m_state) {
             if (index.isValid() && (m_view->isExpanded(index) != wasExpanded)) {
                 m_view->setExpanded(index, wasExpanded);
@@ -87,6 +100,7 @@ private:
     }
 
     QTreeView* m_view;
+    bool m_keeping;
     std::vector<std::pair<QPersistentModelIndex, bool>> m_state;
 };
 
@@ -370,7 +384,7 @@ void SynthResourceHierarchyWidget::unselectPartition()
 {
     setEnabled(false);
 
-    ExpansionKeeper keepExpansion(m_view, m_model);
+    ExpansionKeeper keepExpansion(m_view, m_model, m_bnExpandCollapse->isChecked());
 
     m_selectedPartition.reset();
 
@@ -393,7 +407,7 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
 
     setEnabled(true);
 
-    ExpansionKeeper keepExpansion(m_view, m_model);
+    ExpansionKeeper keepExpansion(m_view, m_model, m_bnExpandCollapse->isChecked());
 
     // check only requested elements + set partition label
     std::function<void(QStandardItem*, const std::string&)> checkAndPartitionRecursive =
@@ -867,7 +881,7 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool repor
 
     // Ticking a box is not a request to reshape the tree either -- the show-only-checked
     // view calls expandAll() from here via showOnlyCheckedItems().
-    ExpansionKeeper keepExpansion(m_view, m_model);
+    ExpansionKeeper keepExpansion(m_view, m_model, m_bnExpandCollapse->isChecked());
 
     QSignalBlocker blocker(m_model);
     // if user clicked a parent checkbox -> force all descendants
