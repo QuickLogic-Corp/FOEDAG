@@ -7634,8 +7634,21 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   //
   // A project with no set_region is unaffected: it never consults the model.
   fp::RtlInstanceModel rtlModel;
-  const bool haveInstanceModel = rtlModel.loadInstances(
-      std::filesystem::path(ProjManager()->projectPath()) / "instances.json");
+  const std::filesystem::path instancesJsonPath =
+      std::filesystem::path(ProjManager()->projectPath()) / "instances.json";
+  const bool instancesLoaded = rtlModel.loadInstances(instancesJsonPath);
+
+  // loadInstances() reports an EMPTY list as a failure, and that is a different thing from
+  // being unable to read one. A flat design -- mult_16_signed, spram_9x4096 -- elaborates
+  // fine and legitimately has "instances": [], so its instance set IS known: there is
+  // nothing to expand, and every set_region token in such a .qdc is necessarily a literal
+  // atom name ("out[0]", "$false", "$undef") that reaches VPR correctly as itself.
+  //
+  // Refusing those would break designs that were never at risk. What the guard below is
+  // for is the case where the set could not be determined at all, so a real instance name
+  // would silently pass through as a literal matching nothing.
+  const bool haveInstanceModel =
+      instancesLoaded || FileUtils::FileExists(instancesJsonPath);
 
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
