@@ -4,6 +4,8 @@
 #include <QLabel>
 #include <QHeaderView>
 
+#include <array>
+
 namespace fp {
 
 PartitionsListWidget::PartitionsListWidget(QWidget* parent)
@@ -27,6 +29,39 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     m_tableWidget->setColumnCount(5);
     m_tableWidget->setHorizontalHeaderLabels(
         {tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM"), tr("Placed")});
+
+    // [aurora2#1725 stage P7] The cells explain their own tier, but only once you know which
+    // cell to hover. Say what each column IS on the header, so the difference between the
+    // three "required/available" columns and the measured one is readable at a glance.
+    const std::array<std::pair<int, QString>, 4> headerTips{{
+        {Column::Clb, tr("Required / available CLB tiles.\n\n"
+                         "Required is a sizing hint, not a placement result: clb atoms are "
+                         "luts and flops that pack many to a tile, so the figure is an atom "
+                         "count divided by a packing density. A leading ~ marks a row whose "
+                         "figures are a pre-synthesis estimate.")},
+        {Column::Dsp, tr("Required / available DSP tiles.\n\n"
+                         "One DSP atom is one tile, so unlike CLB this needs no packing "
+                         "estimate. It is exact even before synthesis: a multiplier in the "
+                         "RTL always becomes a DSP.")},
+        {Column::Bram, tr("Required / available BRAM tiles.\n\n"
+                          "One BRAM atom is one tile. Blank before synthesis, because whether "
+                          "a memory becomes a BRAM is decided by synthesis rather than by the "
+                          "RTL.")},
+        {Column::Placed, tr("CLB tiles this partition ACTUALLY occupies, from the placement "
+                            "(tier 3).\n\n"
+                            "The measured counterpart to the CLB column's estimate — compare "
+                            "the two to see how well a region was sized.\n\n"
+                            "≥ means at least one instance shares clusters with logic "
+                            "outside it, so those tiles are counted for both and the total is "
+                            "an upper bound. A dash means placement has not run yet: it is "
+                            "not shown as 0, because \"not measured\" is not \"measured "
+                            "zero\".")},
+    }};
+    for (const auto& [column, tip]: headerTips) {
+        if (auto* header = m_tableWidget->horizontalHeaderItem(column)) {
+            header->setToolTip(tip);
+        }
+    }
     m_tableWidget->verticalHeader()->setVisible(false);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Name, QHeaderView::Stretch);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Clb, QHeaderView::ResizeToContents);

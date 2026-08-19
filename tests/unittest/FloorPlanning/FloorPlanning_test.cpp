@@ -4,8 +4,10 @@
 #include <FloorPlanning/QdcSerializer.h>
 #include <FloorPlanning/RtlInstanceModel.h>
 #include <FloorPlanning/Partition.h>
+#include <FloorPlanning/PartitionsListWidget.h>
 
 #include <QPoint>
+#include <QTableWidget>
 #include <QTemporaryDir>
 
 #include <fstream>
@@ -907,4 +909,28 @@ TEST(QdcSerializer, AValidRegionStillLoadsNormally)
     EXPECT_EQ(partition->name(), "p1");
     EXPECT_EQ(partition->elements().size(), 1u);
     EXPECT_FALSE(partition->regions().empty());
+}
+
+// [aurora2#1725 stage P7] Header tooltips are set through horizontalHeaderItem(), which is
+// null unless setHorizontalHeaderLabels() created the items. The guard around it means a
+// null there would silently leave every header bare -- compiling fine and doing nothing.
+TEST(PartitionsListWidget, EveryResourceColumnHeaderExplainsItself)
+{
+    fp::PartitionsListWidget widget;
+    auto* table = widget.findChild<QTableWidget*>();
+    ASSERT_NE(table, nullptr);
+    ASSERT_EQ(table->columnCount(), 5);
+
+    // Name needs no explanation; the four resource columns do.
+    for (int column = 1; column < 5; ++column) {
+        auto* header = table->horizontalHeaderItem(column);
+        ASSERT_NE(header, nullptr) << "column " << column << " has no header item";
+        EXPECT_FALSE(header->toolTip().isEmpty())
+            << "column " << column << " (" << header->text().toStdString()
+            << ") has no tooltip";
+    }
+
+    // The measured column must not be mistaken for another estimate.
+    EXPECT_TRUE(table->horizontalHeaderItem(4)->toolTip().contains("ACTUALLY"));
+    EXPECT_TRUE(table->horizontalHeaderItem(4)->text() == "Placed");
 }
