@@ -1890,9 +1890,13 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
         case Design::Language::VHDL_2000:
         case Design::Language::VHDL_2008:
         case Design::Language::VHDL_2019:
-          ErrorMessage(
-              "Elaboration requires Verific for VHDL sources -- enable "
-              "'verific' in Settings.");
+          // Not an error: the caller treats an empty script as "instance discovery is
+          // unavailable" and lets synthesis proceed. Reporting it as ERROR made a
+          // limitation look like a failure, on a path -- Synplify -- that reads VHDL
+          // perfectly well itself.
+          Message(
+              "Instance discovery needs Verific to elaborate VHDL sources; enable "
+              "'verific' in Settings to floorplan this design by RTL instance.");
           return {};
         case Design::Language::VERILOG_1995:
         case Design::Language::VERILOG_2001:
@@ -2056,8 +2060,28 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
           ProjManager()->projectName());
   Message("##################################################");
 
-  if (!RunElaboration()) return false;
-  if (!RunElabInstances()) return false;
+  // [aurora2#1725 stage P0b] Best-effort, like every other stage this feature adds.
+  //
+  // Elaboration runs Yosys on the RTL directly, independently of the synthesis front end --
+  // deliberately, because it has to see the hierarchy before synthesis dissolves it. But
+  // that means the Yosys parser's limits apply even on paths that would not otherwise hit
+  // them: Synplify reads VHDL natively, yet this elaboration cannot, so a VHDL + Synplify
+  // project failed here and never reached synthesis at all. Measured on
+  // tests/testcases/fpu_single -- a pre-existing case in include_testcases__synplify with
+  // no floorplanning in it -- which stopped synthesising entirely.
+  //
+  // Instance discovery ENABLES floorplanning; it is not a precondition for compiling. When
+  // it cannot run, say so and carry on: instances.json is simply absent, the FloorPlanning
+  // panel has nothing to offer for this project, and the region stages downstream skip
+  // exactly as they already do when their own inputs are missing.
+  if (!RunElaboration() || !RunElabInstances()) {
+    Message(
+        "Instance discovery is unavailable for this project, so floorplanning by RTL "
+        "instance will not be offered. Synthesis continues.");
+    // m_designDirty deliberately stays set, so this is retried rather than remembered as
+    // done: whatever blocked it may be fixed by the time the design is next compiled.
+    return true;
+  }
   // [aurora2#1725 stage P7] tier 1 -- the only sizing figures available before synthesis
   // runs, and capped at 1 so an RTL edit replaces any tier-2 file left by the previous
   // revision. Best-effort; see RunDesignResources().
