@@ -79,6 +79,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "foedag_version.h"
 #include "Compiler/QLSettingsManager.h"
 
+#include "FloorPlanning/AtomSets.h"
 #include "FloorPlanning/FloorPlanningWidget.h"
 #include "FloorPlanning/RtlInstanceModel.h"
 #include "nlohmann_json/json.hpp"
@@ -2305,34 +2306,15 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // populateAtomColumns() itself, so the atom-name map has to already be set.
   std::filesystem::path atomsetsJsonPath =
       std::filesystem::path(compiler->ProjManager()->projectPath()) / "atomsets.json";
-  if (FileUtils::FileExists(atomsetsJsonPath)) {
-    std::ifstream atomsetsStream(atomsetsJsonPath);
-    nlohmann::json atomsetsDoc;
-    bool parsedOk = true;
-    try {
-      atomsetsStream >> atomsetsDoc;
-    } catch (const std::exception&) {
-      parsedOk = false;
-    }
-    // [aurora2#1725] Packing density, needed to report a partition's required clb in
-    // tiles rather than atoms. Absent/garbage leaves fp::Partition's A.13.3 default.
-    if (parsedOk && atomsetsDoc.contains("atoms_per_tile")
-        && atomsetsDoc["atoms_per_tile"].is_number_integer()) {
-      m_floorPlanningWidget->setAtomsPerTile(atomsetsDoc["atoms_per_tile"].get<int>());
-    }
-    if (parsedOk && atomsetsDoc.contains("atomsets") && atomsetsDoc["atomsets"].is_object()) {
-      std::map<std::string, std::vector<std::string>, fp::NaturalLess> atomNames;
-      for (auto it = atomsetsDoc["atomsets"].begin(); it != atomsetsDoc["atomsets"].end(); ++it) {
-        std::vector<std::string> atoms;
-        if (it.value().contains("atoms") && it.value()["atoms"].is_array()) {
-          for (const auto& atom : it.value()["atoms"]) {
-            if (atom.is_string()) {
-              atoms.push_back(atom.get<std::string>());
-            }
-          }
-        }
-        atomNames[it.key()] = std::move(atoms);
-      }
+  {
+    // Shared with the batch checker (REQ-004), so the panel and a headless run read the
+    // same file the same way -- including atoms_per_tile, which is the divisor behind every
+    // required-clb figure. Two readers of that would mean the two paths could report
+    // different tile counts for the same .qdc.
+    fp::AtomNameMap atomNames;
+    int atomsPerTile = fp::Partition::atomsPerTile();  // A.13.3 default unless the file says
+    if (fp::loadAtomSets(atomsetsJsonPath, atomNames, atomsPerTile)) {
+      m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
       m_floorPlanningWidget->setAtomNames(std::move(atomNames));
     }
   }

@@ -1,4 +1,6 @@
 #include "SynthResourceHierarchyWidget.h"
+
+#include "AtomSets.h"
 #include "HierarhyElement.h"
 #include "CheckableButton.h"
 
@@ -608,31 +610,11 @@ void SynthResourceHierarchyWidget::setAtomNames(std::map<std::string, std::vecto
 
 std::set<std::string> SynthResourceHierarchyWidget::atomNamesFor(const std::string& path) const
 {
-    if (const auto it = m_atomNames.find(path); it != m_atomNames.end()) {
-        return {it->second.begin(), it->second.end()};
-    }
-
-    // [aurora2#1725] No entry of its own, which does NOT mean no atoms: aurora_atomsets.tcl
-    // derives an instance path as everything before a cell name's last dot, so a scope that
-    // holds only sub-instances and no cells directly gets no entry. The top instance is
-    // always such a scope -- on fft256 "dut" had no entry while its children held 19089
-    // atoms -- which is why selecting the root showed 0 required clb/dsp/bram while any
-    // nested selection was fine. The extractor now emits those scopes (hierarchy_closure),
-    // but a project synthesised before that still has the old file, so reconstruct here too.
-    //
-    // Entries are subtree-inclusive (they come from a "c:<inst>.*" prefix select), so the
-    // union over descendants that do have entries is the full set; the std::set absorbs the
-    // overlap between an entry and its own nested entries. Linear scan rather than a
-    // lower_bound range: m_atomNames is ordered by NaturalLess, whose collation is not the
-    // plain byte order a prefix range would need.
-    std::set<std::string> names;
-    const std::string prefix = path + ".";
-    for (const auto& [candidate, atoms] : m_atomNames) {
-        if (candidate.compare(0, prefix.size(), prefix) == 0) {
-            names.insert(atoms.begin(), atoms.end());
-        }
-    }
-    return names;
+    // [aurora2#1725 REQ-004] Delegates to the shared lookup, which the batch checker also
+    // uses. The subtree reconstruction this used to hold lives there now: a second copy is a
+    // second set of rules to keep in step, and the requirement is that a rule added to one
+    // path is present in the other.
+    return fp::atomNamesFor(m_atomNames, path);
 }
 
 void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)

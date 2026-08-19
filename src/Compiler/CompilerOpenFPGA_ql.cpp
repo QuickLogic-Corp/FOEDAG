@@ -77,6 +77,7 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
+#include "FloorPlanning/FloorplanChecker.h"
 #include "FloorPlanning/RtlInstanceModel.h"
 
 extern const char* foedag_version_number;
@@ -7771,6 +7772,47 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
+  // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
+  //
+  // The panel does this continuously -- under-provisioned regions, overlaps, constraints
+  // naming an instance synthesis deleted, a parent whose own logic no partition takes -- but
+  // a batch compile never constructs the panel, so none of it was ever said out loud. The
+  // flow ran and the packer quietly dealt with whatever it was given.
+  //
+  // Reports only. These are estimates and the packer is the authority, so a batch run is
+  // told what looks wrong and left to proceed.
+  if (fs::exists(floor_planning_constraint_filepath)) {
+    std::shared_ptr<VprArchitectureFileProfider> archProvider =
+        std::make_shared<VprArchitectureFileProfider>(this);
+    fp::DeviceGrid::Issues issues;
+    std::string checkError;
+    const bool checked = fp::FloorplanChecker::check(
+        std::filesystem::path(ProjManager()->projectPath()),
+        floor_planning_constraint_filepath,
+        archProvider->get(),
+        QLSettingsManager::getStringValue("general", "device", "layout"),
+        issues, checkError);
+
+    if (!checkError.empty()) {
+      Message("Floor plan check skipped: " + checkError);
+    } else if (checked) {
+      for (const auto& [where, what] : issues.errors) {
+        ErrorMessage("Floor plan: " + where + ": " + what);
+      }
+      for (const auto& [where, what] : issues.warnings) {
+        Message("Floor plan warning: " + where + ": " + what);
+      }
+      if (issues.isEmpty()) {
+        Message("Floor plan check: no issues found in " +
+                floor_planning_constraint_filepath.filename().string());
+      } else {
+        Message("Floor plan check: " + std::to_string(issues.errors.size()) + " error(s), " +
+                std::to_string(issues.warnings.size()) + " warning(s). Continuing -- these "
+                "are estimates, the packer decides.");
+      }
+    }
+  }
+
   std::filesystem::path generate_floorplanning_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /

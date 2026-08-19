@@ -37,6 +37,8 @@ set (SRC_LIST
   CheckableButton.cpp
   # widgets
   DeviceGridDescriptor.cpp
+  AtomSets.cpp
+  FloorplanChecker.cpp
   QdcSerializer.cpp
   RtlInstanceModel.cpp
   DeviceGrid.cpp
@@ -57,6 +59,8 @@ set (HDR_LIST
   CheckableButton.h
   # widgets
   DeviceGridDescriptor.h
+  AtomSets.h
+  FloorplanChecker.h
   TileDescriptor.h
   QdcSerializer.h
   RtlInstanceModel.h
