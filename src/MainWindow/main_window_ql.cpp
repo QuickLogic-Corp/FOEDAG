@@ -2436,42 +2436,80 @@ bool MainWindow::loadFloorPlanningData(QString& error)
 void MainWindow::refreshFloorPlanningData()
 {
   // Never opens the panel. A compile finishing is not a reason to put a window on screen;
-  // this only brings an ALREADY-OPEN one up to date.
+  // this only offers to bring an ALREADY-OPEN one up to date.
   if (!m_floorPlanningWidget) {
     return;
   }
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
 
-  // The reload repopulates the partitions from the .qdc on disk, so unsaved edits would go
-  // with it. Ask rather than pick for them.
-  if (m_floorPlanningWidget->hasUnsavedChanges()) {
-    const QMessageBox::StandardButton answer = QMessageBox::warning(
-        this, tr("Floor Planning has unsaved changes"),
-        tr("The compile that just finished produced updated resource data.\n\n"
-           "Reloading the panel replaces the current floorplan with the .qdc on disk, "
-           "discarding your unsaved changes.\n\n"
-           "Note that saving a .qdc invalidates the compiled stages, so the run that just "
-           "finished will be marked out of date."),
-        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
-        QMessageBox::Cancel);
+  // Only ask when there is genuinely better data to load. The panel keeps the tier it was
+  // populated with, so comparing it against what is now on disk answers that directly:
+  // tier 2 arriving after a synthesis, or tier 3 after a placement, is worth interrupting
+  // for; another compile that produced nothing newer is not.
+  const int loadedTier = fp::Partition::designResources().tier;
+  int diskTier = 0;
+  {
+    std::filesystem::path path =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) / "design_resources.json";
+    if (FileUtils::FileExists(path)) {
+      std::ifstream stream(path);
+      nlohmann::json doc;
+      try {
+        stream >> doc;
+        if (doc.contains("tier") && doc["tier"].is_number_integer()) {
+          diskTier = doc["tier"].get<int>();
+        }
+      } catch (const std::exception&) {
+        diskTier = 0;
+      }
+    }
+  }
+  if (diskTier <= loadedTier) {
+    return;
+  }
 
-    if (answer == QMessageBox::Cancel) {
-      compiler->Message(
-          "Floor Planning: keeping the current view. Its resource figures are from before "
-          "this compile -- reopen the panel to refresh them.");
-      return;
-    }
-    if (answer == QMessageBox::Save) {
-      m_floorPlanningWidget->saveUnsavedChanges();
-    }
+  // Reloading repopulates the partitions from the .qdc on disk, so the choice differs by
+  // whether there is anything of the user's to lose. Two buttons either way: saving is
+  // offered only when there is something to save, rather than presenting a Save that would
+  // write nothing and a Discard that would discard nothing.
+  const bool dirty = m_floorPlanningWidget->hasUnsavedChanges();
+
+  QMessageBox box(this);
+  box.setIcon(QMessageBox::Question);
+  box.setWindowTitle(tr("Floor Planning"));
+  box.setText(tr("Updated resource data is available (tier %1).").arg(diskTier));
+  box.setInformativeText(
+      dirty ? tr("Restarting floorplanning reloads the panel from the .qdc on disk, so your "
+                 "unsaved changes must be saved first.\n\n"
+                 "Saving a .qdc invalidates the compiled stages, so the run that just "
+                 "finished will be marked out of date.")
+            : tr("Restarting floorplanning reloads the panel so the partitions are measured "
+                 "against the design that was just compiled."));
+
+  QPushButton* proceed = box.addButton(
+      dirty ? tr("Save QDC and restart floorplanning") : tr("Restart floorplanning"),
+      QMessageBox::AcceptRole);
+  box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+  box.setDefaultButton(proceed);
+  box.exec();
+
+  if (box.clickedButton() != proceed) {
+    compiler->Message(
+        "Floor Planning: keeping the current view. Its resource figures are from before "
+        "this compile -- restart floorplanning to refresh them.");
+    return;
+  }
+
+  if (dirty) {
+    m_floorPlanningWidget->saveUnsavedChanges();
   }
 
   QString error;
   if (!loadFloorPlanningData(error)) {
     // Best-effort: the compile itself succeeded, so a failure to refresh the panel is
-    // reported but must not raise a modal over a run the user may have walked away from.
-    compiler->ErrorMessage("Floor Planning: could not refresh after the compile: " +
-                           error.toStdString());
+    // reported but must not raise a second modal over it.
+    compiler->ErrorMessage("Floor Planning: could not restart floorplanning after the "
+                           "compile: " + error.toStdString());
   }
 }
 
