@@ -7609,10 +7609,22 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
 
     std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
     for (std::string line: lines) {
+      // [aurora2#1725] readCommands() returns comments as well as commands, so that saving
+      // the .qdc cannot destroy them. They are not commands: parsing one here would take
+      // its first word as a command name and fail the compile with "Invalid QDC command
+      // '#...'" on any .qdc carrying a header -- which is every floorplanning testcase.
+      if (auto hash = line.find('#'); hash != std::string::npos) {
+        line = line.substr(0, hash);
+      }
+      line = StringUtils::trim(line);
+      if (line.empty()) {
+        continue;
+      }
+
       std::istringstream iss(line);
       std::string token, signalName;
       iss >> token;
-    
+
       static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
       if (supportedCommands.find(token) == supportedCommands.end()){
         ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
