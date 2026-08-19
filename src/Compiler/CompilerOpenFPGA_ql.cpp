@@ -1941,13 +1941,21 @@ bool CompilerOpenFPGA_ql::RunElaboration() {
   // the RTL directly (pipeline.md: "P0/P0b unaffected -- elaborates the RTL directly,
   // never touches the front end"). Re-derive m_useVerific here rather than depending on
   // getSynthesisCommands() having already set it -- EnsureElaborated() runs before it.
-  if (QLSettingsManager::getStringValue("general", "options", "verific") == "checked" &&
-      m_projManager->synthesisTool() != Synplify &&
-      m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  } else {
-    m_useVerific = false;
-  }
+  //
+  // Note what is NOT copied from getSynthesisCommands()'s version of this test: the
+  // Synplify exclusion. There it is right -- reading the RTL with Verific instead of
+  // handing it to Synplify would defeat the point of choosing Synplify. Here it was
+  // simply wrong, and contradicted the comment above it: which parser elaborates the RTL
+  // for instance DISCOVERY is independent of which tool synthesizes afterwards.
+  //
+  // The cost of that copy was that a Synplify project never got instances.json. For
+  // Verilog it degraded quietly; for VHDL there is no fallback parser at all, so
+  // discovery could not run and the emitter, unable to tell an instance name from an
+  // atom name, wrote set_region's bare argument as an exact match that matched nothing
+  // -- all 564 atoms of fpu_single's i_mul_24 placed unconstrained while the flow
+  // reported success.
+  m_useVerific =
+      QLSettingsManager::getStringValue("general", "options", "verific") == "checked";
 
   std::string script = BuildElaborationScript(topModule);
   if (script.empty()) {
@@ -7614,10 +7622,19 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // "out[0]"/"$false"/"$undef" in mult_16_signed_floorplanning_dsp.qdc are real leaf
   // atom names and must stay literal, while "i_mul_24" without a "." + "*" suffix is a
   // whole instance and must not reach VPR as a literal (see the set_region loop below).
-  // Best-effort: a missing/unloadable instances.json just means every pattern below is
-  // treated as an already-exact atom/net name, matching the pre-existing behavior.
+  // NOT best-effort where set_region is concerned. instances.json is what tells an
+  // instance path apart from an exact atom name, and without it every instance silently
+  // stays literal -- a name_pattern that matches nothing, because a bare instance path is
+  // never itself a VPR atom name. Measured on fpu_single under Synplify: set_region
+  // i_mul_24 reached VPR as name_pattern="i_mul_24", and all 564 of that instance's atoms
+  // placed unconstrained while the flow reported success. Silently emitting a constraint
+  // that asks VPR for nothing is the exact defect this feature exists to remove, so the
+  // set_region loop below refuses rather than degrades.
+  //
+  // A project with no set_region is unaffected: it never consults the model.
   fp::RtlInstanceModel rtlModel;
-  rtlModel.loadInstances(std::filesystem::path(ProjManager()->projectPath()) / "instances.json");
+  const bool haveInstanceModel = rtlModel.loadInstances(
+      std::filesystem::path(ProjManager()->projectPath()) / "instances.json");
 
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
@@ -7667,6 +7684,18 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
         }
         signalName.clear();
       } else if (token == "set_region") {
+        // The RTL instance names must be known whatever the synthesis tool. Without them
+        // the expansion below cannot happen and the constraint would reach VPR matching
+        // nothing -- so refuse here, where the cause is still visible, rather than let the
+        // design place as though it had never been constrained.
+        if (!haveInstanceModel) {
+          ErrorMessage(
+              "Cannot expand set_region without instances.json: RTL instance names are "
+              "unknown, so a region would reach VPR matching nothing. Enable 'verific' in "
+              "Settings so the design can be elaborated for instance discovery, or remove "
+              "the set_region constraints from the .qdc.");
+          return false;
+        }
         iss >> signalName;
         std::vector<std::string> elements;
         std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
