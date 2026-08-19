@@ -977,9 +977,27 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   auto list_devices = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
 
-  std::vector <QLDeviceType>device_list = QLDeviceManager::getInstance(true)->device_list;
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance(true);
+
+  std::vector <QLDeviceType>device_list = device_manager->device_list;
+
+  // devices can now come from more than one device data root (the installation plus any
+  // directory a kit was installed into), so report where each one actually came from -
+  // otherwise two same-named devices are indistinguishable in this listing.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::error_code ec;
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, ec);
+  if(ec) {
+    installation_root_dir_path_c = installation_root_dir_path;
+  }
 
   for (QLDeviceType device: device_list) {
+
+    // the extra columns are appended, so anything reading the original 7 is unaffected.
+    std::string device_root_origin =
+        (device.device_root_path == installation_root_dir_path_c) ? "built-in" : "external";
+
     for (QLDeviceVariant device_variant: device.device_variants) {
       for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
         std::cout << device_variant.family << ","
@@ -988,14 +1006,107 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                   << device_variant.devicename << ","
                   << device_variant.voltage_threshold << ","
                   << device_variant.p_v_t_corner << ","
-                  << device_variant_layout.name << std::endl;
+                  << device_variant_layout.name << ","
+                  << device_root_origin << ","
+                  << device.device_root_path.string() << std::endl;
       }
     }
   }
-  
+
   return TCL_OK;
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
+
+  // install_device <kit.tar.gz> -target <dir> [force]
+  //
+  // installs a device kit produced by 'generate_device_kit' into a directory of the user's
+  // choosing, OUTSIDE the Aurora installation, and remembers that directory so the device is
+  // available in later sessions without any environment setup.
+  //
+  // 'force' overrides two separate things and both are reported: replacing a device already
+  // installed at the target, and installing despite the kit needing a newer Aurora.
+  auto install_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    // separate positional args from the '-target <dir>' flag and the trailing 'force'
+    std::vector<std::string> positional;
+    std::string target_dir_path;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = argv[i];
+      if (tok == "-target" || tok == "--target") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("-target requires a directory");
+          return TCL_ERROR;
+        }
+        target_dir_path = argv[++i];
+      } else if (compiler->ToLower(tok).compare("force") == 0 ||
+                 tok == "-force" || tok == "--force") {
+        force = true;
+      } else {
+        positional.push_back(tok);
+      }
+    }
+
+    if (positional.size() != 1 || target_dir_path.empty()) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    install_device <device_kit.tar.gz> -target <install_dir_path> [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->installDevice(positional[0], target_dir_path,
+                                                              force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("install_device", install_device, this, 0);
+
+  // uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]
+  //
+  // removes a device installed with install_device and stops searching its directory once no
+  // devices remain there. this DELETES from a directory the user chose, so it always prints
+  // what it is about to remove, refuses without 'force', and offers 'dry-run'.
+  auto uninstall_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    std::vector<std::string> positional;
+    bool dry_run = false;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = compiler->ToLower(std::string(argv[i]));
+      if (tok == "dry-run" || tok == "dry_run" || tok == "-dry-run" || tok == "--dry-run") {
+        dry_run = true;
+      } else if (tok == "force" || tok == "-force" || tok == "--force") {
+        force = true;
+      } else {
+        positional.push_back(argv[i]);
+      }
+    }
+
+    if (positional.size() != 4) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->uninstallDevice(
+        positional[0], positional[1], positional[2], positional[3], dry_run, force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("uninstall_device", uninstall_device, this, 0);
+
+
 
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.

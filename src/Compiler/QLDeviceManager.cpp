@@ -1,5 +1,7 @@
 #include "QLDeviceManager.h"
 
+#include <cstdlib>   // std::getenv
+
 #include <QObject>
 #include <QWidget>
 #include <QFont>
@@ -27,6 +29,20 @@
 #include <regex>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+#include <thread>
+#include <cstring>
+#include <cstdint>
+#include <cerrno>
+#include <iomanip>
+#include <sstream>
+#include <algorithm>
+#include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <qlcrypt/qlcrypt.hpp>
 #include "CompilerOpenFPGA_ql.h"
@@ -39,6 +55,11 @@
 #include "NewProject/ProjectManager/project_manager.h"
 
 extern FOEDAG::Session* GlobalSession;
+
+// defined at global scope in foedag_version_number_ql.cpp. declared here rather than inside
+// namespace FOEDAG below: a declaration in the namespace names a different symbol and fails
+// to link.
+extern const char* foedag_version_number;
 
 namespace FOEDAG {
 
@@ -950,59 +971,92 @@ void QLDeviceManager::parseDeviceData() {
 
   std::error_code ec;
 
-  // get to the device_data dir path of the installation
-  std::filesystem::path root_device_data_dir_path = deviceDataRootDirPath();
+  // get all the device_data root dir paths to search, in precedence order
+  std::vector<std::filesystem::path> root_device_data_dir_path_list = deviceDataRootDirPathList();
 
   // clear the list before parsing
   device_list.clear();
 
+  // devices already discovered, keyed by device type string, so that the same device
+  // appearing in two roots is reported rather than silently duplicated (REQ-006).
+  std::set<std::string> discovered_device_type_set;
+
   // each dir in the device_data is a family
   //    for each family, check for foundry dirs
-  //      for each foundry, check for node 
-  //        for each node, check for devicename 
+  //      for each foundry, check for node
+  //        for each node, check for devicename
   //          for each family-foundry-node-devicename dir, check the device_variants
-  
+
+  // walk every root. roots earlier in the list win: the installation is first, so a device
+  // shipped with the installation can never be shadowed by an externally installed one.
+  for (const std::filesystem::path& root_device_data_dir_path : root_device_data_dir_path_list) {
+
   // look at the directories inside the device_data_dir_path for 'family' entries
-  for (const std::filesystem::directory_entry& dir_entry_family : 
-                    std::filesystem::directory_iterator(root_device_data_dir_path)) {
-    
+  // NOTE: the error_code overload is required here - a registered root that has been
+  // deleted or made unreadable must warn and be skipped, never abort startup (REQ-007).
+  std::filesystem::directory_iterator root_dir_iterator =
+                    std::filesystem::directory_iterator(root_device_data_dir_path, ec);
+  if(ec) {
+    std::cout << "WARNING: skipping unreadable device data root: "
+              << root_device_data_dir_path.string() << " (" << ec.message() << ")" << std::endl;
+    ec.clear();
+    continue;
+  }
+
+  for (const std::filesystem::directory_entry& dir_entry_family : root_dir_iterator) {
+
     if(dir_entry_family.is_directory()) {
-      
+
       // we would see family at this level
       family = dir_entry_family.path().filename().string();
 
       // look at the directories inside the 'family' dir for 'foundry' entries
-      for (const std::filesystem::directory_entry& dir_entry_foundry : 
-                    std::filesystem::directory_iterator(dir_entry_family.path())) {
+      for (const std::filesystem::directory_entry& dir_entry_foundry :
+                    std::filesystem::directory_iterator(dir_entry_family.path(), ec)) {
 
         if(dir_entry_foundry.is_directory()) {
-      
+
           // we would see foundry at this level
           foundry = dir_entry_foundry.path().filename().string();
 
           // look at the directories inside the 'foundry' dir for 'node' entries
-          for (const std::filesystem::directory_entry& dir_entry_node : 
-                          std::filesystem::directory_iterator(dir_entry_foundry.path())) {
+          for (const std::filesystem::directory_entry& dir_entry_node :
+                          std::filesystem::directory_iterator(dir_entry_foundry.path(), ec)) {
 
             if(dir_entry_node.is_directory()) {
-            
+
               // we would see devicenames at this level
               node = dir_entry_node.path().filename().string();
 
               // look at the directories inside the 'node' dir for 'devicename' entries
-              for (const std::filesystem::directory_entry& dir_entry_devicename : 
-                              std::filesystem::directory_iterator(dir_entry_node.path())) {
+              for (const std::filesystem::directory_entry& dir_entry_devicename :
+                              std::filesystem::directory_iterator(dir_entry_node.path(), ec)) {
 
                 if(dir_entry_devicename.is_directory()) {
-                
+
                   // we would see devices at this level
                   devicename = dir_entry_devicename.path().filename().string();
 
-                  // get all the device_variants for this device:
-                  std::vector<QLDeviceVariant> device_variants = listDeviceVariants(family,
+                  // if this device type was already found in an earlier (higher precedence)
+                  // root, report the shadowing and keep the first one. resolving this
+                  // silently is what makes "why is my flow using the wrong device data?"
+                  // impossible to debug.
+                  std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
+                  if(discovered_device_type_set.count(device_type_string) > 0) {
+                    std::cout << "WARNING: ignoring shadowed device: " << device_type_string << std::endl;
+                    std::cout << "         already found in a higher precedence device data root;" << std::endl;
+                    std::cout << "         ignored copy: " << dir_entry_devicename.path().string() << std::endl;
+                    continue;
+                  }
+
+                  // get all the device_variants for this device, resolved against the
+                  // device dir we are actually standing in - NOT re-derived from a global
+                  // root, which would read another root's files for a shadowed device.
+                  std::vector<QLDeviceVariant> device_variants = listDeviceVariantsInDeviceDirectory(family,
                                                                                     foundry,
                                                                                     node,
-                                                                                    devicename);
+                                                                                    devicename,
+                                                                                    dir_entry_devicename.path());
 
                   if(device_variants.empty()) {
                     // display error, but continue with other devices.
@@ -1016,8 +1070,12 @@ void QLDeviceManager::parseDeviceData() {
                     device.node = node;
                     device.devicename = devicename;
                     device.device_variants = device_variants;
+                    // remember which root this device came from, so that every path and key
+                    // lookup for it resolves against its own root.
+                    device.device_root_path = root_device_data_dir_path;
 
                     device_list.push_back(device);
+                    discovered_device_type_set.insert(device_type_string);
                   }
                 }
               }
@@ -1027,6 +1085,8 @@ void QLDeviceManager::parseDeviceData() {
       }
     }
   }
+
+  } // for each device_data root
 
 
   // parse resources information for each device variant in the device_list:
@@ -1270,12 +1330,15 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
     device_variant.p_v_t_corner = p_v_t_corner;
 
     // list and store all the layouts available in this device_variant:
+    // pass the device dir we were given: this device may live in an external root, and its
+    // encrypted vpr.xml can only be decrypted with the _Supp.db sitting beside it.
     device_variant.device_variant_layouts = listDeviceVariantLayouts(family,
                                                                      foundry,
                                                                      node,
                                                                      devicename,
                                                                      voltage_threshold,
-                                                                     p_v_t_corner);
+                                                                     p_v_t_corner,
+                                                                     device_data_dir_path_c);
 
     // add the variant to the list
     device_variants.push_back(device_variant);
@@ -1291,9 +1354,10 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
     std::string node,
     std::string devicename) {
 
-  // get to the device_data dir path of the installation
-  std::filesystem::path root_device_data_dir_path = 
-     deviceDataRootDirPath();
+  // get to the device_data dir path of the root that owns THIS device (falls back to the
+  // first root when the device is not in device_list yet)
+  std::filesystem::path root_device_data_dir_path =
+     deviceTypeRootDirPath(family, foundry, node, devicename);
 
   // calculate the device_data dir path for specified device
   std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
@@ -1310,13 +1374,20 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
                                                                              std::string node,
                                                                              std::string devicename,
                                                                              std::string voltage_threshold,
-                                                                             std::string p_v_t_corner) {
+                                                                             std::string p_v_t_corner,
+                                                                             std::filesystem::path device_data_dir_path) {
   std::vector<QLDeviceVariantLayout> device_variant_layouts = {};
-  
-  std::filesystem::path root_device_data_dir_path = 
-      deviceDataRootDirPath();
-  
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
+
+  // the caller normally supplies the device dir (it is mandatory while parsing device data,
+  // because the _Supp.db used to decrypt vpr.xml lives in that dir). when it is not given,
+  // resolve it against the root that owns this device.
+  if(device_data_dir_path.empty()) {
+
+    std::filesystem::path root_device_data_dir_path =
+        deviceTypeRootDirPath(family, foundry, node, devicename);
+
+    device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
+  }
 
   std::filesystem::path device_variant_dir = device_data_dir_path / voltage_threshold / p_v_t_corner;
 
@@ -1907,6 +1978,10 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     std::vector<std::filesystem::path> source_device_data_file_list_to_encrypt;
     std::vector<std::filesystem::path> source_device_data_file_list_to_copy;
 
+    // files that matched no classification rule at all. reported individually as they are
+    // found, and summarised at the end so the count is not lost in the packaging output.
+    int unclassified_file_count = 0;
+
     // include pin_table csv files for copy
     std::filesystem::path device_target_config_json_filepath = source_device_data_dir_path / std::string("config.json");
     std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
@@ -1940,6 +2015,18 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
 
       if(dir_entry.is_regular_file(ec)) {
 
+          // every regular file must end up in exactly one of three buckets: encrypted, copied,
+          // or DELIBERATELY EXCLUDED. anything matching no rule is reported at the end of this
+          // block instead of being silently dropped - silent drops are how a device could be
+          // packaged without its routing graph and nobody notice (aurora2#2189).
+          // deliberate exclusions 'continue' out of the block and are never reported.
+          //
+          // classification is detected by watching the two lists rather than by a flag each
+          // rule has to remember to set: several rules deliberately fall through to later ones,
+          // and a flag would silently rot the first time a rule is added without it.
+          const size_t encrypt_list_size_before = source_device_data_file_list_to_encrypt.size();
+          const size_t copy_list_size_before = source_device_data_file_list_to_copy.size();
+
           // skip entries which are in specific directories in device data:
           // skip '/extra/' or '\extra\'
           if (std::regex_match(dir_entry.path().string(),
@@ -1965,6 +2052,27 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                   std::regex::icase))) {
             continue;
           }
+          // skip 'tileable_rrgraph/' and any spreadsheet in the device tree.
+          // SECURITY: the switchbox_*.xlsx under tileable_rrgraph are the PLAINTEXT source
+          // that the encrypted CSV/** files are generated from. shipping them would hand over
+          // exactly the proprietary routing data the CSV encryption exists to protect.
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]tileable_rrgraph[\/\\].*)",
+                                std::regex::icase))) {
+            continue;
+          }
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*\\.xlsx", std::regex::icase))) {
+            continue;
+          }
+          // skip provenance and readme files. these are upstream bookkeeping, and no device
+          // shipped in the installation carries them - the kit manifest records provenance.
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*\\.sha", std::regex::icase)) ||
+              std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*\\.md", std::regex::icase))) {
+            continue;
+          }
 
           // include all files in 'CSV/' for encryption, required for RRG generation
           if (std::regex_match(dir_entry.path().string(),
@@ -1981,27 +2089,63 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
               continue;  // prevent matching further copy rules
           }
 
-          // include all files in 'examples/' for copy
+          // include all files in 'examples/' for copy.
+          //
+          // NOTE: do NOT exclude these here. encryptDevice() transforms a device tree in place
+          // for whoever calls it, and aurora2's DEVICE_INSTALL rule calls it for every CRR
+          // device when ENABLE_ENCRYPTION=on. Dropping examples/ here would silently remove
+          // from the INSTALLATION files that exist in the source. A device kit must not ship
+          // examples, but that is the kit generator's job, not this function's.
+          //
+          // Per-device examples/ is being retired (the release ships one device-agnostic
+          // examples/ tree instead). Nothing here requires it to exist: when the directory is
+          // absent no path matches this rule and the loop simply moves on.
           if (std::regex_match(dir_entry.path().string(),
                                 std::regex(R"(.+[\/\\]examples[\/\\].*)",
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
-          // include rr_graph.bin and router_lookahead.bin files for copy,
-          // but only for non-CRR devices.  CRR devices generate the rr_graph
-          // dynamically from encrypted SB_MAPS + switchbox templates at runtime;
-          // including a pre-built rr_graph.bin would cause VPR to skip that path.
-          if (!is_crr_device) {
+          // routing graph / router lookahead handling.
+          //
+          // for a CRR device these MUST NOT be packaged, in ANY form: the device regenerates
+          // its routing graph at runtime from the encrypted SB_MAPS + switchbox templates, and
+          // shipping a pre-built graph would make VPR load that instead and bypass the
+          // encrypted path entirely - silently defeating the encryption the package exists to
+          // provide. this is a security property, not tidiness.
+          //
+          // note the source tree of some CRR devices (IDAHO-2025Q4-*) really does contain
+          // these files, compressed and/or split, and a previous build may also have left a
+          // decompressed one behind. so match the artifact by name in any form rather than
+          // enumerating extensions - and mark it EXCLUDED so it does not get reported as
+          // unclassified on every package of those devices.
+          // match the graph BINARY and its compressed/split forms only - the pattern must
+          // contain "bin". matching any extension would also swallow router_lookahead.capnp
+          // and silently disable the .capnp ENCRYPTION rule below.
+          if (std::regex_match(dir_entry.path().filename().string(),
+                                  std::regex(".*(rr_graph|router_lookahead)\\..*bin.*",
+                                  std::regex::icase))) {
+
+            if (is_crr_device) {
+              // deliberately excluded
+              continue;
+            }
+
+            // non-CRR devices depend on a pre-built graph, so copy the assembled binaries.
+            // (non-CRR devices are out of scope for the device kit today; this keeps
+            // add_device working for them.)
             if (std::regex_match(dir_entry.path().filename().string(),
                                     std::regex(".*rr_graph\\.bin",
-                                    std::regex::icase))) {
-                source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
-            }
-            if (std::regex_match(dir_entry.path().filename().string(),
+                                    std::regex::icase)) ||
+                std::regex_match(dir_entry.path().filename().string(),
                                     std::regex(".*router_lookahead\\.bin",
                                     std::regex::icase))) {
                 source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            }
+            else {
+              // a compressed/split graph archive for a non-CRR device: not usable as-is.
+              // excluded deliberately rather than dropped silently.
+              continue;
             }
           }
 
@@ -2113,6 +2257,23 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
                                 std::regex(".+\\.au",
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+          }
+
+          // nothing claimed this file. it is NOT silently dropped - report it, so a new kind
+          // of device data file cannot go missing from a package unnoticed. deliberate
+          // exclusions never reach here; they 'continue' above.
+          if(source_device_data_file_list_to_encrypt.size() == encrypt_list_size_before &&
+             source_device_data_file_list_to_copy.size() == copy_list_size_before) {
+
+            std::error_code relative_ec;
+            std::filesystem::path unclassified_relative_path =
+                std::filesystem::relative(dir_entry.path(), source_device_data_dir_path_c, relative_ec);
+
+            compiler->Message(std::string("WARNING: file matches no encrypt/copy/exclude rule, "
+                                          "it will NOT be in the device package: ") +
+                              (relative_ec ? dir_entry.path().string()
+                                           : unclassified_relative_path.string()));
+            unclassified_file_count++;
           }
       }
 
@@ -2373,6 +2534,14 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
       }
     }
 
+    // surface the unclassified count alongside the result: individual warnings scroll past in
+    // a long packaging run, and "0 unclassified" is the line that says the package is complete.
+    if(unclassified_file_count > 0) {
+      compiler->Message("\nWARNING: " + std::to_string(unclassified_file_count) +
+                        " file(s) matched no encrypt/copy/exclude rule and are NOT in the device package.");
+      compiler->Message("Add a rule for them in QLDeviceManager::encryptDevice() if they are device data.");
+    }
+
     compiler->Message("\ndevice encrypted ok: " + device);
     compiler->Message("\ntarget path: " + target_device_data_dir_path.string());
 
@@ -2463,6 +2632,27 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
         //Message("\n");
     }
 
+    // the device may already exist in a LOWER precedence root (e.g. one registered by
+    // install_device). adding it here is allowed - the installation is authoritative - but
+    // the user needs to know the other copy is about to become invisible, otherwise a stale
+    // externally installed device silently stops being the one the flow uses.
+    for (const QLDeviceType& existing_device: device_list) {
+
+      if(existing_device.family == family &&
+         existing_device.foundry == foundry &&
+         existing_device.node == node &&
+         existing_device.devicename == devicename &&
+         !existing_device.device_root_path.empty() &&
+         existing_device.device_root_path != deviceDataRootDirPath()) {
+
+        compiler->Message("\nNOTE: this device also exists in another device data root, which will now be shadowed.");
+        compiler->Message("device:        " + device);
+        compiler->Message("shadowed root: " + existing_device.device_root_path.string());
+        compiler->Message("\n");
+        break;
+      }
+    }
+
     int status = encryptDevice(family, foundry, node, devicename,
                                device_data_source, target_device_data_dir_path.string());
 
@@ -2477,34 +2667,1188 @@ int QLDeviceManager::addDevice(std::string family, std::string foundry, std::str
   }
 
 
- std::filesystem::path QLDeviceManager::deviceDataRootDirPath() {
+// ---------------------------------------------------------------------------------------
+// device kit installation
+// ---------------------------------------------------------------------------------------
 
-  std::filesystem::path root_device_data_dir_path;
+namespace {
 
-  // allow user to override the root device data path using an env variable.
-  // read env var
-  const char* const path_device_data_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
+// SHA-256, implemented here rather than pulled in as a dependency: qlcrypt uses it internally
+// but does not expose a hashing API, and shelling out to sha256sum is not portable to the
+// Windows/MSYS2 builds. this verifies an integrity checksum, not a secret.
+struct Sha256 {
 
-  if (path_device_data_env_str != nullptr) {
+  uint32_t state[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                       0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+  uint64_t bit_count = 0;
+  uint8_t  buffer[64] = {0};
+  size_t   buffer_used = 0;
 
-    // convert to std::filesystem::path and check if the path exists
-    root_device_data_dir_path = std::string(path_device_data_env_str);
+  static uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
 
-    if(!FileUtils::FileExists(root_device_data_dir_path)) {
+  void transform(const uint8_t* block) {
 
-      root_device_data_dir_path.clear();
+    static const uint32_t k[64] = {
+      0x428a2f98u,0x71374491u,0xb5c0fbcfu,0xe9b5dba5u,0x3956c25bu,0x59f111f1u,0x923f82a4u,0xab1c5ed5u,
+      0xd807aa98u,0x12835b01u,0x243185beu,0x550c7dc3u,0x72be5d74u,0x80deb1feu,0x9bdc06a7u,0xc19bf174u,
+      0xe49b69c1u,0xefbe4786u,0x0fc19dc6u,0x240ca1ccu,0x2de92c6fu,0x4a7484aau,0x5cb0a9dcu,0x76f988dau,
+      0x983e5152u,0xa831c66du,0xb00327c8u,0xbf597fc7u,0xc6e00bf3u,0xd5a79147u,0x06ca6351u,0x14292967u,
+      0x27b70a85u,0x2e1b2138u,0x4d2c6dfcu,0x53380d13u,0x650a7354u,0x766a0abbu,0x81c2c92eu,0x92722c85u,
+      0xa2bfe8a1u,0xa81a664bu,0xc24b8b70u,0xc76c51a3u,0xd192e819u,0xd6990624u,0xf40e3585u,0x106aa070u,
+      0x19a4c116u,0x1e376c08u,0x2748774cu,0x34b0bcb5u,0x391c0cb3u,0x4ed8aa4au,0x5b9cca4fu,0x682e6ff3u,
+      0x748f82eeu,0x78a5636fu,0x84c87814u,0x8cc70208u,0x90befffau,0xa4506cebu,0xbef9a3f7u,0xc67178f2u};
+
+    uint32_t w[64];
+    for (int i = 0; i < 16; ++i) {
+      w[i] = (uint32_t(block[i * 4]) << 24) | (uint32_t(block[i * 4 + 1]) << 16) |
+             (uint32_t(block[i * 4 + 2]) << 8) | uint32_t(block[i * 4 + 3]);
+    }
+    for (int i = 16; i < 64; ++i) {
+      uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+      uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+      w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
+    uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
+
+    for (int i = 0; i < 64; ++i) {
+      uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      uint32_t ch = (e & f) ^ ((~e) & g);
+      uint32_t temp1 = h + S1 + ch + k[i] + w[i];
+      uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
+      uint32_t temp2 = S0 + maj;
+      h = g; g = f; f = e; e = d + temp1;
+      d = c; c = b; b = a; a = temp1 + temp2;
+    }
+
+    state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+    state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+  }
+
+  void update(const uint8_t* data, size_t length) {
+    bit_count += uint64_t(length) * 8;
+    while(length > 0) {
+      size_t take = std::min(size_t(64) - buffer_used, length);
+      std::memcpy(buffer + buffer_used, data, take);
+      buffer_used += take;
+      data += take;
+      length -= take;
+      if(buffer_used == 64) {
+        transform(buffer);
+        buffer_used = 0;
+      }
     }
   }
 
-  // if we did not get the path from the env var
-  if(root_device_data_dir_path.empty()) {
+  std::string final() {
+    uint64_t total_bits = bit_count;
+    uint8_t pad = 0x80;
+    update(&pad, 1);
+    uint8_t zero = 0x00;
+    while(buffer_used != 56) {
+      update(&zero, 1);
+    }
+    uint8_t length_bytes[8];
+    for (int i = 0; i < 8; ++i) {
+      length_bytes[7 - i] = uint8_t((total_bits >> (i * 8)) & 0xff);
+    }
+    std::memcpy(buffer + buffer_used, length_bytes, 8);
+    transform(buffer);
 
-    // use the device_data dir path of the installation
-    root_device_data_dir_path = 
-        GlobalSession->Context()->DataPath();
+    std::ostringstream digest;
+    digest << std::hex << std::setfill('0');
+    for (int i = 0; i < 8; ++i) {
+      digest << std::setw(8) << state[i];
+    }
+    return digest.str();
+  }
+};
+
+// hex sha-256 of a file, or an empty string when it cannot be read.
+std::string sha256OfFile(const std::filesystem::path& file_path) {
+
+  std::ifstream file_ifstream(file_path.string(), std::ios::binary);
+  if(!file_ifstream.is_open()) {
+    return std::string();
   }
 
-  return root_device_data_dir_path;
+  Sha256 sha256;
+  std::vector<char> chunk(64 * 1024);
+  while(file_ifstream.good()) {
+    file_ifstream.read(chunk.data(), std::streamsize(chunk.size()));
+    std::streamsize got = file_ifstream.gcount();
+    if(got > 0) {
+      sha256.update(reinterpret_cast<const uint8_t*>(chunk.data()), size_t(got));
+    }
+  }
+  return sha256.final();
+}
+
+// split an Aurora version like "2026.3-alpha1" into numeric components and a pre-release tag.
+void parseAuroraVersion(const std::string& version_string,
+                        std::vector<long>& out_numbers,
+                        std::string& out_prerelease) {
+
+  out_numbers.clear();
+  out_prerelease.clear();
+
+  std::string numeric_part = version_string;
+  std::string::size_type dash = version_string.find('-');
+  if(dash != std::string::npos) {
+    numeric_part = version_string.substr(0, dash);
+    out_prerelease = version_string.substr(dash + 1);
+  }
+
+  std::string::size_type begin = 0;
+  while(begin <= numeric_part.size()) {
+    std::string::size_type end = numeric_part.find('.', begin);
+    if(end == std::string::npos) {
+      end = numeric_part.size();
+    }
+    std::string component = numeric_part.substr(begin, end - begin);
+    if(!component.empty()) {
+      // take the first run of digits in the component. Aurora patch releases are tagged
+      // "2026.2.p1", so a component can carry a non-digit prefix; parsing it as 0 would make
+      // 2026.2.p1 compare EQUAL to 2026.2 and equal to every other patch of it.
+      std::string::size_type digits_begin = component.find_first_of("0123456789");
+      if(digits_begin == std::string::npos) {
+        out_numbers.push_back(0);
+      }
+      else {
+        std::string::size_type digits_end = component.find_first_not_of("0123456789", digits_begin);
+        std::string digits = component.substr(digits_begin,
+            (digits_end == std::string::npos) ? std::string::npos : digits_end - digits_begin);
+        try {
+          out_numbers.push_back(std::stol(digits));
+        }
+        catch (const std::exception&) {
+          out_numbers.push_back(0);
+        }
+      }
+    }
+    begin = end + 1;
+  }
+}
+
+// <0 / 0 / >0, like strcmp.
+//
+// NOTE the pre-release rule: "2026.2-alpha" sorts BEFORE "2026.2". That is not cosmetic - the
+// 2026.2-alpha release still carried the OLD crypto stack, so it cannot read a kit produced
+// today and MUST fail the minimum-version check. Stripping the suffix would wrongly accept it.
+int compareAuroraVersions(const std::string& lhs, const std::string& rhs) {
+
+  std::vector<long> lhs_numbers, rhs_numbers;
+  std::string lhs_prerelease, rhs_prerelease;
+  parseAuroraVersion(lhs, lhs_numbers, lhs_prerelease);
+  parseAuroraVersion(rhs, rhs_numbers, rhs_prerelease);
+
+  for (size_t i = 0; i < std::max(lhs_numbers.size(), rhs_numbers.size()); ++i) {
+    long lhs_number = (i < lhs_numbers.size()) ? lhs_numbers[i] : 0;
+    long rhs_number = (i < rhs_numbers.size()) ? rhs_numbers[i] : 0;
+    if(lhs_number != rhs_number) {
+      return (lhs_number < rhs_number) ? -1 : 1;
+    }
+  }
+
+  if(lhs_prerelease.empty() != rhs_prerelease.empty()) {
+    // the one WITH a pre-release tag is older
+    return lhs_prerelease.empty() ? 1 : -1;
+  }
+  if(lhs_prerelease != rhs_prerelease) {
+    return (lhs_prerelease < rhs_prerelease) ? -1 : 1;
+  }
+  return 0;
+}
+
+// Expand a leading '~' or '~/' to the user's home directory.
+//
+// A Tcl command receives its arguments already word-split, so the shell never expands a tilde
+// inside `aurora --cmd "install_device kit.tar.gz -target ~/devices"` -- bash does not expand
+// '~' inside double quotes unless it starts the word. Without this, that documented form would
+// silently create a directory literally named '~' under the current directory. Only a LEADING
+// tilde is expanded; '~user' is not supported and is left alone.
+std::filesystem::path expandLeadingTilde(const std::filesystem::path& input_path) {
+
+  const std::string input_string = input_path.string();
+  if(input_string.empty() || input_string[0] != '~') {
+    return input_path;
+  }
+  // '~user/...' -- not ours to resolve; leave it untouched rather than guess.
+  if(input_string.size() > 1 && input_string[1] != '/' && input_string[1] != '\\') {
+    return input_path;
+  }
+
+  const char* home_dir = std::getenv("HOME");
+#ifdef _WIN32
+  if(home_dir == nullptr) { home_dir = std::getenv("USERPROFILE"); }
+#endif
+  if(home_dir == nullptr || *home_dir == '\0') {
+    return input_path;                       // no home to expand to: leave it as the user typed it
+  }
+
+  return std::filesystem::path(home_dir) / input_string.substr(input_string.size() > 1 ? 2 : 1);
+}
+
+// true when 'candidate' is inside 'ancestor' (or is it), after resolving symlinks and '..'.
+bool pathIsInside(const std::filesystem::path& candidate, const std::filesystem::path& ancestor) {
+
+  std::error_code ec;
+
+  // resolve as much of the candidate as exists: the target dir may not have been created yet.
+  std::filesystem::path candidate_existing = candidate;
+  while(!candidate_existing.empty() && !std::filesystem::exists(candidate_existing, ec)) {
+    std::filesystem::path parent = candidate_existing.parent_path();
+    if(parent == candidate_existing) {
+      break;
+    }
+    candidate_existing = parent;
+  }
+
+  std::filesystem::path candidate_c = std::filesystem::weakly_canonical(candidate_existing, ec);
+  if(ec) { candidate_c = candidate_existing; ec.clear(); }
+  std::filesystem::path ancestor_c = std::filesystem::weakly_canonical(ancestor, ec);
+  if(ec) { ancestor_c = ancestor; ec.clear(); }
+
+  auto candidate_it = candidate_c.begin();
+  auto ancestor_it = ancestor_c.begin();
+  for(; ancestor_it != ancestor_c.end(); ++ancestor_it, ++candidate_it) {
+    if(candidate_it == candidate_c.end() || *candidate_it != *ancestor_it) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// run a command and return its stdout.
+//
+// FileUtils::ExecuteSystemCommand writes a "Command: ..." preamble line into the output
+// stream before the process output (FileUtils.cpp:418), which corrupts anything parsed from
+// it. strip that here, in one place, rather than at each call site.
+bool runCommandCaptureOutput(const std::string& command,
+                             const std::vector<std::string>& args,
+                             std::string& out_text) {
+
+  // capture stderr SEPARATELY. with a null error stream the child's stderr is folded into
+  // stdout, and tar routinely writes warnings there ("Removing leading '../' from member
+  // names") - which would then be parsed as archive content and, in the traversal check,
+  // rejected as an unsafe entry even for a benign kit.
+  std::ostringstream command_output;
+  std::ostringstream command_error;
+  int status = FileUtils::ExecuteSystemCommand(command, args, &command_output, -1,
+                                               /*workingDir*/ std::string(), &command_error).code;
+
+  out_text = command_output.str();
+
+  const std::string preamble = "Command: ";
+  if(out_text.compare(0, preamble.size(), preamble) == 0) {
+    std::string::size_type first_newline = out_text.find('\n');
+    out_text = (first_newline == std::string::npos) ? std::string()
+                                                    : out_text.substr(first_newline + 1);
+  }
+
+  return (status == 0);
+}
+
+} // anonymous namespace
+
+
+int QLDeviceManager::installDevice(std::string kit_archive_path,
+                                   std::string target_dir_path,
+                                   bool force) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::error_code ec;
+
+  // ORDER MATTERS THROUGHOUT: every check below runs BEFORE anything is written to the
+  // target, so a bad kit never leaves a half-installed device behind.
+
+  // ---- [1] the kit itself -------------------------------------------------------------
+  std::filesystem::path kit_path(kit_archive_path);
+  if(!std::filesystem::is_regular_file(kit_path, ec)) {
+    compiler->ErrorMessage("device kit not found: " + kit_path.string());
+    return -1;
+  }
+  std::filesystem::path kit_path_c = std::filesystem::canonical(kit_path, ec);
+  if(ec) { kit_path_c = kit_path; ec.clear(); }
+
+  // ---- [2] the target must be OUTSIDE the Aurora installation ---------------------------
+  // enforced on the input rather than trusting the user to pick well: the whole point of the
+  // feature is that installing a device never modifies the Aurora installation.
+  std::filesystem::path target_path = expandLeadingTilde(std::filesystem::path(target_dir_path));
+  if(target_path.empty()) {
+    compiler->ErrorMessage("please specify a target directory to install the device into.");
+    return -1;
+  }
+
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::filesystem::path installation_dir_path = installation_root_dir_path.parent_path();
+
+  if(pathIsInside(target_path, installation_dir_path)) {
+    compiler->ErrorMessage("refusing to install into the Aurora installation.");
+    compiler->Message("target:       " + target_path.string());
+    compiler->Message("installation: " + installation_dir_path.string());
+    compiler->Message("Please choose a directory outside the Aurora installation - installing a");
+    compiler->Message("device must never modify the installation itself.");
+    return -1;
+  }
+
+  // ---- [3] integrity: verify the .sha256 sidecar ----------------------------------------
+  std::filesystem::path kit_checksum_path = kit_path_c.string() + ".sha256";
+  if(!std::filesystem::is_regular_file(kit_checksum_path, ec)) {
+    compiler->ErrorMessage("checksum file not found: " + kit_checksum_path.string());
+    compiler->Message("A device kit must be accompanied by its .sha256 file.");
+    return -1;
+  }
+
+  std::string expected_sha256;
+  {
+    std::ifstream checksum_ifstream(kit_checksum_path.string());
+    checksum_ifstream >> expected_sha256;
+  }
+  if(expected_sha256.empty()) {
+    compiler->ErrorMessage("could not read checksum from: " + kit_checksum_path.string());
+    return -1;
+  }
+
+  compiler->Message("verifying kit checksum...");
+  std::string actual_sha256 = sha256OfFile(kit_path_c);
+  if(actual_sha256.empty()) {
+    compiler->ErrorMessage("could not read the device kit: " + kit_path_c.string());
+    return -1;
+  }
+  if(actual_sha256 != expected_sha256) {
+    compiler->ErrorMessage("device kit checksum MISMATCH - the kit is corrupt or was modified.");
+    compiler->Message("expected: " + expected_sha256);
+    compiler->Message("actual:   " + actual_sha256);
+    return -1;
+  }
+
+  // ---- [4] read the manifest WITHOUT extracting -----------------------------------------
+  std::string manifest_text;
+  std::vector<std::string> manifest_args = {"-xzOf", kit_path_c.string(), "manifest.json"};
+  bool manifest_ok = runCommandCaptureOutput("tar", manifest_args, manifest_text);
+  if(!manifest_ok || manifest_text.empty()) {
+    compiler->ErrorMessage("device kit has no readable manifest.json: " + kit_path_c.string());
+    return -1;
+  }
+
+  json manifest_json;
+  try {
+    manifest_json = json::parse(manifest_text);
+  }
+  catch (const json::exception& e) {
+    compiler->ErrorMessage(std::string("device kit manifest.json is malformed: ") + e.what());
+    return -1;
+  }
+
+  if(!manifest_json.contains("device") ||
+     !manifest_json["device"].contains("family") ||
+     !manifest_json["device"].contains("foundry") ||
+     !manifest_json["device"].contains("node") ||
+     !manifest_json["device"].contains("devicename")) {
+    compiler->ErrorMessage("device kit manifest.json does not describe a device.");
+    return -1;
+  }
+
+  std::string family = manifest_json["device"]["family"].get<std::string>();
+  std::string foundry = manifest_json["device"]["foundry"].get<std::string>();
+  std::string node = manifest_json["device"]["node"].get<std::string>();
+  std::string devicename = manifest_json["device"]["devicename"].get<std::string>();
+  std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
+
+  std::string customer_id =
+      manifest_json.contains("customer_id") ? manifest_json["customer_id"].get<std::string>() : "";
+
+  compiler->Message("device:      " + device_type_string);
+  if(!customer_id.empty()) {
+    compiler->Message("customer:    " + customer_id);
+  }
+
+  // ---- [5] version gate -----------------------------------------------------------------
+  // refuse up front rather than letting the flow fail cryptically later. a kit built today
+  // cannot be read by an Aurora older than the crypto stack it was produced with.
+  std::string min_aurora_version =
+      manifest_json.contains("min_aurora_version")
+          ? manifest_json["min_aurora_version"].get<std::string>()
+          : std::string();
+
+  if(!min_aurora_version.empty()) {
+
+    std::string running_aurora_version(foedag_version_number);
+
+    if(compareAuroraVersions(running_aurora_version, min_aurora_version) < 0) {
+
+      // A pre-release OF the required version (2026.2-rc1 vs a 2026.2 minimum) sorts older by
+      // semver and is refused here, which is deliberate: 2026.2-alpha shipped the LEGACY crypto
+      // stack and genuinely cannot read this kit. But the two cases are indistinguishable from
+      // the version alone, so say which one this is instead of a flat "too old" - an internal
+      // user on an rc build needs to know 'force' is the right answer, not an upgrade.
+      std::vector<long> running_numbers, minimum_numbers;
+      std::string running_prerelease, minimum_prerelease;
+      parseAuroraVersion(running_aurora_version, running_numbers, running_prerelease);
+      parseAuroraVersion(min_aurora_version, minimum_numbers, minimum_prerelease);
+      const bool running_is_prerelease_of_minimum =
+          !running_prerelease.empty() && minimum_prerelease.empty() &&
+          running_numbers == minimum_numbers;
+
+      if(!force) {
+        if(running_is_prerelease_of_minimum) {
+          compiler->ErrorMessage("this Aurora is a pre-release of the version this kit needs.");
+          compiler->Message("this Aurora:        " + running_aurora_version);
+          compiler->Message("kit needs at least: " + min_aurora_version);
+          compiler->Message("Pre-releases are treated as older than the release they precede,");
+          compiler->Message("because early ones (2026.2-alpha) carry the legacy crypto stack.");
+          compiler->Message("If this build already has the current stack, re-run with 'force'.");
+        }
+        else {
+          compiler->ErrorMessage("this Aurora is too old to use this device kit.");
+          compiler->Message("this Aurora:        " + running_aurora_version);
+          compiler->Message("kit needs at least: " + min_aurora_version);
+          compiler->Message("Please upgrade Aurora, or re-run with 'force' to install anyway");
+          compiler->Message("(the device is unlikely to work).");
+        }
+        return -1;
+      }
+
+      compiler->Message("\nWARNING: this Aurora (" + running_aurora_version + ") is older than the kit's");
+      compiler->Message("minimum (" + min_aurora_version + "). Installing anyway because 'force' was given;");
+      compiler->Message("the device is unlikely to work.");
+    }
+  }
+
+  // ---- [6] reject a kit that would write outside the target ------------------------------
+  // list the archive first: an absolute path or a '..' component would let a crafted kit
+  // escape the target directory. the checksum only proves the kit is intact, not benign.
+  std::string listing_text;
+  std::vector<std::string> listing_args = {"-tzf", kit_path_c.string()};
+  if(!runCommandCaptureOutput("tar", listing_args, listing_text)) {
+    compiler->ErrorMessage("could not list the device kit contents: " + kit_path_c.string());
+    return -1;
+  }
+
+  {
+    std::istringstream listing(listing_text);
+    std::string entry;
+    while(std::getline(listing, entry)) {
+      if(entry.empty()) {
+        continue;
+      }
+      if(entry.front() == '/' || entry.find("..") != std::string::npos ||
+         (entry.size() > 1 && entry[1] == ':')) {
+        compiler->ErrorMessage("device kit contains an unsafe path, refusing to extract:");
+        compiler->Message("entry: " + entry);
+        return -1;
+      }
+    }
+  }
+
+  // ---- [7] already installed? -----------------------------------------------------------
+  std::filesystem::path installed_device_dir_path =
+      target_path / family / foundry / node / devicename;
+
+  // NOTE this runs AFTER the archive has been validated: with 'force' it deletes the
+  // device that is already installed, and deleting it before knowing the replacement is
+  // usable would leave the customer with nothing.
+  if(std::filesystem::exists(installed_device_dir_path, ec)) {
+    if(!force) {
+      // idempotent: installing an already-installed device is a NO-OP that SUCCEEDS, so
+      // re-running an install script does not fail (REQ-030). use 'force' to replace it.
+      compiler->Message("device is already installed, nothing to do: " + device_type_string);
+      compiler->Message("path:   " + installed_device_dir_path.string());
+      compiler->Message("Specify 'force' to replace it with this kit.");
+      return 0;
+    }
+    compiler->Message("WARNING: replacing the device already installed at " +
+                      installed_device_dir_path.string());
+    std::filesystem::remove_all(installed_device_dir_path, ec);
+    if(ec) {
+      compiler->ErrorMessage("could not replace the installed device: " + ec.message());
+      return -1;
+    }
+    ec.clear();
+  }
+
+  // ---- [8] extract. NO re-encryption: the kit is already encrypted ----------------------
+  std::filesystem::create_directories(target_path, ec);
+  if(ec) {
+    compiler->ErrorMessage("could not create the target directory: " + target_path.string() +
+                           " (" + ec.message() + ")");
+    return -1;
+  }
+
+  compiler->Message("installing...");
+  std::string extract_text;
+  std::vector<std::string> extract_args = {"-xzf", kit_path_c.string(), "-C", target_path.string()};
+  if(!runCommandCaptureOutput("tar", extract_args, extract_text)) {
+    compiler->ErrorMessage("could not extract the device kit into: " + target_path.string());
+    compiler->Message(extract_text);
+    return -1;
+  }
+
+  if(!std::filesystem::exists(installed_device_dir_path, ec)) {
+    compiler->ErrorMessage("the device kit did not contain the device it describes: " +
+                           device_type_string);
+    return -1;
+  }
+
+  // the manifest is metadata about the delivery, not device data - keep it beside the device
+  // tree rather than leaving it at the root of the user's chosen directory.
+  std::filesystem::path extracted_manifest_path = target_path / "manifest.json";
+  if(std::filesystem::exists(extracted_manifest_path, ec)) {
+    std::filesystem::rename(extracted_manifest_path,
+                            installed_device_dir_path / "kit_manifest.json", ec);
+    ec.clear();
+  }
+
+  // ---- [9] remember the root so the device is visible in later sessions ------------------
+  if(!registerDeviceRoot(target_path)) {
+    compiler->Message("\nWARNING: the device was installed but could not be remembered.");
+    compiler->Message("Set AURORA2_DEVICE_DATA_PATH=" + target_path.string() + " to use it.");
+  }
+
+  // make the newly installed device visible to this session too.
+  parseDeviceData();
+
+  compiler->Message("\ndevice installed ok: " + device_type_string);
+  compiler->Message("path: " + installed_device_dir_path.string());
+
+  return 0;
+}
+
+
+int QLDeviceManager::uninstallDevice(std::string family, std::string foundry, std::string node,
+                                     std::string devicename, bool dry_run, bool force) {
+
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
+
+  std::error_code ec;
+  std::string device_type_string = DeviceTypeString(family, foundry, node, devicename);
+
+  // make sure devices have been discovered. this can be called on a fresh interpreter where
+  // nothing has populated device_list yet, and an empty list would look exactly like
+  // "the device is not installed".
+  if(device_list.empty()) {
+    parseDeviceData();
+  }
+
+  // resolve the copy to remove against the device-data roots DIRECTLY, not through device_list.
+  //
+  // device_list carries only the winning copy of a shadowed device. If the customer installs a
+  // kit for a device that also ships built-in, the installation wins, the installed copy is
+  // absent from device_list, and resolving through it would land on the installation and refuse
+  // - leaving the user's own copy both invisible to list_devices and impossible to remove.
+  // Walking the roots finds the copy that is actually theirs.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, ec);
+  if(ec) { installation_root_dir_path_c = installation_root_dir_path; ec.clear(); }
+
+  auto root_is_the_installation = [&](const std::filesystem::path& root_dir_path) {
+    return root_dir_path == installation_root_dir_path_c ||
+           pathIsInside(root_dir_path, installation_root_dir_path_c);
+  };
+
+  std::vector<std::filesystem::path> external_root_dir_path_list;
+  bool installation_holds_device = false;
+
+  for (const std::filesystem::path& root_dir_path : deviceDataRootDirPathList()) {
+    const std::filesystem::path candidate_dir_path =
+        root_dir_path / family / foundry / node / devicename;
+    if(!std::filesystem::exists(candidate_dir_path / "config.json", ec)) { ec.clear(); continue; }
+    ec.clear();
+    if(root_is_the_installation(root_dir_path)) {
+      installation_holds_device = true;
+    }
+    else {
+      external_root_dir_path_list.push_back(root_dir_path);
+    }
+  }
+
+  if(external_root_dir_path_list.empty()) {
+    // never delete from the Aurora installation: built-in devices are part of the install and
+    // are not ours to remove.
+    if(installation_holds_device) {
+      compiler->ErrorMessage("refusing to uninstall a device that is part of the Aurora installation.");
+      compiler->Message("device: " + device_type_string);
+      compiler->Message("root:   " + installation_root_dir_path_c.string());
+      compiler->Message("Only devices installed with 'install_device' can be uninstalled.");
+    }
+    else {
+      compiler->ErrorMessage("device is not installed: " + device_type_string);
+      compiler->Message("Use 'list_devices' to see what is installed.");
+    }
+    return -1;
+  }
+
+  // highest-precedence installed copy first. any further copies are reported after removal so
+  // the user knows another remains rather than believing the device is gone.
+  std::filesystem::path device_root_dir_path = external_root_dir_path_list.front();
+
+  std::filesystem::path device_dir_path =
+      device_root_dir_path / family / foundry / node / devicename;
+
+  if(!std::filesystem::exists(device_dir_path, ec)) {
+    compiler->ErrorMessage("device directory not found: " + device_dir_path.string());
+    return -1;
+  }
+  ec.clear();
+
+  // say exactly what will be removed, always - this deletes from the user's own directory.
+  compiler->Message("device:       " + device_type_string);
+  compiler->Message("will remove:  " + device_dir_path.string());
+
+  if(external_root_dir_path_list.size() > 1 || installation_holds_device) {
+    // the device will still resolve afterwards, from another copy. say so plainly rather than
+    // letting "removed" imply the device is gone.
+    compiler->Message("note: another copy of this device remains and will still be used:");
+    for(std::size_t i = 1; i < external_root_dir_path_list.size(); ++i) {
+      compiler->Message("      installed: " + external_root_dir_path_list[i].string());
+    }
+    if(installation_holds_device) {
+      compiler->Message("      built-in:  " + installation_root_dir_path_c.string());
+    }
+  }
+
+  if(dry_run) {
+    compiler->Message("\n(dry run - nothing was removed)");
+    return 0;
+  }
+
+  if(!force) {
+    // there is no interactive prompt in batch mode, so require the caller to be explicit
+    // rather than deleting on the strength of the command alone.
+    compiler->ErrorMessage("refusing to delete without confirmation.");
+    compiler->Message("Re-run with 'force' to remove it, or 'dry-run' to see what would go.");
+    return -1;
+  }
+
+  std::uintmax_t removed_count = std::filesystem::remove_all(device_dir_path, ec);
+  if(ec) {
+    compiler->ErrorMessage("could not remove the device: " + ec.message());
+    return -1;
+  }
+  compiler->Message("removed " + std::to_string(removed_count) + " file(s)/dir(s).");
+
+  // prune now-empty parents (node, foundry, family) but ONLY within this root, and only while
+  // they are empty: the user's directory may hold their own files and other devices.
+  std::filesystem::path parent_dir_path = device_dir_path.parent_path();
+  while(parent_dir_path != device_root_dir_path &&
+        pathIsInside(parent_dir_path, device_root_dir_path)) {
+
+    if(!std::filesystem::is_empty(parent_dir_path, ec) || ec) {
+      ec.clear();
+      break;
+    }
+    std::filesystem::remove(parent_dir_path, ec);
+    if(ec) { ec.clear(); break; }
+    parent_dir_path = parent_dir_path.parent_path();
+  }
+
+  // if this root holds no further devices, stop searching it.
+  //
+  // ask the FILESYSTEM, not device_list: a device in this root that is shadowed by one in a
+  // higher precedence root is deliberately absent from device_list, so trusting the list here
+  // would deregister a root that still holds devices - and they would become invisible if the
+  // shadowing device were ever removed.
+  bool root_has_devices = false;
+  for (const std::filesystem::directory_entry& remaining_entry :
+           std::filesystem::recursive_directory_iterator(device_root_dir_path,
+               std::filesystem::directory_options::skip_permission_denied, ec)) {
+    if(remaining_entry.is_regular_file(ec) &&
+       remaining_entry.path().filename() == "config.json") {
+      root_has_devices = true;
+      break;
+    }
+  }
+  ec.clear();
+
+  if(!root_has_devices) {
+    if(unregisterDeviceRoot(device_root_dir_path)) {
+      compiler->Message("no devices remain in " + device_root_dir_path.string() +
+                        ", stopped searching it.");
+    }
+  }
+
+  // refresh so the removed device disappears from this session too.
+  parseDeviceData();
+
+  compiler->Message("\ndevice uninstalled ok: " + device_type_string);
+  return 0;
+}
+
+
+// ---------------------------------------------------------------------------------------
+// external device data root registry
+// ---------------------------------------------------------------------------------------
+
+namespace {
+
+// the registry is a small shared file that two Aurora processes can reach at the same time
+// (e.g. two install_device runs). a naive read-modify-write loses entries or, worse, leaves a
+// half-written file behind. so: take an advisory lock, write a temp file, rename it over.
+
+const int DEVICE_ROOT_REGISTRY_VERSION = 1;
+const int REGISTRY_LOCK_TIMEOUT_SECONDS = 5;
+// a lock older than this is assumed to be from a process that died holding it.
+const int REGISTRY_LOCK_STALE_SECONDS = 60;
+
+// create <registry>.lock exclusively, retrying until the timeout. returns false when the lock
+// could not be taken, so the caller reports failure rather than racing.
+bool acquireRegistryLock(const std::filesystem::path& lock_file_path) {
+
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::seconds(REGISTRY_LOCK_TIMEOUT_SECONDS);
+
+  while(true) {
+
+    // O_EXCL creation is the lock: it succeeds for exactly one process.
+    int lock_fd = ::open(lock_file_path.string().c_str(), O_CREAT | O_EXCL | O_RDWR, 0644);
+    if(lock_fd >= 0) {
+      ::close(lock_fd);
+      return true;
+    }
+
+    // only EEXIST means somebody else holds the lock. anything else (a missing parent
+    // directory, no permission) will never resolve by waiting, so fail immediately instead of
+    // spinning until the timeout and reporting misleading "lock contention".
+    if(errno != EEXIST) {
+      std::cout << "ERROR: cannot create device root registry lock: "
+                << lock_file_path.string() << " (" << std::strerror(errno) << ")" << std::endl;
+      return false;
+    }
+
+    // someone holds it. if the lock is old enough that its owner has almost certainly died,
+    // break it rather than making the user wait forever on a crashed process.
+    std::error_code ec;
+    auto lock_write_time = std::filesystem::last_write_time(lock_file_path, ec);
+    if(!ec) {
+      auto lock_age = std::filesystem::file_time_type::clock::now() - lock_write_time;
+      if(lock_age > std::chrono::seconds(REGISTRY_LOCK_STALE_SECONDS)) {
+        std::cout << "WARNING: breaking stale device root registry lock: "
+                  << lock_file_path.string() << std::endl;
+        std::filesystem::remove(lock_file_path, ec);
+        continue;
+      }
+    }
+
+    if(std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
+void releaseRegistryLock(const std::filesystem::path& lock_file_path) {
+  std::error_code ec;
+  std::filesystem::remove(lock_file_path, ec);
+}
+
+} // anonymous namespace
+
+
+std::filesystem::path QLDeviceManager::deviceRootRegistryFilePath() {
+
+  // per-user, never machine-global: one user installing a device must not change what another
+  // user sees.
+#ifdef _WIN32
+  const char* const home_dir_env_str = std::getenv("USERPROFILE");
+#else
+  const char* const home_dir_env_str = std::getenv("HOME");
+#endif
+
+  if(home_dir_env_str == nullptr || std::string(home_dir_env_str).empty()) {
+    // no usable home: the registry is simply unavailable. callers degrade to env-var-only
+    // operation rather than failing (NFR-005).
+    return std::filesystem::path();
+  }
+
+  return std::filesystem::path(home_dir_env_str) / ".aurora" / "device_roots.json";
+}
+
+
+std::vector<std::filesystem::path> QLDeviceManager::readDeviceRootRegistry() {
+
+  std::vector<std::filesystem::path> registered_root_dir_path_list;
+
+  std::filesystem::path registry_file_path = deviceRootRegistryFilePath();
+
+  if(registry_file_path.empty() || !FileUtils::FileExists(registry_file_path)) {
+    // no home dir, or nothing registered yet - both are normal.
+    return registered_root_dir_path_list;
+  }
+
+  try {
+
+    std::ifstream registry_ifstream(registry_file_path.string());
+    json registry_json = json::parse(registry_ifstream);
+
+    if(registry_json.contains("roots") && registry_json["roots"].is_array()) {
+
+      for (const auto& root_entry: registry_json["roots"]) {
+        if(root_entry.is_string()) {
+          std::string root_dir_path_str = root_entry.get<std::string>();
+          if(!root_dir_path_str.empty()) {
+            registered_root_dir_path_list.push_back(std::filesystem::path(root_dir_path_str));
+          }
+        }
+      }
+    }
+  }
+  catch (const json::exception& e) {
+
+    // a corrupt registry must not make Aurora unusable - report it and carry on with the
+    // built-in devices.
+    std::cout << "WARNING: could not read device root registry, ignoring it: "
+              << registry_file_path.string() << " (" << e.what() << ")" << std::endl;
+    registered_root_dir_path_list.clear();
+  }
+
+  return registered_root_dir_path_list;
+}
+
+
+// write the registry atomically: temp file -> rename. the rename is what guarantees a reader
+// never sees a partially written registry.
+static bool writeDeviceRootRegistryFile(const std::filesystem::path& registry_file_path,
+                                        const std::vector<std::filesystem::path>& root_dir_path_list) {
+
+  std::error_code ec;
+  std::filesystem::create_directories(registry_file_path.parent_path(), ec);
+  if(ec) {
+    std::cout << "ERROR: could not create device root registry directory: "
+              << registry_file_path.parent_path().string() << " (" << ec.message() << ")" << std::endl;
+    return false;
+  }
+
+  json registry_json;
+  registry_json["version"] = DEVICE_ROOT_REGISTRY_VERSION;
+  registry_json["roots"] = json::array();
+  for (const std::filesystem::path& root_dir_path: root_dir_path_list) {
+    registry_json["roots"].push_back(root_dir_path.string());
+  }
+
+  std::filesystem::path registry_temp_file_path =
+      registry_file_path.string() + ".tmp." + std::to_string(
+#ifdef _WIN32
+          ::_getpid()
+#else
+          ::getpid()
+#endif
+      );
+
+  {
+    std::ofstream registry_ofstream(registry_temp_file_path.string(), std::ios::trunc);
+    if(!registry_ofstream.is_open()) {
+      std::cout << "ERROR: could not write device root registry: "
+                << registry_temp_file_path.string() << std::endl;
+      return false;
+    }
+    registry_ofstream << registry_json.dump(2) << std::endl;
+    registry_ofstream.flush();
+    if(!registry_ofstream.good()) {
+      std::cout << "ERROR: failed writing device root registry: "
+                << registry_temp_file_path.string() << std::endl;
+      registry_ofstream.close();
+      std::filesystem::remove(registry_temp_file_path, ec);
+      return false;
+    }
+  }
+
+  // replace the live registry in one step.
+  std::filesystem::rename(registry_temp_file_path, registry_file_path, ec);
+  if(ec) {
+    std::cout << "ERROR: could not replace device root registry: "
+              << registry_file_path.string() << " (" << ec.message() << ")" << std::endl;
+    std::filesystem::remove(registry_temp_file_path, ec);
+    return false;
+  }
+
+  return true;
+}
+
+
+bool QLDeviceManager::registerDeviceRoot(const std::filesystem::path& root_dir_path) {
+
+  std::filesystem::path registry_file_path = deviceRootRegistryFilePath();
+  if(registry_file_path.empty()) {
+    std::cout << "WARNING: no usable home directory, cannot remember this device data root."
+              << std::endl;
+    std::cout << "         set AURORA2_DEVICE_DATA_PATH=" << root_dir_path.string()
+              << " to use it." << std::endl;
+    return false;
+  }
+
+  // the lock lives beside the registry, so its directory must exist before we can take it.
+  // on a machine that has never installed a device there is no ~/.aurora yet.
+  std::error_code registry_dir_ec;
+  std::filesystem::create_directories(registry_file_path.parent_path(), registry_dir_ec);
+  if(registry_dir_ec) {
+    std::cout << "WARNING: could not create " << registry_file_path.parent_path().string()
+              << " (" << registry_dir_ec.message() << ")" << std::endl;
+    return false;
+  }
+
+  std::filesystem::path registry_lock_file_path = registry_file_path.string() + ".lock";
+  if(!acquireRegistryLock(registry_lock_file_path)) {
+    std::cout << "ERROR: could not take the device root registry lock: "
+              << registry_lock_file_path.string() << std::endl;
+    return false;
+  }
+
+  // canonicalize so that the same directory reached by different paths registers once.
+  std::error_code ec;
+  std::filesystem::path root_dir_path_c = std::filesystem::canonical(root_dir_path, ec);
+  if(ec) {
+    root_dir_path_c = root_dir_path;
+  }
+
+  std::vector<std::filesystem::path> registered_root_dir_path_list = readDeviceRootRegistry();
+
+  for (const std::filesystem::path& registered_root_dir_path: registered_root_dir_path_list) {
+    if(registered_root_dir_path == root_dir_path_c) {
+      // already registered: nothing to do, and this is not an error (install is idempotent).
+      releaseRegistryLock(registry_lock_file_path);
+      return true;
+    }
+  }
+
+  registered_root_dir_path_list.push_back(root_dir_path_c);
+
+  bool status = writeDeviceRootRegistryFile(registry_file_path, registered_root_dir_path_list);
+
+  releaseRegistryLock(registry_lock_file_path);
+  return status;
+}
+
+
+bool QLDeviceManager::unregisterDeviceRoot(const std::filesystem::path& root_dir_path) {
+
+  std::filesystem::path registry_file_path = deviceRootRegistryFilePath();
+  if(registry_file_path.empty()) {
+    return false;
+  }
+
+  std::error_code registry_dir_ec;
+  std::filesystem::create_directories(registry_file_path.parent_path(), registry_dir_ec);
+  if(registry_dir_ec) {
+    return false;
+  }
+
+  std::filesystem::path registry_lock_file_path = registry_file_path.string() + ".lock";
+  if(!acquireRegistryLock(registry_lock_file_path)) {
+    std::cout << "ERROR: could not take the device root registry lock: "
+              << registry_lock_file_path.string() << std::endl;
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::path root_dir_path_c = std::filesystem::canonical(root_dir_path, ec);
+  if(ec) {
+    root_dir_path_c = root_dir_path;
+  }
+
+  std::vector<std::filesystem::path> registered_root_dir_path_list = readDeviceRootRegistry();
+  std::vector<std::filesystem::path> remaining_root_dir_path_list;
+
+  for (const std::filesystem::path& registered_root_dir_path: registered_root_dir_path_list) {
+    // compare against both the canonical and the raw path: a root that has already been
+    // deleted cannot be canonicalized, and must still be removable from the registry.
+    if(registered_root_dir_path != root_dir_path_c &&
+       registered_root_dir_path != root_dir_path) {
+      remaining_root_dir_path_list.push_back(registered_root_dir_path);
+    }
+  }
+
+  bool status = writeDeviceRootRegistryFile(registry_file_path, remaining_root_dir_path_list);
+
+  releaseRegistryLock(registry_lock_file_path);
+  return status;
+}
+
+
+std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() {
+
+  std::vector<std::filesystem::path> root_device_data_dir_path_list;
+
+  std::error_code root_ec;
+
+  // the installation's own device_data dir - needed up front to recognise the setup.sh default.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, root_ec);
+  if(root_ec) {
+    installation_root_dir_path_c = installation_root_dir_path;
+    root_ec.clear();
+  }
+
+  // [1] $AURORA2_DEVICE_DATA_DIR is an EXCLUSIVE override - but ONLY when it points somewhere
+  //     other than the installation's own device_data.
+  //
+  //     scripts/setup.sh sets this variable unconditionally, defaulting it to
+  //     "${AURORA2_ROOT}/device_data/", so it is set in every normal session. Treating that
+  //     default as an override would make the exclusive branch permanently active and leave
+  //     multi-root discovery unreachable - registered roots and AURORA2_DEVICE_DATA_PATH would
+  //     silently never be consulted.
+  //
+  //     when a user or CI job points it at a DIFFERENT tree (the device-data validation gate
+  //     and the on-demand benchmark both do exactly this) it stays fully exclusive, replacing
+  //     the device set as before.
+  const char* const path_device_data_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");  // this is from setup.sh
+
+  if (path_device_data_env_str != nullptr && std::string(path_device_data_env_str).size() > 0) {
+
+    std::filesystem::path env_root_device_data_dir_path = std::string(path_device_data_env_str);
+
+    if(FileUtils::FileExists(env_root_device_data_dir_path)) {
+
+      // canonicalize before comparing: setup.sh supplies a trailing slash, and the path may
+      // also differ by symlinks or '..' while naming the same directory.
+      std::filesystem::path env_root_device_data_dir_path_c =
+          std::filesystem::canonical(env_root_device_data_dir_path, root_ec);
+      if(root_ec) {
+        env_root_device_data_dir_path_c = env_root_device_data_dir_path;
+        root_ec.clear();
+      }
+
+      if(env_root_device_data_dir_path_c != installation_root_dir_path_c) {
+
+        // a genuine override: return immediately, ignoring every other source of roots.
+        root_device_data_dir_path_list.push_back(env_root_device_data_dir_path_c);
+        return root_device_data_dir_path_list;
+      }
+
+      // else: this is just the setup.sh default naming the installation. fall through and
+      // build the additive list, with the installation first as usual.
+    }
+    else {
+
+      // an env var pointing at a path that does not exist used to be silently ignored.
+      // say so instead - a mistyped AURORA2_DEVICE_DATA_DIR otherwise looks like
+      // "my devices vanished" with no explanation.
+      std::cout << "WARNING: AURORA2_DEVICE_DATA_DIR does not exist, ignoring it: "
+                << env_root_device_data_dir_path.string() << std::endl;
+    }
+  }
+
+  // collected roots are canonicalized and de-duplicated: the same directory reached twice
+  // (e.g. the installation also listed in AURORA2_DEVICE_DATA_PATH) would otherwise be walked
+  // twice and make every one of its devices look "shadowed".
+  std::set<std::string> seen_root_dir_path_set;
+
+  auto append_root_dir_path = [&](const std::filesystem::path& root_dir_path,
+                                  const std::string& source_description,
+                                  bool warn_when_missing) {
+
+    if(root_dir_path.empty()) {
+      return;
+    }
+
+    if(!FileUtils::FileExists(root_dir_path)) {
+      if(warn_when_missing) {
+        std::cout << "WARNING: skipping device data root that no longer exists ("
+                  << source_description << "): " << root_dir_path.string() << std::endl;
+      }
+      return;
+    }
+
+    std::error_code ec;
+    std::filesystem::path root_dir_path_c = std::filesystem::canonical(root_dir_path, ec);
+    if(ec) {
+      root_dir_path_c = root_dir_path;
+    }
+
+    if(seen_root_dir_path_set.insert(root_dir_path_c.string()).second) {
+      root_device_data_dir_path_list.push_back(root_dir_path_c);
+    }
+  };
+
+  // [2] the installation's device_data dir always comes first among the additive roots:
+  //     built-in devices are authoritative and can never be shadowed by an external root.
+  append_root_dir_path(installation_root_dir_path, "installation", false);
+
+  // [3] roots registered by install_device. a registered root that has been deleted or moved
+  //     warns and is skipped - a stale entry must never break startup (REQ-007).
+  for (const std::filesystem::path& registered_root_dir_path: readDeviceRootRegistry()) {
+    append_root_dir_path(registered_root_dir_path, "registered by install_device", true);
+  }
+
+  // [4] $AURORA2_DEVICE_DATA_PATH - additive, ':'-separated on every platform (MSYS2 builds
+  //     use POSIX-style paths, consistent with the rest of the toolchain).
+  const char* const path_device_data_search_env_str = std::getenv("AURORA2_DEVICE_DATA_PATH");
+
+  if(path_device_data_search_env_str != nullptr) {
+
+    std::string path_device_data_search_str(path_device_data_search_env_str);
+    std::string::size_type entry_begin = 0;
+
+    while(entry_begin <= path_device_data_search_str.size()) {
+
+      std::string::size_type entry_end = path_device_data_search_str.find(':', entry_begin);
+      if(entry_end == std::string::npos) {
+        entry_end = path_device_data_search_str.size();
+      }
+
+      std::string entry = path_device_data_search_str.substr(entry_begin, entry_end - entry_begin);
+      if(!entry.empty()) {
+        append_root_dir_path(std::filesystem::path(entry), "AURORA2_DEVICE_DATA_PATH", true);
+      }
+
+      entry_begin = entry_end + 1;
+    }
+  }
+
+  return root_device_data_dir_path_list;
+}
+
+
+ std::filesystem::path QLDeviceManager::deviceDataRootDirPath() {
+
+  // the first root is the one that owns newly added devices, and the fallback for any
+  // device whose own root is not known.
+  std::vector<std::filesystem::path> root_device_data_dir_path_list = deviceDataRootDirPathList();
+
+  if(root_device_data_dir_path_list.empty()) {
+
+    // deviceDataRootDirPathList() always yields at least the installation root, so this is
+    // unreachable in practice - but returning a default-constructed path is safer than
+    // dereferencing an empty container.
+    return std::filesystem::path();
+  }
+
+  return root_device_data_dir_path_list.front();
+}
+
+
+std::filesystem::path QLDeviceManager::deviceTypeRootDirPath(const std::string& family,
+                                                             const std::string& foundry,
+                                                             const std::string& node,
+                                                             const std::string& devicename) {
+
+  // a device's root is a property of the device TYPE, so match on the 4 coordinates only.
+  // note this deliberately does not go through deviceTypeTreeElement(), which additionally
+  // requires a matching variant + layout and would fail for a device_target that carries no
+  // layout - and would be a triple-nested scan on a path that is called very often.
+  for (const QLDeviceType& device: device_list) {
+
+    if(device.family == family &&
+       device.foundry == foundry &&
+       device.node == node &&
+       device.devicename == devicename) {
+
+      if(!device.device_root_path.empty()) {
+        return device.device_root_path;
+      }
+      break;
+    }
+  }
+
+  // not in device_list yet (parseDeviceData() still running), or discovered before roots
+  // were recorded: fall back to the first root.
+  return deviceDataRootDirPath();
 }
 
 
@@ -2711,13 +4055,19 @@ std::filesystem::path QLDeviceManager::deviceTypeDirPath(QLDeviceTarget device_t
     device_target = this->device_target;
   }
 
-  device_type_dir_path = 
-      std::filesystem::path(deviceDataRootDirPath() /
+  // resolve against the root this device was actually discovered under, so that a device
+  // installed into an external directory reads its own files - and, critically, its own
+  // _Supp.db key database, which every decrypt path derives from this dir.
+  device_type_dir_path =
+      std::filesystem::path(deviceTypeRootDirPath(device_target.device_variant.family,
+                                                  device_target.device_variant.foundry,
+                                                  device_target.device_variant.node,
+                                                  device_target.device_variant.devicename) /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /
                             device_target.device_variant.devicename);
-  
+
   return device_type_dir_path;
 }
 
@@ -2732,8 +4082,12 @@ std::filesystem::path QLDeviceManager::deviceVariantDirPath(QLDeviceTarget devic
     device_target = this->device_target;
   }
 
+  // same per-device root resolution as deviceTypeDirPath()
   device_variant_dir_path =
-      std::filesystem::path(deviceDataRootDirPath() /
+      std::filesystem::path(deviceTypeRootDirPath(device_target.device_variant.family,
+                                                  device_target.device_variant.foundry,
+                                                  device_target.device_variant.node,
+                                                  device_target.device_variant.devicename) /
                             device_target.device_variant.family /
                             device_target.device_variant.foundry /
                             device_target.device_variant.node /
