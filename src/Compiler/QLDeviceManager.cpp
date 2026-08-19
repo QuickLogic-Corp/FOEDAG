@@ -1049,6 +1049,15 @@ void QLDeviceManager::parseDeviceData() {
                     continue;
                   }
 
+                  // a device is defined by its config.json. anything else four levels deep is
+                  // simply not a device - a device-data checkout carries other things at that
+                  // depth (QL-Benchmarks/testcases/<kind>/<design>, .git internals), and
+                  // reporting those as malformed devices buries real errors in noise.
+                  std::error_code config_ec;
+                  if(!std::filesystem::exists(dir_entry_devicename.path() / "config.json", config_ec)) {
+                    continue;
+                  }
+
                   // get all the device_variants for this device, resolved against the
                   // device dir we are actually standing in - NOT re-derived from a global
                   // root, which would read another root's files for a shadowed device.
@@ -1059,7 +1068,8 @@ void QLDeviceManager::parseDeviceData() {
                                                                                     dir_entry_devicename.path());
 
                   if(device_variants.empty()) {
-                    // display error, but continue with other devices.
+                    // it HAS a config.json, so it means to be a device: this one is genuinely
+                    // malformed and worth reporting. continue with the other devices.
                     std::cout << "error in parsing variants for device: " + family + "_" + foundry + "_" + node + "_" + devicename + "\n" << std::endl;
                   }
                   else {
@@ -3129,6 +3139,14 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
     return -1;
   }
 
+  // the kit must actually CONTAIN the device its manifest describes. checking the listing
+  // here, rather than the extracted tree afterwards, is what makes the refusal cost nothing:
+  // a kit whose manifest disagrees with its payload used to be rejected only after ~68MB had
+  // already been written into the user's directory, contrary to "verify before extract".
+  const std::string required_prefix =
+      family + "/" + foundry + "/" + node + "/" + devicename + "/";
+  bool listing_holds_the_device = false;
+
   {
     std::istringstream listing(listing_text);
     std::string entry;
@@ -3142,7 +3160,23 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
         compiler->Message("entry: " + entry);
         return -1;
       }
+      // tar may or may not prefix entries with './'
+      std::string normalised_entry = entry;
+      if(normalised_entry.rfind("./", 0) == 0) {
+        normalised_entry = normalised_entry.substr(2);
+      }
+      if(normalised_entry.rfind(required_prefix, 0) == 0) {
+        listing_holds_the_device = true;
+      }
     }
+  }
+
+  if(!listing_holds_the_device) {
+    compiler->ErrorMessage("the device kit did not contain the device it describes: " +
+                           device_type_string);
+    compiler->Message("expected to find: " + required_prefix);
+    compiler->Message("Nothing was written to the target.");
+    return -1;
   }
 
   // ---- [7] already installed? -----------------------------------------------------------
@@ -3688,7 +3722,7 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
   // [1] $AURORA2_DEVICE_DATA_DIR is an EXCLUSIVE override - but ONLY when it points somewhere
   //     other than the installation's own device_data.
   //
-  //     scripts/setup.sh sets this variable unconditionally, defaulting it to
+  //     scripts/setup.sh sets this variable whenever the user has not, defaulting it to
   //     "${AURORA2_ROOT}/device_data/", so it is set in every normal session. Treating that
   //     default as an override would make the exclusive branch permanently active and leave
   //     multi-root discovery unreachable - registered roots and AURORA2_DEVICE_DATA_PATH would
