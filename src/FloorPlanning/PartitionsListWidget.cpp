@@ -120,9 +120,17 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
                                                   .arg(available));
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
             item->setToolTip(estimated
-                ? QObject::tr("Tier 1 -- pre-synthesis estimate, no netlist exists yet. DSP is "
-                              "exact, CLB is approximate, BRAM is not estimated at all. "
-                              "Synthesize for measured figures.")
+                ? QObject::tr(
+                      "Tier 1 — pre-synthesis estimate, no netlist exists yet.\n\n"
+                      "DSP is exact: a multiplier in the RTL always becomes a DSP.\n\n"
+                      "CLB is approximate: it divides an estimated cell count by a packing "
+                      "density, and packing has not happened yet.\n\n"
+                      "BRAM is left blank rather than guessed, because synthesis — not the "
+                      "RTL — decides whether a memory becomes a BRAM: small or awkwardly "
+                      "ported ones are turned into flops and logic instead. Showing a "
+                      "number here would have you reserve BRAM columns the design may never "
+                      "use.\n\n"
+                      "Synthesize to replace all of these with measured figures.")
                 : QObject::tr("Tier 2 -- counted from the post-synthesis netlist. The CLB "
                               "figure is still packing-density derived, so it is a sizing "
                               "hint rather than the tile count the placer will use."));
@@ -205,7 +213,8 @@ void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, Partiti
         text = tr("Resources: tier 2 — counted from the post-synthesis netlist.");
     } else if (estimatedRows == total) {
         text = tr("Resources: tier 1 — pre-synthesis estimate (~). "
-                  "DSP exact, CLB approximate, BRAM not estimated. Synthesize to measure.");
+                  "DSP exact, CLB approximate, BRAM left blank until synthesis decides "
+                  "whether a memory becomes one. Hover a cell for detail.");
     } else {
         text = tr("Resources: mixed — %1 of %2 partition(s) are a pre-synthesis estimate (~); "
                   "the rest are counted from the post-synthesis netlist.")
