@@ -3228,12 +3228,21 @@ int QLDeviceManager::installDevice(std::string kit_archive_path,
     return -1;
   }
 
-  // the manifest is metadata about the delivery, not device data - keep it beside the device
-  // tree rather than leaving it at the root of the user's chosen directory.
-  std::filesystem::path extracted_manifest_path = target_path / "manifest.json";
-  if(std::filesystem::exists(extracted_manifest_path, ec)) {
-    std::filesystem::rename(extracted_manifest_path,
-                            installed_device_dir_path / "kit_manifest.json", ec);
+  // the manifest and the customer README are metadata about the delivery, not device data -
+  // keep them beside the device tree rather than leaving them at the root of the user's chosen
+  // directory. The target is a directory they picked and may keep their own files in; dropping
+  // generic names like README.txt there litters it, and a second kit would overwrite the first
+  // one's copy.
+  const std::pair<const char*, const char*> delivery_files[] = {
+      {"manifest.json", "kit_manifest.json"},
+      {"README.txt", "kit_README.txt"},
+  };
+  for (const auto& [extracted_name, installed_name] : delivery_files) {
+    std::filesystem::path extracted_path = target_path / extracted_name;
+    if(std::filesystem::exists(extracted_path, ec)) {
+      std::filesystem::rename(extracted_path, installed_device_dir_path / installed_name, ec);
+      ec.clear();
+    }
     ec.clear();
   }
 
