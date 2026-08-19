@@ -178,12 +178,15 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
 
 // [aurora2#1725 stage P7] Name the source of the numbers in the table.
 //
-// Deliberately reports the tier of what is DISPLAYED, which is not the same as the tier of
-// design_resources.json. These columns are fed by the atom-based tally, so a row is tier 2
-// whenever it has atoms; the tier-1 estimate only fills in for rows that have none. A tier-3
-// file on disk does NOT make this table tier 3 -- clb_actual is not shown here, and claiming
-// placed-tile accuracy for a packing-density estimate is exactly the confusion A.13.5 exists
-// to prevent.
+// Deliberately reports the tier of the CLB/DSP/BRAM columns, which is not the same as the
+// tier of design_resources.json. Those columns are fed by the atom-based tally, so a row is
+// tier 2 whenever it has atoms; the tier-1 estimate only fills in for rows that have none.
+// A tier-3 file on disk does NOT make them tier 3: claiming placed-tile accuracy for a
+// packing-density estimate is exactly the confusion A.13.5 exists to prevent.
+//
+// The tier-3 measurement has its own column, Placed, and is named separately below --
+// keeping the two apart is the whole reason it is a column rather than a third number
+// folded into CLB.
 void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, PartitionPtr>& partitions)
 {
     int estimatedRows = 0;

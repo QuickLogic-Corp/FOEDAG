@@ -801,6 +801,57 @@ TEST(QdcSerializer, ATrailingCommentDoesNotBreakTheCommandOnTheSameLine)
     EXPECT_EQ(device.partitions().at(0)->name(), "p1");
 }
 
+TEST(QdcSerializer, ATrailingCommentSurvivesOnItsOwnLine)
+{
+    // It annotates THIS constraint, so hoisting it to the top of the file with the
+    // standalone comments would strip it of its referent. It rides on the partition.
+    const auto qdc = writeQdc("fp_qdc_trailing_rt",
+                              "set_region i_a clb(2,4) p1  # keep near the DSP column\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    ASSERT_TRUE(serializer.save(device, qdc));
+
+    const std::string content = readAll(qdc);
+    const auto commandPos = content.find("set_region");
+    const auto commentPos = content.find("# keep near the DSP column");
+    ASSERT_NE(commandPos, std::string::npos);
+    ASSERT_NE(commentPos, std::string::npos);
+    EXPECT_GT(commentPos, commandPos) << "must stay after its command, not hoisted above it";
+    // ...and on the SAME line: the serializer writes the command with "\\\n" continuations,
+    // so what must not appear between them is a bare newline ending the command.
+    const std::string between = content.substr(commandPos, commentPos - commandPos);
+    EXPECT_EQ(between.find("\n\n"), std::string::npos)
+        << "the comment must not be separated from its command by a blank line";
+}
+
+TEST(QdcSerializer, APartitionWithoutACommentGetsNoStrayHash)
+{
+    const auto qdc = writeQdc("fp_qdc_nocomment", "set_region i_a clb(2,4) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    ASSERT_TRUE(serializer.save(device, qdc));
+
+    EXPECT_EQ(readAll(qdc).find('#'), std::string::npos);
+}
+
+TEST(QdcSerializer, ATrailingCommentDoesNotStealThePartitionName)
+{
+    // The name is taken only when there are exactly four tokens, so a comment left in the
+    // line would push the count past four and the partition would load unnamed.
+    const auto qdc = writeQdc("fp_qdc_name_vs_comment",
+                              "set_region i_a clb(2,4) p1  # two more words here\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    ASSERT_EQ(device.partitions().size(), 1u);
+    EXPECT_EQ(device.partitions().at(0)->name(), "p1");
+}
+
 TEST(QdcSerializer, AnUnparsableRegionIsPreservedRatherThanDiscardedOnSave)
 {
     // The partition used to be added to the device before its regions were parsed, so a bad

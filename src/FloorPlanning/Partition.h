@@ -41,6 +41,13 @@ public:
 
     void setName(const std::string& name) { m_name = name; }
 
+    // [aurora2#1725] A trailing comment from the .qdc line this partition came from, e.g.
+    // "set_region i_a clb(2,4) p1  # keep near the DSP column". It annotates THIS constraint,
+    // so it is carried here and written back on the same line rather than being hoisted to
+    // the top of the file with the standalone comments, where it would lose its referent.
+    void setComment(const std::string& comment) { m_comment = comment; }
+    const std::string& comment() const { return m_comment; }
+
     const std::string name() const { return m_name; }
 
     void setColor(const QColor& color);
@@ -173,6 +180,7 @@ public:
 private:
     int m_id = -1;
     std::string m_name;
+    std::string m_comment;
     QColor m_color;
     QColor m_colorTransparent;
 

@@ -206,6 +206,11 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
 
         line += partition->name();
 
+        if (!partition->comment().empty()) {
+            line += "  ";
+            line += partition->comment();
+        }
+
         line += "\n\n";
 
         // add line to context
@@ -261,7 +266,19 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
 
     for (const std::string& line: lines) {
         if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
-            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(line, " ");
+            // Split any trailing comment off BEFORE tokenizing: its words would otherwise
+            // count as command tokens, and the partition name -- taken only when there are
+            // exactly four -- would be silently lost.
+            std::string commandPart = line;
+            std::string trailingComment;
+            if (auto hash = line.find('#'); hash != std::string::npos) {
+                trailingComment = line.substr(hash);
+                trailingComment = FOEDAG::StringUtils::trim(trailingComment);
+                commandPart = line.substr(0, hash);
+                commandPart = FOEDAG::StringUtils::trim(commandPart);
+            }
+
+            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(commandPart, " ");
             // extract partition name [optionally]
             std::string partitionName = "";
             if (cmdTokens.size() == 4) {
@@ -326,6 +343,7 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
             }
 
             PartitionPtr partition = std::make_shared<Partition>(partitionName);
+            partition->setComment(trailingComment);
             device.addPartition(partition);
 
             // extract elements
@@ -370,27 +388,15 @@ std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path
         continue; // Skip empty line
       }
 
-      // [aurora2#1725] A whole-line comment is user content, not a command, and it is
-      // returned verbatim so load() can put it in m_reservedContent and save() can write it
-      // back. It used to be stripped to an empty string and skipped here, so it never
-      // reached load() at all -- and since m_reservedContent is filled only from the lines
-      // load() receives, every comment in the .qdc was destroyed by the next save. The
-      // testcase .qdc files carry their entire rationale in such headers.
-      if (line.front() == '#') {
-        commands.push_back(line);
-        continue;
-      }
-
-      // drop comment part
-      if (auto pos = line.find("#"); pos != std::string::npos) {
-        line = line.substr(0, pos); // drop commented part of line
-        line = FOEDAG::StringUtils::trim(line);
-      }
-
-      if (line.empty()){
-        continue; // Skip empty line
-      }
-
+      // [aurora2#1725] Comments are user content and are returned intact -- whole-line ones
+      // for load() to keep in m_reservedContent, trailing ones for it to carry on the
+      // partition they annotate. They used to be stripped here and dropped, and since
+      // m_reservedContent is filled only from the lines load() receives, every comment in
+      // the .qdc was destroyed by the next save. The testcase .qdc files carry their entire
+      // rationale in such headers.
+      //
+      // Consumers therefore have to expect them: see GenerateIOFloorPlanConstraints(),
+      // which would otherwise read a comment's first word as a command name.
       commands.push_back(line);
     }
 
