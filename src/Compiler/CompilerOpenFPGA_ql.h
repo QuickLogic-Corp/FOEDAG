@@ -177,7 +177,7 @@ class CompilerOpenFPGA_ql : public Compiler {
  public:
   // [aurora2#1725 stage P0] instance discovery -- runs an elaboration-only Yosys pass
   // (verific/read_verilog -> hierarchy -> write_json, attributes kept) to produce
-  // <top>_elab.json, then derives instances.json from it via scripts/elab_instances.py.
+  // <top>_elab.json, then derives instances.json from it via scripts/floorplanning_elab_instances.py.
   // Lazy: skipped when instances.json already exists and no design file has changed
   // since (see m_designDirty in Compiler.h). Called from Synthesize() (covers headless,
   // and any GUI flow that never opens FloorPlanning) and from MainWindow's
@@ -305,21 +305,30 @@ private:
 
   // [aurora2#1725 stage P4] validation gate -- grades every instance elaboration found
   // (complete/partial/deleted/failed) against the just-written synthesis outputs, via
-  // scripts/validate_instances.py, producing validation.json. Best-effort: atomsets.json
+  // scripts/floorplanning_validate_instances.py, producing validation.json. Best-effort: atomsets.json
   // only exists for devices whose template already has the P2/P3 blocks (not all of them
   // yet), so a missing input here just skips this stage rather than failing synthesis,
   // which has already succeeded by the time this runs.
   // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P4).
   // [aurora2#1725 stage P2b] name maps -- optional, gated on general.options.namemap.
-  // Runs netlist_namemap.py over the debug JSON stage P4 already uses, producing [5]
+  // Runs floorplanning_netlist_namemap.py over the debug JSON stage P4 already uses, producing [5]
   // namemap.csv so check 3 has an input at all. Best-effort, like its siblings.
   bool RunNetlistNamemap();
 
   bool RunValidateInstances();
 
+  // [aurora2#1725] "<project>_floorplanning" -- the stem every artifact this feature
+  // generates is named after, so a project directory shows at a glance which files the
+  // floorplanning flow owns. Use this rather than rebuilding the string at each call
+  // site; the device template gets it as ${FLOORPLANNING_PREFIX}.
+  std::string FloorplanningPrefix();
+
+  // Path to "<project>_floorplanning_<suffix>" inside the project directory.
+  std::filesystem::path FloorplanningArtifact(const std::string& suffix);
+
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
-  // scripts/generate_design_resources.py. Best-effort, exactly like RunValidateInstances()
+  // scripts/floorplanning_design_resources.py. Best-effort, exactly like RunValidateInstances()
   // above: a missing input skips the stage rather than failing a compile that has already
   // succeeded.
   //

@@ -1734,7 +1734,7 @@ bool CompilerOpenFPGA_ql::Analyze() {
 // (m_useVerific branch), but stops after `hierarchy -top` + `write_json` -- no
 // `flatten -scopename`, no synth_ql -- so instances synthesis later deletes or merges
 // across boundaries are still visible in the emitted JSON. Never pass -noattr: that
-// would strip the src/hdlname attributes elab_instances.py depends on.
+// would strip the src/hdlname attributes floorplanning_elab_instances.py depends on.
 std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topModule) {
   std::string script;
 
@@ -1882,7 +1882,7 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
         topModuleLib.empty() ? std::string{} : "-work " + topModuleLib + " ";
     script += "verific " + topModuleLibImport + importLibs + "-import " + topModule + "\n";
   } else {
-    // Default Yosys parser -- cannot read VHDL at all (elab_instances.py's docstring).
+    // Default Yosys parser -- cannot read VHDL at all (floorplanning_elab_instances.py's docstring).
     for (const auto& lang_file : ProjManager()->DesignFiles()) {
       std::string lang;
       switch (lang_file.first.language) {
@@ -1929,7 +1929,7 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
   // keeps this one script working for both frontends. proc only restructures behavioral
   // code into structural primitives ($mux/$dff/...) inside each module -- it does not
   // touch cross-module boundaries, rename/merge instances, or drop the src/hdlname
-  // attributes elab_instances.py depends on, so this stays elaboration, not synthesis.
+  // attributes floorplanning_elab_instances.py depends on, so this stays elaboration, not synthesis.
   script += "proc\n";
   script += "write_json " + topModule + "_elab.json\n";
   return script;
@@ -2005,7 +2005,7 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("elab_instances.py");
+      std::filesystem::path("floorplanning_elab_instances.py");
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2017,12 +2017,12 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
     ErrorMessage("System " + python_exec.string() +
                  " is not found, Please install " + python_exec.string() +
                  " and make sure it's in the PATH variable."
-                 " Instance-tree derivation (elab_instances.py) failed!");
+                 " Instance-tree derivation (floorplanning_elab_instances.py) failed!");
     return false;
   }
 
   std::filesystem::path instances_json_path =
-      std::filesystem::path(ProjManager()->projectPath()) / "instances.json";
+      FloorplanningArtifact("instances.json");
 
   std::vector<std::string> args;
   args.push_back(elab_instances_script_path.string());
@@ -2043,7 +2043,7 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
           .realCode;
   if (status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " instance-tree derivation (elab_instances.py) failed");
+                 " instance-tree derivation (floorplanning_elab_instances.py) failed");
     return false;
   }
   return true;
@@ -2052,7 +2052,7 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
 bool CompilerOpenFPGA_ql::EnsureElaborated() {
   const std::string topModule = ProjManager()->DesignTopModule();
   std::filesystem::path instances_json_path =
-      std::filesystem::path(ProjManager()->projectPath()) / "instances.json";
+      FloorplanningArtifact("instances.json");
 
   if (!m_designDirty && FileUtils::FileExists(instances_json_path)) {
     return true;  // nothing changed since the last successful elaboration
@@ -2099,6 +2099,17 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
   m_designDirty = false;
   return true;
 }
+// [aurora2#1725] Naming for every artifact the floorplanning flow generates. Defined once
+// so the convention cannot drift between the stages that write these files and the ones
+// that read them back.
+std::string CompilerOpenFPGA_ql::FloorplanningPrefix() {
+  return ProjManager()->projectName() + "_floorplanning";
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::FloorplanningArtifact(const std::string& suffix) {
+  return std::filesystem::path{ProjManager()->projectPath()} /
+         (FloorplanningPrefix() + "_" + suffix);
+}
 
 // [aurora2#1725 stage P2b] name maps -- OPTIONAL, off unless general.options.namemap is
 // "checked". An absent key reads as empty, so a project that has never heard of the option
@@ -2126,7 +2137,7 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("netlist_namemap.py");
+      std::filesystem::path("floorplanning_netlist_namemap.py");
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2136,7 +2147,7 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
 
   if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
     ErrorMessage("System " + python_exec.string() +
-                 " is not found; skipping name maps (netlist_namemap.py).");
+                 " is not found; skipping name maps (floorplanning_netlist_namemap.py).");
     return true;  // best-effort, like every other stage this feature adds
   }
 
@@ -2144,14 +2155,14 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   args.push_back(namemap_script_path.string());
   args.push_back(debug_json_path.string());
   args.push_back("-o");
-  args.push_back((projectPath / "namemap.csv").string());
+  args.push_back((FloorplanningArtifact("namemap.csv")).string());
 
   int status =
       FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
           .realCode;
   if (status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " name map generation (netlist_namemap.py) failed");
+                 " name map generation (floorplanning_netlist_namemap.py) failed");
     return true;  // no namemap.csv to audit
   }
 
@@ -2159,7 +2170,7 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   // atomsets.json does not? An empty p2b.log across the suite is the argument for deleting
   // this stage. Lowest priority in the flow -- it reports and never blocks, so its exit code
   // is deliberately ignored. See docs/specs/p2b-namemap-redundancy/spec.md.
-  std::filesystem::path atomsets_path = projectPath / "atomsets.json";
+  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
   if (!FileUtils::FileExists(atomsets_path)) {
     return true;  // no P3 output to compare against
   }
@@ -2169,21 +2180,27 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("p2b_audit.py");
+      std::filesystem::path("floorplanning_p2b_audit.py");
 
+  // Inputs are named explicitly rather than left to the script to guess from --project:
+  // the artifact prefix is this class's convention, and one place should own it.
   std::vector<std::string> audit_args;
   audit_args.push_back(p2b_audit_script_path.string());
   audit_args.push_back("--project");
   audit_args.push_back(projectPath.string());
+  audit_args.push_back("--atomsets");
+  audit_args.push_back(atomsets_path.string());
+  audit_args.push_back("--namemap");
+  audit_args.push_back(FloorplanningArtifact("namemap.csv").string());
   audit_args.push_back("-o");
-  audit_args.push_back((projectPath / "p2b.log").string());
+  audit_args.push_back((FloorplanningArtifact("p2b.log")).string());
 
   FileUtils::ExecuteSystemCommand(python_exec.string(), audit_args, m_out,
                                   /*timeout_ms*/ -1);
   return true;
 }
 
-// [aurora2#1725 stage P4] validation gate -- see scripts/validate_instances.py's
+// [aurora2#1725 stage P4] validation gate -- see scripts/floorplanning_validate_instances.py's
 // docstring and docs/specs/region-based-placement-synthesis-integration/pipeline.md
 // (A.P4). Called from Synthesize() after the Yosys tool has actually run (Synplify
 // falls through to it too -- pipeline.md: "Yosys still reads Synplify's top.vm, still
@@ -2193,11 +2210,11 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   const std::string topModule = ProjManager()->DesignTopModule();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
 
-  // aurora_atomsets.tcl (invoked from the device template) writes this relative to the
+  // floorplanning_atomsets.tcl (invoked from the device template) writes this relative to the
   // yosys process's cwd, which is the project directory. Not every device template has
   // the P2/P3 blocks yet, so a missing file just means this stage isn't available for
   // the current device -- skip quietly rather than treating it as a failure.
-  std::filesystem::path atomsets_path = projectPath / "atomsets.json";
+  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
   if (!FileUtils::FileExists(atomsets_path)) {
     return true;
   }
@@ -2213,7 +2230,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("validate_instances.py");
+      std::filesystem::path("floorplanning_validate_instances.py");
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2224,16 +2241,16 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
     ErrorMessage("System " + python_exec.string() +
                  " is not found; skipping instance validation "
-                 "(validate_instances.py).");
+                 "(floorplanning_validate_instances.py).");
     return true;  // best-effort: not required for synthesis to have succeeded
   }
 
-  std::filesystem::path instances_json_path = projectPath / "instances.json";
+  std::filesystem::path instances_json_path = FloorplanningArtifact("instances.json");
   std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
-  // [aurora2#1725 stage P2b] optional; validate_instances.py records check 3 as
+  // [aurora2#1725 stage P2b] optional; floorplanning_validate_instances.py records check 3 as
   // "unknown" and grades on the rest when this is absent.
-  std::filesystem::path namemap_hier_path = projectPath / "namemap_hier.csv";
-  std::filesystem::path validation_json_path = projectPath / "validation.json";
+  std::filesystem::path namemap_hier_path = FloorplanningArtifact("namemap_hier.csv");
+  std::filesystem::path validation_json_path = FloorplanningArtifact("validation.json");
 
   std::vector<std::string> args;
   args.push_back(validate_instances_script_path.string());
@@ -2251,9 +2268,9 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
     args.push_back("--synth-log");
     args.push_back(synth_log_path.string());
   }
-  // [5], generated by RunNetlistNamemap() when the option is on. validate_instances.py
+  // [5], generated by RunNetlistNamemap() when the option is on. floorplanning_validate_instances.py
   // prefers [6] when it exists and falls back to this.
-  std::filesystem::path namemap_path = projectPath / "namemap.csv";
+  std::filesystem::path namemap_path = FloorplanningArtifact("namemap.csv");
   if (FileUtils::FileExists(namemap_path)) {
     args.push_back("--namemap");
     args.push_back(namemap_path.string());
@@ -2272,7 +2289,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
     // Best-effort: synthesis has already succeeded by the time this runs, so a
     // validation failure is reported but must not fail the build over it.
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " instance validation (validate_instances.py) failed");
+                 " instance validation (floorplanning_validate_instances.py) failed");
   }
   return true;
 }
@@ -2284,7 +2301,7 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   std::filesystem::path projectPath{ProjManager()->projectPath()};
 
   std::filesystem::path elab_json_path = projectPath / (topModule + "_elab.json");
-  std::filesystem::path atomsets_path = projectPath / "atomsets.json";
+  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
   // VPR names these after the project, not the top module -- see Placement(), which
   // builds the same two paths to decide whether placement can be reused.
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
@@ -2309,7 +2326,7 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("generate_design_resources.py");
+      std::filesystem::path("floorplanning_design_resources.py");
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2320,11 +2337,11 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
     ErrorMessage("System " + python_exec.string() +
                  " is not found; skipping resource reporting "
-                 "(generate_design_resources.py).");
+                 "(floorplanning_design_resources.py).");
     return true;  // best-effort: the compile stage itself has already succeeded
   }
 
-  std::filesystem::path design_resources_path = projectPath / "design_resources.json";
+  std::filesystem::path design_resources_path = FloorplanningArtifact("design_resources.json");
 
   std::vector<std::string> args;
   args.push_back(design_resources_script_path.string());
@@ -2351,7 +2368,7 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
     // Best-effort, as above: report it, but a resource-report failure must not fail a
     // compile stage that has already succeeded.
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " resource reporting (generate_design_resources.py) failed");
+                 " resource reporting (floorplanning_design_resources.py) failed");
   }
   return true;
 }
@@ -7728,7 +7745,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // A project with no set_region is unaffected: it never consults the model.
   fp::RtlInstanceModel rtlModel;
   const std::filesystem::path instancesJsonPath =
-      std::filesystem::path(ProjManager()->projectPath()) / "instances.json";
+      FloorplanningArtifact("instances.json");
   const bool instancesLoaded = rtlModel.loadInstances(instancesJsonPath);
 
   // loadInstances() reports an EMPTY list as a failure, and that is a different thing from
@@ -7814,7 +7831,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
           // shared). A bare instance path is never itself a VPR atom name -- real atoms
           // are always "<path>.<signal>" -- so without the "." + "*" suffix this would
           // reach VPR as a literal name_pattern and silently match nothing (see
-          // generate_floorplanning.py's add_atom_pattern). But not every token here is
+          // floorplanning_generate.py's add_atom_pattern). But not every token here is
           // an instance: e.g. "out[0]"/"$false"/"$undef" are exact leaf atom/net names
           // and must stay literal. instances.json is what tells the two apart.
           //
@@ -7878,7 +7895,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
-  // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
+  // [aurora2#1725 REQ-004] Check the floorplan before handing it to floorplanning_generate.py.
   //
   // The panel does this continuously -- under-provisioned regions, overlaps, constraints
   // naming an instance synthesis deleted, a parent whose own logic no partition takes -- but
@@ -7924,7 +7941,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("generate_floorplanning.py");
+      std::filesystem::path("floorplanning_generate.py");
       
       
   std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
@@ -10538,16 +10555,16 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("aurora_atomsets.tcl");
+      std::filesystem::path("floorplanning_atomsets.tcl");
 
   // [aurora2#1725 stage P3] NOT wired to pass the instance list from instances.json
-  // (P0b), despite that being the documented intent (aurora_atomsets.tcl's own
+  // (P0b), despite that being the documented intent (floorplanning_atomsets.tcl's own
   // header: "Pass the list from stage P0b's instances.json to also report instances
   // that produced ZERO atoms"). Blocked structurally: the device template's own line
   // already appends fixed positional arguments after this substitution --
   // aurora_template_script.ys: "${CALL_TCL_ATOMSETS_SCRIPT} atomsets.json --blif
   // ${OUTPUT_BLIF}" -- with no placeholder for an instance list, and
-  // aurora_atomsets.tcl parses argv positionally (out_path first, then optional
+  // floorplanning_atomsets.tcl parses argv positionally (out_path first, then optional
   // --blif, then instances). Any instance list this code appends either duplicates
   // those two fixed arguments (if appended after them, which this substitution can't
   // do -- it precedes them in the template line) or corrupts out_path/blif_path
@@ -10555,10 +10572,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // would then land mid-argv and be misread as a 14th instance -- measured on
   // fpu_single, confirmed both ways). Fixing this for real needs either editing the
   // device_data template (separate submodule) to add an instance-list placeholder in
-  // the right position, or reworking aurora_atomsets.tcl to take the list some
+  // the right position, or reworking floorplanning_atomsets.tcl to take the list some
   // other way (e.g. a file) instead of positional argv.
   //
-  // Not required for P4 in practice: validate_instances.py's own --instances flag
+  // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances flag
   // (see RunValidateInstances()) already compensates -- it overrides the graded
   // universe with instances.json's full list, so a deleted (zero-atom) instance
   // absent from atomsets.json is still correctly graded "deleted". Confirmed on
@@ -10568,6 +10585,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                                                     aurora_atomsets_script_path.string());
   yosysScript->addFile(aurora_atomsets_script_path);
   // -- atomsets_script --------------------------------------------------------------
+
+  // -- floorplanning_prefix ---------------------------------------------------------
+  // [aurora2#1725] Every artifact the floorplanning flow generates is named
+  // "<project>_floorplanning_<artifact>", so it is obvious in a project directory which
+  // files this feature owns. The device template needs the stem to name the atom-set
+  // output it writes, since that one file is produced by yosys rather than by the C++.
+  yosysScript->apply("${FLOORPLANNING_PREFIX}", FloorplanningPrefix());
+  // -- floorplanning_prefix ---------------------------------------------------------
 
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
   yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
@@ -10805,7 +10830,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // - there is no pre-generated .place file AND
   // - there is no pcf file in the project.
 
-  // Bypassing the pcf2place due to generating the pcf constraints using the generate_floorplanning.py script
+  // Bypassing the pcf2place due to generating the pcf constraints using the floorplanning_generate.py script
   // std::string filepath_fpga_fix_pins_place_str;
   // if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 

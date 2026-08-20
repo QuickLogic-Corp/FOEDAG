@@ -26,7 +26,7 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
 
 // Every atom belonging to `path`, its sub-instances included.
 //
-// An instance with no entry of its own does NOT mean no atoms: aurora_atomsets.tcl derives
+// An instance with no entry of its own does NOT mean no atoms: floorplanning_atomsets.tcl derives
 // an instance path as everything before a cell name's last dot, so a scope holding only
 // sub-instances gets no entry. The top instance is always such a scope -- on fft256 "dut"
 // had no entry while its children held 19089 atoms between them. Entries are

@@ -2298,7 +2298,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   rtlModel.mergeVerdicts(validationJsonPath);
 
   // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
-  // atoms belonging to it, straight from atomsets.json (aurora_atomsets.tcl,
+  // atoms belonging to it, straight from atomsets.json (floorplanning_atomsets.tcl,
   // in-session, stage P3). Only available post-synthesis; pre-synthesis there's no
   // atom data yet, so setAtomNames() is simply not called and every leaf stays
   // visible (see SynthResourceHierarchyWidget::populateAtomColumns()'s early-return
@@ -2320,7 +2320,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   }
 
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
-  // schema whatever point the flow has reached (generate_design_resources.py, A.13.5).
+  // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
   // Written by RunDesignResources() at elaboration (tier 1), synthesis (tier 2) and
   // placement (tier 3). Must be set before loadNetList() below, which builds the trees
   // and populates every partition: Partition::addElement() reads it as it goes.
