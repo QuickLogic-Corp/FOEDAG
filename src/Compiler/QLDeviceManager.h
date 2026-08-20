@@ -98,7 +98,8 @@ class QLDeviceManager : public QObject {
   int addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                 std::string device_data_source, bool force);
   int encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
-                    std::string device_data_source, std::string device_data_target);
+                    std::string device_data_source, std::string device_data_target,
+                    std::string customer_id = "");
   std::vector<QLDeviceVariant> listDeviceVariants(std::string family,
                                                  std::string foundry,
                                                  std::string node,
@@ -108,12 +109,18 @@ class QLDeviceManager : public QObject {
                                                  std::string node,
                                                  std::string devicename,
                                                  std::filesystem::path device_data_dir_path);
+  // 'device_data_dir_path' is the device-type directory (<root>/<family>/<foundry>/<node>/<devicename>)
+  // that this variant belongs to. it MUST be supplied while parsing device data, because the
+  // encrypted vpr.xml is decrypted using the _Supp.db key database that sits in that same
+  // directory - deriving it from a global root would read the wrong device's key under
+  // multi-root discovery. when left empty, the owning root is looked up by device coordinates.
   std::vector<QLDeviceVariantLayout> listDeviceVariantLayouts(std::string family,
                                                             std::string foundry,
                                                             std::string node,
                                                             std::string devicename,
                                                             std::string voltage_threshold,
-                                                            std::string p_v_t_corner);
+                                                            std::string p_v_t_corner,
+                                                            std::filesystem::path device_data_dir_path = std::filesystem::path());
   std::string DeviceString(std::string family,
                            std::string foundry,
                            std::string node,
@@ -164,11 +171,86 @@ class QLDeviceManager : public QObject {
   // device files access API to have a uniform way of getting the required files
   public:
 
+  // the ordered list of device-data roots that are searched for devices.
+  // order (highest precedence first):
+  //   [1] $AURORA2_DEVICE_DATA_DIR - when set and valid this is EXCLUSIVE: it replaces the
+  //       whole list, preserving the long-standing drop-in-place override behaviour that CI
+  //       and the device-data validation gate rely on.
+  //   [2] the installation's device_data dir (built-in devices, authoritative)
+  //   [3] roots registered by install_device (per-user registry)
+  //   [4] $AURORA2_DEVICE_DATA_PATH - additive, ':'-separated
+  // roots that do not exist are dropped here (with a warning), so callers never have to
+  // guard against a stale registry entry or a mistyped env var.
+  std::vector<std::filesystem::path> deviceDataRootDirPathList();
+
+  // first entry of deviceDataRootDirPathList(), i.e. the root that "owns" newly added
+  // devices and the fallback when a device's own root is not known.
+  // kept for the many call sites that legitimately want a single root.
   std::filesystem::path deviceDataRootDirPath();
+
+  // install a device kit (.tar.gz produced by 'generate_device_kit') into a directory of the
+  // user's choosing, OUTSIDE the Aurora installation, and register that directory so the
+  // device is visible in later sessions without the user setting anything.
+  //
+  // the kit is already encrypted: this places files, it does not transform them. that is why
+  // addDevice() cannot be reused - it re-encrypts on the way in and would need the plaintext
+  // the customer does not have.
+  //
+  // returns 0 on success, -1 on failure. nothing is written to the target unless the archive
+  // checksum, the manifest and the Aurora version check all pass first.
+  int installDevice(std::string kit_archive_path, std::string target_dir_path, bool force);
+
+  // remove a device that was installed with install_device, and deregister its root once no
+  // devices remain under it.
+  //
+  // this is the only destructive command in the feature: it deletes from a directory the USER
+  // named, not one Aurora owns. so it refuses to touch the installation, deletes only paths it
+  // can attribute to the device, and supports a dry run.
+  int uninstallDevice(std::string family, std::string foundry, std::string node,
+                      std::string devicename, bool dry_run, bool force);
+
+  // --- external device data root registry (per-user) -------------------------------------
+  // install_device records the directory it installed into here, so the device stays visible
+  // in later sessions without the user setting anything. uninstall_device removes it again.
+
+  // <home>/.aurora/device_roots.json. empty when there is no usable home directory, in which
+  // case the registry degrades to "not available" rather than failing.
+  std::filesystem::path deviceRootRegistryFilePath();
+
+  // registered roots, in registration order. a malformed registry is reported and treated as
+  // empty rather than aborting - a corrupt config file must not make Aurora unusable.
+  std::vector<std::filesystem::path> readDeviceRootRegistry();
+
+  // add/remove a root. both are atomic and safe against concurrent Aurora processes.
+  // adding an already-registered root succeeds without duplicating it.
+  bool registerDeviceRoot(const std::filesystem::path& root_dir_path);
+  bool unregisterDeviceRoot(const std::filesystem::path& root_dir_path);
+
+  // the root that the given device was actually discovered under, looked up from device_list
+  // by device coordinates. falls back to deviceDataRootDirPath() when the device is not (yet)
+  // in the list - which is the case while parseDeviceData() is still running.
+  std::filesystem::path deviceTypeRootDirPath(const std::string& family,
+                                              const std::string& foundry,
+                                              const std::string& node,
+                                              const std::string& devicename);
 
   bool deviceFileIsEncrypted(std::filesystem::path filepath);
 
+  // Load the device's plaintext `config.json` into `out_config_json`.
+  // config.json is device data and is never encrypted.
+  // Returns true on success; false if the file is absent or JSON parsing fails.
+  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json);
+
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
+  // DSP version supported by the device, derived from the "DSP_TYPE" entry in
+  // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
+  // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPV1.0) when not specified.
+  std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
+  // Set of FPU IP capability tokens the device supports, from the "FPU_TYPE"
+  // JSON string-array in config.json (e.g. {"FPUADDSUB","FPUMULT","FPUMAC"}).
+  // Returns an empty set when the key is absent, empty, or not a string array
+  // (opt-in gating: no token => the corresponding FPU IP is unavailable).
+  std::set<std::string> deviceFPUTypes(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());

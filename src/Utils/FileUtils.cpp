@@ -244,6 +244,25 @@ std::filesystem::path candidate = searchPath / filename;
   return result;
 }
 
+std::vector<std::filesystem::path> FileUtils::FindAbsoluteFilePathsRecursively(
+    const std::filesystem::path& searchPath) {
+  std::vector<std::filesystem::path> results{};
+  if (!FileUtils::FileIsDirectory(searchPath)) {
+    return results;
+  }
+  std::error_code ec;
+  std::filesystem::recursive_directory_iterator it(
+      searchPath, std::filesystem::directory_options::skip_permission_denied,
+      ec);
+  const std::filesystem::recursive_directory_iterator end;
+  for (; !ec && it != end; it.increment(ec)) {
+    if (FileUtils::FileIsRegular(it->path())) {
+      results.push_back(std::filesystem::absolute(it->path()));
+    }
+  }
+  return results;
+}
+
 // This will search the given paths (non-recursively) for a child file.
 // All matches will be returned in a vector
 std::vector<std::filesystem::path> FileUtils::FindFileInDirs(
@@ -641,7 +660,7 @@ std::vector<std::string> FileUtils::findFileNamesByWildcard(const std::string& p
 std::string FileUtils::calcHash(const std::string& content) 
 {
   QCryptographicHash hash(QCryptographicHash::Md5);
-  hash.addData(content.data(), content.size());
+  hash.addData(QByteArray::fromRawData(content.data(), content.size()));
   QByteArray hexResult = hash.result().toHex();
   return std::string(hexResult.constData(), hexResult.size());
 }
@@ -662,7 +681,7 @@ std::string FileUtils::calcFileContentHash(const std::filesystem::path& filePath
   while (!file.atEnd()) {
     qint64 bytesRead = file.read(buffer.data(), bufferSize);
     if (bytesRead > 0) {
-      hash.addData(buffer.constData(), bytesRead);
+      hash.addData(QByteArray::fromRawData(buffer.constData(), bytesRead));
     } else {
       break; // read error or EOF
     }

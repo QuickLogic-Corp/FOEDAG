@@ -69,6 +69,12 @@ class FileUtils final {
   static std::filesystem::path LocateFileRecursive(
       const std::filesystem::path& searchPath, const std::string filename);
 
+  // Recursively collect every regular file under searchPath as an absolute
+  // path. Returns an empty vector if searchPath does not exist or is not a
+  // directory.
+  static std::vector<std::filesystem::path> FindAbsoluteFilePathsRecursively(
+      const std::filesystem::path& searchPath);
+
   static std::vector<std::filesystem::path> FindFileInDirs(
       const std::string& filename,
       const std::vector<std::filesystem::path>& searchPaths,

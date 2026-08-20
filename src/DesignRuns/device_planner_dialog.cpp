@@ -1,6 +1,10 @@
 #include "device_planner_dialog.h"
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
+#else
+#include <QScreen>
+#endif
 #include <QVBoxLayout>
 
 #include "ui_device_planner_dialog.h"
@@ -15,9 +19,15 @@ DevicePlannerDialog::DevicePlannerDialog(QWidget *parent)
   setWindowTitle(tr("Device Planner"));
 
   // One thirds of desktop size
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  auto *screen = QApplication::primaryScreen();
+  int w = screen->geometry().width() / 4;
+  int h = screen->geometry().height() / 4;
+#else
   QDesktopWidget dw;
   int w = dw.width() / 4;
   int h = dw.height() / 4;
+#endif
   setGeometry(w, h, w, h);
 
   m_deviceForm = new devicePlannerForm(this);

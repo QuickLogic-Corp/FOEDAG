@@ -337,7 +337,7 @@ void SourcesForm::SlotRemoveFile() {
     // un-related selections
     if ((item->data(0, Qt::WhatsThisPropertyRole) == itemType) &&
         !fileSet.isNull()) {
-      selections.append(qMakePair(strFileName, fileSet));
+      selections.append({strFileName, fileSet});
       files.append(strFileName);
     }
   }

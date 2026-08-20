@@ -20,6 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <memory>
+
 #include <QProxyStyle>
 
 namespace FOEDAG {
@@ -29,11 +31,12 @@ class FoedagStylePrivate;
 class FoedagStyle : public QProxyStyle {
  public:
   explicit FoedagStyle(QStyle* style = nullptr);
+  ~FoedagStyle();
   void drawPrimitive(PrimitiveElement element, const QStyleOption* opt,
                      QPainter* p,
                      const QWidget* widget = nullptr) const override;
 
  private:
-  QSharedPointer<FoedagStylePrivate> d;
+  std::unique_ptr<FoedagStylePrivate> d;
 };
 }  // namespace FOEDAG

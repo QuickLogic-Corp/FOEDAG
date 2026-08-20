@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #pragma once
 
 #include <QObject>
+#include <QRegularExpression>
 #include <QVector>
 #include <map>
 #include <set>
@@ -30,7 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "DataProfiles.h"
 
 class QFile;
-class QRegExp;
 class QTextStream;
 
 namespace FOEDAG {
@@ -71,7 +71,7 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   // Creates and opens log file instance. returns nullptr if file doesn't exist.
   std::unique_ptr<QFile> createLogFile(const QString &fileName) const;
 
-  using SectionKeys = QVector<QRegExp>;
+  using SectionKeys = QVector<QRegularExpression>;
   int parseErrorWarningSection(QTextStream &in, int lineNr,
                                const QString &sectionLine, SectionKeys keys,
                                bool stopEmptyLine = false);
@@ -94,9 +94,13 @@ class AbstractReportManager : public QObject, public ITaskReportManager {
   // Timing data is task specific and can't be split on generic level
   virtual void splitTimingData(const QString &timingStr) = 0;
 
+  // Returns the last match of re in str, or a default (invalid) match if none.
+  static QRegularExpressionMatch lastMatch(const QRegularExpression& re,
+                                           const QString& str);
+
   // Keyword to recognize the start of resource usage section
-  static const QRegExp FIND_RESOURCES;
-  static const QRegExp FIND_CIRCUIT_STAT;
+  static const QRegularExpression FIND_RESOURCES;
+  static const QRegularExpression FIND_CIRCUIT_STAT;
 
   bool isFileParsed() const;
   void setFileParsed(bool parsed);

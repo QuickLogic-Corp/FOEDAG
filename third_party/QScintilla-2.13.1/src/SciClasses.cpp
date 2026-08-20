@@ -74,10 +74,12 @@ void QsciSciCallTip::paintEvent(QPaintEvent *)
 // Handle a mouse press in a call tip.
 void QsciSciCallTip::mousePressEvent(QMouseEvent *e)
 {
-    Scintilla::Point pt;
-
-    pt.x = e->x();
-    pt.y = e->y();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QPointF eventPos = e->position();
+#else
+    const QPointF eventPos = QPointF(e->x(), e->y());
+#endif
+    Scintilla::Point pt(eventPos.x(), eventPos.y());
 
     sci->ct.MouseClick(pt);
     sci->CallTipClick();

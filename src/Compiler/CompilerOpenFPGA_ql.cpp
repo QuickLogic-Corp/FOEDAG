@@ -65,7 +65,7 @@
 #include "MainWindow/main_window.h"
 #include "Main/WidgetFactory.h"
 #include "Main/Settings.h"
-#include <CRFileCryptProc.hpp>
+#include <qlcrypt/qlcrypt.hpp>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QStackedWidget>
@@ -909,7 +909,8 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
 
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
 
-    // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [target_device_data_dir_path]
+    // encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path>
+    //                [target_device_data_dir_path] [--customer-id <id>]
     // this will perform the steps:
     // 1. ensure that the structure in the <source_device_data_dir_path> reflects 
     //      required structure, as specified in the document: <TODO>
@@ -923,25 +924,45 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     //    if target path is not specified, default is a new dir created at same level as source_device_data_dir_path
     //    with the same name + "_en" added.
 
-    // check args: 6 or 7(if target is specified)
-    if (argc != 6 && argc != 7) {
-      compiler->ErrorMessage("Please enter command in the format:\n"
-                             "    encrypt_device <family> <foundry> <node> <devicename> <source_device_data_dir_path> [target_device_data_dir_path]");
+    // Separate positional args from "--customer-id <id>" flag (which may appear
+    // anywhere after the fixed prefix).
+    std::vector<std::string> positional;
+    std::string customer_id;
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = argv[i];
+      if (tok == "--customer-id") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("--customer-id requires a value");
+          return TCL_ERROR;
+        }
+        customer_id = argv[++i];
+      } else {
+        positional.push_back(tok);
+      }
+    }
+
+    if (positional.size() != 5 && positional.size() != 6) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    encrypt_device <family> <foundry> <node> <devicename> "
+          "<source_device_data_dir_path> [target_device_data_dir_path] "
+          "[--customer-id <id>]");
       return TCL_ERROR;
     }
 
-    // parse args
-    std::string family = std::string(argv[1]);
-    std::string foundry = std::string(argv[2]);
-    std::string node = std::string(argv[3]);
-    std::string devicename = std::string(argv[4]);
-    std::string source_device_data_dir_path = argv[5];
+    std::string family = positional[0];
+    std::string foundry = positional[1];
+    std::string node = positional[2];
+    std::string devicename = positional[3];
+    std::string source_device_data_dir_path = positional[4];
     std::string target_device_data_dir_path;
-    if(argc == 7) {
-      target_device_data_dir_path = argv[6];
+    if (positional.size() == 6) {
+      target_device_data_dir_path = positional[5];
     }
 
-    int status = QLDeviceManager::getInstance()->encryptDevice(family, foundry, node, devicename, source_device_data_dir_path, target_device_data_dir_path);
+    int status = QLDeviceManager::getInstance()->encryptDevice(
+        family, foundry, node, devicename, source_device_data_dir_path,
+        target_device_data_dir_path, customer_id);
 
     if(status == 0) {
       compiler->Message("\ndevice encrypted ok: " + family + "," + foundry + "," + node + "," + devicename);
@@ -957,9 +978,27 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   auto list_devices = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
 
-  std::vector <QLDeviceType>device_list = QLDeviceManager::getInstance(true)->device_list;
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance(true);
+
+  std::vector <QLDeviceType>device_list = device_manager->device_list;
+
+  // devices can now come from more than one device data root (the installation plus any
+  // directory a kit was installed into), so report where each one actually came from -
+  // otherwise two same-named devices are indistinguishable in this listing.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::error_code ec;
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, ec);
+  if(ec) {
+    installation_root_dir_path_c = installation_root_dir_path;
+  }
 
   for (QLDeviceType device: device_list) {
+
+    // the extra columns are appended, so anything reading the original 7 is unaffected.
+    std::string device_root_origin =
+        (device.device_root_path == installation_root_dir_path_c) ? "built-in" : "external";
+
     for (QLDeviceVariant device_variant: device.device_variants) {
       for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
         std::cout << device_variant.family << ","
@@ -968,14 +1007,107 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                   << device_variant.devicename << ","
                   << device_variant.voltage_threshold << ","
                   << device_variant.p_v_t_corner << ","
-                  << device_variant_layout.name << std::endl;
+                  << device_variant_layout.name << ","
+                  << device_root_origin << ","
+                  << device.device_root_path.string() << std::endl;
       }
     }
   }
-  
+
   return TCL_OK;
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
+
+  // install_device <kit.tar.gz> -target <dir> [force]
+  //
+  // installs a device kit produced by 'generate_device_kit' into a directory of the user's
+  // choosing, OUTSIDE the Aurora installation, and remembers that directory so the device is
+  // available in later sessions without any environment setup.
+  //
+  // 'force' overrides two separate things and both are reported: replacing a device already
+  // installed at the target, and installing despite the kit needing a newer Aurora.
+  auto install_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    // separate positional args from the '-target <dir>' flag and the trailing 'force'
+    std::vector<std::string> positional;
+    std::string target_dir_path;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = argv[i];
+      if (tok == "-target" || tok == "--target") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("-target requires a directory");
+          return TCL_ERROR;
+        }
+        target_dir_path = argv[++i];
+      } else if (compiler->ToLower(tok).compare("force") == 0 ||
+                 tok == "-force" || tok == "--force") {
+        force = true;
+      } else {
+        positional.push_back(tok);
+      }
+    }
+
+    if (positional.size() != 1 || target_dir_path.empty()) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    install_device <device_kit.tar.gz> -target <install_dir_path> [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->installDevice(positional[0], target_dir_path,
+                                                              force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("install_device", install_device, this, 0);
+
+  // uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]
+  //
+  // removes a device installed with install_device and stops searching its directory once no
+  // devices remain there. this DELETES from a directory the user chose, so it always prints
+  // what it is about to remove, refuses without 'force', and offers 'dry-run'.
+  auto uninstall_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    std::vector<std::string> positional;
+    bool dry_run = false;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = compiler->ToLower(std::string(argv[i]));
+      if (tok == "dry-run" || tok == "dry_run" || tok == "-dry-run" || tok == "--dry-run") {
+        dry_run = true;
+      } else if (tok == "force" || tok == "-force" || tok == "--force") {
+        force = true;
+      } else {
+        positional.push_back(argv[i]);
+      }
+    }
+
+    if (positional.size() != 4) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->uninstallDevice(
+        positional[0], positional[1], positional[2], positional[3], dry_run, force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("uninstall_device", uninstall_device, this, 0);
+
+
 
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.
@@ -1386,7 +1518,11 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                "report_unconstrained_timing.hold.rpt",
                "report_unconstrained_timing.setup.rpt",
                "vpr_stdout.log",
-               BITSTREAM_LOG};
+               BITSTREAM_LOG,
+               // secure post-process artefacts (REQUIREMENTS.md §4.3, FR-9)
+               std::string{projectName + "_fabric_bitstream.bch"},
+               std::string{projectName + "_fabric_bitstream.ascon"},
+               std::string{projectName + "_bitstream_encode.log"}};
       break;
     default:
       break;
@@ -2217,7 +2353,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      vpr_options += std::string(" --max_router_iterations 100");
+      vpr_options += std::string(" --max_router_iterations 300");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
@@ -2342,11 +2478,32 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
     if(!sb_maps_file_path.empty() && !sb_templates_dir_path.empty()) {
 
+      // Plaintext and encrypted CRR flows pass --sb_maps/--sb_templates
+      // identically; encryption only adds --crypt_key_db.
       vpr_options += " --sb_maps " + sb_maps_file_path.string();
       vpr_options += " --sb_templates " + sb_templates_dir_path.string();
 
-      vpr_options += " --preserve_input_pin_connections off";
-      vpr_options += " --preserve_output_pin_connections off";
+      // VPR keys CRR encryption solely off the ".en" suffix on --sb_maps and
+      // then requires --crypt_key_db (see VTR read_options.cpp). Keep FOEDAG in
+      // lock-step with that single source of truth. If a file is detected as
+      // encrypted (e.g. carries the QLEN magic) but lacks the ".en" suffix VPR
+      // would silently treat it as plaintext, so fail loudly here rather than
+      // emit an opaque VPR error downstream.
+      if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(sb_maps_file_path)) {
+        if(sb_maps_file_path.extension() != ".en") {
+          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + sb_maps_file_path.string());
+          return std::make_tuple(std::string(""), std::string(""));
+        }
+        std::filesystem::path crypt_key_db =
+            (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
+            (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
+        if(!FileUtils::FileExists(crypt_key_db)) {
+          ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
+          return std::make_tuple(std::string(""), std::string(""));
+        }
+        vpr_options += " --crypt_key_db " + crypt_key_db.string();
+      }
+
       vpr_options += " --annotated_rr_graph on";
       vpr_options += " --remove_dangling_nodes off";
       // this is always enabled in the default Aurora flow, so don't add here.
@@ -2369,18 +2526,9 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     std::filesystem::path vpr_xml_en_path = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::make_tuple(std::string(""), std::string(""));
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
       // empty string returned on error.
       return std::make_tuple(std::string(""), std::string(""));
     }
@@ -2529,9 +2677,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "net_file") + " , specified in vpr>filename>net_file setting. \n");
         return nullptr;
     }
-    command->appendFile("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
+    command->appendPath("--net_file", QLSettingsManager::getPathValue("vpr", "filename", "net_file"));
   } else {
-    command->appendFile("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
+    command->appendPath("--net_file", std::filesystem::path{netlistFilePrefix + std::string(".net")});
   }
 
   if (cfg.use_place_file) {
@@ -2541,9 +2689,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "place_file") + " , specified in vpr>filename>place_file setting. \n");
           return nullptr;
       }
-      command->appendFile("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
+      command->appendPath("--place_file", QLSettingsManager::getPathValue("vpr", "filename", "place_file"));
     } else {
-      command->appendFile("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
+      command->appendPath("--place_file", std::filesystem::path{netlistFilePrefix + std::string(".place")});
     }
   }
 
@@ -2554,9 +2702,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
           QLSettingsManager::getStringValue("vpr", "filename", "route_file") + " , specified in vpr>filename>route_file setting. \n");
           return nullptr;
         }
-      command->appendFile("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
+      command->appendPath("--route_file", QLSettingsManager::getPathValue("vpr", "filename", "route_file"));
     } else {
-      command->appendFile("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
+      command->appendPath("--route_file", std::filesystem::path{netlistFilePrefix + std::string(".route")});
     }
   }
 
@@ -2573,7 +2721,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!sdc_file_path.empty()) {
     Message(std::string("SDC file found: ") + sdc_file_path.string());
-    command->appendFile("--sdc_file", sdc_file_path);
+    command->appendPath("--sdc_file", sdc_file_path);
   }
   else {
     Message(std::string("SDC file not found, no constraints passed to vpr."));
@@ -2582,7 +2730,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
 
   if( !QLSettingsManager::getStringValue("vpr", "filename", "write_rr_graph").empty() ) {
-    command->appendFile("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
+    command->appendPath("--write_rr_graph", QLSettingsManager::getPathValue("vpr", "filename", "write_rr_graph"));
   }
 
   // parse vpr netlist options
@@ -2612,7 +2760,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // if flat_routing is enabled, and user has not specified the max_router_iterations
       // then, increase maximum router iterations to a good default, to give flat router enough
       // time to converage to a legal routing solution
-      command->append("--max_router_iterations",  "100");
+      command->append("--max_router_iterations",  "300");
     }
     // otherwise, user specified max_router_iterations is honored.
   }
@@ -2712,8 +2860,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       QLDeviceManager::getInstance()->deviceVPRRouterLookaheadFile(device_target);
 
   if(!rr_graph_file_path.empty() && !router_lookahead_file_path.empty()) {
-    command->appendFile("--read_rr_graph", rr_graph_file_path);
-    command->appendFile("--read_router_lookahead", router_lookahead_file_path);
+    command->appendPath("--read_rr_graph", rr_graph_file_path);
+    command->appendPath("--read_router_lookahead", router_lookahead_file_path);
   }
   else {
     // no rr_graph available to use, try to use dynamic rr_graph generation.
@@ -2726,11 +2874,32 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
     if(!m_SBMapsFile.empty() && !m_SBTemplatesDir.empty()) {
 
-      command->appendFile("--sb_maps", m_SBMapsFile);
-      command->appendFile("--sb_templates", m_SBTemplatesDir);
+      // Plaintext and encrypted CRR flows pass --sb_maps/--sb_templates
+      // identically; encryption only adds --crypt_key_db.
+      command->appendPath("--sb_maps", m_SBMapsFile);
+      command->appendPath("--sb_templates", m_SBTemplatesDir);
 
-      command->append("--preserve_input_pin_connections off");
-      command->append("--preserve_output_pin_connections off");
+      // VPR keys CRR encryption solely off the ".en" suffix on --sb_maps and
+      // then requires --crypt_key_db (see VTR read_options.cpp). Keep FOEDAG in
+      // lock-step with that single source of truth. If a file is detected as
+      // encrypted (e.g. carries the QLEN magic) but lacks the ".en" suffix VPR
+      // would silently treat it as plaintext, so fail loudly here rather than
+      // emit an opaque VPR error downstream.
+      if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_SBMapsFile)) {
+        if(m_SBMapsFile.extension() != ".en") {
+          ErrorMessage("Encrypted SB_MAPS file must have a '.en' suffix for VPR to decrypt it: " + m_SBMapsFile.string());
+          return nullptr;
+        }
+        std::filesystem::path crypt_key_db =
+            (QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)) /
+            (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
+        if(!FileUtils::FileExists(crypt_key_db)) {
+          ErrorMessage("Cannot find key database for encrypted device data: " + crypt_key_db.string());
+          return nullptr;
+        }
+        command->appendPath("--crypt_key_db", crypt_key_db);
+      }
+
       command->append("--annotated_rr_graph on");
       command->append("--remove_dangling_nodes off");
       // this is always enabled in the default Aurora flow, so don't add here.
@@ -2753,18 +2922,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     std::filesystem::path vpr_xml_en_path = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return nullptr;
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
       // empty string returned on error.
       return nullptr;
     }
@@ -2789,7 +2949,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     if (fs::exists(fp_constraint_filepath_absolute)) {
-      command->appendFile("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
+      command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
   else { //IO floorplanning generation failed, must stop the flow
@@ -3085,7 +3245,14 @@ bool CompilerOpenFPGA_ql::Packing() {
       int overhead_percentage = 0;
       if(FileUtils::FileExists(add_layout_params_json_filepath)) {
         std::ifstream add_layout_params_json_ifstream(add_layout_params_json_filepath.string());
-        add_layout_params_json = json::parse(add_layout_params_json_ifstream);
+        try {
+          add_layout_params_json = json::parse(add_layout_params_json_ifstream);
+        }
+        catch (const json::exception& e) {
+          ErrorMessage("Failed to parse '" + add_layout_params_json_filepath.string() +
+                       "': " + e.what());
+          return false;
+        }
         if(!add_layout_params_json.empty()) {
           if(add_layout_params_json.contains("overhead_percentage")){
             overhead_percentage = add_layout_params_json["overhead_percentage"].get<int>();
@@ -3127,7 +3294,11 @@ bool CompilerOpenFPGA_ql::Packing() {
         // get the layout name generated from the log file:
         const QRegularExpression auto_layout_regex("Layout for (\\w+) with width (\\d+) and height (\\d+) has been created in architecture file.");
         QFile file{QString::fromStdString(logfile_auto_device.string())};
-        file.open(QFile::ReadOnly);
+        if (!file.open(QFile::ReadOnly)) {
+          ErrorMessage("Cannot open auto-layout log file: " +
+                       logfile_auto_device.string() + "\n");
+          return false;
+        }
         while (!file.atEnd()) {
           auto line = file.readLine();
           auto match = auto_layout_regex.match(line);
@@ -3262,19 +3433,11 @@ bool CompilerOpenFPGA_ql::Packing() {
     
     // encrypt the generated vpr xml with the same key as the current device
     // this will be saved into m_autoLayoutGeneratedVPRXMLPath.
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      ErrorMessage("load cryptdb failed\n");
-      return false;
-    }
-
-    // existing API forces us to use a list of files to be encrypted...
     std::vector<std::filesystem::path> file_list_to_encrypt;
     file_list_to_encrypt.push_back(generated_vpr_xml_path);
-    if (!CRFileCryptProc::getInstance()->encryptFiles(file_list_to_encrypt)) {
-      ErrorMessage("encryption failed!");
+    if (!encryptDeviceFiles(file_list_to_encrypt,
+                            QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                            QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       return false;
     }
     m_autoLayoutGeneratedVPRXMLPath = generated_vpr_xml_path;
@@ -3290,14 +3453,64 @@ bool CompilerOpenFPGA_ql::Packing() {
     // save the path of the previously decrypted architecture file path for easy replacement in command to re-run pack.
     std::filesystem::path old_m_architectureFile = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
-  
-    if (!CRFileCryptProc::getInstance()->decryptFile(m_autoLayoutGeneratedVPRXMLPath, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+
+    if (!decryptDeviceFile(m_autoLayoutGeneratedVPRXMLPath, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       return false;
     }
 
     // Deal with the generated SB_MAPS yml:
     m_autoLayoutGeneratedSBMapsYMLPath = generated_sb_maps_yml_path;
+
+    // Keep the generated routing-graph set (SB_MAPS + CSV switchbox templates)
+    // internally consistent. The CSV templates are reused unchanged from the
+    // source device, so when they are encrypted (.en) the freshly generated
+    // SB_MAPS -- written in plaintext by add_layout.py -- must be encrypted to
+    // match. VPR selects CRR encrypted-vs-plaintext decoding solely off the
+    // '.en' suffix of --sb_maps; a plaintext --sb_maps would make VPR read the
+    // encrypted 'switchbox_*.csv.en' templates as plaintext and fail with
+    // "Required switch template file not found". Encrypting the generated
+    // SB_MAPS lets VPR decrypt SB_MAPS + CSV in-memory (keyed off the .en
+    // suffix + --crypt_key_db). Pin-table data is unrelated to CRR routing-graph
+    // encryption and is intentionally left untouched.
+    {
+      std::filesystem::path sb_templates_dir =
+          QLDeviceManager::getInstance()->deviceSBTemplatesDir();
+      bool csv_templates_encrypted = false;
+      std::error_code ec_csv;
+      if (!sb_templates_dir.empty() &&
+          std::filesystem::is_directory(sb_templates_dir, ec_csv)) {
+        for (const auto& entry :
+             std::filesystem::directory_iterator(sb_templates_dir, ec_csv)) {
+          if (entry.is_regular_file(ec_csv) &&
+              entry.path().extension() == ".en") {
+            csv_templates_encrypted = true;
+            break;
+          }
+        }
+      }
+      // Only encrypt when a generated SB_MAPS actually exists. Some paths (e.g.
+      // the auto-layout "design fits the base layout" case) may not produce a
+      // generated SB_MAPS; encrypting a missing file would hard-fail here. A
+      // missing SB_MAPS is handled (and reported) by the downstream stages.
+      if (csv_templates_encrypted &&
+          FileUtils::FileExists(generated_sb_maps_yml_path)) {
+        std::vector<std::filesystem::path> sbmaps_to_encrypt;
+        sbmaps_to_encrypt.push_back(generated_sb_maps_yml_path);
+        if (!encryptDeviceFiles(
+                sbmaps_to_encrypt,
+                QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
+          return false;
+        }
+        // Drop the plaintext generated SB_MAPS; downstream stages use the
+        // encrypted variant so VPR decrypts it (and the CSV templates) in-memory.
+        FileUtils::removeFile(generated_sb_maps_yml_path);
+        m_autoLayoutGeneratedSBMapsYMLPath = generated_sb_maps_yml_path;
+        m_autoLayoutGeneratedSBMapsYMLPath += ".en";
+      }
+    }
 
 
     // re-run packing with the generated vpr xml now.
@@ -3306,12 +3519,19 @@ bool CompilerOpenFPGA_ql::Packing() {
     // - replace the layout name
     std::string command_rerun = command->string();
 
-    // ensure that 'FPGA_AUTO' replacement is done first!!
+    // Replace ONLY the '--device <layout>' token, not every occurrence of the
+    // layout name. The command also embeds device-data PATHS such as
+    // '.../TURNKEY-FPGA_AUTO/.../vpr.xml' and the sdc/net file paths, which must
+    // keep pointing at the original device directory. A blunt ReplaceAll on the
+    // bare layout name rewrote those paths to a non-existent
+    // 'TURNKEY-AUTOFPGA<w><h>' directory (in plaintext mode the arch path is the
+    // on-disk device file), so the architecture-file swap below could no longer
+    // match old_m_architectureFile and VPR failed to open the arch file.
     if(m_autoLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+      command_rerun = ReplaceAll(command_rerun, "--device FPGA_AUTO", "--device " + m_autoLayoutGeneratedLayoutName);
     }
     if(m_customLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+      command_rerun = ReplaceAll(command_rerun, "--device FPGA_CUSTOM", "--device " + m_autoLayoutGeneratedLayoutName);
     }
     command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
     // generator devices (AUTO/CUSTOM) may not ship a static SB_MAPS.yml, so the
@@ -3438,12 +3658,22 @@ bool CompilerOpenFPGA_ql::Packing() {
       // SB_TEMPLATES dir is copied parallel to the vpr.xml.en (this is probably not required at all!, as it will remain same as current device.)
       std::filesystem::path target_device_sb_maps_yml_filepath =
           target_device_copy_dirpath / "aurora" / "SB_MAPS.yml";
+      // The generated SB_MAPS may have been encrypted (.en) to stay consistent
+      // with the device's encrypted CSV switchbox templates. Preserve that
+      // suffix on the copy so the regenerated device's SB_MAPS file name matches
+      // its (encrypted) content; deviceSBMAPSFile() resolves the '.en' variant
+      // and VPR keys CRR decryption off that suffix. Without this the cached
+      // device would carry encrypted bytes under a plaintext '.yml' name and
+      // fail to decrypt on reuse.
+      if(m_autoLayoutGeneratedSBMapsYMLPath.extension() == ".en") {
+        target_device_sb_maps_yml_filepath += ".en";
+      }
       FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
       // 4 cryptdb: replace FPGA_AUTO with the generated layout name
-      std::filesystem::path source_device_cryptdb_filepath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString());
+      std::filesystem::path source_device_cryptdb_filepath =
+          (QLDeviceManager::getInstance()->deviceTypeDirPath()) /
+          (QLDeviceManager::getInstance()->convertToDeviceTypeString() + "_Supp.db");
       std::string source_device_cryptdb_filename = 
           source_device_cryptdb_filepath.filename().string();
 
@@ -3939,22 +4169,22 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
-   std::filesystem::path pinmapping2pcf_script_path =
+   std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /
     std::filesystem::path("scripts") /
-    std::filesystem::path("pinmapping2pcf.py");
+    std::filesystem::path("place2pcf.py");
 
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
   if (pinTableFile.empty()){
-      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the pinmapping2pcf.py. Skipping pinmapping2pcf.py.\n");
+      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the place2pcf.py. Skipping place2pcf.py.\n");
       return true;
   }
 
   std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.place");
 
-  std::filesystem::path output_pcf_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_PinMapping.pcf");
+  std::filesystem::path output_pcf_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place2pcf.pcf");
 
   #ifdef _WIN32
     std::filesystem::path python_exec{"python.exe"};
@@ -3963,28 +4193,30 @@ bool CompilerOpenFPGA_ql::Placement() {
   #endif // _WIN32
 
   if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-  #ifdef USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  #ifdef USE_IPGENERATOR_PYTHON_FOR_PLACE2PCF
     // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
     pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
-  #else // USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  #else // USE_IPGENERATOR_PYTHON_FOR_PLACE2PCF
     ErrorMessage("System " + python_exec.string() +
                 " is not found, Please install " + python_exec.string() + " and make sure it's in the PATH variable."
-                " PinMapping2PCF Generation Failed!");
+                " Place2PCF Generation Failed!");
     return false;
-  #endif // USE_IPGENERATOR_PYTHON_FOR_PINMAPPING2PCF
+  #endif // USE_IPGENERATOR_PYTHON_FOR_PLACE2PCF
   
   }
   
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
   if(filepath_fpga_io_map_xml.empty()) {
-    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the pinmapping2pcf.py. Skipping pinmapping2pcf.py.");
+    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the place2pcf.py. Skipping place2pcf.py.");
     return true;
   }
   
-  const std::string pinmapping2pcf_command = python_exec.string();
+  std::filesystem::path clocksFile  = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + ".clocks");
+
+  const std::string place2pcf_command = python_exec.string();
   std::vector<std::string> args;
-  args.push_back(pinmapping2pcf_script_path.string());
+  args.push_back(place2pcf_script_path.string());
   args.push_back("--fpga_io_map");
   args.push_back(filepath_fpga_io_map_xml.string());
   if(fs::exists(pinTableFile)) {
@@ -3993,14 +4225,19 @@ bool CompilerOpenFPGA_ql::Placement() {
   }          
   args.push_back("--pcf_file");
   args.push_back(output_pcf_path.string());        
-   args.push_back("--place_file");
-  args.push_back(place_file_path.string());       
+  args.push_back("--place_file");
+  args.push_back(place_file_path.string());  
+  
+  if (fs::exists(clocksFile.string())) {
+    args.push_back("--clocks_file");
+    args.push_back(clocksFile.string());
+  }
 
-  int pinmapping2pcf_status = FileUtils::ExecuteSystemCommand(pinmapping2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
+  int place2pcf_status = FileUtils::ExecuteSystemCommand(place2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
 
-  if (pinmapping2pcf_status == 1) { //Failure
+  if (place2pcf_status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
-                " PinMapping2PCF Failed!");
+                " Place2PCF Failed!");
     return false;
   }
   return true;
@@ -4632,7 +4869,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
         std::filesystem::is_regular_file(sdfFileName) &&
         std::filesystem::is_regular_file(sdcFileName)) {
       taCommand = BaseStaCommand();
-      taCommand->appendFile(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
+      taCommand->appendPath(BaseStaScript(libFileName, netlistFileName, sdfFileName, sdcFileName));
       
       FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
     } else {
@@ -5398,16 +5635,38 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   if (QLSettingsManager::getStringValue("power", "power_outputs", "debug") != "checked" ) {
     tmp_xlsx_filepath.remove();
   }
+  // The power-calculator prints its diagnostics (ERROR:/WARNING: lines) to
+  // stderr, which ExecuteAndMonitorSystemCommand tees into power_analysis.rpt.
+  // On a non-OK status, extract those lines so the specific reason is surfaced
+  // to the user instead of only a generic message.
+  auto powerCalculatorDiagnostics = [&]() -> std::string {
+    std::ifstream rpt(power_analysis_rpt_filepath);
+    std::string line, detail;
+    while (std::getline(rpt, line)) {
+      if (line.rfind("ERROR:", 0) == 0 || line.rfind("WARNING:", 0) == 0) {
+        if (!detail.empty()) detail += "; ";
+        detail += line;
+      }
+    }
+    return detail;
+  };
+
   if (status == 0) {
     Message("Design " + ProjManager()->projectName() + " is power analysed");
     return true;
   } else if (status == 1) {
-    Message("Design " + ProjManager()->projectName() + " power analysis is skipped");
+    const std::string detail = powerCalculatorDiagnostics();
+    Message("Design " + ProjManager()->projectName() +
+            " power analysis is skipped" +
+            (detail.empty() ? "" : (": " + detail)));
     return true;
   } else {
-    ErrorMessage("Design " + ProjManager()->projectName() + " power analysed fail");
+    const std::string detail = powerCalculatorDiagnostics();
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " power analysed fail" +
+                 (detail.empty() ? "" : (": " + detail)));
     return false;
-  } 
+  }
 #endif // LEGACY_POWER_CALCULATOR
 }
 
@@ -5681,18 +5940,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path vpr_xml_en_path = m_architectureFile;
     m_architectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device_target)).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target));
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5713,18 +5963,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path openfpga_xml_en_path = m_OpenFpgaArchitectureFile;
     m_OpenFpgaArchitectureFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(openfpga_xml_en_path, m_OpenFpgaArchitectureFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(openfpga_xml_en_path, m_OpenFpgaArchitectureFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5745,18 +5986,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path bitstream_annotation_xml_en_path = m_OpenFpgaBitstreamSettingFile;
     m_OpenFpgaBitstreamSettingFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(bitstream_annotation_xml_en_path, m_OpenFpgaBitstreamSettingFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(bitstream_annotation_xml_en_path, m_OpenFpgaBitstreamSettingFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5777,18 +6009,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       std::filesystem::path repack_design_contraint_xml_en_path = m_OpenFpgaRepackConstraintsFile;
       m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
 
-      m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-        Message("load cryptdb failed!");
-        // empty string returned on error.
-        return std::string("");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile)) {
-        ErrorMessage("decryption failed!");
+      if (!decryptDeviceFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
         return std::string("");
       }
@@ -5810,18 +6033,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     std::filesystem::path fixed_sim_openfpga_xml_en_path = m_OpenFpgaSimSettingFile;
     m_OpenFpgaSimSettingFile = GenerateTempFilePath();
 
-    m_cryptdbPath = 
-        CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                           QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-    if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-      Message("load cryptdb failed!");
-      // empty string returned on error.
-      return std::string("");
-    }
-
-    if (!CRFileCryptProc::getInstance()->decryptFile(fixed_sim_openfpga_xml_en_path, m_OpenFpgaSimSettingFile)) {
-      ErrorMessage("decryption failed!");
+    if (!decryptDeviceFile(fixed_sim_openfpga_xml_en_path, m_OpenFpgaSimSettingFile,
+                           QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                           QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
       // empty string returned on error.
       return std::string("");
     }
@@ -5839,18 +6053,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       std::filesystem::path fabric_key_xml_en_path = m_OpenFpgaFabricKeyFile;
       m_OpenFpgaFabricKeyFile = GenerateTempFilePath();
 
-      m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-        Message("load cryptdb failed!");
-        // empty string returned on error.
-        return std::string("");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(fabric_key_xml_en_path, m_OpenFpgaFabricKeyFile)) {
-        ErrorMessage("decryption failed!");
+      if (!decryptDeviceFile(fabric_key_xml_en_path, m_OpenFpgaFabricKeyFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
         return std::string("");
       }
@@ -5869,18 +6074,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       std::filesystem::path bitstream_remapping_xml_en_path = m_OpenFpgaBitstreamRemappingFile;
       m_OpenFpgaBitstreamRemappingFile = GenerateTempFilePath();
 
-      m_cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath()).string(),
-                                                            QLDeviceManager::getInstance()->convertToDeviceTypeString());
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(m_cryptdbPath.string())) {
-        Message("load cryptdb failed!");
-        // empty string returned on error.
-        return std::string("");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile)) {
-        ErrorMessage("decryption failed!");
+      if (!decryptDeviceFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
         return std::string("");
       }
@@ -6186,6 +6382,31 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     ErrorMessage(std::string(__func__) + std::string("(): Design needs to be *atleast* in routed state"));
     return false;
   }
+  // `bitstream encode` (Tcl verb): run the secure post-process over an EXISTING
+  // fabric_bitstream.bit only -- do NOT re-run OpenFPGA, and bypass the
+  // bitstream_generation gate below (REQUIREMENTS.md §4.2, OQ-1).
+  if (BitstreamEncode()) {
+    const std::filesystem::path fabricBit =
+        std::filesystem::path(ProjManager()->projectPath()) /
+        "fabric_bitstream.bit";
+    if (!FileUtils::FileExists(fabricBit)) {
+      ErrorMessage(
+          "bitstream encode: fabric_bitstream.bit not found. Run 'bitstream' "
+          "first to generate it.");
+      ResetBitstreamEncode();
+      return false;
+    }
+    const uint32_t stages = ResolveBitstreamEncodeStages();
+    if (stages != 0) {
+      (void)RunBitstreamEncode(stages);
+    } else {
+      Message("bitstream encode: no stages enabled; nothing to do.");
+    }
+    ResetBitstreamEncode();
+    m_state = State::BistreamGenerated;
+    return true;
+  }
+
   Message("##################################################");
   Message("Bitstream generation for design \"" + ProjManager()->projectName() +
           "\" on device \"" + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() + "\"");
@@ -6410,10 +6631,216 @@ int status = ExecuteAndMonitorSystemCommand(command);
                  " bitstream generation failed");
     return false;
   }
+  // Secure bitstream post-process (REQUIREMENTS.md §4): checksum -> ASCON -> BCH.
+  // Runs only if a stage is enabled via the settings JSON or forced via the
+  // `bitstream encode` Tcl verb. A post-process failure is logged but does NOT
+  // fail bitstream generation, since the plain fabric_bitstream.bit is valid
+  // (§4.5). The encode request state is cleared so it does not leak to the next
+  // bitstream run.
+  const uint32_t encodeStages = ResolveBitstreamEncodeStages();
+  if (encodeStages != 0) {
+    (void)RunBitstreamEncode(encodeStages);
+  }
+  ResetBitstreamEncode();
+
   m_state = State::BistreamGenerated;
 
   Message("Design " + ProjManager()->projectName() + " bitstream is generated.\n");
   
+  return true;
+}
+
+uint32_t CompilerOpenFPGA_ql::ResolveBitstreamEncodeStages() const {
+  // Device-capability gate: for checkbox settings, getStringValue() returns ""
+  // when the key is absent from the project JSON (which is a copy of the device
+  // settings_template.json), and "checked"/"unchecked" when it is present.
+  // If none of the three encoding keys exist in the project settings, the
+  // device's template does not declare encryption support — block all encoding
+  // paths, including the explicit `bitstream encode` Tcl verb.
+  auto keyPresent = [](const char* key) {
+    return !QLSettingsManager::getStringValue("openfpga", "general", key)
+                .empty();
+  };
+  if (!keyPresent("checksum_encoding") && !keyPresent("ascon_encoding") &&
+      !keyPresent("bch_encoding")) {
+    if (BitstreamEncode()) {
+      Message(
+          "bitstream encode: device settings do not include encryption keys; "
+          "secure encoding is not supported for this device.");
+    }
+    return 0;
+  }
+
+  auto checked = [](const char* key) {
+    return QLSettingsManager::getStringValue("openfpga", "general", key) ==
+           std::string("checked");
+  };
+  uint32_t jsonStages = 0;
+  if (checked("checksum_encoding"))
+    jsonStages |=
+        static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Checksum);
+  if (checked("ascon_encoding"))
+    jsonStages |= static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Ascon);
+  if (checked("bch_encoding"))
+    jsonStages |= static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Bch);
+
+  if (BitstreamEncode()) {
+    // `bitstream encode <stage>...` forces exactly the named stages; bare
+    // `bitstream encode` honours the JSON toggles (REQUIREMENTS.md §4.2).
+    const uint32_t forced = BitstreamEncodeStages();
+    return forced != 0 ? forced : jsonStages;
+  }
+  // Plain `bitstream`: the bitstream_generation gate was already checked.
+  return jsonStages;
+}
+
+bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
+  const std::filesystem::path projectPath(ProjManager()->projectPath());
+  const std::string projectName = ProjManager()->projectName();
+
+  // Vendored encoder, resolved via the same scripts root as other utilities.
+  const std::filesystem::path script =
+      GetSession()->Context()->DataPath() / std::filesystem::path("..") /
+      std::filesystem::path("scripts") / std::filesystem::path("bitstream") /
+      std::filesystem::path("aurora_bitstream_encode.py");
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else   // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif  // _WIN32
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " not found; skipping secure bitstream post-process.");
+    return false;
+  }
+
+  const std::filesystem::path inp = projectPath / "fabric_bitstream.bit";
+  const std::filesystem::path out =
+      projectPath / (projectName + "_fabric_bitstream.bch");
+  const std::filesystem::path encFile =
+      projectPath / (projectName + "_fabric_bitstream.ascon");
+  const std::filesystem::path tagFile =
+      projectPath / (projectName + "_fabric_bitstream.tag");
+  // The distribution XML filename defaults to "bitstream_distribution.xml" but
+  // a user-supplied value in settings supersedes it. An absolute path is used
+  // as-is; a bare filename is resolved against the project output dir (and the
+  // device data copy in the fallback below).
+  const std::string xmlSetting = QLSettingsManager::getStringValue(
+      "openfpga", "general", "bitstream_distribution_xml");
+  const std::string xmlName = xmlSetting.empty()
+                                  ? std::string("bitstream_distribution.xml")
+                                  : xmlSetting;
+  std::filesystem::path xml = std::filesystem::path(xmlName).is_absolute()
+                                  ? std::filesystem::path(xmlName)
+                                  : projectPath / xmlName;
+  const std::filesystem::path log =
+      projectPath / (projectName + "_bitstream_encode.log");
+
+  const bool doChecksum =
+      stages & static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Checksum);
+  const bool doAscon =
+      stages & static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Ascon);
+  const bool doBch =
+      stages & static_cast<uint32_t>(Compiler::BitstreamEncodeStage::Bch);
+
+  // If checksum is requested but the distribution XML is not in the project
+  // output directory, fall back to the device data copy. Without this file the
+  // Python encoder silently skips the checksum stage, producing a BCH without
+  // checksum rows that will fail hardware programming.
+  if (doChecksum && !std::filesystem::exists(xml)) {
+    const QLDeviceTarget device_target =
+        QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+    const std::filesystem::path deviceXml =
+        QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
+        std::filesystem::path(xmlName).filename();
+    if (std::filesystem::exists(deviceXml)) {
+      Message("bitstream encode: " +
+              std::filesystem::path(xmlName).filename().string() +
+              " not in project dir; using device data copy.");
+      xml = deviceXml;
+    }
+  }
+
+  std::string stageNames;
+  if (doChecksum) stageNames += " checksum";
+  if (doAscon)    stageNames += " ascon";
+  if (doBch)      stageNames += " bch";
+
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(script.string());
+  args.push_back("--inp");
+  args.push_back(inp.string());
+  args.push_back("--out");
+  args.push_back(out.string());
+  if (doAscon) {
+    args.push_back("--enc");
+    args.push_back(encFile.string());
+    // Tag is an internal artifact (not exposed in GUI) used for software
+    // decode and roundtrip verification. Written alongside .bch and .ascon.
+    args.push_back("--tag");
+    args.push_back(tagFile.string());
+  }
+  if (doChecksum) {
+    args.push_back("--xml");
+    args.push_back(xml.string());
+  }
+  args.push_back("--log");
+  args.push_back(log.string());
+  if (doChecksum) args.push_back("--checksum");
+  if (doAscon)    args.push_back("--ascon");
+  if (doBch)      args.push_back("--bch");
+
+  // Advanced knobs default to driver values when the settings are absent.
+  const std::string padbits = QLSettingsManager::getStringValue(
+      "openfpga", "general", "bch_input_padbits");
+  if (!padbits.empty()) {
+    args.push_back("--input_padbits");
+    args.push_back(padbits);
+  }
+  const std::string just =
+      QLSettingsManager::getStringValue("openfpga", "general", "bch_input_just");
+  if (!just.empty()) {
+    args.push_back("--input_just");
+    args.push_back(just);
+  }
+
+  // Production key injection: when a device settings_template.json provides
+  // key file paths the encoder uses them; otherwise it falls back to the
+  // vendored non-secret sample keys (scripts/bitstream/sample_keys/).
+  if (doAscon) {
+    const std::string asconKey =
+        QLSettingsManager::getStringValue("openfpga", "general", "ascon_key_file");
+    if (!asconKey.empty()) {
+      args.push_back("--ascon_key");
+      args.push_back(asconKey);
+    }
+    const std::string asconNonce =
+        QLSettingsManager::getStringValue("openfpga", "general", "ascon_nonce_file");
+    if (!asconNonce.empty()) {
+      args.push_back("--ascon_nonce");
+      args.push_back(asconNonce);
+    }
+    const std::string asconAd =
+        QLSettingsManager::getStringValue("openfpga", "general", "ascon_ad_file");
+    if (!asconAd.empty()) {
+      args.push_back("--ascon_ad");
+      args.push_back(asconAd);
+    }
+  }
+
+  Message("Secure bitstream post-process [" + stageNames.substr(1) + "]: " +
+          command + " " + script.string());
+  const int status =
+      FileUtils::ExecuteSystemCommand(command, args, m_out, -1).realCode;
+  if (status != 0) {
+    // Non-fatal: the plain fabric_bitstream.bit is still valid (§4.5).
+    ErrorMessage("Secure bitstream post-process failed (see " + log.string() +
+                 "). The plain fabric_bitstream.bit is unaffected.");
+    return false;
+  }
+  Message("Secure bitstream written: " + out.string());
   return true;
 }
 
@@ -6734,20 +7161,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   //m_blifParser.printHierachy(); // debug
   
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
-  if (pinTableFile.empty()) 
-      Message(std::string(__func__) + ": pin table csv not found, cannot pass it to the generate_floorplanning.");
 
   std::filesystem::path filepath_fpga_io_map_xml;
   filepath_fpga_io_map_xml = QLDeviceManager::getInstance()->deviceOpenFPGAIOMapFile();
-  if(filepath_fpga_io_map_xml.empty()) {
-    Message(std::string(__func__) + ": fpga io map xml not found, cannot pass it to the generate_floorplanning.");
-  }
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
-  if (!fs::exists(floor_planning_constraint_filepath) && !fs::exists(pinTableFile)){
-    Message("qdc Constraint File and Pin Table File Does Not Exist. Skipping the generate_floorplanning Script.\n");
-    return true;
-  }
+
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
@@ -6914,7 +7333,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
   else if (status == 2){ //Skipped
-    Message("All of the atoms on the QDC have been overwritten by PCF file; Thus, no partition has been created!");
+    Message("IO Floor Plan Generation Skipped!");
     return true;
   }
   else { //Success
@@ -7167,6 +7586,87 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOuts
 
     // return the temp file path we obtained
     return temp_file_path;
+}
+
+
+bool CompilerOpenFPGA_ql::decryptDeviceFile(
+    const std::filesystem::path& src_en,
+    const std::filesystem::path& dst_plain,
+    const std::filesystem::path& deviceTypeDir,
+    const std::string& deviceTypeString) {
+  const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
+  m_cryptdbPath = cryptdb;
+
+  if (!FileUtils::FileExists(cryptdb)) {
+    ErrorMessage(std::string("cannot find key database for decryption: ") + cryptdb.string());
+    return false;
+  }
+  if (!FileUtils::FileExists(src_en)) {
+    ErrorMessage(std::string("cannot find encrypted device file: ") + src_en.string());
+    return false;
+  }
+
+  qlcrypt::KeyDB keys;
+  if (auto s = qlcrypt::KeyDB::load(cryptdb.string(), keys); !qlcrypt::ok(s)) {
+    ErrorMessage(std::string("load cryptdb failed: ") + cryptdb.string() +
+                 " -> " + std::string(qlcrypt::toString(s)));
+    return false;
+  }
+
+  qlcrypt::FileCrypt fc(keys);
+  std::string plaintext;
+  if (auto s = fc.decryptFile(src_en.string(), plaintext); !qlcrypt::ok(s)) {
+    ErrorMessage(std::string("decryption failed: ") + src_en.string() +
+                 " -> " + std::string(qlcrypt::toString(s)));
+    return false;
+  }
+
+  std::ofstream out(dst_plain, std::ios::binary);
+  if (!out) {
+    ErrorMessage(std::string("cannot write decrypted output: ") + dst_plain.string());
+    return false;
+  }
+  out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
+  return out.good();
+}
+
+
+bool CompilerOpenFPGA_ql::encryptDeviceFiles(
+    const std::vector<std::filesystem::path>& paths,
+    const std::filesystem::path& deviceTypeDir,
+    const std::string& deviceTypeString) {
+  const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
+  m_cryptdbPath = cryptdb;
+
+  qlcrypt::KeyDB keys;
+  std::error_code ec;
+  if (std::filesystem::exists(cryptdb, ec)) {
+    if (auto s = qlcrypt::KeyDB::load(cryptdb.string(), keys); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("load cryptdb failed: ") + cryptdb.string() +
+                   " -> " + std::string(qlcrypt::toString(s)));
+      return false;
+    }
+  } else {
+    if (auto s = qlcrypt::KeyDB::create(keys, deviceTypeString); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("keygen failed: ") + std::string(qlcrypt::toString(s)));
+      return false;
+    }
+    if (auto s = keys.save(cryptdb.string()); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("cryptdb save failed: ") + std::string(qlcrypt::toString(s)));
+      return false;
+    }
+  }
+
+  qlcrypt::FileCrypt fc(keys);
+  for (const auto& src : paths) {
+    const std::string outPath = src.string() + ".en";
+    if (auto s = fc.encryptFile(src.string(), outPath); !qlcrypt::ok(s)) {
+      ErrorMessage(std::string("encrypt failed: ") + src.string() + " -> " +
+                   std::string(qlcrypt::toString(s)));
+      return false;
+    }
+  }
+  return true;
 }
 
 
@@ -8794,11 +9294,8 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
       std::string bram_type;
 
-      std::filesystem::path device_target_config_json_filepath = deviceConfigFilePath(current_device_target);
-
-      if(FileUtils::FileExists(device_target_config_json_filepath)) {
-          std::ifstream device_target_config_json_ifstream(device_target_config_json_filepath.string());
-          json device_target_config_json = json::parse(device_target_config_json_ifstream);
+      json device_target_config_json;
+      if(QLDeviceManager::getInstance()->loadDeviceConfigJSON(current_device_target, device_target_config_json)) {
           bram_type = device_target_config_json["BRAM_TYPE"].get<std::string>();
       }
       if(bram_type == "TDP" || bram_type == "TDP_ECC"){
@@ -9431,12 +9928,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    std::string(" ") + 
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
-
+  
+  #ifdef __linux__
   if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
     yosys_options += std::string(" -de") + 
-                   std::string(" ") + 
-                   QLSettingsManager::getStringValue("yosys", "general", "de");
+    std::string(" ") + 
+    QLSettingsManager::getStringValue("yosys", "general", "de");
   }
+  #endif
 
   // pass in the path to the device specific yosys libraries directly.
   std::string yosys_modules_dir_path_string = 
@@ -9609,7 +10108,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
-  //   command->appendFile("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
+  //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
   // }
   // else
   // {
@@ -9647,6 +10146,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
   }
 
   command->append("--skip_sync_clustering_and_routing_results on");
+  command->append("--analysis");
   command->append("--route");
 
   return command;
@@ -9750,14 +10250,32 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
   return !m_taskCompilationStateManager.isEmpty();
 }
 
-std::filesystem::path CompilerOpenFPGA_ql::deviceConfigFilePath(const QLDeviceTarget& device) const
-{
-  return QLDeviceManager::getInstance()->deviceTypeDirPath(device) / std::string("config.json");
+void CompilerOpenFPGA_ql::onQdcFileSaved() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
+  BaseVprCommand(); // we need this call in order to decrypt arch file and store it as m_architectureFile
+
+  // incr compilation itself didn't track qdc file, so we must re-generate xml
+  // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+  GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
+  invalidateTaskStatuses();
 }
 
-void CompilerOpenFPGA_ql::onQdcFileSaved() {
-  // incr compilation itself didn't track qdc file, so we must re-generate xml 
-  // in order to incr compilation refresh compile statuses accordingly each time we save qdc file
+void CompilerOpenFPGA_ql::onPcfFileSaved() {
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+
+  BaseVprCommand(); // decrypt arch file -> m_architectureFile
+
+  // incr compilation itself didn't track pcf file, so we must re-generate xml
+  // in order to incr compilation refresh compile statuses accordingly each time we save pcf file
   GenerateIOFloorPlanConstraints(/*forceOverwrite*/true);
   invalidateTaskStatuses();
 }
@@ -9950,16 +10468,11 @@ const std::filesystem::path& VprArchitectureFileProfider::get()
       m_architectureFile = m_compiler->GenerateTempFilePath(true);
       m_isFileTemporary = true;
 
-      std::filesystem::path cryptdbPath = 
-          CRFileCryptProc::getInstance()->getCryptDBFileName((QLDeviceManager::getInstance()->deviceTypeDirPath(device)).string(),
-                                                              QLDeviceManager::getInstance()->convertToDeviceTypeString(device));
-
-      if (!CRFileCryptProc::getInstance()->loadCryptKeyDB(cryptdbPath.string())) {
-        return error("load cryptdb failed!");
-      }
-
-      if (!CRFileCryptProc::getInstance()->decryptFile(vpr_xml_en_path, m_architectureFile)) {
-        return error("decryption failed!");
+      if (!m_compiler->decryptDeviceFile(
+              vpr_xml_en_path, m_architectureFile,
+              QLDeviceManager::getInstance()->deviceTypeDirPath(device),
+              QLDeviceManager::getInstance()->convertToDeviceTypeString(device))) {
+        return error(std::string("Failed to decrypt VPR architecture file: ") + vpr_xml_en_path.string());
       }
     }
   }  

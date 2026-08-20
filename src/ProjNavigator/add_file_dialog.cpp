@@ -1,6 +1,8 @@
 #include "add_file_dialog.h"
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
 #include <QDesktopWidget>
+#endif
 
 #include "Compiler/Compiler.h"
 #include "Compiler/CompilerDefines.h"

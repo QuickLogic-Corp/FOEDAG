@@ -9,10 +9,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-DGTEST_LANGUAGE_CXX20)
 
-find_package(Qt5 COMPONENTS Test REQUIRED)
-if (NOT Qt5Test_FOUND)
-    message(STATUS "Failed to find Qt5Test required (on debian/ubuntu try 'sudo apt install qt5-default')")
-endif()
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Test REQUIRED)
 
 if(MSVC)
   # Microsoft reports the value of __cplusplus wrong and gmock/gtest pulls in the
@@ -37,8 +34,9 @@ set (CPP_LIST
 #    PinAssignment/PinsBaseModel_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/PortsLoader_test.cpp
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
+    PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
-#    IPGenerator/IPGenerator_test.cpp // TODO @wOlek, fix crash
+    IPGenerator/IPGenerator_test.cpp
     FloorPlanning/FloorPlanning_test.cpp
     NewProject/source_grid_test.cpp
     Utils/sequential_map_test.cpp
@@ -48,9 +46,11 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
+    Compiler/TaskCompilationStateManager_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
+
 )
 
 if (USE_IPA)
@@ -60,6 +60,7 @@ if (USE_IPA)
     InteractivePathAnalysis/TelegramParser_test.cpp
     InteractivePathAnalysis/TelegramBuffer_test.cpp
     InteractivePathAnalysis/NCriticalPathModel_test.cpp
+    InteractivePathAnalysis/VprProcess_test.cpp
   )
 endif()
 
@@ -81,6 +82,6 @@ target_link_libraries(unittest PRIVATE
   newproject
   foedag
   foedagcore
-  Qt5::Test)
+  Qt6::Test)
 
 add_test(NAME unittest COMMAND unittest)

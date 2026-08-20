@@ -27,6 +27,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #include <QFile>
 #include <QProcess>
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -48,6 +50,212 @@ using Time = std::chrono::high_resolution_clock;
 using ms = std::chrono::milliseconds;
 
 std::string Constant::m_name;
+
+namespace {
+// Parse the entire string as a base-10 integer (optional sign, trailing
+// whitespace allowed). Returns true only if the whole string is consumed.
+bool parseFullInt(const std::string& s, long long& out) {
+  if (s.empty()) return false;
+  try {
+    size_t pos = 0;
+    out = std::stoll(s, &pos, 10);
+    while (pos < s.size() &&
+           std::isspace(static_cast<unsigned char>(s[pos]))) {
+      ++pos;
+    }
+    return pos == s.size();
+  } catch (...) {
+    return false;
+  }
+}
+
+// Parse the entire string as a floating point value (trailing whitespace
+// allowed). Returns true only if the whole string is consumed.
+bool parseFullDouble(const std::string& s, double& out) {
+  if (s.empty()) return false;
+  try {
+    size_t pos = 0;
+    out = std::stod(s, &pos);
+    while (pos < s.size() &&
+           std::isspace(static_cast<unsigned char>(s[pos]))) {
+      ++pos;
+    }
+    return pos == s.size();
+  } catch (...) {
+    return false;
+  }
+}
+
+// True if `s` is a recognized boolean literal (case-insensitive):
+// 0 / 1 / true / false.
+bool isBool(const std::string& s) {
+  const std::string v = StringUtils::toLower(s);
+  return v == "0" || v == "1" || v == "true" || v == "false";
+}
+
+// Interpret a boolean-ish string: true for "1" / "true" (case-insensitive),
+// false for anything else (including unrecognized values).
+bool toBool(const std::string& s) {
+  const std::string v = StringUtils::toLower(s);
+  return v == "1" || v == "true";
+}
+}  // namespace
+
+bool IPParameter::Validate(const std::string& value,
+                           std::string& errorMsg) const {
+  errorMsg.clear();
+
+  // An empty value means "fall back to the parameter default", which is assumed
+  // valid (the same way the GUI leaves an untouched field at its default).
+  if (value.empty()) return true;
+
+  // Mirror the GUI widget-selection precedence in
+  // IPDialogBox::CreateParamFields():
+  //   Bool -> FilePath -> options (combobox) -> range (validated input) -> input
+
+  // Bool: accept common boolean literals only.
+  if (m_paramType == ParamType::Bool) {
+    if (isBool(value)) return true;
+    errorMsg =
+        "'" + value + "' is not a valid boolean (expected 0/1/true/false)";
+    return false;
+  }
+
+  // FilePath: the GUI does not validate path contents, so neither do we.
+  if (m_paramType == ParamType::FilePath) return true;
+
+  // Enum (combobox): value must be one of the declared options.
+  if (!m_options.empty()) {
+    if (std::find(m_options.begin(), m_options.end(), value) !=
+        m_options.end()) {
+      return true;
+    }
+    std::string opts;
+    for (size_t i = 0; i < m_options.size(); ++i) {
+      opts += (i ? ", " : "") + m_options[i];
+    }
+    errorMsg = "'" + value +
+               "' is not a valid option (expected one of: " + opts + ")";
+    return false;
+  }
+
+  // Ranged numeric input: must be numeric AND within [min, max]. Range option
+  // only applies to Int/Float (matching the GUI, which ignores it otherwise).
+  if (m_range.size() == 2 &&
+      (m_paramType == ParamType::Int || m_paramType == ParamType::Float)) {
+    if (m_paramType == ParamType::Int) {
+      long long v{};
+      if (!parseFullInt(value, v)) {
+        errorMsg = "'" + value + "' is not a valid integer";
+        return false;
+      }
+      long long lo{}, hi{};
+      // If the catalog range metadata itself doesn't parse, skip the bounds
+      // check rather than rejecting the value over bad metadata.
+      if (parseFullInt(m_range[0], lo) && parseFullInt(m_range[1], hi) &&
+          (v < lo || v > hi)) {
+        errorMsg = "value " + value + " is out of range [" + m_range[0] + ", " +
+                   m_range[1] + "]";
+        return false;
+      }
+      return true;
+    }
+    double v{};
+    if (!parseFullDouble(value, v)) {
+      errorMsg = "'" + value + "' is not a valid number";
+      return false;
+    }
+    double lo{}, hi{};
+    if (parseFullDouble(m_range[0], lo) && parseFullDouble(m_range[1], hi) &&
+        (v < lo || v > hi)) {
+      errorMsg = "value " + value + " is out of range [" + m_range[0] + ", " +
+                 m_range[1] + "]";
+      return false;
+    }
+    return true;
+  }
+
+  // Plain input: numeric types must still parse; strings accept anything.
+  if (m_paramType == ParamType::Int) {
+    long long v{};
+    if (!parseFullInt(value, v)) {
+      errorMsg = "'" + value + "' is not a valid integer";
+      return false;
+    }
+  } else if (m_paramType == ParamType::Float) {
+    double v{};
+    if (!parseFullDouble(value, v)) {
+      errorMsg = "'" + value + "' is not a valid number";
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool IPParameter::IsActive(
+    const std::map<std::string, std::string>& paramValues) const {
+  // Statically disabled fields are never editable.
+  if (toBool(m_disable)) return false;
+
+  // A dependency-gated field is active only when ALL of its controlling boolean
+  // parameters are true. (The catalog "dependency" key lists those bools; e.g.
+  // field_with_dep depends on bool_for_dep.) A dependency missing from the map
+  // is treated as false.
+  for (const auto& depName : m_dependencies) {
+    auto it = paramValues.find(depName);
+    if (it == paramValues.end() || !toBool(it->second)) return false;
+  }
+  return true;
+}
+
+std::string IPParameter::ParamTypeStr() const {
+  switch (m_paramType) {
+    case ParamType::Int: return "int";
+    case ParamType::Float: return "float";
+    case ParamType::Bool: return "bool";
+    case ParamType::String: return "string";
+    case ParamType::FilePath: return "filepath";
+  }
+  return "string";
+}
+
+std::string IPParameter::ConstraintStr() const {
+  if (!m_options.empty()) {
+    std::string s = "choices: ";
+    for (size_t i = 0; i < m_options.size(); ++i) {
+      s += (i ? ", " : "") + m_options[i];
+    }
+    return s;
+  }
+  if (m_range.size() == 2) {
+    return "range: [" + m_range[0] + ", " + m_range[1] + "]";
+  }
+  return {};
+}
+
+std::string FOEDAG::DescribeIPParameters(const std::vector<Value*>& params) {
+  size_t nameW = 0;
+  const size_t typeW = 8;  // widest type name: "filepath"
+  for (auto* p : params) {
+    if (p->GetType() == Value::Type::ParamIpVal && p->Name().size() > nameW) {
+      nameW = p->Name().size();
+    }
+  }
+  std::string out;
+  for (auto* p : params) {
+    if (p->GetType() != Value::Type::ParamIpVal) continue;
+    auto* ip = static_cast<IPParameter*>(p);
+    const std::string type = ip->ParamTypeStr();
+    if (!out.empty()) out += "\n";
+    out += "  " + ip->Name() + std::string(nameW - ip->Name().size(), ' ') +
+           "  " + type + std::string(typeW - type.size(), ' ') +
+           "  (default: " + ip->GetSValue() + ")";
+    const std::string constraint = ip->ConstraintStr();
+    if (!constraint.empty()) out += "  " + constraint;
+  }
+  return out;
+}
 
 bool IPCatalog::addIP(IPDefinition* def) {
   if (m_definitionMap.find(def->Name()) == m_definitionMap.end()) {

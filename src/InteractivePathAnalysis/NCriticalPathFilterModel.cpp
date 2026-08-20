@@ -33,13 +33,20 @@ namespace FOEDAG {
 bool NCriticalPathFilterModel::setFilterCriteria(
     const FilterCriteriaConf& inputCriteriaConf,
     const FilterCriteriaConf& outputCriteriaConf) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+  beginFilterChange();
+#endif
   bool isInputCriteriaChanged = m_inputCriteriaConf.set(inputCriteriaConf);
   bool isOutoutCriteriaChanged = m_outputCriteriaConf.set(outputCriteriaConf);
-
   bool isChanged = isInputCriteriaChanged || isOutoutCriteriaChanged;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+  endFilterChange();
+#else
   if (isChanged) {
     invalidateFilter();
   }
+#endif
+
   return isChanged;
 }
 

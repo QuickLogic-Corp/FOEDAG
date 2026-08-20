@@ -9,6 +9,7 @@
 #endif
 
 #include <iostream>
+#include <sstream>
 
 namespace FOEDAG {
 

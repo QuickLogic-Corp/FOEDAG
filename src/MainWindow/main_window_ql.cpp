@@ -169,14 +169,21 @@ MainWindow::MainWindow(Session* session)
   // Initially, main window should be maximized.
   showMaximized();
 #endif
-  QDesktopWidget dw;
   // support multiple screens correctly.
   // show() required before windowHandle() is valid!
   show();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  auto *screen = QGuiApplication::screenAt(QCursor::pos());
+  if (!screen) screen = QGuiApplication::primaryScreen();
+  windowHandle()->setScreen(screen);
+  QRect desk_rect = screen->geometry();
+#else
+  QDesktopWidget dw;
   // set the screen to be displayed according to the mouse cursor position right now
   windowHandle()->setScreen(QGuiApplication::screenAt(QCursor::pos()));
   // set the geometry so that we are approximately 2/3 of the screen size
   QRect desk_rect = dw.screenGeometry(dw.screenNumber(QCursor::pos()));
+#endif
   setGeometry(desk_rect.width() / 6, desk_rect.height() / 6, desk_rect.width() * 2 / 3,
               desk_rect.height() * 2 / 3);
   // move ourself so that we are centered
@@ -1641,7 +1648,11 @@ QObject::connect(m_EULADialogNextButton, &QPushButton::released,
         license_accepted_file_stream << "Aurora End User License Agreement";
         license_accepted_file_stream << "\n----------------------------------------\n\n";
         license_accepted_file_stream << "Licenses Accepted on: "
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+                                     << QLocale::system().toString(local, QLocale::LongFormat).toStdString()
+#else
                                      << local.toString(Qt::SystemLocaleLongDate).toStdString()
+#endif
                                      << "\n\n";
         license_accepted_file_stream << licenseAcceptedFileContent;
     }
@@ -2003,6 +2014,10 @@ bool MainWindow::saveActionTriggered() {
   if (saveConstraintFile()) {
     QtUtils::AppendToEventQueue([this]() { m_blockRefereshEn = false; });
     pinPlannerSaved();
+    if (auto* compiler_ql = dynamic_cast<CompilerOpenFPGA_ql*>(m_compiler)) {
+      compiler_ql->onPcfFileSaved();
+      updateSourceTree();
+    }
     return true;
   } else {
     m_blockRefereshEn = false;

@@ -131,7 +131,12 @@ void NCriticalPathView::setupModels() {
 void NCriticalPathView::clear() { m_sourceModel->clear(); }
 
 void NCriticalPathView::mousePressEvent(QMouseEvent* event) {
-  QModelIndex index = indexAt(event->pos());
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  const QPoint eventPos = event->position().toPoint();
+#else
+  const QPoint eventPos = event->pos();
+#endif
+  QModelIndex index = indexAt(eventPos);
   if (index.isValid()) {
     if (event->button() == Qt::RightButton) {
       if (isExpanded(index)) {

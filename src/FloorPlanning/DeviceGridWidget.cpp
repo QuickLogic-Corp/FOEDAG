@@ -250,8 +250,12 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 {
     setFocus(); // needed for keyPressEvent
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QPointF mousePos = event->position();
+#else
     const QPointF mousePos = QPointF(event->pos());
-    
+#endif
+
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
@@ -276,7 +280,11 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
 }
 
 void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QPointF mousePos = event->position();
+#else
     QPointF mousePos = QPointF(event->pos());
+#endif
 
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
@@ -314,7 +322,11 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
 {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const QPointF mousePos = event->position();
+#else
     const QPointF mousePos = QPointF(event->pos());
+#endif
 
     const QPointF worldCoord = screenToWorldCoord(mousePos);
 

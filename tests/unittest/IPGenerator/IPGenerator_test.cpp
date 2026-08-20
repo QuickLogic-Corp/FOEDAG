@@ -21,6 +21,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IPGenerate/IPGenerator.h"
 
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "Compiler/Compiler.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/tcl_command_integration.h"
@@ -147,6 +151,145 @@ TEST(IPGenerate, CheckAllIPPath) {
   EXPECT_EQ(ipGen->GetTmpPath(), "run_1/IPs/.tmp");
 
   EXPECT_EQ(ipGen->GetProjectIPsPath(), "run_1/IPs");
+}
+
+TEST(IPParameterValidate, IntRange) {
+  IPParameter p("Width", "Width", "8", IPParameter::ParamType::Int);
+  p.SetRange({"1", "16"});
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("8", err)) << err;
+  EXPECT_TRUE(p.Validate("1", err)) << err;   // inclusive lower bound
+  EXPECT_TRUE(p.Validate("16", err)) << err;  // inclusive upper bound
+  EXPECT_TRUE(p.Validate("", err)) << err;    // empty -> default
+
+  EXPECT_FALSE(p.Validate("0", err));
+  EXPECT_FALSE(p.Validate("17", err));
+  EXPECT_FALSE(p.Validate("abc", err));
+  EXPECT_FALSE(p.Validate("8.5", err));  // not an integer
+}
+
+TEST(IPParameterValidate, FloatRange) {
+  IPParameter p("Freq", "Freq", "1.0", IPParameter::ParamType::Float);
+  p.SetRange({"0.5", "2.5"});
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("1.5", err)) << err;
+  EXPECT_TRUE(p.Validate("0.5", err)) << err;
+  EXPECT_TRUE(p.Validate("2.5", err)) << err;
+
+  EXPECT_FALSE(p.Validate("0.4", err));
+  EXPECT_FALSE(p.Validate("2.6", err));
+  EXPECT_FALSE(p.Validate("notanumber", err));
+}
+
+TEST(IPParameterValidate, Bool) {
+  IPParameter p("Enable", "Enable", "0", IPParameter::ParamType::Bool);
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("0", err)) << err;
+  EXPECT_TRUE(p.Validate("1", err)) << err;
+  EXPECT_TRUE(p.Validate("true", err)) << err;
+  EXPECT_TRUE(p.Validate("False", err)) << err;  // case-insensitive
+
+  EXPECT_FALSE(p.Validate("2", err));
+  EXPECT_FALSE(p.Validate("yes", err));
+}
+
+TEST(IPParameterValidate, Options) {
+  IPParameter p("Mode", "Mode", "fast", IPParameter::ParamType::String);
+  p.SetOptions({"fast", "slow", "auto"});
+  std::string err;
+
+  EXPECT_TRUE(p.Validate("fast", err)) << err;
+  EXPECT_TRUE(p.Validate("auto", err)) << err;
+
+  EXPECT_FALSE(p.Validate("turbo", err));
+  EXPECT_FALSE(p.Validate("FAST", err));  // options are case-sensitive
+}
+
+TEST(IPParameterValidate, PlainTypes) {
+  std::string err;
+
+  // Int without a range still must be numeric.
+  IPParameter i("Count", "Count", "0", IPParameter::ParamType::Int);
+  EXPECT_TRUE(i.Validate("42", err)) << err;
+  EXPECT_TRUE(i.Validate("-7", err)) << err;
+  EXPECT_FALSE(i.Validate("x", err));
+
+  // String accepts anything.
+  IPParameter s("Label", "Label", "", IPParameter::ParamType::String);
+  EXPECT_TRUE(s.Validate("anything goes", err)) << err;
+
+  // FilePath content is not validated (mirrors the GUI).
+  IPParameter f("File", "File", "", IPParameter::ParamType::FilePath);
+  EXPECT_TRUE(f.Validate("/no/such/path", err)) << err;
+}
+
+TEST(IPParameterValidate, DependencyGating) {
+  // field_with_dep depends on the boolean bool_for_dep, and has a [1,10] range.
+  IPParameter dep("field_with_dep", "field_with_dep", "27",
+                  IPParameter::ParamType::Int);
+  dep.SetRange({"1", "10"});
+  dep.SetDependencies({"bool_for_dep"});
+
+  // Dependency off -> inactive (so its out-of-range default 27 is ignored);
+  // dependency on -> active.
+  EXPECT_FALSE(dep.IsActive({{"bool_for_dep", "0"}}));
+  EXPECT_TRUE(dep.IsActive({{"bool_for_dep", "1"}}));
+
+  // A dependency missing from the map is treated as false -> inactive.
+  EXPECT_FALSE(dep.IsActive({}));
+
+  // Statically disabled fields are inactive regardless of dependencies.
+  IPParameter sd("x", "x", "5", IPParameter::ParamType::Int);
+  sd.SetRange({"1", "10"});
+  sd.SetDisable("true");
+  EXPECT_FALSE(sd.IsActive({{"bool_for_dep", "1"}}));
+
+  // "1" is treated as disabled too (same boolean interpretation as deps).
+  IPParameter sd1("x1", "x1", "5", IPParameter::ParamType::Int);
+  sd1.SetDisable("1");
+  EXPECT_FALSE(sd1.IsActive({{"bool_for_dep", "1"}}));
+
+  IPParameter en("y", "y", "5", IPParameter::ParamType::Int);
+  en.SetDisable("false");
+  EXPECT_TRUE(en.IsActive({{"bool_for_dep", "1"}}));
+
+  // A field with no dependencies and no static disable is always active.
+  IPParameter plain("z", "z", "5", IPParameter::ParamType::Int);
+  EXPECT_TRUE(plain.IsActive({}));
+
+  // Multiple dependencies: active only when ALL controlling bools are true.
+  IPParameter md("multi_dep", "multi_dep", "0", IPParameter::ParamType::Int);
+  md.SetDependencies({"a", "b"});
+  EXPECT_FALSE(md.IsActive({{"a", "1"}, {"b", "0"}}));
+  EXPECT_TRUE(md.IsActive({{"a", "1"}, {"b", "true"}}));  // case-insensitive
+}
+
+TEST(IPParameterValidate, Describe) {
+  IPParameter eq("equation", "Equation", "AxB", IPParameter::ParamType::String);
+  eq.SetOptions({"AxB", "AxB+CxD"});
+  IPParameter aw("a_width", "A width", "32", IPParameter::ParamType::Int);
+  aw.SetRange({"1", "32"});
+  IPParameter rin("reg_in", "Reg In", "0", IPParameter::ParamType::Bool);
+
+  EXPECT_EQ(eq.ParamTypeStr(), "string");
+  EXPECT_EQ(aw.ParamTypeStr(), "int");
+  EXPECT_EQ(rin.ParamTypeStr(), "bool");
+
+  EXPECT_EQ(eq.ConstraintStr(), "choices: AxB, AxB+CxD");
+  EXPECT_EQ(aw.ConstraintStr(), "range: [1, 32]");
+  EXPECT_EQ(rin.ConstraintStr(), "");  // unconstrained bool
+
+  std::vector<Value*> params{&eq, &aw, &rin};
+  const std::string table = DescribeIPParameters(params);
+  EXPECT_NE(table.find("equation"), std::string::npos);
+  EXPECT_NE(table.find("(default: 32)"), std::string::npos);
+  EXPECT_NE(table.find("range: [1, 32]"), std::string::npos);
+  EXPECT_NE(table.find("choices: AxB, AxB+CxD"), std::string::npos);
+  // One line per parameter (3 params -> 2 newline separators).
+  EXPECT_EQ(std::count(table.begin(), table.end(), '\n'), 2);
 }
 
 }  // namespace FOEDAG
