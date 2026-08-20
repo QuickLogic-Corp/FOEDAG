@@ -44,6 +44,7 @@
 #include <thread>
 #include <regex>
 #include <vector>
+#include <set>
 #include <string>
 #include <locale>
 #include <fstream>
@@ -92,6 +93,64 @@ static inline void initPowerCalcResource() {
   Q_INIT_RESOURCE(compiler_power_calc_resources);
 }
 #endif
+
+// Parse the physical-block requirements of the packed netlist out of a
+// *successful* VPR pack log, formatted for add_layout.py's --resources option
+// (e.g. "clb=22,io=99").
+//
+// add_layout.py sizes an auto layout either from a FAILED pack -- by scraping
+// "Failed to find device which satisfies resource requirements" via
+// --vpr_stdout_log -- or from explicit counts via --resources. When the design
+// already fits the default layout there is no failure line to scrape, so the
+// counts have to come from the log's "Pb types usage" section instead:
+//
+//   Pb types usage...
+//     io                   : 99
+//      io_output           : 33      <- nested detail, ignored
+//     clb                  : 22
+//
+// Only top-level entries (exactly two leading spaces) are physical block types.
+// add_layout.py accepts clb/bram/dsp/io and defaults anything absent to 0, so a
+// design using no BRAM simply yields no bram entry.
+//
+// Returns an empty string if the section is missing or names nothing usable;
+// callers must treat that as "cannot size from resources".
+static std::string parsePackedResourcesForAddLayout(
+    const std::filesystem::path& vpr_stdout_log) {
+  std::ifstream log(vpr_stdout_log.string());
+  if (!log.is_open()) return "";
+
+  static const std::regex top_level_usage(R"(^  ([A-Za-z_][A-Za-z0-9_]*)\s+:\s+([0-9]+)\s*$)");
+  const std::set<std::string> wanted{"clb", "bram", "dsp", "io"};
+
+  bool in_section = false;
+  std::vector<std::string> parts;
+  std::string line;
+  while (std::getline(log, line)) {
+    if (line.find("Pb types usage") != std::string::npos) {
+      in_section = true;
+      continue;
+    }
+    if (!in_section) continue;
+    // The section ends at the first blank line.
+    if (line.empty()) break;
+
+    std::smatch m;
+    if (std::regex_match(line, m, top_level_usage)) {
+      const std::string name = m[1].str();
+      if (wanted.count(name)) {
+        parts.push_back(name + "=" + m[2].str());
+      }
+    }
+  }
+
+  std::string resources;
+  for (const auto& part : parts) {
+    if (!resources.empty()) resources += ",";
+    resources += part;
+  }
+  return resources;
+}
 
 #define USE_INCREMENTAL_COMPILATION
 #define GENERATE_NEW_DEVICE_FPGA_AUTO 1
@@ -3098,12 +3157,47 @@ bool CompilerOpenFPGA_ql::Packing() {
         std::string("_") +
         std::to_string(std::hash<std::string>{}(ProjManager()->projectPath()));
 
+    // When the design already fits the default layout the pack SUCCEEDS, so there
+    // is no "Failed to find device which satisfies resource requirements" line for
+    // add_layout.py to size from. Previously that case skipped add_layout.py
+    // entirely, which left the generated device with NO SB_MAPS -- and because
+    // generator devices (FPGA_AUTO/FPGA_CUSTOM) ship no static SB_MAPS.yml either,
+    // VPR silently fell back to building a DEFAULT routing resource graph instead
+    // of the device CRR. The run succeeded with timing that did not describe the
+    // real fabric, and the device was left at the default size rather than sized
+    // to the design. Scrape the packed resource counts instead and hand them to
+    // add_layout.py via --resources, so auto mode always right-sizes and always
+    // produces a SB_MAPS.
+    std::string packed_resources_spec;
+    if (m_autoLayoutGenerationMode && (status == 0)) {
+      packed_resources_spec = parsePackedResourcesForAddLayout(
+          std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log");
+      if (packed_resources_spec.empty()) {
+        ErrorMessage(
+            "Auto layout: design fits the default layout but the packed resource "
+            "counts could not be read from vpr_stdout.log, so no SB_MAPS can be "
+            "generated. VPR would fall back to a default routing graph and the "
+            "resulting timing would not reflect this device.\n");
+        return false;
+      }
+    }
+
     if ( (m_autoLayoutGenerationMode && (status != 0)) ||
+         (m_autoLayoutGenerationMode && !packed_resources_spec.empty()) ||
          (m_customLayoutGenerationMode) ) {
 
       if(m_autoLayoutGenerationMode) {
-        Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
-        Message("Try to generate a device that can accomodate current design...\n");
+        if(packed_resources_spec.empty()) {
+          Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
+          Message("Try to generate a device that can accomodate current design...\n");
+        }
+        else {
+          // The design DID fit the default layout; we generate anyway so that the
+          // device is sized to the design and a SB_MAPS (hence the device CRR)
+          // exists. Do not claim it did not fit.
+          Message("Design " + ProjManager()->projectName() + " fits the current device layout.\n");
+          Message("Generate a device sized to the design (" + packed_resources_spec + ")...\n");
+        }
       }
       if(m_customLayoutGenerationMode) {
         Message("Generate a device that can accomodate current layout specification...\n");
@@ -3172,8 +3266,19 @@ bool CompilerOpenFPGA_ql::Packing() {
           std::string("--output_sb_map ") + generated_sb_maps_yml_path.string();
 
       if(m_autoLayoutGenerationMode) {
-        command_auto_device +=
-          std::string(" --vpr_stdout_log ") + vpr_stdout_log_filepath.string();
+        // A failed pack is sized by scraping the failure line; a successful pack
+        // has no such line, so pass the packed counts explicitly instead.
+        if(packed_resources_spec.empty()) {
+          command_auto_device +=
+            std::string(" --vpr_stdout_log ") + vpr_stdout_log_filepath.string();
+        }
+        else {
+          // No shell is involved (ExecuteAndMonitorSystemCommand), so quoting the
+          // value would pass the quotes through to argparse verbatim. The spec is
+          // comma-separated with no spaces, so it needs none.
+          command_auto_device +=
+            std::string(" --resources ") + packed_resources_spec;
+        }
       }
       if(m_customLayoutGenerationMode) {
         command_auto_device +=
@@ -3251,6 +3356,11 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
     }
+    // UNREACHABLE as of the --resources change above: auto mode with status == 0
+    // now either generates a layout in the branch above, or returns false when the
+    // packed resource counts cannot be read. Kept rather than deleted so the
+    // previous "device equivalent to the current device" behaviour is still visible
+    // in one place if the resource-scraping path ever needs to be relaxed.
     else if(m_autoLayoutGenerationMode && (status == 0)) {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
       Message("Generating Device equivalent to the current device...\n");
