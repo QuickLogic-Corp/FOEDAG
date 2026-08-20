@@ -2152,7 +2152,34 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   if (status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " name map generation (netlist_namemap.py) failed");
+    return true;  // no namemap.csv to audit
   }
+
+  // The only consumer of namemap.csv: does it know any instance->atom pair that stage P3's
+  // atomsets.json does not? An empty p2b.log across the suite is the argument for deleting
+  // this stage. Lowest priority in the flow -- it reports and never blocks, so its exit code
+  // is deliberately ignored. See docs/specs/p2b-namemap-redundancy/spec.md.
+  std::filesystem::path atomsets_path = projectPath / "atomsets.json";
+  if (!FileUtils::FileExists(atomsets_path)) {
+    return true;  // no P3 output to compare against
+  }
+
+  std::filesystem::path p2b_audit_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("p2b_audit.py");
+
+  std::vector<std::string> audit_args;
+  audit_args.push_back(p2b_audit_script_path.string());
+  audit_args.push_back("--project");
+  audit_args.push_back(projectPath.string());
+  audit_args.push_back("-o");
+  audit_args.push_back((projectPath / "p2b.log").string());
+
+  FileUtils::ExecuteSystemCommand(python_exec.string(), audit_args, m_out,
+                                  /*timeout_ms*/ -1);
   return true;
 }
 
