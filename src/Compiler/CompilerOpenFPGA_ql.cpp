@@ -2342,6 +2342,11 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   }
 
   std::filesystem::path design_resources_path = FloorplanningArtifact("design_resources.json");
+  // Persists across tiers 1/2/3's separate invocations, unlike design_resources_path above,
+  // which each tier overwrites. Once tier 3 supplies clb_actual, the script appends the
+  // error against whichever tier 1/2 clb_est this same log already holds.
+  std::filesystem::path estimation_log_path =
+      FloorplanningArtifact("resource_estimation.log");
 
   std::vector<std::string> args;
   args.push_back(design_resources_script_path.string());
@@ -2358,6 +2363,8 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
     args.push_back("--elab");
     args.push_back(elab_json_path.string());
   }
+  args.push_back("--estimation-log");
+  args.push_back(estimation_log_path.string());
   args.push_back("-o");
   args.push_back(design_resources_path.string());
 
