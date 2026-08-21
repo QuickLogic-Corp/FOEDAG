@@ -2395,6 +2395,84 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   return true;
 }
 
+// [aurora2#1725 stage P7] post-placement compliance -- see
+// scripts/floorplanning_constraint_compliance.py's docstring and
+// docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P7).
+//
+// Called with --mode warning: a soft constraint. Every region violation this finds is
+// printed to the console, but it must never fail a compile that has already placed
+// successfully -- that is the whole point of the distinction from --mode error, which
+// scripts/tests/floorplan_check.py's per-testcase validators use instead, where the same
+// violation SHOULD fail the run.
+bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
+  const std::string projectName = ProjManager()->projectName();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
+  std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
+  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
+  if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path) ||
+      !FileUtils::FileExists(atomsets_path)) {
+    // Nothing placed yet, or this device template has no P2/P3 blocks -- not an error,
+    // see RunDesignResources() for the same reasoning.
+    return true;
+  }
+
+  std::filesystem::path constraint_compliance_script_path =
+      GetSession()->Context()->DataPath() /
+      std::filesystem::path("..") /
+      std::filesystem::path("..") /
+      std::filesystem::path("scripts") /
+      std::filesystem::path("floorplanning_constraint_compliance.py");
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping constraint compliance "
+                 "(floorplanning_constraint_compliance.py).");
+    return true;  // best-effort: placement has already succeeded
+  }
+
+  std::filesystem::path manifest_path =
+      FloorplanningArtifact("constraints.manifest.json");
+  std::filesystem::path constraints_xml_path =
+      projectPath / (projectName + "_constraints.xml");
+  std::filesystem::path compliance_rpt_path =
+      FloorplanningArtifact("constraint_compliance.rpt");
+
+  std::vector<std::string> args;
+  args.push_back(constraint_compliance_script_path.string());
+  args.push_back("--place");
+  args.push_back(place_path.string());
+  args.push_back("--net");
+  args.push_back(net_path.string());
+  args.push_back("--atomsets");
+  args.push_back(atomsets_path.string());
+  if (FileUtils::FileExists(manifest_path)) {
+    args.push_back("--manifest");
+    args.push_back(manifest_path.string());
+  } else if (FileUtils::FileExists(constraints_xml_path)) {
+    args.push_back("--constraints-xml");
+    args.push_back(constraints_xml_path.string());
+  }
+  args.push_back("--mode");
+  args.push_back("warning");
+  args.push_back("-o");
+  args.push_back(compliance_rpt_path.string());
+
+  // Soft constraint: the exit code is intentionally not checked. --mode warning already
+  // returns 0 unconditionally: any FAIL/STALE verdict is in compliance_rpt_path and in
+  // m_out's console output, not in this function's return value.
+  FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out,
+                                  /*timeout_ms*/ -1);
+  return true;
+}
+
 bool CompilerOpenFPGA_ql::Synthesize() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -4621,6 +4699,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     // [aurora2#1725 stage P7] tier 3 -- the .net/.place this path just found up-to-date
     // are exactly what tier 3 reads, so regenerate even though VPR did not re-run.
     RunDesignResources(3);
+    RunConstraintCompliance();
     return true;
   }
 
@@ -4731,6 +4810,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("##################################################");
     m_state = State::Placed;
     RunDesignResources(3);  // [aurora2#1725 stage P7] tier 3, same reasoning as above
+    RunConstraintCompliance();
     return true;
   }
 
@@ -4766,6 +4846,9 @@ bool CompilerOpenFPGA_ql::Placement() {
   // FloorPlanning UI can compare its estimates against. Runs before the place2pcf.py
   // block below, which returns early when no pin table is found.
   RunDesignResources(3);
+  // [aurora2#1725 stage P7] post-placement compliance -- soft constraint, see
+  // RunConstraintCompliance()'s own comment for why this never fails the build.
+  RunConstraintCompliance();
    std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /

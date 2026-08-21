@@ -341,6 +341,10 @@ private:
   // (A.13.5).
   bool RunDesignResources(int maxTier);
 
+  // [aurora2#1725 stage P7] see the definition in CompilerOpenFPGA_ql.cpp for why this
+  // is a soft constraint (--mode warning) and never fails the build.
+  bool RunConstraintCompliance();
+
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
