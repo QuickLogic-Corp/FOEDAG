@@ -9826,14 +9826,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosys_options += " -ioff";
   }
 
-  // Threshold for the shared-inverter override on the IO reset path. Inert
-  // without -ioff, so it is safe to carry a value while ioff is unchecked.
-  if( !QLSettingsManager::getStringValue("yosys", "general", "ioff_min_shared_reset").empty() ) {
-    yosys_options += std::string(" -ioff_min_shared_reset") +
-                   std::string(" ") +
-                   QLSettingsManager::getStringValue("yosys", "general", "ioff_min_shared_reset");
-  }
-
   #ifdef __linux__
   if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
     yosys_options += std::string(" -de") + 
