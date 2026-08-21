@@ -2168,8 +2168,9 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
 
   // The only consumer of namemap.csv: does it know any instance->atom pair that stage P3's
   // atomsets.json does not? An empty p2b.log across the suite is the argument for deleting
-  // this stage. Lowest priority in the flow -- it reports and never blocks, so its exit code
-  // is deliberately ignored. See docs/specs/p2b-namemap-redundancy/spec.md.
+  // this stage. Its exit code IS checked, deliberately: a real finding means P2b is not
+  // (yet) provably redundant, so this hard-fails the build rather than logging and moving
+  // on. See docs/specs/p2b-namemap-redundancy/spec.md.
   std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
   if (!FileUtils::FileExists(atomsets_path)) {
     return true;  // no P3 output to compare against
@@ -2193,10 +2194,24 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   audit_args.push_back("--namemap");
   audit_args.push_back(FloorplanningArtifact("namemap.csv").string());
   audit_args.push_back("-o");
-  audit_args.push_back((FloorplanningArtifact("p2b.log")).string());
+  std::filesystem::path p2b_log_path = FloorplanningArtifact("p2b.log");
+  audit_args.push_back(p2b_log_path.string());
 
-  FileUtils::ExecuteSystemCommand(python_exec.string(), audit_args, m_out,
-                                  /*timeout_ms*/ -1);
+  int audit_status =
+      FileUtils::ExecuteSystemCommand(python_exec.string(), audit_args, m_out,
+                                      /*timeout_ms*/ -1)
+          .realCode;
+  if (audit_status != 0) {
+    ErrorMessage(
+        "Design " + ProjManager()->projectName() +
+        ": stage P2b (floorplanning_p2b_audit.py) found an RTL instance -> atom pair "
+        "that stage P3's atomsets.json does not know about -- see " +
+        p2b_log_path.string() +
+        ". This means P2b is not (yet) provably safe to remove "
+        "(docs/specs/p2b-namemap-redundancy/spec.md); failing the build so this is "
+        "investigated rather than silently ignored.");
+    return false;
+  }
   return true;
 }
 
@@ -2466,8 +2481,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
             ", skipping synthesis.");
     // [aurora2#1725 stage P4] re-run even on a skip: instances.json may have changed
     // (see EnsureElaborated() above) since the last time this ran, and validation.json
-    // should reflect it. Best-effort, result not checked -- see RunValidateInstances().
-    RunNetlistNamemap();
+    // should reflect it. RunValidateInstances() itself stays best-effort; RunNetlistNamemap()
+    // does not -- a real P2b finding hard-fails the build, see its own comment.
+    if (!RunNetlistNamemap()) {
+      return false;
+    }
     RunValidateInstances();
     RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning
     return true;
@@ -2495,7 +2513,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
     // still runs even though synthesis itself didn't.
-    RunNetlistNamemap();
+    if (!RunNetlistNamemap()) {
+      return false;
+    }
     RunValidateInstances();
     RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning
     return true;
@@ -2521,9 +2541,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     // [aurora2#1725 stage P4] validation gate -- grade every instance against the
-    // synthesis output just produced. Best-effort, result not checked -- see
-    // RunValidateInstances().
-    RunNetlistNamemap();
+    // synthesis output just produced. RunValidateInstances() stays best-effort;
+    // RunNetlistNamemap() hard-fails on a real P2b finding, see its own comment.
+    if (!RunNetlistNamemap()) {
+      return false;
+    }
     RunValidateInstances();
     // [aurora2#1725 stage P7] tier 2 -- exact per-instance primitive counts, now that
     // atomsets.json describes the netlist just written.
