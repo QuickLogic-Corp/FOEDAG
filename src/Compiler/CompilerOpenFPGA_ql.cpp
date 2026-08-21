@@ -2249,7 +2249,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
   // [aurora2#1725 stage P2b] optional; floorplanning_validate_instances.py records check 3 as
   // "unknown" and grades on the rest when this is absent.
-  std::filesystem::path namemap_hier_path = FloorplanningArtifact("namemap_hier.csv");
+  std::filesystem::path namemap_hier_path = FloorplanningArtifact("namemap.hier.csv");
   std::filesystem::path validation_json_path = FloorplanningArtifact("validation.json");
 
   std::vector<std::string> args;
