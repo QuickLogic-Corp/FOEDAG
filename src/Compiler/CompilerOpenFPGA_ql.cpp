@@ -39,6 +39,7 @@
 #include <QDirIterator>
 #include <QTemporaryFile>
 #include <chrono>
+#include <cstdlib>   // std::getenv
 #include <filesystem>
 #include <sstream>
 #include <thread>
@@ -3005,6 +3006,124 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   return openStaFile;
 }
 
+
+// Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'.
+// The 'x' separator is not cosmetic: plain concatenation makes a 12x10 layout
+// read as 'AUTOFPGA1210', which is equally 1x210 and 121x0. All construction
+// sites go through here so they cannot drift apart.
+static std::string generatedLayoutName(const std::string& prefix, int width, int height) {
+
+  return prefix + std::string("FPGA") +
+         std::to_string(width) + std::string("x") + std::to_string(height);
+}
+
+
+// Directory name (== devicename) of the device package generated from a re-shaped
+// layout.
+//
+// Substitute when the source layout name is embedded in the source devicename -
+// 'TURNKEY-FPGA_AUTO' with layout 'FPGA_AUTO' becomes 'TURNKEY-AUTOFPGA16x14',
+// which is what pre-2026.3 kits have always produced. Otherwise append, because
+// a device is identified by its package DIRECTORY LEAF and a current package
+// names that leaf after the part rather than after its layout:
+// 'EVAL2-CCFF-CUSTOM' with layout 'FPGA0808' becomes
+// 'EVAL2-CCFF-CUSTOM-AUTOFPGA16x14'.
+// Appending is not a nicety. With substitution alone the derived name would come
+// back unchanged, the clone target would resolve to the shipped package
+// directory, and the caller deletes that directory before copying into it.
+static std::string generatedDeviceName(const std::string& source_devicename,
+                                       const std::string& source_layout_name,
+                                       const std::string& generated_layout_name) {
+
+  if(!source_layout_name.empty() &&
+     source_devicename.find(source_layout_name) != std::string::npos) {
+    return StringUtils::replaceAll(source_devicename, source_layout_name, generated_layout_name);
+  }
+
+  return source_devicename + std::string("-") + generated_layout_name;
+}
+
+
+// Read the user's flat 'custom_layout.yml' (ARRAY_X / ARRAY_Y / BRAM_COLS /
+// DSP_COLS, one 'KEY: VALUE' per line) into a json object.
+// The file stays flat and user-facing: it is what users write and what the
+// device-data test harness generates, so its shape is not ours to change. We
+// read it here and re-emit it as the CUSTOM section of a device config overlay,
+// because '--custom_layout' is retired and '--device_config' is the only config
+// interface add_layout.py keeps.
+// Returns false, with a reason, on anything that is not a flat mapping - a
+// mis-read geometry silently builds the wrong fabric.
+static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_filepath,
+                                json& out_custom_layout_json,
+                                std::string& out_error) {
+
+  std::ifstream ifs(custom_layout_yml_filepath.string());
+  if(!ifs.is_open()) {
+    out_error = "cannot be opened for reading";
+    return false;
+  }
+
+  out_custom_layout_json = json::object();
+
+  std::string line;
+  int line_number = 0;
+  while(std::getline(ifs, line)) {
+    line_number++;
+
+    // strip a comment and a trailing CR (the file may come from Windows).
+    const std::size_t comment_pos = line.find('#');
+    if(comment_pos != std::string::npos) {
+      line = line.substr(0, comment_pos);
+    }
+    if(!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+
+    if(line.find_first_not_of(" \t") == std::string::npos) {
+      continue;
+    }
+
+    // an indented line means a nested mapping, which this file must not have.
+    if(line[0] == ' ' || line[0] == '\t' || line[0] == '-') {
+      out_error = "is not a flat mapping (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    const std::size_t colon_pos = line.find(':');
+    if(colon_pos == std::string::npos) {
+      out_error = "has a line that is not 'KEY: VALUE' (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    std::string key = line.substr(0, colon_pos);
+    std::string value = line.substr(colon_pos + 1);
+    StringUtils::trim(key);
+    StringUtils::trim(value);
+    if(value.size() >= 2 &&
+       ((value.front() == '\'' && value.back() == '\'') ||
+        (value.front() == '"' && value.back() == '"'))) {
+      value = value.substr(1, value.size() - 2);
+    }
+
+    if(key.empty() || value.empty()) {
+      out_error = "has an empty key or value (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    // kept as strings: that is how the config contract spells the CUSTOM
+    // section ("ARRAY_X": "8"), and add_layout.py converts them itself.
+    out_custom_layout_json[key] = value;
+  }
+
+  if(out_custom_layout_json.empty()) {
+    out_error = "contains no layout keys";
+    return false;
+  }
+
+  return true;
+}
+
+
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
@@ -3139,10 +3258,220 @@ bool CompilerOpenFPGA_ql::Packing() {
   PostTaskFileRemover placeFileRemover(ProjManager()->projectPath() / std::filesystem::path(ProjManager()->projectName() + "_post_synth.place"));
 
 
+  // LAYOUT GENERATION MODE RESOLUTION ++
+  // The mode is a property of the DEVICE PACKAGE - 'DEVICE_TYPE' and
+  // 'DEVICE_TYPE_SETTINGS.LAYOUT_MODE' in its config.json - and not of the name
+  // the user picked in the layout selector. Resolve it once, here, into the same
+  // two booleans the rest of this function has always worked off.
+  //
+  // THE ORDER OF THE THREE ARMS BELOW IS LOAD-BEARING, and nothing in the code
+  // says so, hence:
+  //
+  // 1. 'DEVICE_TYPE' is inspected FIRST. 'FIXED' means there is silicon behind
+  //    this fabric, so no layout is generated for it - which is the normal,
+  //    successful path for a customer part - and it must never be re-shaped, not
+  //    by a 'LAYOUT_MODE' and not by a user-supplied custom_layout.yml. Were the
+  //    override read first, a user could resize hard silicon just by dropping a
+  //    yml beside the project. And there is no second line of defence
+  //    downstream: add_layout.py runs 'DEVICE_TYPE' through its 'LAYOUT_MODE'
+  //    alias map, which maps FIXED to CUSTOM, then finds no
+  //    'DEVICE_TYPE_SETTINGS' and falls back to 'LAYOUT_MODE': 'AUTO' - so it
+  //    will auto-size a fixed device without a word. This gate is the only guard
+  //    there is.
+  // 2. Only on a re-shapable ('CUSTOM') device does the project-level
+  //    custom_layout.yml mean anything, and there it wins over 'LAYOUT_MODE'.
+  // 3. Only when the package carries no 'DEVICE_TYPE' at all do we fall back to
+  //    keying off the layout name, which is what Aurora did before this contract
+  //    existed. An already released kit therefore keeps working unchanged, with
+  //    no re-sync.
+  m_autoLayoutGenerationMode = false;
   m_customLayoutGenerationMode = false;
-  if(current_device_target.device_variant_layout.name == "FPGA_CUSTOM") {
-    m_customLayoutGenerationMode = true;
+
+  // The layout this device package ships, and the device it belongs to. Every
+  // 'FPGA_AUTO'/'FPGA_CUSTOM' literal in the generated-device logic further down
+  // is driven off these instead, so a package that names its layout after the
+  // fabric ('FPGA0808') gets the same substitutions a legacy one does. On a
+  // legacy package source_layout_name IS 'FPGA_AUTO'/'FPGA_CUSTOM', so those
+  // sites behave exactly as before.
+  const std::string& source_layout_name = current_device_target.device_variant_layout.name;
+  const std::string& source_devicename = current_device_target.device_variant.devicename;
+
+  // '--device_config' for add_layout.py: the package config.json, or the overlay
+  // synthesised from the user's custom_layout.yml.
+  // EMPTY means the mode came from the layout name (arm 3), and it stays empty
+  // there deliberately: the add_layout.py shipped inside a pre-2026.3 package has
+  // no '--device_config' in its argparse surface, so passing it would abort the
+  // run with 'unrecognized arguments'. A package carrying 'DEVICE_TYPE' also
+  // ships the current script, so the flag and the key always travel together.
+  std::filesystem::path add_layout_device_config_path;
+
+  // <project>/../custom_layout.yml - the user's per-run size override.
+  std::filesystem::path custom_layout_yml_filepath =
+      std::filesystem::path(ProjManager()->projectPath()) / ".." / "custom_layout.yml";
+  try {
+    // canonicalize to remove relative paths.
+    custom_layout_yml_filepath = std::filesystem::weakly_canonical(custom_layout_yml_filepath);
   }
+  catch (const std::filesystem::filesystem_error& e) {
+    ErrorMessage("Error Canonicalizing Directory Paths\n");
+    //std::cerr << "Error: " << e.what() << std::endl;
+    return false;
+  }
+
+  {
+    QLDeviceLayoutSettings layout_settings =
+        QLDeviceManager::getInstance()->deviceLayoutSettings(current_device_target);
+
+    if(layout_settings.invalid) {
+      ErrorMessage("Device '" + source_devicename + "': unsupported value '" +
+                   layout_settings.invalid_value + "' for '" + layout_settings.invalid_key +
+                   "' in " + layout_settings.config_json_path.string() + "\n");
+      return false;
+    }
+
+    if(layout_settings.device_type == "FIXED") {
+      // 1. hard silicon.
+      //
+      // Nothing asked to re-shape it in the ordinary case, and that case is the
+      // ordinary one: every customer part is 'FIXED' and carries no layout
+      // settings at all, so this arm leaves both booleans false and the flow
+      // continues against the fabric the package ships. That is what a fixed
+      // device does today via the layout-name arm, and it must keep doing it -
+      // failing here would fail every customer run.
+      //
+      // What is refused is a re-shape actually being ASKED for. We look at each
+      // of those inputs only in order to reject it by name; none of them is ever
+      // read as authoritative or allowed to select a mode on this arm. That
+      // ordering - inspect DEVICE_TYPE before honouring anything - is the whole
+      // guarantee, and it is the only one there is.
+      if(layout_settings.device_type_settings_present) {
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                     layout_settings.config_json_path.string() +
+                     " and cannot be re-shaped, but that file also carries "
+                     "'DEVICE_TYPE_SETTINGS'" +
+                     (layout_settings.layout_mode_present
+                          ? std::string(" ('LAYOUT_MODE': '") + layout_settings.layout_mode + "')"
+                          : std::string()) +
+                     ". Remove the layout settings from the device config.\n");
+        return false;
+      }
+      const char* layout_mode_env = std::getenv("LAYOUT_MODE");
+      if(layout_mode_env != nullptr && layout_mode_env[0] != '\0') {
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                     layout_settings.config_json_path.string() +
+                     " and cannot be re-shaped, but LAYOUT_MODE is set to '" +
+                     std::string(layout_mode_env) +
+                     "' in the environment. Unset it, or select a device whose "
+                     "'DEVICE_TYPE' is 'CUSTOM'.\n");
+        return false;
+      }
+      if(FileUtils::FileExists(custom_layout_yml_filepath)) {
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                     layout_settings.config_json_path.string() +
+                     " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
+                     ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
+        return false;
+      }
+      // nothing asked for a re-shape: a fixed device runs the normal flow.
+    }
+    else if(layout_settings.device_type_present) {
+      // 2. 'DEVICE_TYPE': 'CUSTOM' - this fabric may be re-shaped.
+      if(FileUtils::FileExists(custom_layout_yml_filepath)) {
+        // The user's flat yml wins over the package's 'LAYOUT_MODE'. We re-emit
+        // it as a device config overlay instead of passing it through
+        // '--custom_layout', which add_layout.py has retired, so the file itself
+        // keeps the flat shape users and the device-data test harness write.
+        // The overlay is built ON TOP of the package config: the script reads the
+        // geometry it needs to size a fabric ('BRAM_SIZE', 'DSP_SIZE',
+        // 'IO_CAPACITY', 'MARGIN') from the same file, so a bare three-key
+        // overlay would send it back to its built-in defaults and quietly build
+        // the wrong fabric on a device that is not 1x6/1x3.
+        json custom_layout_json;
+        std::string custom_layout_error;
+        if(!readCustomLayoutYML(custom_layout_yml_filepath, custom_layout_json, custom_layout_error)) {
+          ErrorMessage("Device '" + source_devicename + "': custom layout spec " +
+                       custom_layout_yml_filepath.string() + " " + custom_layout_error + "\n");
+          return false;
+        }
+
+        json layout_override_json;
+        if(!QLDeviceManager::getInstance()->loadDeviceConfigJSON(current_device_target,
+                                                                layout_override_json) ||
+           !layout_override_json.is_object()) {
+          layout_override_json = json::object();
+        }
+        layout_override_json["DEVICE_TYPE"] = "CUSTOM";
+        if(!layout_override_json["DEVICE_TYPE_SETTINGS"].is_object()) {
+          layout_override_json["DEVICE_TYPE_SETTINGS"] = json::object();
+        }
+        layout_override_json["DEVICE_TYPE_SETTINGS"]["LAYOUT_MODE"] = "CUSTOM";
+        layout_override_json["DEVICE_TYPE_SETTINGS"]["CUSTOM"] = custom_layout_json;
+
+        std::filesystem::path layout_override_json_filepath =
+            std::filesystem::path(ProjManager()->projectPath()) / ".layout_override.json";
+        std::ofstream layout_override_ofstream(layout_override_json_filepath.string());
+        if(!layout_override_ofstream.is_open()) {
+          ErrorMessage("Device '" + source_devicename + "': cannot write layout override file " +
+                       layout_override_json_filepath.string() + "\n");
+          return false;
+        }
+        layout_override_ofstream << layout_override_json.dump(2) << std::endl;
+        layout_override_ofstream.close();
+
+        m_customLayoutGenerationMode = true;
+        add_layout_device_config_path = layout_override_json_filepath;
+      }
+      else if(layout_settings.layout_mode_present) {
+        if(layout_settings.layout_mode == "AUTO") {
+          // pack first, then size from the packing run's vpr_stdout.log.
+          m_autoLayoutGenerationMode = true;
+        }
+        else {
+          // 'CUSTOM' and 'RESOURCES' share this boolean because their flow
+          // control is identical: skip packing, invoke the script, let it size
+          // from the device config. 'RESOURCES' is deliberately NOT routed to
+          // 'AUTO' - it has no use for a VPR log, and demanding one would only
+          // fail the run.
+          m_customLayoutGenerationMode = true;
+        }
+        add_layout_device_config_path = layout_settings.config_json_path;
+      }
+      else {
+        // 'DEVICE_TYPE': 'CUSTOM' with no 'LAYOUT_MODE'. add_layout.py would
+        // default this to 'AUTO'; we will not. How to shape a device is not
+        // something to guess at.
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'CUSTOM' but no "
+                     "'DEVICE_TYPE_SETTINGS.LAYOUT_MODE' in " +
+                     layout_settings.config_json_path.string() +
+                     ". Expected one of 'AUTO', 'CUSTOM', 'RESOURCES'.\n");
+        return false;
+      }
+    }
+    else {
+      // 3. no 'DEVICE_TYPE': pre-contract package, key off the layout name.
+      if(source_layout_name == "FPGA_CUSTOM") {
+        m_customLayoutGenerationMode = true;
+      }
+      else if(source_layout_name == "FPGA_AUTO") {
+        m_autoLayoutGenerationMode = true;
+      }
+      // any other layout name: no layout generation, as before.
+    }
+
+    if(!add_layout_device_config_path.empty()) {
+      Message("Layout generation configured by: " + add_layout_device_config_path.string() + "\n");
+    }
+  }
+
+  // Everything below that renames a layout keys off source_layout_name. An empty
+  // one is not merely a no-op: the file rewrites go through std::regex, and an
+  // empty pattern matches at every position. Refuse rather than corrupt.
+  if((m_autoLayoutGenerationMode || m_customLayoutGenerationMode) && source_layout_name.empty()) {
+    ErrorMessage("Device '" + source_devicename + "': layout generation was requested but the "
+                 "selected device target carries no layout name.\n");
+    return false;
+  }
+  // LAYOUT GENERATION MODE RESOLUTION --
 
   int status = 0;
   if(m_customLayoutGenerationMode == true) 
@@ -3157,16 +3486,11 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   // FPGA_AUTO device logic ++
   // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
-  m_autoLayoutGenerationMode = false;
-  
+
   // Note: At this point:
   // m_architectureFile is already populated in the vpr base command
   // m_SBMapsFile is already populated in the vpr base command
   // m_SBTemplatesDir is already populated in the vpr base command
-  
-  if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
-    m_autoLayoutGenerationMode = true;
-  }
 
   if(m_autoLayoutGenerationMode || m_customLayoutGenerationMode) {
 
@@ -3179,10 +3503,10 @@ bool CompilerOpenFPGA_ql::Packing() {
 
     // Regardless of the status (whether the design fits into the base auto layout or not)
     // we generate a device package.
-    // Even if the design fits, the layout being called 'FPGA_AUTO' necessary to trigger the
-    // auto layout generation mode, prevents it from being used in the normal flow.
-    // So, we generate a device package (which will be identical to the FPGA_AUTO) with the
-    // devicename and layoutname changed according to the generated layout from the script.
+    // A device that resolved to a generation mode is a template for shaping a
+    // fabric, not something the rest of the flow can target directly, so even
+    // when the design fits we emit a device package with the devicename and
+    // layoutname taken from the generated layout.
 
     // m_architectureFile -> decrypted vpr.xml of current device target.
     std::filesystem::path generated_vpr_xml_path = 
@@ -3196,12 +3520,29 @@ bool CompilerOpenFPGA_ql::Packing() {
     int generated_layout_height = 0;
     m_autoLayoutGeneratedLayoutName = "";
 
-    if ( (m_autoLayoutGenerationMode && (status != 0)) ||
-         (m_customLayoutGenerationMode) ) {
+    // In AUTO mode we go through the script even when the design FITS, as long as
+    // a device config is available. The alternative - copying the arch file and
+    // doing a literal layout-name replacement - no-ops on a package whose layout
+    // is not called 'FPGA_AUTO', and it skips the SB map when the package ships
+    // none, so a design that fits would end up with different artefacts from one
+    // that triggered a resize. Without a device config the script cannot be
+    // invoked at all (see add_layout_device_config_path), so the copy path below
+    // stays for that case.
+    const bool generate_layout_via_script =
+        m_customLayoutGenerationMode ||
+        (m_autoLayoutGenerationMode && ((status != 0) || !add_layout_device_config_path.empty()));
+
+    if (generate_layout_via_script) {
 
       if(m_autoLayoutGenerationMode) {
-        Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
-        Message("Try to generate a device that can accomodate current design...\n");
+        if(status != 0) {
+          Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
+          Message("Try to generate a device that can accomodate current design...\n");
+        }
+        else {
+          Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
+          Message("Generating Device that can accomodate current design...\n");
+        }
       }
       if(m_customLayoutGenerationMode) {
         Message("Generate a device that can accomodate current layout specification...\n");
@@ -3216,47 +3557,15 @@ bool CompilerOpenFPGA_ql::Packing() {
             std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
       }
 
-      std::filesystem::path custom_layout_yml_filepath;
-      if(m_customLayoutGenerationMode) {
-        custom_layout_yml_filepath = 
-            std::filesystem::path(ProjManager()->projectPath()) / ".." / "custom_layout.yml";
-        // canonicalize to remove relative paths.
-        try {
-          custom_layout_yml_filepath = std::filesystem::weakly_canonical(custom_layout_yml_filepath);
-        }
-        catch (const std::filesystem::filesystem_error& e) {
-          ErrorMessage("Error Canonicalizing Directory Paths\n");
-          //std::cerr << "Error: " << e.what() << std::endl;
-          return false;
-        }
+      // On the legacy arm the size can only come from the user's yml, so a
+      // missing file is an error here exactly as before. On a config-driven arm
+      // the yml is optional and the resolver has already turned it into the
+      // overlay that add_layout_device_config_path points at.
+      if(m_customLayoutGenerationMode && add_layout_device_config_path.empty()) {
         if(!FileUtils::FileExists(custom_layout_yml_filepath)) {
           ErrorMessage("[Error] custom layout spec yml not found at expected path: " + custom_layout_yml_filepath.string() + "\n");
           ErrorMessage("Please ensure to create a 'custom_layout.yml' file in the project path.");
           return false;
-        }
-      }
-
-      // overhead settings and other settings, read from file 'add_layout_params.json' if it exists:
-      std::filesystem::path add_layout_params_json_filepath = 
-          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout_params.json";
-
-      json add_layout_params_json = json::object();
-      int overhead_percentage = 0;
-      if(FileUtils::FileExists(add_layout_params_json_filepath)) {
-        std::ifstream add_layout_params_json_ifstream(add_layout_params_json_filepath.string());
-        try {
-          add_layout_params_json = json::parse(add_layout_params_json_ifstream);
-        }
-        catch (const json::exception& e) {
-          ErrorMessage("Failed to parse '" + add_layout_params_json_filepath.string() +
-                       "': " + e.what());
-          return false;
-        }
-        if(!add_layout_params_json.empty()) {
-          if(add_layout_params_json.contains("overhead_percentage")){
-            overhead_percentage = add_layout_params_json["overhead_percentage"].get<int>();
-            // std::cout << "overhead_percentage: " << overhead_percentage << std::endl;
-          }
         }
       }
 
@@ -3273,14 +3582,22 @@ bool CompilerOpenFPGA_ql::Packing() {
         command_auto_device +=
           std::string(" --vpr_stdout_log ") + vpr_stdout_log_filepath.string();
       }
-      if(m_customLayoutGenerationMode) {
+      if(!add_layout_device_config_path.empty()) {
+        // The whole configuration - device type, layout mode, geometry, margin -
+        // comes from this one file. Left to itself the script looks for a
+        // config.json by walking up from --arch_file, and --arch_file is a
+        // decrypted vpr.xml in the project directory, so that walk never reaches
+        // the device package and the script falls back to its built-in geometry
+        // defaults without warning - correct for a 1x6/1x3 device and wrong for
+        // every other one.
+        command_auto_device +=
+          std::string(" --device_config ") + add_layout_device_config_path.string();
+      }
+      else if(m_customLayoutGenerationMode) {
+        // Legacy arm only: this package's add_layout.py predates
+        // '--device_config' and has no other way of being told the size.
         command_auto_device +=
           std::string(" --custom_layout ") + custom_layout_yml_filepath.string();
-      }
-
-      if(overhead_percentage > 0) {
-        command_auto_device += 
-            std::string(" --overhead_percentage ") + std::to_string(overhead_percentage);
       }
 
       std::filesystem::path logfile_auto_device = 
@@ -3329,20 +3646,16 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
       if(m_autoLayoutGenerationMode) {
-        // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
-        // if the layout name of the device is 'FPGA_AUTO'
-        m_autoLayoutGeneratedLayoutName = 
-                std::string("AUTOFPGA") + 
-                std::to_string(generated_layout_width) + 
-                std::to_string(generated_layout_height);
+        // set a unique layout name, so the generated layout is distinguishable
+        // from the one the device package ships.
+        m_autoLayoutGeneratedLayoutName =
+                generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
       }
       if(m_customLayoutGenerationMode) {
-      // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
-      // if the layout name of the device is 'FPGA_AUTO'
-      m_autoLayoutGeneratedLayoutName = 
-              std::string("CUSTOMFPGA") + 
-              std::to_string(generated_layout_width) + 
-              std::to_string(generated_layout_height);
+        // set a unique layout name, so the generated layout is distinguishable
+        // from the one the device package ships.
+        m_autoLayoutGeneratedLayoutName =
+                generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height);
       }
 
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
@@ -3353,10 +3666,8 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       generated_layout_width = current_device_target.device_variant_layout.width;
       generated_layout_height = current_device_target.device_variant_layout.height;
-      m_autoLayoutGeneratedLayoutName = 
-              std::string("AUTOFPGA") + 
-              std::to_string(generated_layout_width) + 
-              std::to_string(generated_layout_height);
+      m_autoLayoutGeneratedLayoutName =
+              generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
 
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
@@ -3368,8 +3679,11 @@ bool CompilerOpenFPGA_ql::Packing() {
         FileUtils::overwriteFile(m_SBMapsFile, generated_sb_maps_yml_path);
       }
 
-      // update the layout_name in the vpr.xml, we know that it would be called 'FPGA_AUTO' in this case.
-      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+      // update the layout_name in the vpr.xml. this branch only runs when no
+      // device config was available, which means a pre-contract package, whose
+      // layout really is named 'FPGA_AUTO' - but take the name from the device
+      // target anyway so nothing here depends on that literal.
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, source_layout_name, m_autoLayoutGeneratedLayoutName);
     }
 
 
@@ -3526,12 +3840,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // 'TURNKEY-AUTOFPGA<w><h>' directory (in plaintext mode the arch path is the
     // on-disk device file), so the architecture-file swap below could no longer
     // match old_m_architectureFile and VPR failed to open the arch file.
-    if(m_autoLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "--device FPGA_AUTO", "--device " + m_autoLayoutGeneratedLayoutName);
-    }
-    if(m_customLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "--device FPGA_CUSTOM", "--device " + m_autoLayoutGeneratedLayoutName);
-    }
+    command_rerun = ReplaceAll(command_rerun, "--device " + source_layout_name, "--device " + m_autoLayoutGeneratedLayoutName);
     command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
     // generator devices (AUTO/CUSTOM) may not ship a static SB_MAPS.yml, so the
     // original command has no --sb_maps to swap and m_SBMapsFile is empty.
@@ -3561,33 +3870,36 @@ bool CompilerOpenFPGA_ql::Packing() {
 #if GENERATE_NEW_DEVICE_FPGA_AUTO
     // DEVICE CREATION LOGIC ++
     // At this point, (if) the packing is completed with the generated device vpr xml, and we can create a usable device
-    // 1 copy <device>: as a copy of the FPGA_AUTO device parallel to the device (device_data location)
-    //   where devicename: replace FPGA_AUTO with the generated layout name
+    // 1 copy <device>: as a copy of the source device parallel to the device (device_data location)
+    //   where devicename: derived from the generated layout name
     // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
     // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
     // -OR-
     // 3 SB_MAPS.yml/CSV : copy the generated SB_MAPS.yml, and the CSVs need not change.
-    // 4 cryptdb: replace FPGA_AUTO with the generated layout name
-    // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
+    // 4 cryptdb: rename after the generated devicename
+    // 5 settings.json, replace the source layout name with the generated one for all examples
+    // 5b config.json: mark the generated device non-reshapable
     // 6 example logs: if currently running design within examples, clean up logs
     // 7 remove other files: add_layout.py, add_layout_params.json if existing
     if(status == 0) {
       // packing succeeded with the generated vpr xml, package the device
 
-      // 1 copy the FPGA_AUTO device directory recursively to create new device.
-      //   and replace devicename using the generated layoutname.
-      std::string target_device_copy_devicename;
-      if(m_autoLayoutGenerationMode) {
-        target_device_copy_devicename = 
-          StringUtils::replaceAll(current_device_target.device_variant.devicename,
-                                  std::string("FPGA_AUTO"),
-                                  m_autoLayoutGeneratedLayoutName);
-      }
-      if(m_customLayoutGenerationMode) {
-        target_device_copy_devicename = 
-          StringUtils::replaceAll(current_device_target.device_variant.devicename,
-                                  std::string("FPGA_CUSTOM"),
-                                  m_autoLayoutGeneratedLayoutName);
+      // 1 copy the source device directory recursively to create new device.
+      //   and derive the new devicename from the generated layoutname.
+      std::string target_device_copy_devicename =
+          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName);
+
+      // Backstop. If the derived name did not change, the "new" device directory
+      // IS the source device directory, and the code just below deletes an
+      // existing target with RmDirRecursively() before copying into it - i.e. it
+      // would delete the installed device package and then copy from a directory
+      // that no longer exists. Never let that fall through.
+      if(target_device_copy_devicename == source_devicename) {
+        ErrorMessage("Cannot generate a device for '" + source_devicename + "' (layout '" +
+                     source_layout_name + "'): the generated device name is identical to the "
+                     "source device name, and generating it would overwrite the installed "
+                     "device package.\n");
+        return false;
       }
 
       std::filesystem::path source_device_copy_dirpath = 
@@ -3669,26 +3981,22 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
       FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
-      // 4 cryptdb: replace FPGA_AUTO with the generated layout name
+      // 4 cryptdb: rename it after the generated device
       std::filesystem::path source_device_cryptdb_filepath =
           (QLDeviceManager::getInstance()->deviceTypeDirPath()) /
           (QLDeviceManager::getInstance()->convertToDeviceTypeString() + "_Supp.db");
       std::string source_device_cryptdb_filename = 
           source_device_cryptdb_filepath.filename().string();
 
-      std::string target_device_copy_cryptdb_filename;
-      if(m_autoLayoutGenerationMode) {
-        target_device_copy_cryptdb_filename = 
-            StringUtils::replaceAll(source_device_cryptdb_filename,
-                                    std::string("FPGA_AUTO"),
-                                    m_autoLayoutGeneratedLayoutName);
-      }
-      if(m_customLayoutGenerationMode) {
-        target_device_copy_cryptdb_filename = 
-            StringUtils::replaceAll(source_device_cryptdb_filename,
-                                    std::string("FPGA_CUSTOM"),
-                                    m_autoLayoutGeneratedLayoutName);
-      }
+      // The key database is looked up as '<family>_<foundry>_<node>_<devicename>_Supp.db',
+      // so it has to follow the DEVICENAME and not the layout name: on a package
+      // whose directory leaf is not named after its layout, substituting the
+      // layout name leaves the file called after the source device and the
+      // generated device then has no key database at all.
+      std::string target_device_copy_cryptdb_filename =
+          StringUtils::replaceAll(source_device_cryptdb_filename,
+                                  source_devicename,
+                                  target_device_copy_devicename);
 
       std::filesystem::path target_device_copy_cryptdb_filepath_original = 
           target_device_copy_dirpath / source_device_cryptdb_filename;
@@ -3707,7 +4015,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
 
-      // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
+      // 5 settings.json, replace the source layout name with the generated one for all examples
       {
         std::regex filename_pattern(".+\\.json");
 
@@ -3720,16 +4028,48 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
         }
 
-        if(m_autoLayoutGenerationMode) {
-          // replace "FPGA_AUTO" with generated layout name in all the files
-          for(auto filepath: filepath_list) {
-            FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
-          }
+        for(auto filepath: filepath_list) {
+          FileUtils::findAndReplaceInFile(filepath, source_layout_name, m_autoLayoutGeneratedLayoutName);
         }
-        if(m_customLayoutGenerationMode) {
-          // replace "FPGA_CUSTOM" with generated layout name in all the files
-          for(auto filepath: filepath_list) {
-            FileUtils::findAndReplaceInFile(filepath, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+      }
+
+      // 5b the generated device is a fixed-size copy: its fabric has already been
+      // shaped and its add_layout.py is removed below, so it must not resolve to
+      // a generation mode again on the next run. Rewrite its own config.json the
+      // way the silicon release task writes a non-reshapable part - 'DEVICE_TYPE':
+      // 'FIXED' with the layout settings dropped - and leave the rest of the file
+      // (BRAM_SIZE, DSP_SIZE, IO_CAPACITY, DSP_TYPE, ...) alone.
+      // A pre-contract package carries neither key, so nothing is written for it.
+      {
+        std::filesystem::path target_device_config_json_filepath =
+            target_device_copy_dirpath / "config.json";
+
+        if(FileUtils::FileExists(target_device_config_json_filepath)) {
+          std::ifstream target_device_config_json_ifstream(target_device_config_json_filepath.string());
+          json target_device_config_json;
+          try {
+            target_device_config_json = json::parse(target_device_config_json_ifstream);
+          }
+          catch (const json::exception& e) {
+            ErrorMessage("Failed to parse '" + target_device_config_json_filepath.string() +
+                         "': " + e.what());
+            return false;
+          }
+          target_device_config_json_ifstream.close();
+
+          if(target_device_config_json.is_object() &&
+             (target_device_config_json.contains("DEVICE_TYPE") ||
+              target_device_config_json.contains("DEVICE_TYPE_SETTINGS"))) {
+            target_device_config_json["DEVICE_TYPE"] = "FIXED";
+            target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
+
+            std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
+            if(!target_device_config_json_ofstream.is_open()) {
+              ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
+              return false;
+            }
+            target_device_config_json_ofstream << target_device_config_json.dump(2) << std::endl;
+            target_device_config_json_ofstream.close();
           }
         }
       }

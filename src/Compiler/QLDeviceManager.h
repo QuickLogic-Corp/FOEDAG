@@ -86,6 +86,11 @@ class QLDeviceLayoutSettings {
     // "DEVICE_TYPE" was present and understood. when false, 'device_type' is
     // empty and the package predates the layout-mode contract.
     bool device_type_present = false;
+    // "DEVICE_TYPE_SETTINGS" was present at all. On a FIXED device the release
+    // task deletes the whole section, so its mere presence there is a
+    // configuration error - reported separately from LAYOUT_MODE, which is only
+    // one of the keys it can carry.
+    bool device_type_settings_present = false;
     // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" was present and understood.
     bool layout_mode_present = false;
     // a key was present but carried a value we do not understand. the caller

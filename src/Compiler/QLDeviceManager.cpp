@@ -4132,6 +4132,7 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
       layout_settings.invalid_value = device_type_settings.dump();
       return layout_settings;
     }
+    layout_settings.device_type_settings_present = true;
 
     if( device_type_settings.contains("LAYOUT_MODE") ) {
       const auto& layout_mode = device_type_settings["LAYOUT_MODE"];
