@@ -39,7 +39,6 @@
 #include <QDirIterator>
 #include <QTemporaryFile>
 #include <chrono>
-#include <cstdlib>   // std::getenv
 #include <filesystem>
 #include <sstream>
 #include <thread>
@@ -3044,6 +3043,28 @@ static std::string generatedDeviceName(const std::string& source_devicename,
 }
 
 
+// <project>/../custom_layout.yml, with relative components removed.
+// Resolved on demand rather than once up front: a package that takes the
+// layout-name path never consults this file, and canonicalization is a way to
+// fail that that path did not previously have.
+static bool resolveCustomLayoutYMLPath(const std::filesystem::path& project_path,
+                                       std::filesystem::path& out_filepath) {
+
+  std::filesystem::path filepath = project_path / ".." / "custom_layout.yml";
+  try {
+    // canonicalize to remove relative paths.
+    filepath = std::filesystem::weakly_canonical(filepath);
+  }
+  catch (const std::filesystem::filesystem_error& e) {
+    //std::cerr << "Error: " << e.what() << std::endl;
+    return false;
+  }
+
+  out_filepath = filepath;
+  return true;
+}
+
+
 // Read the user's flat 'custom_layout.yml' (ARRAY_X / ARRAY_Y / BRAM_COLS /
 // DSP_COLS, one 'KEY: VALUE' per line) into a json object.
 // The file stays flat and user-facing: it is what users write and what the
@@ -3051,11 +3072,41 @@ static std::string generatedDeviceName(const std::string& source_devicename,
 // read it here and re-emit it as the CUSTOM section of a device config overlay,
 // because '--custom_layout' is retired and '--device_config' is the only config
 // interface add_layout.py keeps.
-// Returns false, with a reason, on anything that is not a flat mapping - a
-// mis-read geometry silently builds the wrong fabric.
+//
+// Validation is strict deliberately. add_layout.py resolves every key it does
+// not find against its own module default ('ARRAY_X' = '08', 'ARRAY_Y' = '06'),
+// so a key let through misspelled does not fail the run - it quietly builds a
+// 12x10 fabric instead of the one that was asked for, with no diagnostic
+// anywhere. An unknown key, a repeated key, a missing dimension or a value that
+// is not a whole number is therefore an error naming the key and the line.
 static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_filepath,
                                 json& out_custom_layout_json,
                                 std::string& out_error) {
+
+  // The keys the CUSTOM section of the device config contract defines, with the
+  // smallest value each accepts. ARRAY_X/ARRAY_Y size the fabric, so they must
+  // be present; the column counts may legitimately be zero and may be omitted.
+  struct CustomLayoutKey {
+    const char* name;
+    long minimum;
+    bool required;
+  };
+  static const CustomLayoutKey custom_layout_keys[] = {
+    { "ARRAY_X",   1, true  },
+    { "ARRAY_Y",   1, true  },
+    { "BRAM_COLS", 0, false },
+    { "DSP_COLS",  0, false },
+  };
+  const std::size_t custom_layout_key_count =
+      sizeof(custom_layout_keys) / sizeof(custom_layout_keys[0]);
+
+  std::string accepted_keys;
+  for(std::size_t i = 0; i < custom_layout_key_count; i++) {
+    if(i > 0) {
+      accepted_keys += ", ";
+    }
+    accepted_keys += custom_layout_keys[i].name;
+  }
 
   std::ifstream ifs(custom_layout_yml_filepath.string());
   if(!ifs.is_open()) {
@@ -3070,6 +3121,13 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
   while(std::getline(ifs, line)) {
     line_number++;
 
+    // A UTF-8 BOM would otherwise become part of the first key and turn a
+    // perfectly good file into an unrecognised-key error - editors on Windows
+    // write one without being asked.
+    if(line_number == 1 && line.rfind("\xEF\xBB\xBF", 0) == 0) {
+      line = line.substr(3);
+    }
+
     // strip a comment and a trailing CR (the file may come from Windows).
     const std::size_t comment_pos = line.find('#');
     if(comment_pos != std::string::npos) {
@@ -3083,9 +3141,17 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
       continue;
     }
 
-    // an indented line means a nested mapping, which this file must not have.
+    // A document marker is legal YAML and PyYAML accepted it, so keep accepting
+    // it - rejecting it would narrow a shape users may already have on disk.
+    std::string document_marker = line;
+    StringUtils::trim(document_marker);
+    if(document_marker == "---" || document_marker == "...") {
+      continue;
+    }
+
+    // an indented line or a list item means a nested mapping or a sequence.
     if(line[0] == ' ' || line[0] == '\t' || line[0] == '-') {
-      out_error = "is not a flat mapping (line " + std::to_string(line_number) + ")";
+      out_error = "is not a flat 'KEY: VALUE' mapping (line " + std::to_string(line_number) + ")";
       return false;
     }
 
@@ -3105,19 +3171,79 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
       value = value.substr(1, value.size() - 2);
     }
 
-    if(key.empty() || value.empty()) {
-      out_error = "has an empty key or value (line " + std::to_string(line_number) + ")";
+    if(key.empty()) {
+      out_error = "has a line with no key (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+    if(value.empty()) {
+      // A nested file ('CUSTOM:' with indented children) lands here, on the
+      // parent line, before the indent check above can ever see the children -
+      // so name the real cause rather than blaming the empty value.
+      out_error = "has key '" + key + "' with no value (line " + std::to_string(line_number) +
+                  "); the file must be a flat 'KEY: VALUE' mapping, not a nested one";
       return false;
     }
 
-    // kept as strings: that is how the config contract spells the CUSTOM
-    // section ("ARRAY_X": "8"), and add_layout.py converts them itself.
+    const CustomLayoutKey* known_key = nullptr;
+    for(std::size_t i = 0; i < custom_layout_key_count; i++) {
+      if(key == custom_layout_keys[i].name) {
+        known_key = &custom_layout_keys[i];
+        break;
+      }
+    }
+    if(known_key == nullptr) {
+      out_error = "has unknown key '" + key + "' (line " + std::to_string(line_number) +
+                  "); expected one of " + accepted_keys;
+      return false;
+    }
+
+    if(out_custom_layout_json.contains(key)) {
+      // last-wins would make the effective geometry depend on line order, and
+      // silently drop the value the user probably meant.
+      out_error = "sets '" + key + "' more than once (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    // Strictly a decimal integer. '-8', '8.5', 'null' and '[4, 8]' must not
+    // reach the script, which either aborts in int() or mis-sizes the fabric.
+    bool digits_only = !value.empty();
+    for(char c : value) {
+      if(c < '0' || c > '9') {
+        digits_only = false;
+        break;
+      }
+    }
+    if(!digits_only) {
+      out_error = "has a non-integer value '" + value + "' for '" + key + "' (line " +
+                  std::to_string(line_number) + ")";
+      return false;
+    }
+    // bounded so the conversion below cannot overflow; no fabric dimension comes
+    // anywhere near nine digits.
+    if(value.size() > 9) {
+      out_error = "has an out-of-range value '" + value + "' for '" + key + "' (line " +
+                  std::to_string(line_number) + ")";
+      return false;
+    }
+    const long numeric_value = std::stol(value);
+    if(numeric_value < known_key->minimum) {
+      out_error = "has '" + key + "' = " + value + ", below the minimum of " +
+                  std::to_string(known_key->minimum) + " (line " +
+                  std::to_string(line_number) + ")";
+      return false;
+    }
+
+    // kept as a string: that is how the config contract spells the CUSTOM
+    // section ("ARRAY_X": "8"), and add_layout.py converts it itself.
     out_custom_layout_json[key] = value;
   }
 
-  if(out_custom_layout_json.empty()) {
-    out_error = "contains no layout keys";
-    return false;
+  for(std::size_t i = 0; i < custom_layout_key_count; i++) {
+    if(custom_layout_keys[i].required &&
+       !out_custom_layout_json.contains(custom_layout_keys[i].name)) {
+      out_error = std::string("is missing the required key '") + custom_layout_keys[i].name + "'";
+      return false;
+    }
   }
 
   return true;
@@ -3305,22 +3431,25 @@ bool CompilerOpenFPGA_ql::Packing() {
   // ships the current script, so the flag and the key always travel together.
   std::filesystem::path add_layout_device_config_path;
 
-  // <project>/../custom_layout.yml - the user's per-run size override.
-  std::filesystem::path custom_layout_yml_filepath =
-      std::filesystem::path(ProjManager()->projectPath()) / ".." / "custom_layout.yml";
-  try {
-    // canonicalize to remove relative paths.
-    custom_layout_yml_filepath = std::filesystem::weakly_canonical(custom_layout_yml_filepath);
-  }
-  catch (const std::filesystem::filesystem_error& e) {
-    ErrorMessage("Error Canonicalizing Directory Paths\n");
-    //std::cerr << "Error: " << e.what() << std::endl;
-    return false;
-  }
+  // <project>/../custom_layout.yml - the user's per-run size override. Resolved
+  // by resolveCustomLayoutYMLPath() only on the arms that actually consult it,
+  // so a package taking the layout-name path is not exposed to a canonicalization
+  // failure it never met before.
+  std::filesystem::path custom_layout_yml_filepath;
 
   {
     QLDeviceLayoutSettings layout_settings =
         QLDeviceManager::getInstance()->deviceLayoutSettings(current_device_target);
+
+    if(layout_settings.config_parse_failed) {
+      // A config.json that exists but does not parse must never be treated as
+      // one that is absent: absent selects the layout-name path, and on a FIXED
+      // device that path walks straight past the gate below.
+      ErrorMessage("Device '" + source_devicename + "': cannot parse " +
+                   layout_settings.config_json_path.string() + ": " +
+                   layout_settings.config_parse_error + "\n");
+      return false;
+    }
 
     if(layout_settings.invalid) {
       ErrorMessage("Device '" + source_devicename + "': unsupported value '" +
@@ -3339,11 +3468,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       // device does today via the layout-name arm, and it must keep doing it -
       // failing here would fail every customer run.
       //
-      // What is refused is a re-shape actually being ASKED for. We look at each
-      // of those inputs only in order to reject it by name; none of them is ever
-      // read as authoritative or allowed to select a mode on this arm. That
-      // ordering - inspect DEVICE_TYPE before honouring anything - is the whole
-      // guarantee, and it is the only one there is.
+      // What is refused is a re-shape actually being ASKED for, and there are
+      // exactly two ways to ask: 'DEVICE_TYPE_SETTINGS' in the device config, and
+      // a custom_layout.yml beside the project. Both are inputs add_layout.py
+      // would act on. Each is inspected only in order to reject it by name;
+      // neither is ever read as authoritative or allowed to select a mode on this
+      // arm. That ordering - inspect DEVICE_TYPE before honouring anything - is
+      // the whole guarantee, and it is the only one there is.
       if(layout_settings.device_type_settings_present) {
         ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
                      layout_settings.config_json_path.string() +
@@ -3355,14 +3486,9 @@ bool CompilerOpenFPGA_ql::Packing() {
                      ". Remove the layout settings from the device config.\n");
         return false;
       }
-      const char* layout_mode_env = std::getenv("LAYOUT_MODE");
-      if(layout_mode_env != nullptr && layout_mode_env[0] != '\0') {
-        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
-                     layout_settings.config_json_path.string() +
-                     " and cannot be re-shaped, but LAYOUT_MODE is set to '" +
-                     std::string(layout_mode_env) +
-                     "' in the environment. Unset it, or select a device whose "
-                     "'DEVICE_TYPE' is 'CUSTOM'.\n");
+      if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                     custom_layout_yml_filepath)) {
+        ErrorMessage("Error Canonicalizing Directory Paths\n");
         return false;
       }
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
@@ -3376,6 +3502,11 @@ bool CompilerOpenFPGA_ql::Packing() {
     }
     else if(layout_settings.device_type_present) {
       // 2. 'DEVICE_TYPE': 'CUSTOM' - this fabric may be re-shaped.
+      if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                     custom_layout_yml_filepath)) {
+        ErrorMessage("Error Canonicalizing Directory Paths\n");
+        return false;
+      }
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
         // The user's flat yml wins over the package's 'LAYOUT_MODE'. We re-emit
         // it as a device config overlay instead of passing it through
@@ -3395,10 +3526,25 @@ bool CompilerOpenFPGA_ql::Packing() {
         }
 
         json layout_override_json;
+        std::string layout_override_parse_error;
         if(!QLDeviceManager::getInstance()->loadDeviceConfigJSON(current_device_target,
-                                                                layout_override_json) ||
+                                                                layout_override_json,
+                                                                &layout_override_parse_error) ||
            !layout_override_json.is_object()) {
-          layout_override_json = json::object();
+          // Never synthesise a bare overlay from nothing here. The script takes
+          // 'BRAM_SIZE', 'DSP_SIZE', 'IO_CAPACITY' and 'MARGIN' from the very
+          // file it is handed, so an overlay missing them drops it back to its
+          // built-in 1x6 / 1x3 / 20 / 1.2 geometry - the exact silent fallback
+          // this change exists to delete. Unreachable today, since reaching this
+          // arm means the same file already parsed as an object, but
+          // "currently unreachable" does not survive a refactor.
+          ErrorMessage("Device '" + source_devicename + "': cannot read device config " +
+                       layout_settings.config_json_path.string() +
+                       " needed to build the layout override" +
+                       (layout_override_parse_error.empty()
+                            ? std::string()
+                            : std::string(": ") + layout_override_parse_error) + "\n");
+          return false;
         }
         layout_override_json["DEVICE_TYPE"] = "CUSTOM";
         if(!layout_override_json["DEVICE_TYPE_SETTINGS"].is_object()) {
@@ -3447,6 +3593,16 @@ bool CompilerOpenFPGA_ql::Packing() {
         return false;
       }
     }
+    else if(layout_settings.device_type_settings_present) {
+      // Layout settings with nothing saying whether this fabric may be re-shaped
+      // - a half-migrated package. Falling through to the layout-name path would
+      // leave the settings inert with no diagnostic, which is the silent
+      // misconfiguration this whole change exists to remove.
+      ErrorMessage("Device '" + source_devicename + "' carries 'DEVICE_TYPE_SETTINGS' but no "
+                   "'DEVICE_TYPE' in " + layout_settings.config_json_path.string() +
+                   ". Add 'DEVICE_TYPE': 'CUSTOM' or 'FIXED', or remove the layout settings.\n");
+      return false;
+    }
     else {
       // 3. no 'DEVICE_TYPE': pre-contract package, key off the layout name.
       if(source_layout_name == "FPGA_CUSTOM") {
@@ -3463,12 +3619,13 @@ bool CompilerOpenFPGA_ql::Packing() {
     }
   }
 
-  // Everything below that renames a layout keys off source_layout_name. An empty
-  // one is not merely a no-op: the file rewrites go through std::regex, and an
-  // empty pattern matches at every position. Refuse rather than corrupt.
-  if((m_autoLayoutGenerationMode || m_customLayoutGenerationMode) && source_layout_name.empty()) {
+  // Everything below that renames a layout or a device keys off these two names.
+  // An empty one is not merely a no-op: the file rewrites go through std::regex,
+  // and an empty pattern matches at every position. Refuse rather than corrupt.
+  if((m_autoLayoutGenerationMode || m_customLayoutGenerationMode) &&
+     (source_layout_name.empty() || source_devicename.empty())) {
     ErrorMessage("Device '" + source_devicename + "': layout generation was requested but the "
-                 "selected device target carries no layout name.\n");
+                 "selected device target carries no layout name or no device name.\n");
     return false;
   }
   // LAYOUT GENERATION MODE RESOLUTION --
@@ -3540,8 +3697,12 @@ bool CompilerOpenFPGA_ql::Packing() {
           Message("Try to generate a device that can accomodate current design...\n");
         }
         else {
+          // The script keeps the device's own dimensions on this path - it reads
+          // them back out of the architecture file - and regenerates the layout
+          // and the SB map from it. Same wording as the copy path below, because
+          // the outcome is the same device, just produced properly.
           Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
-          Message("Generating Device that can accomodate current design...\n");
+          Message("Generating Device equivalent to the current device...\n");
         }
       }
       if(m_customLayoutGenerationMode) {
@@ -3562,6 +3723,11 @@ bool CompilerOpenFPGA_ql::Packing() {
       // the yml is optional and the resolver has already turned it into the
       // overlay that add_layout_device_config_path points at.
       if(m_customLayoutGenerationMode && add_layout_device_config_path.empty()) {
+        if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                       custom_layout_yml_filepath)) {
+          ErrorMessage("Error Canonicalizing Directory Paths\n");
+          return false;
+        }
         if(!FileUtils::FileExists(custom_layout_yml_filepath)) {
           ErrorMessage("[Error] custom layout spec yml not found at expected path: " + custom_layout_yml_filepath.string() + "\n");
           ErrorMessage("Please ensure to create a 'custom_layout.yml' file in the project path.");
@@ -3877,7 +4043,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // -OR-
     // 3 SB_MAPS.yml/CSV : copy the generated SB_MAPS.yml, and the CSVs need not change.
     // 4 cryptdb: rename after the generated devicename
-    // 5 settings.json, replace the source layout name with the generated one for all examples
+    // 5 settings.json, retarget devicename and layout name onto the generated device
     // 5b config.json: mark the generated device non-reshapable
     // 6 example logs: if currently running design within examples, clean up logs
     // 7 remove other files: add_layout.py, add_layout_params.json if existing
@@ -4015,7 +4181,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
 
-      // 5 settings.json, replace the source layout name with the generated one for all examples
+      // 5 settings.json, retarget devicename and layout name onto the generated device
       {
         std::regex filename_pattern(".+\\.json");
 
@@ -4028,7 +4194,19 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
         }
 
+        // TWO axes, and both are needed. A device is identified by the pair
+        // (devicename, layout), and the layout side is enumerated from the device
+        // directory's own vpr.xml - so a clone whose settings still name the
+        // SOURCE devicename resolves to the source package, which has no such
+        // layout, and every example shipped inside the generated device fails to
+        // open. Before this change one substitution happened to fix both fields,
+        // because a legacy devicename embedded the layout name; a package that
+        // names its directory after the part does not.
+        // Devicename first: in the append case the layout pass would otherwise
+        // leave the devicename occurrences behind. On a legacy package the two
+        // passes compose to exactly the single pre-change substitution.
         for(auto filepath: filepath_list) {
+          FileUtils::findAndReplaceInFile(filepath, source_devicename, target_device_copy_devicename);
           FileUtils::findAndReplaceInFile(filepath, source_layout_name, m_autoLayoutGeneratedLayoutName);
         }
       }
