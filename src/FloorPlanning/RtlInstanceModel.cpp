@@ -77,6 +77,56 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
     return true;
 }
 
+std::map<std::string, InstancePlacement> loadPlacementVerdicts(
+    const std::filesystem::path& path)
+{
+    std::map<std::string, InstancePlacement> placements;
+    if (!std::filesystem::exists(path)) {
+        return placements;
+    }
+
+    nlohmann::json doc;
+    try {
+        std::ifstream stream(path);
+        stream >> doc;
+    } catch (const std::exception&) {
+        // Unreadable is treated as absent, deliberately: a placement verdict is an extra,
+        // and a malformed one must not stop the panel from opening.
+        return placements;
+    }
+
+    if (!doc.contains("instances") || !doc["instances"].is_object()) {
+        return placements;
+    }
+
+    for (auto it = doc["instances"].begin(); it != doc["instances"].end(); ++it) {
+        const auto& entry = it.value();
+        InstancePlacement placement;
+        placement.partition = entry.value("partition", std::string{});
+        placement.region = entry.value("region", std::string{});
+        placement.atomsTotal = entry.value("atoms_total", 0);
+        placement.inRegion = entry.value("in_region", 0);
+
+        if (entry.contains("outside") && entry["outside"].is_array()) {
+            for (const auto& atom : entry["outside"]) {
+                // ["<atom>", x, y], with x/y null for an atom no .place row mentions.
+                if (!atom.is_array() || atom.empty() || !atom[0].is_string()) continue;
+                PlacedAtom outside;
+                outside.name = atom[0].get<std::string>();
+                if (atom.size() >= 3 && atom[1].is_number_integer()
+                    && atom[2].is_number_integer()) {
+                    outside.x = atom[1].get<int>();
+                    outside.y = atom[2].get<int>();
+                    outside.located = true;
+                }
+                placement.outside.push_back(std::move(outside));
+            }
+        }
+        placements[it.key()] = std::move(placement);
+    }
+    return placements;
+}
+
 bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
 {
     if (!std::filesystem::exists(path)) {

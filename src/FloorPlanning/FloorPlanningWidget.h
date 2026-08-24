@@ -48,6 +48,11 @@ public:
     // grey out what synthesis deleted and flag what is only partially trustworthy.
     void setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts);
 
+    // [aurora2#1725 stage P7] Measured placement per constrained instance, so the trees can
+    // show whether a region constraint actually took effect: a tick when every atom of an
+    // instance landed inside its region, a warning when some did not.
+    void setPlacementVerdicts(std::map<std::string, InstancePlacement> placements);
+
     // [aurora2#1725 stage P7] design_resources.json: per-instance clb/dsp/bram plus the
     // tier that says how they were obtained. Gives the panel sizing figures before
     // synthesis has run -- until now it had none at all -- and reports the tier, which

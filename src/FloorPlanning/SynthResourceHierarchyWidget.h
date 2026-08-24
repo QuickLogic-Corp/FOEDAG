@@ -29,7 +29,11 @@ class SynthResourceHierarchyWidget : public QWidget {
       Netlist = 0,
       AtomList = 1,
       AtomType = 2,
-      Partitions = 3
+      Partitions = 3,
+      // [aurora2#1725 stage P7] Clickable "?" for rows that have something to explain --
+      // a partial placement or an instance synthesis optimised out. Last logically so the
+      // existing column indices are untouched; moved next to the name visually in build().
+      Why = 4
     };
 public:
     enum Flag {
@@ -73,6 +77,13 @@ public:
     // equally usable, which is what the panel did before stage P4 was wired up.
     void setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts);
 
+    // [aurora2#1725 stage P7] Placement status per constrained instance, from
+    // <project>_floorplanning_placement.json: a green tick when every atom landed inside its
+    // region, a warning triangle when some did not. Optional and independent of the P4
+    // verdicts above -- an unconstrained instance gets no icon at all, because there is no
+    // region it could be inside or outside of.
+    void setPlacementVerdicts(std::map<std::string, InstancePlacement> placements);
+
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void selectPartition(const PartitionPtr&);
     void unselectPartition();
@@ -101,6 +112,7 @@ private:
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
+    std::map<std::string, InstancePlacement> m_placements;
     bool m_atomColumnsVisible = false;
     AtomMappingReport m_atomMappingReport;
 
@@ -112,6 +124,9 @@ private:
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
     void populateAtomColumns();
     void applyInstanceVerdicts();
+    void applyPlacementVerdicts();
+    // Fills the Why cell of one row and stores the text its popup shows.
+    void setExplanation(QStandardItem* whyItem, const QString& title, const QString& body);
 
     void addPath(const std::string&);
     void onItemChanged(QStandardItem*, bool reportChanges);

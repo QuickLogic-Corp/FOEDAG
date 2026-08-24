@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <set>
 #include <map>
 
@@ -64,6 +65,32 @@ struct DesignResources {
 struct InstanceVerdict {
     std::string verdict;   // "complete" | "partial" | "deleted" | "unknown"
     std::string reason;    // why it was deleted, or which check failed
+};
+
+// [aurora2#1725 stage P7] Where one constrained instance's atoms actually ended up, from
+// <project>_floorplanning_placement.json -- the only artifact that measures placement rather
+// than stating intent. Drives the status icon on an RTL row: all atoms inside its region is a
+// pass, any atom outside is a partial placement, and the atoms below say which ones and where,
+// because "partially placed" on its own gives the user nothing to act on.
+struct PlacedAtom {
+    std::string name;
+    int x = -1;
+    int y = -1;
+    // False when the atom's cluster appears in no .place row at all -- unplaced, not misplaced.
+    bool located = false;
+};
+
+struct InstancePlacement {
+    std::string partition;   // the partition that constrains this instance
+    std::string region;      // human description, e.g. "region x[2..14] y[68..79]"
+    int atomsTotal = 0;
+    int inRegion = 0;
+    std::vector<PlacedAtom> outside;
+
+    // Measured and clean. atomsTotal == 0 means the instance contributed no atoms to the
+    // placement at all, which is not the same as "every atom is where it should be".
+    bool fullyPlaced() const { return atomsTotal > 0 && inRegion == atomsTotal; }
+    bool partiallyPlaced() const { return atomsTotal > 0 && inRegion != atomsTotal; }
 };
 
 class HierarhyElement {

@@ -2454,6 +2454,13 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   std::filesystem::path compliance_rpt_path =
       FloorplanningArtifact("constraint_compliance.rpt");
 
+  // [aurora2#1725 stage P7] The same verdict, machine-readable, for the FloorPlanning
+  // panel: the .rpt names one example out-of-region atom because a human reading a log
+  // does not want 500, but the panel has to list every one to explain why an instance is
+  // only partially placed.
+  std::filesystem::path placement_json_path =
+      FloorplanningArtifact("placement.json");
+
   std::vector<std::string> args;
   args.push_back(constraint_compliance_script_path.string());
   args.push_back("--place");
@@ -2473,6 +2480,8 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   args.push_back("warning");
   args.push_back("-o");
   args.push_back(compliance_rpt_path.string());
+  args.push_back("--json");
+  args.push_back(placement_json_path.string());
 
   // Soft constraint: the exit code is intentionally not checked. --mode warning already
   // returns 0 unconditionally: any FAIL/STALE verdict is in compliance_rpt_path and in

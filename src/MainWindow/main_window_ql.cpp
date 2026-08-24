@@ -2398,6 +2398,14 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   }
   m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
 
+  // [aurora2#1725 stage P7] Measured placement, when a placement exists. Written by the
+  // constraint-compliance stage, so it appears after place and is refreshed by the same
+  // reload path as everything else here; absent before then, which leaves every row without
+  // a status icon rather than with a wrong one.
+  m_floorPlanningWidget->setPlacementVerdicts(fp::loadPlacementVerdicts(
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "placement.json")));
+
   // [aurora2#1725 stage P1] instances.json -> flat path set for the tree. Every instance,
   // deleted ones included: they are shown greyed out and unselectable rather than dropped,
   // because whether an instance survives synthesis depends on generics and constant

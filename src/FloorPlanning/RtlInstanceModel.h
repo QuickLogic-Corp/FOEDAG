@@ -45,6 +45,12 @@ struct RtlInstance {
     bool constrainable() const { return status == "complete" || status == "partial"; }
 };
 
+// [aurora2#1725 stage P7] Reads <project>_floorplanning_placement.json. A missing file is
+// ordinary -- placement may simply not have run yet -- and yields an empty map, which the
+// panel renders as "no status", never as "nothing is placed".
+std::map<std::string, InstancePlacement> loadPlacementVerdicts(
+    const std::filesystem::path& path);
+
 class RtlInstanceModel {
 public:
     // Reads instances.json. Fails, rather than returning an empty tree, when the file is

@@ -18,6 +18,16 @@
 #include <QMenu>
 #include <QShortcut>
 #include <QBrush>
+#include <QDialog>
+#include <QFontDatabase>
+#include <QDialogButtonBox>
+#include <QPlainTextEdit>
+#include <QStyle>
+#include <QCursor>
+#include <QPainter>
+#include <QPointer>
+#include <QStyleOptionButton>
+#include <QStyledItemDelegate>
 
 #include <QDebug>
 
@@ -35,8 +45,98 @@ static constexpr int kVprDisplayRowRole = Qt::UserRole + 100;
 // Path construction concatenates directly: parent "din" + "[0]" → "din[0]".
 static constexpr int kBusBitRole = Qt::UserRole + 101;
 
+// [aurora2#1725 stage P7] The Why cell's popup text and window title. Held on the item so
+// the click handler needs no parallel lookup table keyed by row.
+static constexpr int kExplanationRole = Qt::UserRole + 102;
+static constexpr int kExplanationTitleRole = Qt::UserRole + 103;
+
 bool isVprDisplayRow(const QStandardItem* item) {
     return item && item->data(kVprDisplayRowRole).toBool();
+}
+
+// [aurora2#1725 stage P7] Paints the Why cell as a push button, so it looks pressable and
+// lights up under the pointer, instead of a bare "?" glyph that reads as text. Drawn through
+// the style's own CE_PushButton, so the background and the hover state match every other
+// button in the panel under any theme.
+//
+// A delegate rather than a widget per row: only some rows have an explanation, but a tree can
+// hold thousands of rows and hover has to be cheap.
+class WhyButtonDelegate final : public QStyledItemDelegate {
+public:
+    explicit WhyButtonDelegate(QTreeView* view)
+        : QStyledItemDelegate(view), m_view(view) {}
+
+    void paint(QPainter* painter, const QStyleOptionViewItem& option,
+               const QModelIndex& index) const override {
+        if (index.data(kExplanationRole).toString().isEmpty()) {
+            // Nothing to explain on this row: no button at all, not a disabled one.
+            QStyledItemDelegate::paint(painter, option, index);
+            return;
+        }
+
+        QStyleOptionButton button;
+        button.rect = option.rect.adjusted(2, 2, -2, -2);
+        button.text = QStringLiteral("?");
+        button.state = QStyle::State_Enabled | QStyle::State_Raised;
+        // option.state's MouseOver covers the whole hovered row, so the pointer is tested
+        // against this cell instead -- the button must light up only when it is the thing
+        // under the cursor.
+        if (m_view && option.rect.contains(m_view->viewport()->mapFromGlobal(QCursor::pos()))) {
+            button.state |= QStyle::State_MouseOver;
+        }
+        QStyle* style = m_view ? m_view->style() : QApplication::style();
+        style->drawControl(QStyle::CE_PushButton, &button, painter, m_view);
+    }
+
+private:
+    QTreeView* m_view{nullptr};
+};
+
+// [aurora2#1725 stage P7] Shows one row's explanation. A dialog rather than a tooltip because
+// the interesting case is hundreds of out-of-region atom names: that has to be scrollable,
+// selectable and copyable, none of which a tooltip is. Non-modal, so it can stay open while
+// the user carries on clicking through the tree, and it deletes itself when closed.
+// One dialog for the whole panel: pressing another row's button replaces what is on screen
+// rather than stacking a second window over it. Shared across both trees (netlist and
+// partition), because to the user they are one panel.
+QPointer<QDialog> g_explanationDialog;
+
+void showExplanationDialog(QWidget* parent, const QString& title, const QString& body) {
+    if (g_explanationDialog) {
+        g_explanationDialog->close();   // WA_DeleteOnClose disposes of it
+    }
+
+    QDialog* dialog = new QDialog(parent);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(title);
+    dialog->setModal(false);
+    dialog->resize(560, 420);
+
+    QVBoxLayout* layout = new QVBoxLayout(dialog);
+
+    QPlainTextEdit* text = new QPlainTextEdit(body, dialog);
+    text->setReadOnly(true);              // read-only, still selectable and copyable
+    // Wrap rather than scroll sideways: an atom name plus its coordinates can be longer than
+    // the dialog, and text hidden off to the right may as well not be there. Anywhere, not
+    // just at word boundaries, because these names have no spaces to break at.
+    text->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    text->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    text->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    text->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    layout->addWidget(text);
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+    // Explicit Copy: selecting a few hundred atom names by dragging is worse than a button.
+    QPushButton* copyAll = buttons->addButton(QObject::tr("Copy"), QDialogButtonBox::ActionRole);
+    QObject::connect(copyAll, &QPushButton::clicked, dialog, [body]{
+        QApplication::clipboard()->setText(body);
+    });
+    QObject::connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+    layout->addWidget(buttons);
+
+    g_explanationDialog = dialog;
+    dialog->show();
+    dialog->raise();
 }
 
 // Build the full path for `item` given its parent's path.
@@ -216,6 +316,23 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
 
     // Right-click context menu: copy atom name(s) of the hovered row
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    // [aurora2#1725 stage P7] The "?" cell behaves as a button: one click, one popup. Kept as
+    // a cell rather than a real QPushButton per row so a tree of thousands of instances does
+    // not carry thousands of widgets.
+    m_view->setItemDelegateForColumn(Column::Why, new WhyButtonDelegate(m_view));
+    // Hover is painted from the cursor position, so the viewport has to be repainted as the
+    // pointer moves for the button to light up and go dark again.
+    m_view->setMouseTracking(true);
+    connect(m_view, &QTreeView::entered, this, [this](const QModelIndex&) {
+        m_view->viewport()->update();
+    });
+    connect(m_view, &QTreeView::clicked, this, [this](const QModelIndex& index) {
+        if (!index.isValid() || index.column() != Column::Why) return;
+        const QString body = index.data(kExplanationRole).toString();
+        if (body.isEmpty()) return;
+        showExplanationDialog(this, index.data(kExplanationTitleRole).toString(), body);
+    });
+
     connect(m_view, &QTreeView::customContextMenuRequested, this, [this, atomCopyText](const QPoint& pos) {
         const QModelIndex idx = m_view->indexAt(pos);
         const QString text = atomCopyText(idx);
@@ -240,21 +357,32 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
 void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
 {
     m_model->clear();
+    // Both variants carry all five columns so Column::Why means the same index in each;
+    // the partition tree hides Partitions instead of omitting it.
     if (!isPartitionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "Type" << "Partitions");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "Type" << "Partitions" << "");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "Type");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "Type" << "" << "");
         m_view->header()->setVisible(false);
     }
 
     QHeaderView* header = m_view->header();
-    header->setStretchLastSection(true);
+    // Why is the last logical section, so stretching the last one would stretch the "?"
+    // column; AtomList and Partitions are Stretch and absorb the slack instead.
+    header->setStretchLastSection(false);
     header->setSectionResizeMode(Column::Netlist, QHeaderView::ResizeToContents);
     header->setSectionResizeMode(Column::AtomList, QHeaderView::Stretch);
     header->setSectionResizeMode(Column::AtomType, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(Column::Why, QHeaderView::Fixed);
+    header->resizeSection(Column::Why, m_view->style()->pixelMetric(QStyle::PM_SmallIconSize) + 12);
     if (!isPartitionsColumnHidden()) {
         header->setSectionResizeMode(Column::Partitions, QHeaderView::Stretch);
+    } else {
+        m_view->setColumnHidden(Column::Partitions, true);
     }
+    // Sits immediately right of the name, where the icon it explains is. Logical order is
+    // untouched, so every Column:: index elsewhere still addresses the same cell.
+    header->moveSection(header->visualIndex(Column::Why), 1);
 
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
     for (const std::string& element: elements) {
@@ -264,6 +392,9 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     // After populateAtomColumns(): a graded instance's verdict is the better explanation
     // than "no atoms in atomsets.json", so it overrides that hiding.
     applyInstanceVerdicts();
+    // After applyInstanceVerdicts(): placement is the later, measured word on a row, and its
+    // icon should win over nothing more than the grading colour it is drawn beside.
+    applyPlacementVerdicts();
     blocker.unblock();
 
     // completer
@@ -530,9 +661,8 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
 
 void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 {
-    const bool isPartitionColumnVisible = !isPartitionsColumnHidden();
     std::function<QStandardItem*(QStandardItem*, const QString&)>
-        findOrCreateChild = [isPartitionColumnVisible](QStandardItem* parent, const QString& text)
+        findOrCreateChild = [](QStandardItem* parent, const QString& text)
     {
         auto applyFlags = [](QStandardItem* item) {
             Qt::ItemFlags flags = item->flags()
@@ -560,12 +690,11 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
         atomListItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         QStandardItem* atomTypeItem = new QStandardItem("");
         atomTypeItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-        if (isPartitionColumnVisible) {
-            QStandardItem* partitionItem = new QStandardItem("");
-            parent->appendRow({item, atomListItem, atomTypeItem, partitionItem});
-        } else {
-            parent->appendRow({item, atomListItem, atomTypeItem});
-        }
+        QStandardItem* partitionItem = new QStandardItem("");
+        QStandardItem* whyItem = new QStandardItem("");
+        whyItem->setFlags(Qt::ItemIsEnabled);   // clickable, never checkable or editable
+        whyItem->setTextAlignment(Qt::AlignCenter);
+        parent->appendRow({item, atomListItem, atomTypeItem, partitionItem, whyItem});
         return item;
     };
 
@@ -615,6 +744,126 @@ std::set<std::string> SynthResourceHierarchyWidget::atomNamesFor(const std::stri
     // second set of rules to keep in step, and the requirement is that a rule added to one
     // path is present in the other.
     return fp::atomNamesFor(m_atomNames, path);
+}
+
+// [aurora2#1725 stage P7] Placement status. Same shape as setInstanceVerdicts(): store, then
+// apply if the tree already exists (build() applies both itself).
+void SynthResourceHierarchyWidget::setPlacementVerdicts(
+    std::map<std::string, InstancePlacement> placements)
+{
+    m_placements = std::move(placements);
+    applyPlacementVerdicts();
+}
+
+void SynthResourceHierarchyWidget::setExplanation(QStandardItem* whyItem, const QString& title,
+                                                  const QString& body)
+{
+    if (!whyItem) return;
+    whyItem->setText(QStringLiteral("?"));
+    whyItem->setData(body, kExplanationRole);
+    whyItem->setData(title, kExplanationTitleRole);
+    whyItem->setToolTip(tr("Click for details"));
+}
+
+// Renders the measured placement of every constrained instance: a tick when all of its atoms
+// landed inside its region, a warning triangle when any did not, and nothing at all for an
+// instance no .qdc constrains -- there is no region for those to be inside of, and marking
+// them all "placed" would turn the column into decoration.
+//
+// The out-of-region atom names go in the Why popup rather than the tooltip: there can be
+// hundreds, and the whole point is being able to read and copy them.
+void SynthResourceHierarchyWidget::applyPlacementVerdicts()
+{
+    if (!m_model) return;
+
+    std::function<void(QStandardItem*, const std::string&)> markRecursive =
+        [&markRecursive, this](QStandardItem* item, const std::string& prefix)
+    {
+        if (!item) return;
+        const int rows = item->rowCount();
+        for (int row = 0; row < rows; ++row) {
+            QStandardItem* child = item->child(row, Column::Netlist);
+            if (!child || isVprDisplayRow(child)) continue;
+
+            const std::string path = buildChildPath(prefix, child);
+            const auto found = m_placements.find(path);
+            if (found != m_placements.end()) {
+                const InstancePlacement& placement = found->second;
+                const QString region = QString::fromStdString(placement.region);
+
+                if (placement.fullyPlaced()) {
+                    // No icon: a tick here reads as the row's own checkbox. Nothing wrong is
+                    // the default state, and the tooltip still says so on hover.
+                    child->setToolTip(tr("Placed: all %1 atoms are inside %2 (partition %3).")
+                                          .arg(placement.atomsTotal)
+                                          .arg(region)
+                                          .arg(QString::fromStdString(placement.partition)));
+                } else if (placement.partiallyPlaced()) {
+                    child->setIcon(m_view->style()->standardIcon(QStyle::SP_MessageBoxWarning));
+
+                    // Tooltip: the count, the region, and the first few names, so hovering is
+                    // already useful. The full list is one click away.
+                    QStringList preview;
+                    const int kPreview = 5;
+                    for (const PlacedAtom& atom : placement.outside) {
+                        if (preview.size() >= kPreview) break;
+                        preview << (atom.located
+                            ? tr("%1 at (%2,%3)").arg(QString::fromStdString(atom.name))
+                                  .arg(atom.x).arg(atom.y)
+                            : tr("%1 (unplaced)").arg(QString::fromStdString(atom.name)));
+                    }
+                    const int remaining =
+                        static_cast<int>(placement.outside.size()) - preview.size();
+                    QString tip = tr("Partially placed: %1 of %2 atoms are outside %3.\n\n%4")
+                                      .arg(placement.outside.size())
+                                      .arg(placement.atomsTotal)
+                                      .arg(region)
+                                      .arg(preview.join(QStringLiteral("\n")));
+                    if (remaining > 0) {
+                        tip += tr("\n... and %n more atom(s). Click ? for the full list.",
+                                  nullptr, remaining);
+                    }
+                    child->setToolTip(tip);
+
+                    // Popup body: every atom, one per line, with where it actually landed.
+                    QStringList lines;
+                    lines << tr("Instance      : %1").arg(QString::fromStdString(path));
+                    lines << tr("Partition     : %1").arg(QString::fromStdString(placement.partition));
+                    lines << tr("Region        : %1").arg(region);
+                    lines << tr("Atoms placed  : %1").arg(placement.atomsTotal);
+                    lines << tr("Inside region : %1").arg(placement.inRegion);
+                    lines << tr("Outside region: %1").arg(placement.outside.size());
+                    lines << QString();
+                    lines << tr("Atoms placed elsewhere:");
+                    for (const PlacedAtom& atom : placement.outside) {
+                        lines << (atom.located
+                            ? QStringLiteral("  %1  clb(%2,%3)")
+                                  .arg(QString::fromStdString(atom.name)).arg(atom.x).arg(atom.y)
+                            : QStringLiteral("  %1  (not placed)")
+                                  .arg(QString::fromStdString(atom.name)));
+                    }
+                    setExplanation(item->child(row, Column::Why),
+                                   tr("Why partially placed: %1").arg(QString::fromStdString(path)),
+                                   lines.join(QStringLiteral("\n")));
+                }
+            } else {
+                // No verdict for this row: clear any icon a previous placement left behind, so
+                // a re-measured tree never shows a status that is no longer true. The crossed
+                // icon on an optimised-out instance is not ours to clear -- that one comes
+                // from the P4 grading, which has already run by this point.
+                const auto graded = m_verdicts.find(path);
+                const bool optimisedOut =
+                    graded != m_verdicts.end() && graded->second.verdict == "deleted";
+                if (!optimisedOut) {
+                    child->setIcon(QIcon());
+                }
+            }
+
+            markRecursive(child, path);
+        }
+    };
+
+    markRecursive(m_model->invisibleRootItem(), "");
 }
 
 void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
@@ -694,20 +943,32 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
                     child->setFlags(child->flags() & ~Qt::ItemIsUserCheckable);
                     child->setData(QVariant(), Qt::CheckStateRole);
                     child->setForeground(QBrush(Qt::gray));
+                    child->setIcon(m_view->style()->standardIcon(QStyle::SP_MessageBoxCritical));
                     child->setToolTip(reason.isEmpty()
-                        ? tr("Deleted by synthesis: no atoms in the netlist.")
-                        : tr("Deleted by synthesis: %1").arg(reason));
+                        ? tr("Optimised out by synthesis: no atoms in the netlist.")
+                        : tr("Optimised out by synthesis: %1").arg(reason));
+
+                    QStringList lines;
+                    lines << tr("Instance: %1").arg(QString::fromStdString(path));
+                    lines << QString();
+                    lines << tr("This instance is not in the synthesised netlist, so it has no "
+                                "atoms to place and cannot be constrained.");
+                    lines << QString();
+                    lines << (reason.isEmpty()
+                        ? tr("Reason: synthesis reported no atoms for it.")
+                        : tr("Reason: %1").arg(reason));
+                    setExplanation(item->child(row, Column::Why),
+                                   tr("Why optimised out: %1").arg(QString::fromStdString(path)),
+                                   lines.join(QStringLiteral("\n")));
                     if (QStandardItem* atomItem = item->child(row, Column::AtomList)) {
                         atomItem->setText(tr("(deleted)"));
                         atomItem->setForeground(QBrush(Qt::gray));
                     }
                 } else if (graded.verdict == "partial") {
                     child->setForeground(QBrush(QColor(0xB8, 0x86, 0x0B)));  // dark goldenrod
-                    child->setToolTip(reason.isEmpty()
-                        ? tr("Partially trustworthy: this instance is constrained, but its atom "
-                             "set may be incomplete.")
-                        : tr("Partially trustworthy: this instance is constrained, but its atom "
-                             "set may be incomplete (%1).").arg(reason));
+                    child->setToolTip(
+                        tr("This instance can be constrained, but its atom set may be "
+                           "incomplete, so its resource figures are a lower bound."));
                 }
             }
 
@@ -722,14 +983,12 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
 {
     if (!m_hasAtomNames) return;
 
-    const bool partitionsVisible = !isPartitionsColumnHidden();
-
     // [aurora2#1725] Leaves with no atoms are tallied here, not logged: FloorPlanningWidget
     // reads the tally back and reports it once, rather than once per tree.
     m_atomMappingReport = AtomMappingReport{};
 
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this, partitionsVisible](QStandardItem* item, const std::string& prefix)
+        [&populateRecursive, this](QStandardItem* item, const std::string& prefix)
     {
         if (!item) return;
         const int rows = item->rowCount();
@@ -777,10 +1036,8 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                             col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                             auto* col2 = new QStandardItem(classifyAtomType(n));
                             col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            if (partitionsVisible)
-                                child->appendRow({col0, col1, col2, new QStandardItem()});
-                            else
-                                child->appendRow({col0, col1, col2});
+                            child->appendRow({col0, col1, col2, new QStandardItem(),
+                                              new QStandardItem()});
                         }
                     }
                 }

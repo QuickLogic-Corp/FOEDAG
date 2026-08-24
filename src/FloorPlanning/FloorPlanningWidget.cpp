@@ -495,6 +495,12 @@ void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerd
     m_partitionResourcesWidget->setInstanceVerdicts(std::move(verdicts));
 }
 
+void FloorPlanningWidget::setPlacementVerdicts(std::map<std::string, InstancePlacement> placements)
+{
+    m_synthResourcesWidget->setPlacementVerdicts(placements);
+    m_partitionResourcesWidget->setPlacementVerdicts(std::move(placements));
+}
+
 void FloorPlanningWidget::setDesignResources(DesignResources resources)
 {
     // An invalid set means "this project has no design_resources.json". It must still be
