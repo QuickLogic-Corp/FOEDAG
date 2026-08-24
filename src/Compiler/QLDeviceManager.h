@@ -71,6 +71,39 @@ class QLDeviceTarget  {
 };
 
 
+// the device package's layout-generation settings, read from its config.json:
+//   "DEVICE_TYPE": "CUSTOM"                      -- may this fabric be re-shaped at all?
+//   "DEVICE_TYPE_SETTINGS": {"LAYOUT_MODE": ...} -- how should the layout be produced?
+// these are two independent axes with overlapping vocabularies, and they are
+// normalised by two DIFFERENT helpers - see normalizeDeviceType() /
+// normalizeLayoutMode() in QLDeviceManager.cpp.
+// everything is returned as one value so the caller resolves the mode in a
+// single decision instead of stitching out-params together.
+class QLDeviceLayoutSettings {
+  public:
+    // config.json was found and parsed.
+    bool config_found = false;
+    // "DEVICE_TYPE" was present and understood. when false, 'device_type' is
+    // empty and the package predates the layout-mode contract.
+    bool device_type_present = false;
+    // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" was present and understood.
+    bool layout_mode_present = false;
+    // a key was present but carried a value we do not understand. the caller
+    // must fail: guessing here is exactly the silent fallback we are removing.
+    bool invalid = false;
+    // the offending key and its verbatim value, for the error message.
+    std::string invalid_key;
+    std::string invalid_value;
+    // canonical "CUSTOM" or "FIXED".
+    std::string device_type;
+    // canonical "AUTO", "CUSTOM" or "RESOURCES".
+    std::string layout_mode;
+    // the config.json this was read from, reported in errors and passed to
+    // add_layout.py as --device_config. set even when the file is absent.
+    std::filesystem::path config_json_path;
+};
+
+
 class QLDeviceManager : public QObject {
   Q_OBJECT
  public:
@@ -251,6 +284,12 @@ class QLDeviceManager : public QObject {
   // Returns an empty set when the key is absent, empty, or not a string array
   // (opt-in gating: no token => the corresponding FPU IP is unavailable).
   std::set<std::string> deviceFPUTypes(QLDeviceTarget device_target = QLDeviceTarget());
+  // Layout-generation settings of the device package, from "DEVICE_TYPE" and
+  // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
+  // reported as not-present (a pre-2026.3 package), an unrecognised value as
+  // invalid - never defaulted, because a wrong default here silently re-shapes
+  // a device.
+  QLDeviceLayoutSettings deviceLayoutSettings(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());

@@ -4011,6 +4011,147 @@ std::set<std::string> QLDeviceManager::deviceFPUTypes(QLDeviceTarget device_targ
   return types;
 }
 
+// Spelling cleanup shared by both layout-setting normalisers: trim, drop an
+// optional "FPGA_" prefix and upper-case. Only the SPELLING is shared here;
+// the alias maps are not - see below.
+static std::string canonicalizeLayoutToken(const std::string& value) {
+
+  std::string token = value;
+
+  const std::size_t first = token.find_first_not_of(" \t\r\n");
+  const std::size_t last = token.find_last_not_of(" \t\r\n");
+  if(first == std::string::npos) {
+    return std::string();
+  }
+  token = token.substr(first, last - first + 1);
+
+  // ascii upper-case: these are config identifiers, not user text, so stay
+  // independent of the process locale.
+  for(char& c : token) {
+    if(c >= 'a' && c <= 'z') {
+      c = static_cast<char>(c - 'a' + 'A');
+    }
+  }
+
+  if(token.rfind("FPGA_", 0) == 0) {
+    token = token.substr(5);
+  }
+
+  return token;
+}
+
+// Normalise "DEVICE_TYPE". Only CUSTOM and FIXED are legal.
+//
+// This deliberately does NOT apply normalizeLayoutMode()'s alias map, and the
+// two must never be merged into one helper: that map contains FIXED -> CUSTOM,
+// so reusing it here would turn a device that must never be re-shaped into a
+// re-shapable one and silently delete the FIXED guard. That is exactly the bug
+// add_layout.py has upstream - it normalises DEVICE_TYPE through the
+// LAYOUT_MODE map, so a FIXED package with no DEVICE_TYPE_SETTINGS collapses to
+// CUSTOM, finds no settings, falls back to LAYOUT_MODE=AUTO and auto-sizes hard
+// silicon without a word. Aurora is the only guard against that.
+// Returns false when the value is not a recognised device type.
+static bool normalizeDeviceType(const std::string& value, std::string& out_device_type) {
+
+  const std::string token = canonicalizeLayoutToken(value);
+
+  if(token == "CUSTOM" || token == "FIXED") {
+    out_device_type = token;
+    return true;
+  }
+
+  return false;
+}
+
+// Normalise "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" to AUTO / CUSTOM / RESOURCES.
+//
+// The two legacy spellings older packages carry are aliased: FIXED meant "an
+// explicitly specified array", which is CUSTOM, and SCALED meant "scale to a
+// resource budget", which is RESOURCES. This alias map is valid for LAYOUT_MODE
+// ONLY - see normalizeDeviceType().
+// Returns false when the value is not a recognised layout mode.
+static bool normalizeLayoutMode(const std::string& value, std::string& out_layout_mode) {
+
+  std::string token = canonicalizeLayoutToken(value);
+
+  if(token == "FIXED") {
+    token = "CUSTOM";
+  }
+  else if(token == "SCALED") {
+    token = "RESOURCES";
+  }
+
+  if(token == "AUTO" || token == "CUSTOM" || token == "RESOURCES") {
+    out_layout_mode = token;
+    return true;
+  }
+
+  return false;
+}
+
+QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
+
+  QLDeviceLayoutSettings layout_settings;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // reported in the caller's error messages even when the file is missing.
+  layout_settings.config_json_path = deviceTypeDirPath(device_target) / std::string("config.json");
+
+  json device_target_config_json;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+    // no config.json: a package predating the layout-mode contract. the caller
+    // falls back to the layout-name path so an already released kit keeps
+    // working without a re-sync.
+    return layout_settings;
+  }
+  layout_settings.config_found = true;
+
+  if( device_target_config_json.contains("DEVICE_TYPE") ) {
+    const auto& device_type = device_target_config_json["DEVICE_TYPE"];
+    if( device_type.is_string() &&
+        normalizeDeviceType(device_type.get<std::string>(), layout_settings.device_type) ) {
+      layout_settings.device_type_present = true;
+    }
+    else {
+      layout_settings.invalid = true;
+      layout_settings.invalid_key = "DEVICE_TYPE";
+      layout_settings.invalid_value = device_type.is_string() ? device_type.get<std::string>()
+                                                             : device_type.dump();
+      return layout_settings;
+    }
+  }
+
+  if( device_target_config_json.contains("DEVICE_TYPE_SETTINGS") ) {
+    const auto& device_type_settings = device_target_config_json["DEVICE_TYPE_SETTINGS"];
+    if( !device_type_settings.is_object() ) {
+      layout_settings.invalid = true;
+      layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS";
+      layout_settings.invalid_value = device_type_settings.dump();
+      return layout_settings;
+    }
+
+    if( device_type_settings.contains("LAYOUT_MODE") ) {
+      const auto& layout_mode = device_type_settings["LAYOUT_MODE"];
+      if( layout_mode.is_string() &&
+          normalizeLayoutMode(layout_mode.get<std::string>(), layout_settings.layout_mode) ) {
+        layout_settings.layout_mode_present = true;
+      }
+      else {
+        layout_settings.invalid = true;
+        layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS.LAYOUT_MODE";
+        layout_settings.invalid_value = layout_mode.is_string() ? layout_mode.get<std::string>()
+                                                               : layout_mode.dump();
+        return layout_settings;
+      }
+    }
+  }
+
+  return layout_settings;
+}
+
 // Load the device's `config.json` into the supplied json object.
 // Returns true on success, false if the file does not exist or parsing fails.
 // config.json is always plaintext device data; it is never encrypted.
