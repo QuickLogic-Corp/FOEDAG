@@ -21,6 +21,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IPGenerate/IPCatalogBuilder.h"
 
+#include <cctype>
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -136,6 +138,24 @@ std::string IPCatalogBuilder::ipNameFromGeneratorPath(
   return IPName;
 }
 
+// True for "<digits>_<digits>", the form QLDeviceManager::deviceDSPVersion()
+// produces and the only form the gate can compare against. A plausible typo -
+// "2.0", copying the DSPV1.1 spelling from DSP_TYPE - would otherwise be
+// accepted verbatim and then match no device at all, hiding the IP from the
+// very fabric it targets. That is fail-closed, which the model forbids.
+static bool isDspVersionWellFormed(const std::string& value) {
+  const size_t separator = value.find('_');
+  if (separator == std::string::npos || separator == 0 ||
+      separator + 1 == value.size())
+    return false;
+  if (value.find('_', separator + 1) != std::string::npos) return false;
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (i == separator) continue;
+    if (!std::isdigit(static_cast<unsigned char>(value[i]))) return false;
+  }
+  return true;
+}
+
 // Returns obj[key] when it is present and a string, "" otherwise. Manifests are
 // hand written, so a wrong type must degrade to "unset", never throw.
 static std::string manifestString(const json& obj, const char* key) {
@@ -233,13 +253,23 @@ IPAvailability IPCatalogBuilder::readIPManifest(
     } else {
       for (const auto& item : requiresNode.items()) {
         if (item.key() == "dsp_version") {
-          if (item.value().is_string()) {
-            availability.requiredDspVersion = item.value().get<std::string>();
-          } else {
+          if (!item.value().is_string()) {
             availability.requirementUnverifiable = true;
             warn(
                 "Manifest \"requires.dsp_version\" is not a string; the fabric "
                 "requirement cannot be read.");
+          } else {
+            const std::string value = item.value().get<std::string>();
+            if (isDspVersionWellFormed(value)) {
+              availability.requiredDspVersion = value;
+            } else {
+              // Do not gate on a value we cannot compare: it would match no
+              // device and hide the IP everywhere, including on its own.
+              availability.requirementUnverifiable = true;
+              warn("Manifest \"requires.dsp_version\" value \"" + value +
+                   "\" is not of the form <major>_<minor>; the fabric "
+                   "requirement cannot be read.");
+            }
           }
         } else {
           availability.requirementUnverifiable = true;

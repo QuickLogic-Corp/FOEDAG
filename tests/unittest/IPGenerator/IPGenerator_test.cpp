@@ -445,6 +445,29 @@ TEST(IPManifest, UnknownRequiresKeyIsReported) {
             "fabric requirement cannot be read.");
 }
 
+TEST(IPManifest, UnknownRequiresKeyKeepsTheVersionItDidRead) {
+  // The forward-compatibility case: a newer ipgenerator adds a second requires
+  // key. The dsp_version we understood must survive, or the IP silently
+  // becomes ungated on an older FOEDAG.
+  const auto availability = readFixture(manifestFixture("requires_extra_key"));
+  EXPECT_EQ(availability.requiredDspVersion, "2_0");
+  EXPECT_TRUE(availability.requirementUnverifiable);
+  EXPECT_EQ(availability.manifestWarning,
+            "Manifest \"requires\" contains unknown key \"bram_version\"; the "
+            "fabric requirement cannot be read.");
+}
+
+TEST(IPManifest, MalformedDspVersionValueIsRejected) {
+  // "2.0" instead of "2_0" - the DSPV1.1 spelling copied from DSP_TYPE. Taken
+  // literally it matches no device and hides the IP from its own fabric.
+  const auto availability = readFixture(manifestFixture("requires_bad_version"));
+  EXPECT_TRUE(availability.requirementUnverifiable);
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_EQ(availability.manifestWarning,
+            "Manifest \"requires.dsp_version\" value \"2.0\" is not of the "
+            "form <major>_<minor>; the fabric requirement cannot be read.");
+}
+
 TEST(IPManifest, UnknownMaturityIsTreatedAsProduction) {
   const auto availability = readFixture(manifestFixture("unknown_maturity"));
   EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
@@ -626,6 +649,80 @@ TEST(IPAvailabilityGate, UnreadableRequirementIsReportedNotErased) {
             std::string::npos);
 }
 
+TEST(IPAvailabilityGate, PartlyReadableRequiresStillEnforcesWhatItRead) {
+  // The must-not-regress case: dsp_version parsed fine, another key did not.
+  // The gate has to run on what was read AND report that more may exist.
+  IPCatalog catalog;
+  IPAvailability requiresV1;
+  requiresV1.manifestPresent = true;
+  requiresV1.requiredDspVersion = "1_0";
+  catalog.addIP(makeIP("dsp_generator_v1_0", requiresV1));
+  IPDefinition* v2 = makeIP("dsp_generator_v2_0",
+                            readFixture(manifestFixture("requires_extra_key")));
+  catalog.addIP(v2);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      v2, &catalog, onDevice(kSmokeDevice, "1_0"));
+  // Enforced, not waved through.
+  EXPECT_FALSE(status.available);
+  EXPECT_FALSE(status.listed);
+  EXPECT_EQ(status.state, "unavailable");
+  EXPECT_TRUE(status.unverified);
+  EXPECT_EQ(v2->Name() + " " + status.reason,
+            "dsp_generator_v2_0 requires DSPV2 fabric; device "
+            "IDAHO-FPGA0806_WLBL provides DSPV1. Use dsp_generator_v1_0 on "
+            "this device. Part of the \"requires\" block could not be read, so "
+            "this IP may have further requirements that were not checked. "
+            "Manifest \"requires\" contains unknown key \"bram_version\"; the "
+            "fabric requirement cannot be read.");
+  EXPECT_EQ(IPGenerator::UnverifiedRequirementNotice(v2),
+            "IP dsp_generator_v2_0: part of the \"requires\" block in "
+            "ip_manifest.json could not be read, so this IP may have further "
+            "requirements that were not checked. Manifest \"requires\" "
+            "contains unknown key \"bram_version\"; the fabric requirement "
+            "cannot be read.");
+}
+
+TEST(IPAvailabilityGate, PartlyReadableRequiresIsStillUsableWhenTheGatePasses) {
+  // Same manifest on the device it targets: available, but still flagged.
+  IPCatalog catalog;
+  IPDefinition* v2 = makeIP("dsp_generator_v2_0",
+                            readFixture(manifestFixture("requires_extra_key")));
+  catalog.addIP(v2);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      v2, &catalog, onDevice("SOMEDEV", "2_0"));
+  EXPECT_TRUE(status.available);
+  EXPECT_TRUE(status.listed);
+  EXPECT_TRUE(status.unverified);
+  EXPECT_NE(status.reason.find(
+                "requires DSPV2 fabric; device SOMEDEV provides DSPV2."),
+            std::string::npos)
+      << status.reason;
+  EXPECT_NE(status.reason.find("further requirements that were not checked."),
+            std::string::npos)
+      << status.reason;
+}
+
+TEST(IPAvailabilityGate, MalformedVersionValueDoesNotHideTheIP) {
+  // Fail-closed check: "2.0" must not gate at all, on any device, rather than
+  // gating against a value nothing can ever match.
+  IPCatalog catalog;
+  IPDefinition* def = makeIP(
+      "dsp_generator_v2_0", readFixture(manifestFixture("requires_bad_version")));
+  catalog.addIP(def);
+
+  for (const char* deviceVersion : {"1_0", "2_0"}) {
+    const auto status = IPGenerator::EvaluateAvailability(
+        def, &catalog, onDevice("SOMEDEV", deviceVersion));
+    EXPECT_TRUE(status.available) << deviceVersion;
+    EXPECT_TRUE(status.listed) << deviceVersion;
+    EXPECT_TRUE(status.unverified) << deviceVersion;
+    EXPECT_EQ(status.reason.find("requires DSPV2.0"), std::string::npos)
+        << status.reason;
+  }
+}
+
 TEST(IPAvailabilityGate, UnreadableRequirementWithNoDeviceSaysSoToo) {
   IPCatalog catalog;
   IPDefinition* def = makeIP("dsp_generator_v2_0",
@@ -727,6 +824,68 @@ TEST(IPWrapperStamp, StampsTheGeneratedWrapperInPlace) {
   // now report the miss instead of succeeding silently.
   EXPECT_FALSE(IPGenerator::StampWrapperComment(&compiler, dir, "inst1", line));
 
+  std::filesystem::remove_all(dir.parent_path());
+}
+
+TEST(IPWrapperStamp, PreservesTheWrapperFileMode) {
+  // The temporary is created 0666 & ~umask, so a naive rename widens a
+  // read-only generated file.
+  const auto dir =
+      std::filesystem::temp_directory_path() / "foedag_stamp_mode" / "src";
+  std::filesystem::remove_all(dir.parent_path());
+  std::filesystem::create_directories(dir);
+  const auto wrapper = dir / "inst1_v1_0.v";
+  {
+    std::ofstream out(wrapper.string());
+    out << "module inst1();\nendmodule\n";
+  }
+  const auto mode = std::filesystem::perms::owner_read |
+                    std::filesystem::perms::group_read |
+                    std::filesystem::perms::others_read;
+  std::filesystem::permissions(wrapper, mode,
+                               std::filesystem::perm_options::replace);
+
+  Compiler compiler;
+  EXPECT_TRUE(IPGenerator::StampWrapperComment(&compiler, dir, "inst1_v1_0",
+                                               "// WARNING: preview."));
+  EXPECT_EQ(std::filesystem::status(wrapper).permissions(), mode);
+
+  std::filesystem::permissions(wrapper, std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::add);
+  std::filesystem::remove_all(dir.parent_path());
+}
+
+TEST(IPWrapperStamp, LeavesNoTemporaryBehindWhenItCannotWrite) {
+  const auto dir =
+      std::filesystem::temp_directory_path() / "foedag_stamp_ro" / "src";
+  std::filesystem::remove_all(dir.parent_path());
+  std::filesystem::create_directories(dir);
+  const auto wrapper = dir / "inst1_v1_0.v";
+  {
+    std::ofstream out(wrapper.string());
+    out << "module inst1();\nendmodule\n";
+  }
+  // Read-only directory: the wrapper is found but the temporary cannot be
+  // created, which is the "could not rewrite" case rather than "not found".
+  std::filesystem::permissions(dir,
+                               std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_exec,
+                               std::filesystem::perm_options::replace);
+
+  Compiler compiler;
+  const bool stamped = IPGenerator::StampWrapperComment(
+      &compiler, dir, "inst1_v1_0", "// WARNING: preview.");
+
+  std::filesystem::permissions(dir, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::add);
+  if (!stamped) {  // skipped when the test runs as root, which ignores 0500
+    EXPECT_FALSE(std::filesystem::exists(
+        std::filesystem::path{wrapper.string() + ".stamp.tmp"}));
+    std::ifstream in(wrapper.string());
+    std::stringstream body;
+    body << in.rdbuf();
+    EXPECT_EQ(body.str(), "module inst1();\nendmodule\n");
+  }
   std::filesystem::remove_all(dir.parent_path());
 }
 

@@ -99,10 +99,13 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
                                       const std::filesystem::path& srcDir,
                                       const std::string& baseName,
                                       const std::string& line) {
+  bool found = false;
   bool stamped = false;
   for (const char* extension : {".v", ".sv"}) {
     const std::filesystem::path wrapper = srcDir / (baseName + extension);
     if (!FileUtils::FileExists(wrapper)) continue;
+    found = true;
+
     std::string body;
     {
       std::ifstream in(wrapper.string());
@@ -115,32 +118,56 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
       stamped = true;
       continue;
     }
+
+    // Keep the generated file's mode: the temporary is created with
+    // 0666 & ~umask, so renaming it over a read-only wrapper would widen it.
+    std::error_code error;
+    const auto mode = std::filesystem::status(wrapper, error).permissions();
+    const bool haveMode = !error;
+
     const std::filesystem::path temporary = wrapper.string() + ".stamp.tmp";
+    auto discardTemporary = [&temporary]() {
+      std::error_code ignored;
+      std::filesystem::remove(temporary, ignored);
+    };
     {
       std::ofstream out(temporary.string(), std::ios::trunc);
       if (!out) continue;
       out << line << "\n" << body;
-      out.flush();
+      // close() explicitly and then check: a deferred write error can surface
+      // only at close, and letting the destructor swallow it would rename a
+      // truncated file over the generated wrapper.
+      out.close();
       if (!out) {
-        out.close();
-        std::error_code ignored;
-        std::filesystem::remove(temporary, ignored);
+        discardTemporary();
         continue;
       }
     }
-    std::error_code error;
+    if (haveMode) {
+      std::filesystem::permissions(temporary, mode,
+                                   std::filesystem::perm_options::replace,
+                                   error);
+      if (error) {
+        discardTemporary();
+        continue;
+      }
+    }
     std::filesystem::rename(temporary, wrapper, error);
     if (error) {
-      std::error_code ignored;
-      std::filesystem::remove(temporary, ignored);
+      discardTemporary();
       continue;
     }
     stamped = true;
   }
+
   if (!stamped && compiler) {
+    // Distinguish the two failures: during an incident, "no source found" for
+    // a file that exists but could not be rewritten sends the reader the wrong
+    // way entirely.
     compiler->WarningMessage(
         "IP Generate, could not record the preview notice in the generated "
-        "wrapper: no source found at " +
+        "wrapper: " +
+        std::string(found ? "could not rewrite " : "no source found at ") +
         (srcDir / (baseName + ".v")).string());
   }
   return stamped;
@@ -156,10 +183,18 @@ std::string IPGenerator::PreviewNotice(const IPDefinition* def) {
 }
 
 std::string IPGenerator::UnverifiedRequirementNotice(const IPDefinition* def) {
-  return "IP " + def->Name() +
-         ": the fabric requirement in ip_manifest.json could not be read, so "
-         "it has not been checked against this device. " +
-         def->Availability().manifestWarning;
+  const IPAvailability& availability = def->Availability();
+  // Two distinct situations: nothing usable was read, or a requirement was
+  // read and enforced but the rest of the block was not.
+  const std::string lead =
+      availability.requiredDspVersion.empty()
+          ? "the fabric requirement in ip_manifest.json could not be read, so "
+            "it has not been checked against this device."
+          : "part of the \"requires\" block in ip_manifest.json could not be "
+            "read, so this IP may have further requirements that were not "
+            "checked.";
+  return "IP " + def->Name() + ": " + lead + " " +
+         availability.manifestWarning;
 }
 
 IPGenerator::DeviceFacts IPGenerator::CurrentDeviceFacts() {
@@ -183,12 +218,19 @@ IPGenerator::IPStatus IPGenerator::EvaluateAvailability(
   status.preview = availability.maturity == IPAvailability::Maturity::Preview;
   status.state = status.preview ? "preview" : "production";
 
+  // Invariant 3: an unreadable manifest does not get to mean "ungated". Note
+  // that this is NOT tested ahead of the gate - a "requires" block can be
+  // partly readable (a valid dsp_version next to a key from a newer schema),
+  // and a requirement we did read must still be enforced. Dropping it there
+  // would put a DSPV2 IP on DSPV1 fabric the moment ipgenerator adds a second
+  // requires key against an older FOEDAG.
+  status.unverified = availability.requirementUnverifiable;
+
   std::vector<std::string> clauses;
-  if (availability.requirementUnverifiable) {
-    // Invariant 3: an unreadable manifest does not get to mean "ungated". The
-    // IP stays listed and buildable - we cannot prove it would fail - but the
-    // fact that the gate never ran is stated at every surface.
-    status.unverified = true;
+  if (status.unverified && availability.requiredDspVersion.empty()) {
+    // Nothing usable was read. The IP stays listed and buildable - we cannot
+    // prove it would fail - but the fact that the gate never ran is stated at
+    // every surface.
     clauses.push_back(
         std::string(
             "fabric requirement could not be read from ip_manifest.json and "
@@ -236,6 +278,13 @@ IPGenerator::IPStatus IPGenerator::EvaluateAvailability(
     }
     clauses.push_back(clause);
   }
+
+  // A requirement was read and enforced above, but the rest of the block was
+  // not: say so, because the IP may carry requirements this build never saw.
+  if (status.unverified && !availability.requiredDspVersion.empty())
+    clauses.push_back(
+        "Part of the \"requires\" block could not be read, so this IP may have "
+        "further requirements that were not checked.");
 
   if (status.preview) {
     std::string clause = "Preview IP, not production-qualified";
