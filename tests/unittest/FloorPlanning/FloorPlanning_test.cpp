@@ -985,9 +985,10 @@ TEST(PartitionsListWidget, EveryResourceColumnHeaderExplainsItself)
     fp::PartitionsListWidget widget;
     auto* table = widget.findChild<QTableWidget*>();
     ASSERT_NE(table, nullptr);
-    ASSERT_EQ(table->columnCount(), 5);
+    ASSERT_EQ(table->columnCount(), 6);
 
-    // Name needs no explanation; the four resource columns do.
+    // Name needs no explanation, and Remove (5) is an icon button; the four resource
+    // columns in between do.
     for (int column = 1; column < 5; ++column) {
         auto* header = table->horizontalHeaderItem(column);
         ASSERT_NE(header, nullptr) << "column " << column << " has no header item";
