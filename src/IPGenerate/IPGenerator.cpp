@@ -68,25 +68,40 @@ std::string dspFabricName(const std::string& version) {
 
 // Name of the same IP built for a different DSP version, derived purely by
 // rewriting the "_v<required>" suffix - no IP name is hard-coded anywhere.
-// Returns "" when the name does not carry the required version as a suffix.
+// The version marker is matched case-insensitively and its case preserved,
+// because catalog directories use both "v1_0" and "V1_0". Returns "" when the
+// name does not carry the required version as a suffix.
 std::string siblingForDspVersion(const std::string& ipName,
                                  const std::string& requiredVersion,
                                  const std::string& deviceVersion) {
-  const std::string suffix = "_v" + requiredVersion;
-  if (ipName.size() <= suffix.size() ||
-      ipName.compare(ipName.size() - suffix.size(), suffix.size(), suffix) != 0)
+  const size_t suffixLength = 2 + requiredVersion.size();  // "_v" + version
+  if (ipName.size() <= suffixLength) return {};
+  const size_t at = ipName.size() - suffixLength;
+  if (ipName[at] != '_') return {};
+  const char marker = ipName[at + 1];
+  if (marker != 'v' && marker != 'V') return {};
+  if (ipName.compare(at + 2, requiredVersion.size(), requiredVersion) != 0)
     return {};
-  return ipName.substr(0, ipName.size() - suffix.size()) + "_v" + deviceVersion;
+  return ipName.substr(0, at) + "_" + marker + deviceVersion;
 }
+
+}  // namespace
 
 // Prepends `line` as a comment to the generated wrapper source, so a preview
 // IP carries its status into the netlist and not just into the session log.
-// Best effort: an absent or unwritable wrapper is not a generation failure.
-void stampWrapperComment(const std::filesystem::path& srcDir,
-                         const std::string& moduleName,
-                         const std::string& line) {
+//
+// The generators write "<module>_<version>.v" (lib/common.py builds
+// build_name + "_" + version), so `baseName` must already carry the version.
+// Getting that wrong used to make this a silent no-op, hence the diagnostic
+// when nothing matches. The rewrite goes through a temporary file so an
+// interrupted stamp cannot destroy a generated wrapper.
+bool IPGenerator::StampWrapperComment(Compiler* compiler,
+                                      const std::filesystem::path& srcDir,
+                                      const std::string& baseName,
+                                      const std::string& line) {
+  bool stamped = false;
   for (const char* extension : {".v", ".sv"}) {
-    const std::filesystem::path wrapper = srcDir / (moduleName + extension);
+    const std::filesystem::path wrapper = srcDir / (baseName + extension);
     if (!FileUtils::FileExists(wrapper)) continue;
     std::string body;
     {
@@ -96,13 +111,40 @@ void stampWrapperComment(const std::filesystem::path& srcDir,
       buffer << in.rdbuf();
       body = buffer.str();
     }
-    if (body.rfind(line, 0) == 0) continue;  // already stamped
-    std::ofstream out(wrapper.string(), std::ios::trunc);
-    if (!out) continue;
-    out << line << "\n" << body;
+    if (body.rfind(line, 0) == 0) {  // already stamped
+      stamped = true;
+      continue;
+    }
+    const std::filesystem::path temporary = wrapper.string() + ".stamp.tmp";
+    {
+      std::ofstream out(temporary.string(), std::ios::trunc);
+      if (!out) continue;
+      out << line << "\n" << body;
+      out.flush();
+      if (!out) {
+        out.close();
+        std::error_code ignored;
+        std::filesystem::remove(temporary, ignored);
+        continue;
+      }
+    }
+    std::error_code error;
+    std::filesystem::rename(temporary, wrapper, error);
+    if (error) {
+      std::error_code ignored;
+      std::filesystem::remove(temporary, ignored);
+      continue;
+    }
+    stamped = true;
   }
+  if (!stamped && compiler) {
+    compiler->WarningMessage(
+        "IP Generate, could not record the preview notice in the generated "
+        "wrapper: no source found at " +
+        (srcDir / (baseName + ".v")).string());
+  }
+  return stamped;
 }
-}  // namespace
 
 std::string IPGenerator::PreviewNotice(const IPDefinition* def) {
   std::string notice = "IP " + def->Name() +
@@ -113,18 +155,57 @@ std::string IPGenerator::PreviewNotice(const IPDefinition* def) {
   return notice;
 }
 
+std::string IPGenerator::UnverifiedRequirementNotice(const IPDefinition* def) {
+  return "IP " + def->Name() +
+         ": the fabric requirement in ip_manifest.json could not be read, so "
+         "it has not been checked against this device. " +
+         def->Availability().manifestWarning;
+}
+
+IPGenerator::DeviceFacts IPGenerator::CurrentDeviceFacts() {
+  DeviceFacts facts;
+  auto* devices = QLDeviceManager::getInstance();
+  const auto target = devices->getCurrentDeviceTarget();
+  facts.valid = devices->isDeviceTargetValid(target);
+  if (!facts.valid) return facts;
+  facts.name = target.device_variant.devicename;
+  // deviceDSPVersion() defaults to "1_0" for devices that declare no DSP_TYPE,
+  // which is most of them. Only ask for it once a device is actually selected,
+  // so that default cannot stand in for a device that is not there.
+  facts.dspVersion = devices->deviceDSPVersion(target);
+  return facts;
+}
+
 IPGenerator::IPStatus IPGenerator::EvaluateAvailability(
-    const IPDefinition* def, IPCatalog* catalog, bool haveDevice,
-    const std::string& deviceName, const std::string& deviceDspVersion) {
+    const IPDefinition* def, IPCatalog* catalog, const DeviceFacts& device) {
   IPStatus status;
   const IPAvailability& availability = def->Availability();
   status.preview = availability.maturity == IPAvailability::Maturity::Preview;
   status.state = status.preview ? "preview" : "production";
 
   std::vector<std::string> clauses;
-  if (availability.requiredDspVersion.empty()) {
-    clauses.push_back("available on all devices.");
-  } else if (!haveDevice) {
+  if (availability.requirementUnverifiable) {
+    // Invariant 3: an unreadable manifest does not get to mean "ungated". The
+    // IP stays listed and buildable - we cannot prove it would fail - but the
+    // fact that the gate never ran is stated at every surface.
+    status.unverified = true;
+    clauses.push_back(
+        std::string(
+            "fabric requirement could not be read from ip_manifest.json and "
+            "has not been checked") +
+        (device.valid ? " against device " + device.name
+                      : " (no device is selected)") +
+        ".");
+  } else if (availability.requiredDspVersion.empty()) {
+    // Distinguish "the file says production" from "there was no file". The
+    // second is the signature of a stale or partial catalog install, and is
+    // the only way an operator can see it.
+    clauses.push_back(
+        availability.manifestPresent
+            ? "available on all devices."
+            : "no ip_manifest.json; defaulted to production with no fabric "
+              "requirement.");
+  } else if (!device.valid) {
     // With no device selected there is nothing to gate against. Say so and
     // keep the IP listed, rather than judging it against a
     // default-constructed target that would silently look like a DSPV1 part.
@@ -132,21 +213,21 @@ IPGenerator::IPStatus IPGenerator::EvaluateAvailability(
                       dspFabricName(availability.requiredDspVersion) +
                       " fabric; no device is selected, so availability is not "
                       "evaluated.");
-  } else if (deviceDspVersion == availability.requiredDspVersion) {
+  } else if (device.dspVersion == availability.requiredDspVersion) {
     clauses.push_back("requires " +
                       dspFabricName(availability.requiredDspVersion) +
-                      " fabric; device " + deviceName + " provides " +
-                      dspFabricName(deviceDspVersion) + ".");
+                      " fabric; device " + device.name + " provides " +
+                      dspFabricName(device.dspVersion) + ".");
   } else {
     status.available = false;
     status.listed = false;
     status.state = "unavailable";
     std::string clause = "requires " +
                          dspFabricName(availability.requiredDspVersion) +
-                         " fabric; device " + deviceName + " provides " +
-                         dspFabricName(deviceDspVersion) + ".";
+                         " fabric; device " + device.name + " provides " +
+                         dspFabricName(device.dspVersion) + ".";
     const std::string alternative = siblingForDspVersion(
-        def->Name(), availability.requiredDspVersion, deviceDspVersion);
+        def->Name(), availability.requiredDspVersion, device.dspVersion);
     if (!alternative.empty() && catalog != nullptr &&
         catalog->Definition(alternative) != nullptr) {
       clause += " Use " + alternative + " on this device.";
@@ -172,16 +253,7 @@ IPGenerator::IPStatus IPGenerator::EvaluateAvailability(
 
 IPGenerator::IPStatus IPGenerator::EvaluateAvailability(const IPDefinition* def,
                                                         IPCatalog* catalog) {
-  auto* devices = QLDeviceManager::getInstance();
-  const auto target = devices->getCurrentDeviceTarget();
-  const bool haveDevice = devices->isDeviceTargetValid(target);
-  // deviceDSPVersion() defaults to "1_0" for devices that declare no DSP_TYPE,
-  // which is most of them - only ask for it once a device is actually
-  // selected, so the default cannot stand in for a device that isn't there.
-  return EvaluateAvailability(
-      def, catalog, haveDevice,
-      haveDevice ? target.device_variant.devicename : std::string{},
-      haveDevice ? devices->deviceDSPVersion(target) : std::string{});
+  return EvaluateAvailability(def, catalog, CurrentDeviceFacts());
 }
 
 std::filesystem::path IPGenerator::EnvsPath() const {
@@ -264,7 +336,7 @@ void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
     }
     saveJsonFile(json, path / "device_info.json");
   } else {
-    m_compiler->Message("WARNING: Cannot dump device info because target device is invalid\n");
+    m_compiler->WarningMessage("Cannot dump device info because target device is invalid");
   }
 }
 
@@ -399,6 +471,19 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       }
     }
 
+    if (!ipName.empty() && (listAll || jsonFormat)) {
+      compiler->ErrorMessage(
+          "ip_catalog: -all and -format apply to the catalog listing, not to a "
+          "named IP" +
+          usage);
+      return TCL_ERROR;
+    }
+
+    // One device lookup per command. EvaluateAvailability() needs the device's
+    // DSP version, and reading it re-parses the device config.json - doing
+    // that once per IP made a listing O(N) file parses.
+    const IPGenerator::DeviceFacts device = IPGenerator::CurrentDeviceFacts();
+
     if (!ipName.empty()) {
       // Querying a named IP. An unknown name still yields an empty result, as
       // it always has; only an IP the current device cannot use is rejected,
@@ -406,7 +491,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       IPDefinition* named = generator->Catalog()->Definition(ipName);
       if (named != nullptr) {
         const IPGenerator::IPStatus status =
-            IPGenerator::EvaluateAvailability(named, generator->Catalog());
+            IPGenerator::EvaluateAvailability(named, generator->Catalog(),
+                                              device);
         if (!status.available) {
           compiler->ErrorMessage(named->Name() + " " + status.reason);
           return TCL_ERROR;
@@ -447,13 +533,16 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       nlohmann::ordered_json records = nlohmann::ordered_json::array();
       for (auto def : generator->Catalog()->Definitions()) {
         const IPGenerator::IPStatus status =
-            IPGenerator::EvaluateAvailability(def, generator->Catalog());
+            IPGenerator::EvaluateAvailability(def, generator->Catalog(),
+                                              device);
         nlohmann::ordered_json record;
         record["name"] = def->Name();
         record["state"] = status.state;
         record["maturity"] = status.preview ? "preview" : "production";
         record["available"] = status.available;
         record["listed"] = status.listed;
+        record["manifest_present"] = def->Availability().manifestPresent;
+        record["requirement_verified"] = !status.unverified;
         record["reason"] = status.reason;
         records.push_back(record);
       }
@@ -462,7 +551,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       std::vector<std::string> lines;
       for (auto def : generator->Catalog()->Definitions()) {
         const IPGenerator::IPStatus status =
-            IPGenerator::EvaluateAvailability(def, generator->Catalog());
+            IPGenerator::EvaluateAvailability(def, generator->Catalog(),
+                                              device);
         lines.push_back(def->Name() + " [" + status.state + "] " +
                         status.reason);
       }
@@ -470,7 +560,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     } else {
       std::string ips;
       for (auto def : generator->Catalog()->Definitions()) {
-        if (!IPGenerator::EvaluateAvailability(def, generator->Catalog())
+        if (!IPGenerator::EvaluateAvailability(def, generator->Catalog(),
+                                               device)
                  .listed)
           continue;
         ips += def->Name() + " ";
@@ -565,15 +656,6 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       ok = false;
       return TCL_ERROR;
     }
-    // A preview IP is buildable, so it builds. It just says what it is, on the
-    // console and in the flow log; the wrapper gets the same line stamped into
-    // it at generation time so the provenance survives the session.
-    if (status.preview) {
-      const std::string notice = IPGenerator::PreviewNotice(def);
-      compiler->Message("WARNING: " + notice + " Continuing.");
-      if (GlobalSession && GlobalSession->CmdStack())
-        LOG_OUTPUT("WARNING: " + notice + " Continuing.\n");
-    }
     if (!out_location.empty()) {
       generator->setIpOutputLocation(mod_name, version, out_location);
     } else {
@@ -636,6 +718,22 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
         return TCL_ERROR;
       }
     }
+
+    // Advisories come last, once the command is known to be well formed:
+    // warning about a preview IP and then rejecting the call for a missing
+    // -mod_name would be noise about something that never happened.
+    //
+    // Both go to the console and to the flow log. A preview IP additionally
+    // gets the notice stamped into its generated wrapper at ipgenerate time,
+    // so the provenance outlives the session that configured it.
+    auto advise = [compiler](const std::string& notice) {
+      compiler->WarningMessage(notice + " Continuing.");
+      if (GlobalSession && GlobalSession->CmdStack())
+        LOG_OUTPUT("WARNING: " + notice + " Continuing.\n");
+    };
+    if (status.unverified)
+      advise(IPGenerator::UnverifiedRequirementNotice(def));
+    if (status.preview) advise(IPGenerator::PreviewNotice(def));
 
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_location);
@@ -994,7 +1092,12 @@ bool IPGenerator::Generate() {
 
         if (def->Availability().maturity ==
             IPAvailability::Maturity::Preview) {
-          stampWrapperComment(GetBuildDir(inst) / "src", inst->ModuleName(),
+          // The generators name the wrapper "<module>_<version>.v", with the
+          // version taken from the catalog path - the same source GetMetaPath()
+          // uses for the build directory.
+          const auto meta = FOEDAG::getIpInfoFromPath(def->FilePath());
+          StampWrapperComment(m_compiler, GetBuildDir(inst) / "src",
+                              inst->ModuleName() + "_" + meta.version,
                               "// WARNING: " + PreviewNotice(def));
         }
 

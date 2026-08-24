@@ -289,7 +289,7 @@ std::string DescribeIPParameters(const std::vector<Value*>& params);
 
 // Highest ip_manifest.json schema version this build understands. A manifest
 // declaring a newer schema is still honoured: the known keys are read and the
-// unknown ones ignored (forward compatible, fail open).
+// unknown ones ignored (forward compatible).
 constexpr int kIPManifestSchema = 1;
 
 // Availability metadata for a catalog IP, read from the optional
@@ -298,23 +298,49 @@ constexpr int kIPManifestSchema = 1;
 //   { "schema": 1, "maturity": "production|preview",
 //     "maturity_note": "...", "requires": { "dsp_version": "2_0" } }
 //
-// Fail open by construction: every field defaults to "no restriction", so a
-// missing, unreadable, malformed or unrecognised manifest leaves the IP fully
-// available as a production IP. A manifest must never remove an IP from the
-// catalog - it can only mark it infeasible on a given device, with a reason.
+// THE FAIL-OPEN CONTRACT (canonical statement; other headers refer here).
+//
+// Three invariants govern every decision made from this struct:
+//
+//  1. Nothing is hidden without a stated reason. A missing, unreadable,
+//     malformed or unrecognised manifest never removes an IP from the catalog
+//     and never hides it from the listing.
+//  2. Nothing that would build is rejected. Doubt about an IP produces a
+//     warning and a build, not a refusal.
+//  3. Fail-open must never erase a fabric requirement. (1) and (2) apply to
+//     *visibility* and to *maturity*. They do not license pretending that an
+//     unreadable manifest declared no fabric requirement: an IP whose
+//     requirement cannot be read is reported as unverified, loudly, at every
+//     surface - it is not silently reclassified as ungated. Instantiating a
+//     DSPV2 IP on a DSPV1 fabric is a broken bitstream, not a warning.
+//
+// Concretely, that means every field below has a "no restriction" default, but
+// requirementUnverifiable exists so that "we could not tell" is distinguishable
+// from "there was nothing to tell", and manifestPresent so that "defaulted" is
+// distinguishable from "the file says production".
 struct IPAvailability {
   enum class Maturity { Production, Preview };
   // "maturity". Anything other than "production"/"preview" is treated as
-  // production and reported through m_maturityWarning.
+  // production and reported through manifestWarning.
   Maturity maturity{Maturity::Production};
   // "maturity_note": free text shown with the preview warning.
   std::string maturityNote;
   // "requires.dsp_version": "<major>_<minor>" as produced by
-  // QLDeviceManager::deviceDSPVersion(). Empty means "no fabric requirement".
+  // QLDeviceManager::deviceDSPVersion(). Empty means "no fabric requirement" -
+  // but only trust that when requirementUnverifiable is false.
   std::string requiredDspVersion;
-  // Non-empty when the manifest existed but could not be used as written
-  // (unparsable, wrong shape, unknown maturity value). The IP stays available;
-  // this is surfaced once as a warning and carried in the reported reason.
+  // True when an ip_manifest.json existed beside the generator. False means
+  // every field here is a default, which is a robustness rule for third-party
+  // and field installs rather than the shipping configuration - see invariant
+  // 3 above and the reporting in `ip_catalog -all`.
+  bool manifestPresent{false};
+  // True when a manifest existed but its "requires" block could not be read as
+  // written (unparsable file, wrong shape, wrong value type, unknown key).
+  // The IP stays listed and buildable; the requirement is reported as
+  // unchecked rather than assumed absent.
+  bool requirementUnverifiable{false};
+  // Everything that was wrong with the manifest, space separated. Non-empty
+  // implies the manifest was present but not wholly usable as written.
   std::string manifestWarning;
 };
 

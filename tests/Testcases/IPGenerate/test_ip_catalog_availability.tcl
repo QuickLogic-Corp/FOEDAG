@@ -37,11 +37,15 @@ create_design ip_availability_test
 architecture ../../Arch/k6_frac_N10_tileable_40nm.xml ../../Arch/k6_N10_40nm_openfpga.xml
 add_litex_ip_catalog ./IP_Catalog
 
-# 1. The bare command must stay a flat, space-separated list of names.
-#    Shipped testcases and user scripts do `foreach ip [ip_catalog]` on it.
+# 1. The bare command must stay a flat, space-separated list of names, byte for
+#    byte. Shipped testcases and user scripts do `foreach ip [ip_catalog]` on
+#    it, and the trailing space is part of what they see.
 set names [ip_catalog]
 if { [string first "\n" $names] >= 0 } {
     fail "ip_catalog must return a flat space-separated list, got:\n$names"
+}
+if { ![string match "* " $names] } {
+    fail "ip_catalog output must keep its trailing space: '$names'"
 }
 foreach expected {axis_converter_V1_0 dsp_generator_v1_0 dsp_generator_v2_0 preview_ip_V1_0} {
     if { [lsearch -exact $names $expected] < 0 } {
@@ -51,8 +55,13 @@ foreach expected {axis_converter_V1_0 dsp_generator_v1_0 dsp_generator_v2_0 prev
 
 # 2. -all annotates every IP with a state and a reason.
 set all [ip_catalog -all]
-if { ![regexp {axi_ram_V1_0 \[production\] available on all devices\.} $all] } {
-    fail "ip_catalog -all did not report an ungated IP as production:\n$all"
+# An IP with no manifest must be reported as defaulted, not as a clean
+# production IP - that is the only signal a stale catalog pin gives.
+if { ![regexp {axi_ram_V1_0 \[production\] no ip_manifest\.json; defaulted to production with no fabric requirement\.} $all] } {
+    fail "ip_catalog -all did not flag the manifest-less IP as defaulted:\n$all"
+}
+if { ![regexp {dsp_generator_v1_0 \[production\] requires DSPV1 fabric} $all] } {
+    fail "ip_catalog -all did not report the manifest-declared DSPV1 requirement:\n$all"
 }
 if { ![regexp {preview_ip_V1_0 \[preview\] .*Preview IP, not production-qualified: timing is not characterised yet\.} $all] } {
     fail "ip_catalog -all did not report the preview IP and its note:\n$all"
@@ -65,7 +74,7 @@ if { ![regexp {dsp_generator_v2_0 \[production\] requires DSPV2 fabric; no devic
 
 # 3. -format json carries the same facts in a machine-readable form.
 set records [ip_catalog -format json]
-foreach key {"name" "state" "maturity" "available" "listed" "reason"} {
+foreach key {"name" "state" "maturity" "available" "listed" "manifest_present" "requirement_verified" "reason"} {
     if { [string first "\"$key\"" $records] < 0 } {
         fail "ip_catalog -format json is missing the $key field:\n$records"
     }
@@ -74,9 +83,30 @@ if { [string first "\"preview_ip_V1_0\"" $records] < 0 } {
     fail "ip_catalog -format json did not report preview_ip_V1_0:\n$records"
 }
 
-# 4. Bad options are rejected rather than silently ignored.
+# 4. Bad options and bad combinations are rejected rather than silently ignored.
 if { ![catch {ip_catalog -nosuchoption}] } {
     fail "ip_catalog accepted an unknown option"
+}
+if { ![catch {ip_catalog -all axi_ram_V1_0}] } {
+    fail "ip_catalog silently ignored -all next to a named IP"
+}
+
+# 5. A preview IP builds, and the notice reaches the generated wrapper.
+configure_ip preview_ip_V1_0 -mod_name prev1 -version V1_0
+ipgenerate
+
+set wrapper ip_availability_test/run_1/IPs/RapidSilicon/IP/preview_ip/V1_0/prev1/src/prev1_V1_0.v
+if { ![file exists $wrapper] } {
+    fail "ipgenerate did not produce $wrapper"
+}
+set fp [open $wrapper r]
+set wrapper_data [read $fp]
+close $fp
+if { ![regexp {^// WARNING: IP preview_ip_V1_0 is a preview IP and is not production-qualified: timing is not characterised yet\.} $wrapper_data] } {
+    fail "the generated wrapper carries no preview notice:\n$wrapper_data"
+}
+if { ![regexp {module prev1} $wrapper_data] } {
+    fail "stamping the wrapper destroyed its contents:\n$wrapper_data"
 }
 
 puts "TEST PASSED: ip_catalog availability surfaces"

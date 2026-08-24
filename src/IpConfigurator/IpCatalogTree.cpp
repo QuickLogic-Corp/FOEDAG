@@ -117,6 +117,7 @@ QList<IpCatalogTree::IpEntry> IpCatalogTree::getAvailableIPs(
       entry.reason =
           QString::fromStdString(record.value("reason", std::string{}));
       entry.available = record.value("available", true);
+      entry.verified = record.value("requirement_verified", true);
       if (!entry.name.isEmpty()) ips.push_back(entry);
     }
   } catch (const std::exception& e) {

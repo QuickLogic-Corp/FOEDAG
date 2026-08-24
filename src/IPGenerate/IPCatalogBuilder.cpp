@@ -151,15 +151,23 @@ IPAvailability IPCatalogBuilder::readIPManifest(
   const std::filesystem::path manifestPath =
       pythonConverterScript.parent_path() / "ip_manifest.json";
   if (!FileUtils::FileExists(manifestPath)) {
-    // No manifest is the normal case: the IP is a production IP with no
-    // fabric requirement.
+    // Defaulting when the file is absent is a robustness rule for third-party
+    // and field installs - it is NOT the shipping configuration. Every IP we
+    // ship is expected to carry a manifest, so `ip_catalog -all` reports a
+    // defaulted IP differently from one the file declares as production; that
+    // is what makes a bad catalog pin visible instead of silently ungating.
     return availability;
   }
+  availability.manifestPresent = true;
 
+  // Every problem is printed and every problem is carried in the reason
+  // string, so nothing about a half-usable manifest is invisible.
   auto warn = [&](const std::string& text) {
-    availability.manifestWarning = text;
-    m_compiler->Message("WARNING: IP Catalog, " + manifestPath.string() + ": " +
-                        text);
+    if (!availability.manifestWarning.empty())
+      availability.manifestWarning += " ";
+    availability.manifestWarning += text;
+    m_compiler->WarningMessage("IP Catalog, " + manifestPath.string() + ": " +
+                               text);
   };
 
   json manifest;
@@ -167,27 +175,38 @@ IPAvailability IPCatalogBuilder::readIPManifest(
     std::ifstream ifs(manifestPath.string());
     manifest = json::parse(ifs);
   } catch (const std::exception& e) {
+    // Fail open on visibility, never on the fabric gate (IPAvailability
+    // invariant 3): we cannot see whether this IP declared a requires block,
+    // so the requirement is recorded as unverifiable, not as absent.
+    availability.requirementUnverifiable = true;
     warn("Manifest could not be parsed (" + std::string(e.what()) +
-         "); treated as production and ungated.");
+         "); its fabric requirement cannot be read.");
     return availability;
   }
 
   if (!manifest.is_object()) {
-    warn("Manifest is not a JSON object; treated as production and ungated.");
+    availability.requirementUnverifiable = true;
+    warn(
+        "Manifest is not a JSON object; its fabric requirement cannot be "
+        "read.");
     return availability;
   }
 
   // Forward compatibility: a newer schema is read for the fields we do know
   // and the rest is ignored. Reported once per catalog walk, not per IP.
-  if (manifest.contains("schema") && manifest["schema"].is_number_integer()) {
-    const int schema = manifest["schema"].get<int>();
-    if (schema > kIPManifestSchema && !m_newerSchemaReported) {
-      m_newerSchemaReported = true;
-      m_compiler->Message(
-          "IP Catalog, ip_manifest.json declares schema " +
-          std::to_string(schema) + " but this build understands schema " +
-          std::to_string(kIPManifestSchema) +
-          "; known fields are honoured and the rest ignored");
+  if (manifest.contains("schema")) {
+    if (!manifest["schema"].is_number_integer()) {
+      warn("Manifest \"schema\" is not an integer; ignored.");
+    } else {
+      const int schema = manifest["schema"].get<int>();
+      if (schema > kIPManifestSchema && !m_newerSchemaReported) {
+        m_newerSchemaReported = true;
+        m_compiler->Message(
+            "IP Catalog, ip_manifest.json declares schema " +
+            std::to_string(schema) + " but this build understands schema " +
+            std::to_string(kIPManifestSchema) +
+            "; known fields are honoured and the rest ignored");
+      }
     }
   }
 
@@ -200,9 +219,35 @@ IPAvailability IPCatalogBuilder::readIPManifest(
   }
   availability.maturityNote = manifestString(manifest, "maturity_note");
 
-  if (manifest.contains("requires") && manifest["requires"].is_object()) {
-    availability.requiredDspVersion =
-        manifestString(manifest["requires"], "dsp_version");
+  // "requires" is a CLOSED set, unlike the top level: an unrecognised key
+  // there is most likely a misspelt requirement, and ignoring it would drop a
+  // fabric gate on the floor. Anything we cannot read as written makes the
+  // requirement unverifiable rather than absent.
+  if (manifest.contains("requires")) {
+    const json& requiresNode = manifest["requires"];
+    if (!requiresNode.is_object()) {
+      availability.requirementUnverifiable = true;
+      warn(
+          "Manifest \"requires\" is not an object; the fabric requirement "
+          "cannot be read.");
+    } else {
+      for (const auto& item : requiresNode.items()) {
+        if (item.key() == "dsp_version") {
+          if (item.value().is_string()) {
+            availability.requiredDspVersion = item.value().get<std::string>();
+          } else {
+            availability.requirementUnverifiable = true;
+            warn(
+                "Manifest \"requires.dsp_version\" is not a string; the fabric "
+                "requirement cannot be read.");
+          }
+        } else {
+          availability.requirementUnverifiable = true;
+          warn("Manifest \"requires\" contains unknown key \"" + item.key() +
+               "\"; the fabric requirement cannot be read.");
+        }
+      }
+    }
   }
 
   return availability;

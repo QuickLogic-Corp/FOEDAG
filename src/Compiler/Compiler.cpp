@@ -288,6 +288,11 @@ void Compiler::Message(const std::string& message) const {
   if (m_out) (*m_out) << "INFO: " << GetMessagePrefix() << message << std::endl;
 }
 
+void Compiler::WarningMessage(const std::string& message) const {
+  if (m_out)
+    (*m_out) << "WARNING: " << GetMessagePrefix() << message << std::endl;
+}
+
 void Compiler::ErrorMessage(const std::string& message, bool append) const {
   if (m_err)
     (*m_err) << "ERROR: " << GetMessagePrefix() << message << std::endl;

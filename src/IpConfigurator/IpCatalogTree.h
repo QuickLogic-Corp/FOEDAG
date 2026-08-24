@@ -50,9 +50,13 @@ class IpCatalogTree : public QTreeWidget {
     QString state;  // "production" | "preview" | "unavailable"
     QString reason;
     bool available{true};
+    // False when the IP's fabric requirement could not be read; the IP is
+    // still usable but the gate never ran, and the tooltip says so.
+    bool verified{true};
     bool operator==(const IpEntry& other) const {
       return name == other.name && state == other.state &&
-             reason == other.reason && available == other.available;
+             reason == other.reason && available == other.available &&
+             verified == other.verified;
     }
   };
   QList<IpEntry> prevIpCatalogResults;

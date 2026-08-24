@@ -51,10 +51,9 @@ class IPCatalogBuilder {
 
   // Reads the IP availability manifest that optionally sits beside an IP's
   // generator script: for Vendor/Library/Name/Version/<name>_gen.py that is
-  // Version/ip_manifest.json. Never fails - a missing, unreadable, malformed
-  // or unrecognised manifest yields the default IPAvailability (production,
-  // no fabric requirement), with the problem recorded in manifestWarning and
-  // reported once. An IP is never dropped from the catalog over its manifest.
+  // Version/ip_manifest.json. Never fails and never drops an IP; see the
+  // fail-open contract on IPAvailability (IPCatalog.h) for what a problem with
+  // the manifest is and is not allowed to do.
   IPAvailability readIPManifest(
       const std::filesystem::path& pythonConverterScript);
 
