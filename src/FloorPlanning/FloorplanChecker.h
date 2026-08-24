@@ -22,10 +22,13 @@ namespace fp {
 // batch compile is told what looks wrong and left to proceed.
 class FloorplanChecker {
 public:
-    // projectPath holds atomsets.json and validation.json; qdcPath is the file the flow is
+    // projectPath holds the flow's artifacts; qdcPath is the file the flow is
     // about to consume. Returns false when there is nothing to check (no .qdc, or no device
     // description), leaving `issues` empty -- that is not a failure.
     static bool check(const std::filesystem::path& projectPath,
+                      // Names the flow's artifacts: they are "<projectName>_floorplanning_*",
+                      // not bare files in projectPath.
+                      const std::string& projectName,
                       const std::filesystem::path& qdcPath,
                       const std::filesystem::path& archFile,
                       const std::string& layoutName,

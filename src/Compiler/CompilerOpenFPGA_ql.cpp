@@ -78,6 +78,7 @@
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
 #include "FloorPlanning/FloorplanChecker.h"
+#include "FloorPlanning/FloorplanningPaths.h"
 #include "FloorPlanning/RtlInstanceModel.h"
 
 extern const char* foedag_version_number;
@@ -2103,12 +2104,20 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
 // so the convention cannot drift between the stages that write these files and the ones
 // that read them back.
 std::string CompilerOpenFPGA_ql::FloorplanningPrefix() {
-  return ProjManager()->projectName() + "_floorplanning";
+  return fp::floorplanningPrefix(ProjManager()->projectName());
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::FloorplanningArtifact(const std::string& suffix) {
-  return std::filesystem::path{ProjManager()->projectPath()} /
-         (FloorplanningPrefix() + "_" + suffix);
+  return fp::floorplanningArtifact(std::filesystem::path{ProjManager()->projectPath()},
+                                   ProjManager()->projectName(), suffix);
+}
+
+// [aurora2#1725] atomsets.json, at whichever of its two possible names the device template
+// produced -- see fp::floorplanningArtifactOrBare(). Every stage that consumes atoms goes
+// through here, so none of them can end up looking at a different file than the panel does.
+std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
+  return fp::floorplanningArtifactOrBare(std::filesystem::path{ProjManager()->projectPath()},
+                                         ProjManager()->projectName(), "atomsets.json");
 }
 
 // [aurora2#1725 stage P2b] name maps -- OPTIONAL, off unless general.options.namemap is
@@ -2171,7 +2180,7 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   // this stage. Its exit code IS checked, deliberately: a real finding means P2b is not
   // (yet) provably redundant, so this hard-fails the build rather than logging and moving
   // on. See docs/specs/p2b-namemap-redundancy/spec.md.
-  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
   if (!FileUtils::FileExists(atomsets_path)) {
     return true;  // no P3 output to compare against
   }
@@ -2229,7 +2238,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   // yosys process's cwd, which is the project directory. Not every device template has
   // the P2/P3 blocks yet, so a missing file just means this stage isn't available for
   // the current device -- skip quietly rather than treating it as a failure.
-  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
   if (!FileUtils::FileExists(atomsets_path)) {
     return true;
   }
@@ -2316,7 +2325,7 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   std::filesystem::path projectPath{ProjManager()->projectPath()};
 
   std::filesystem::path elab_json_path = projectPath / (topModule + "_elab.json");
-  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
   // VPR names these after the project, not the top module -- see Placement(), which
   // builds the same two paths to decide whether placement can be reused.
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
@@ -2410,7 +2419,7 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
 
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
-  std::filesystem::path atomsets_path = FloorplanningArtifact("atomsets.json");
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
   if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path) ||
       !FileUtils::FileExists(atomsets_path)) {
     // Nothing placed yet, or this device template has no P2/P3 blocks -- not an error,
@@ -8023,6 +8032,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     std::string checkError;
     const bool checked = fp::FloorplanChecker::check(
         std::filesystem::path(ProjManager()->projectPath()),
+        ProjManager()->projectName(),
         floor_planning_constraint_filepath,
         archProvider->get(),
         QLSettingsManager::getStringValue("general", "device", "layout"),

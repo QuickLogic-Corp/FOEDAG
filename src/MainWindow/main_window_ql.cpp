@@ -81,6 +81,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "FloorPlanning/AtomSets.h"
 #include "FloorPlanning/FloorPlanningWidget.h"
+#include "FloorPlanning/FloorplanningPaths.h"
 #include "FloorPlanning/RtlInstanceModel.h"
 #include "nlohmann_json/json.hpp"
 
@@ -2280,7 +2281,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // language-agnostic unlike the RTL-source text scrapers this replaced (which only
   // understood Verilog and found nothing at all for a VHDL design like fpu_single).
   std::filesystem::path instancesJsonPath =
-      std::filesystem::path(compiler->ProjManager()->projectPath()) / "instances.json";
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "instances.json");
   fp::RtlInstanceModel rtlModel;
   if (!rtlModel.loadInstances(instancesJsonPath)) {
     error = QString::fromStdString(rtlModel.error());
@@ -2294,7 +2296,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // which renders exactly as the tree did before this was wired up. Failure isn't checked
   // for the same reason -- a missing or stale verdict must not stop the user floorplanning.
   std::filesystem::path validationJsonPath =
-      std::filesystem::path(compiler->ProjManager()->projectPath()) / "validation.json";
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "validation.json");
   rtlModel.mergeVerdicts(validationJsonPath);
 
   // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
@@ -2305,7 +2308,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // on !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
   // populateAtomColumns() itself, so the atom-name map has to already be set.
   std::filesystem::path atomsetsJsonPath =
-      std::filesystem::path(compiler->ProjManager()->projectPath()) / "atomsets.json";
+      fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "atomsets.json");
   {
     // Shared with the batch checker (REQ-004), so the panel and a headless run read the
     // same file the same way -- including atoms_per_tile, which is the divisor behind every
@@ -2334,7 +2338,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   m_floorPlanningWidget->setDesignResources(fp::DesignResources{});
 
   std::filesystem::path designResourcesPath =
-      std::filesystem::path(compiler->ProjManager()->projectPath()) / "design_resources.json";
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "design_resources.json");
   if (FileUtils::FileExists(designResourcesPath)) {
     std::ifstream designResourcesStream(designResourcesPath);
     nlohmann::json designResourcesDoc;
@@ -2432,7 +2437,8 @@ void MainWindow::refreshFloorPlanningData()
   int diskTier = 0;
   {
     std::filesystem::path path =
-        std::filesystem::path(compiler->ProjManager()->projectPath()) / "design_resources.json";
+        fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "design_resources.json");
     if (FileUtils::FileExists(path)) {
       std::ifstream stream(path);
       nlohmann::json doc;

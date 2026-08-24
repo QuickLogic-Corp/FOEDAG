@@ -61,6 +61,7 @@ set (HDR_LIST
   DeviceGridDescriptor.h
   AtomSets.h
   FloorplanChecker.h
+  FloorplanningPaths.h
   TileDescriptor.h
   QdcSerializer.h
   RtlInstanceModel.h

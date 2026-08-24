@@ -1,5 +1,7 @@
 #include "FloorplanChecker.h"
 
+#include "FloorplanningPaths.h"
+
 #include "AtomSets.h"
 #include "DeviceGridDescriptor.h"
 #include "QdcSerializer.h"
@@ -10,6 +12,7 @@
 namespace fp {
 
 bool FloorplanChecker::check(const std::filesystem::path& projectPath,
+                             const std::string& projectName,
                              const std::filesystem::path& qdcPath,
                              const std::filesystem::path& archFile,
                              const std::string& layoutName,
@@ -51,7 +54,9 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // Attach them the same way the panel does, through the shared lookup.
     AtomNameMap atomNames;
     int atomsPerTile = Partition::atomsPerTile();
-    const bool haveAtoms = loadAtomSets(projectPath / "atomsets.json", atomNames, atomsPerTile);
+    const bool haveAtoms =
+        loadAtomSets(floorplanningArtifactOrBare(projectPath, projectName, "atomsets.json"),
+                     atomNames, atomsPerTile);
     if (haveAtoms) {
         Partition::setAtomsPerTile(atomsPerTile);
         device.setOwnAtomCounts(ownAtomCounts(atomNames));
@@ -69,8 +74,10 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // Instances synthesis deleted entirely: a .qdc may still name one, and such a constraint
     // matches no atom.
     RtlInstanceModel rtlModel;
-    if (rtlModel.loadInstances(projectPath / "instances.json")) {
-        rtlModel.mergeVerdicts(projectPath / "validation.json");
+    if (rtlModel.loadInstances(
+            floorplanningArtifact(projectPath, projectName, "instances.json"))) {
+        rtlModel.mergeVerdicts(
+            floorplanningArtifact(projectPath, projectName, "validation.json"));
         std::unordered_set<std::string> deleted;
         for (const RtlInstance& instance : rtlModel.instances()) {
             if (instance.status == "deleted") {

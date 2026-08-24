@@ -326,6 +326,9 @@ private:
   // Path to "<project>_floorplanning_<suffix>" inside the project directory.
   std::filesystem::path FloorplanningArtifact(const std::string& suffix);
 
+  // atomsets.json, resolved to the name the device template actually wrote.
+  std::filesystem::path FloorplanningAtomsets();
+
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
   // scripts/floorplanning_design_resources.py. Best-effort, exactly like RunValidateInstances()
