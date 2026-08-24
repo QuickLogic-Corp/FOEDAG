@@ -83,6 +83,14 @@ class QLDeviceLayoutSettings {
   public:
     // config.json was found and parsed.
     bool config_found = false;
+    // config.json exists but could not be parsed. This is deliberately NOT
+    // folded into 'config_found == false': a genuinely absent config.json is the
+    // pre-contract package that must keep taking the layout-name path, whereas a
+    // corrupt one must fail loudly. Treating them alike would make a truncated
+    // file skip layout generation on a CUSTOM device, and - worse - make the
+    // FIXED gate unreachable, which is the only guard there is.
+    bool config_parse_failed = false;
+    std::string config_parse_error;
     // "DEVICE_TYPE" was present and understood. when false, 'device_type' is
     // empty and the package predates the layout-mode contract.
     bool device_type_present = false;
@@ -277,7 +285,11 @@ class QLDeviceManager : public QObject {
   // Load the device's plaintext `config.json` into `out_config_json`.
   // config.json is device data and is never encrypted.
   // Returns true on success; false if the file is absent or JSON parsing fails.
-  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json);
+  // When `out_parse_error` is supplied it distinguishes the two failures: it is
+  // set to the parser's message when the file exists but does not parse, and
+  // left untouched when the file is simply absent.
+  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json,
+                            std::string* out_parse_error = nullptr);
 
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
   // DSP version supported by the device, derived from the "DSP_TYPE" entry in

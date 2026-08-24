@@ -4101,10 +4101,28 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
   layout_settings.config_json_path = deviceTypeDirPath(device_target) / std::string("config.json");
 
   json device_target_config_json;
-  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+  std::string config_parse_error;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json, &config_parse_error)) {
+    if(!config_parse_error.empty()) {
+      // the file is there but unreadable. this must NOT degrade to "absent":
+      // absent means "pre-contract package, take the layout-name path", and a
+      // corrupt config on a FIXED device would take that path straight past the
+      // gate that is the only thing protecting hard silicon.
+      layout_settings.config_parse_failed = true;
+      layout_settings.config_parse_error = config_parse_error;
+      return layout_settings;
+    }
     // no config.json: a package predating the layout-mode contract. the caller
     // falls back to the layout-name path so an already released kit keeps
     // working without a re-sync.
+    return layout_settings;
+  }
+  if(!device_target_config_json.is_object()) {
+    // valid JSON that is not a mapping is a corrupt device config, not an absent
+    // one - contains() would just answer false for every key and we would fall
+    // through as if the file were not there.
+    layout_settings.config_parse_failed = true;
+    layout_settings.config_parse_error = "top-level JSON is not an object";
     return layout_settings;
   }
   layout_settings.config_found = true;
@@ -4156,7 +4174,8 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
 // Load the device's `config.json` into the supplied json object.
 // Returns true on success, false if the file does not exist or parsing fails.
 // config.json is always plaintext device data; it is never encrypted.
-bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json) {
+bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json,
+                                           std::string* out_parse_error) {
 
   if( !isDeviceTargetValid(device_target) ) {
     device_target = this->device_target;
@@ -4175,6 +4194,12 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
     return true;
   }
   catch(const std::exception& e) {
+    // report the parse failure to the caller when it asked, so it can tell a
+    // corrupt config.json apart from an absent one. std::cout alone never
+    // reaches the compiler's error stream.
+    if(out_parse_error != nullptr) {
+      *out_parse_error = e.what();
+    }
     std::cout << "loadDeviceConfigJSON: failed to parse "
               << config_json_path.string() << ": " << e.what() << std::endl;
     return false;
