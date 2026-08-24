@@ -3010,6 +3010,24 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 // The 'x' separator is not cosmetic: plain concatenation makes a 12x10 layout
 // read as 'AUTOFPGA1210', which is equally 1x210 and 121x0. All construction
 // sites go through here so they cannot drift apart.
+// Drop a "--flag <value>" pair from a whitespace-separated option string.
+// Reuses StringUtils::tokenize/join rather than a regex so a value that happens
+// to contain the flag text cannot be mangled.
+static std::string removeVprOption(const std::string& options, const std::string& flag) {
+  const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  std::vector<std::string> kept;
+  kept.reserve(tokens.size());
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] == flag) {
+      ++i;  // skip the flag's value too
+      continue;
+    }
+    kept.push_back(tokens[i]);
+  }
+  return StringUtils::join(kept, " ");
+}
+
+
 static std::string generatedLayoutName(const std::string& prefix, int width, int height) {
 
   return prefix + std::string("FPGA") +
@@ -6639,6 +6657,16 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 #endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
+  // A device's openfpga template may pass --sb_maps itself: the 2026.3 eval
+  // packages do, TURNKEY-FPGA3030 does not. Substituting ours in on top of that
+  // makes OpenFPGA abort with "Argument --sb_maps specified multiple times", so
+  // when the template supplies it, the template wins - it names the regenerated
+  // SB map the template's own add_layout step just produced, which is the one
+  // this run should use.
+  if(result.find("--sb_maps") != std::string::npos) {
+    base_vpr_options = removeVprOption(base_vpr_options, "--sb_maps");
+  }
+
   result = ReplaceAll(result, "${VPR_STANDARD_OPTS}", base_vpr_options);
   result = ReplaceAll(result, "${VPR_OPTS}", std::string(""));
 
