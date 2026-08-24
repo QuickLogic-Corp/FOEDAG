@@ -514,18 +514,19 @@ void FloorPlanningWidget::setDesignResources(DesignResources resources)
     // whether the clb/dsp/bram they are sizing against were measured or guessed. Logged to
     // the compiler log for the same reason the no-atom report is -- a GUI user never sees
     // the terminal.
+    //
+    // tierName carries the whole predicate -- "counted from the post-synthesis netlist" --
+    // so the level number is left out. It ranks the three sources for code that has to pick
+    // the better one; to a user reading a log it is a number with no scale attached.
     if (resources.isEstimate()) {
-        emit logMessage(tr("Floor Planning: resource figures are a PRE-SYNTHESIS ESTIMATE "
-                           "(tier %1, %2) over %3 instance(s). DSP counts are exact; clb is "
-                           "approximate and BRAM is not estimated at all. Synthesize to get "
-                           "measured figures.")
-                            .arg(resources.tier)
+        emit logMessage(tr("Floor Planning: resource figures are %1 -- NOT MEASURED -- for "
+                           "%2 instance(s). DSP counts are exact; clb is approximate and "
+                           "BRAM is not estimated at all. Synthesize to get figures counted "
+                           "from the netlist.")
                             .arg(QString::fromStdString(resources.tierName))
                             .arg(static_cast<int>(resources.instances.size())));
     } else {
-        emit logMessage(tr("Floor Planning: resource figures are measured (tier %1, %2) "
-                           "over %3 instance(s).")
-                            .arg(resources.tier)
+        emit logMessage(tr("Floor Planning: resource figures are %1, for %2 instance(s).")
                             .arg(QString::fromStdString(resources.tierName))
                             .arg(static_cast<int>(resources.instances.size())));
     }

@@ -553,8 +553,8 @@ fp::DesignResources makeResources(int tier, std::map<std::string, fp::DesignReso
 {
     fp::DesignResources resources;
     resources.tier = tier;
-    resources.tierName = (tier == 1) ? "estimate from elaboration (pre-synthesis)"
-                                     : "exact primitives (post-synthesis)";
+    resources.tierName = (tier == 1) ? "estimated from the RTL, before synthesis"
+                                     : "counted from the post-synthesis netlist";
     resources.instances = std::move(instances);
     return resources;
 }

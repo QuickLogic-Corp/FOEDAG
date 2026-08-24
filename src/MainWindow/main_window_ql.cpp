@@ -2473,7 +2473,16 @@ void MainWindow::refreshFloorPlanningData()
   QMessageBox box(this);
   box.setIcon(QMessageBox::Question);
   box.setWindowTitle(tr("Floor Planning"));
-  box.setText(tr("Updated resource data is available (tier %1).").arg(diskTier));
+  // [aurora2#1725 stage P7] Name the source that arrived rather than its level number.
+  // The reason to interrupt is that the figures got better, which "tier 3" only conveys to
+  // someone who already knows the ladder.
+  QString arrived = tr("estimated from the RTL");
+  if (diskTier >= 3) {
+    arrived = tr("measured from the placement");
+  } else if (diskTier == 2) {
+    arrived = tr("counted from the post-synthesis netlist");
+  }
+  box.setText(tr("More accurate resource data is available: %1.").arg(arrived));
   box.setInformativeText(
       dirty ? tr("Restarting floorplanning reloads the panel from the .qdc on disk, so your "
                  "unsaved changes must be saved first.\n\n"
