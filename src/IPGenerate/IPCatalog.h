@@ -287,6 +287,37 @@ class IPParameter : public Value {
 // parameters of an IP).
 std::string DescribeIPParameters(const std::vector<Value*>& params);
 
+// Highest ip_manifest.json schema version this build understands. A manifest
+// declaring a newer schema is still honoured: the known keys are read and the
+// unknown ones ignored (forward compatible, fail open).
+constexpr int kIPManifestSchema = 1;
+
+// Availability metadata for a catalog IP, read from the optional
+// "ip_manifest.json" that sits next to the IP's <name>_gen.py.
+//
+//   { "schema": 1, "maturity": "production|preview",
+//     "maturity_note": "...", "requires": { "dsp_version": "2_0" } }
+//
+// Fail open by construction: every field defaults to "no restriction", so a
+// missing, unreadable, malformed or unrecognised manifest leaves the IP fully
+// available as a production IP. A manifest must never remove an IP from the
+// catalog - it can only mark it infeasible on a given device, with a reason.
+struct IPAvailability {
+  enum class Maturity { Production, Preview };
+  // "maturity". Anything other than "production"/"preview" is treated as
+  // production and reported through m_maturityWarning.
+  Maturity maturity{Maturity::Production};
+  // "maturity_note": free text shown with the preview warning.
+  std::string maturityNote;
+  // "requires.dsp_version": "<major>_<minor>" as produced by
+  // QLDeviceManager::deviceDSPVersion(). Empty means "no fabric requirement".
+  std::string requiredDspVersion;
+  // Non-empty when the manifest existed but could not be used as written
+  // (unparsable, wrong shape, unknown maturity value). The IP stays available;
+  // this is surfaced once as a warning and carried in the reported reason.
+  std::string manifestWarning;
+};
+
 class IPDefinition {
  public:
   enum class IPType { LiteXGenerator, Other };
@@ -322,6 +353,13 @@ class IPDefinition {
   const std::vector<Value*> Parameters() const { return m_parameters; }
   bool Valid() const { return m_valid; }
   void Valid(bool valid) { m_valid = valid; }
+  // Manifest-derived availability metadata. Set once by IPCatalogBuilder while
+  // walking the catalog; survives the later re-apply() that fills in the
+  // parameters, because apply() does not touch it.
+  const IPAvailability& Availability() const { return m_availability; }
+  void Availability(const IPAvailability& availability) {
+    m_availability = availability;
+  }
 
  private:
   IPType m_type;
@@ -331,6 +369,7 @@ class IPDefinition {
   std::vector<Connector*> m_connections;
   std::vector<Value*> m_parameters;
   bool m_valid{true};
+  IPAvailability m_availability{};
 };
 
 class IPInstance {

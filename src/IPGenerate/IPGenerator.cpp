@@ -55,56 +55,134 @@ using ms = std::chrono::milliseconds;
 #define EXCLUDE_MODIFICATION_JSON_FLOW
 
 namespace {
-// Common prefix of the versioned DSP generator IPs (dsp_generator_v1_0, ...).
-const char* const kDspPrefix = "dsp_generator_v";
-
-bool isDspGenerator(const std::string& ipName) {
-  return ipName.rfind(kDspPrefix, 0) == 0;
+// "2_0" -> "DSPV2", "1_1" -> "DSPV1.1". Mirrors the DSP_TYPE spelling in the
+// device config.json so a message names the fabric the way the device data
+// does, rather than echoing the internal "<major>_<minor>" form.
+std::string dspFabricName(const std::string& version) {
+  const size_t sep = version.find('_');
+  if (sep == std::string::npos) return "DSPV" + version;
+  const std::string major = version.substr(0, sep);
+  const std::string minor = version.substr(sep + 1);
+  return "DSPV" + major + ((minor.empty() || minor == "0") ? "" : "." + minor);
 }
 
-// Prefix of the versioned FPU multiplier generator IPs (fpu_mult_generator_v1_0, ...).
-const char* const kFpuMultPrefix = "fpu_mult_generator_v";
-
-bool isFpuMultGenerator(const std::string& ipName) {
-  return ipName.rfind(kFpuMultPrefix, 0) == 0;
+// Name of the same IP built for a different DSP version, derived purely by
+// rewriting the "_v<required>" suffix - no IP name is hard-coded anywhere.
+// Returns "" when the name does not carry the required version as a suffix.
+std::string siblingForDspVersion(const std::string& ipName,
+                                 const std::string& requiredVersion,
+                                 const std::string& deviceVersion) {
+  const std::string suffix = "_v" + requiredVersion;
+  if (ipName.size() <= suffix.size() ||
+      ipName.compare(ipName.size() - suffix.size(), suffix.size(), suffix) != 0)
+    return {};
+  return ipName.substr(0, ipName.size() - suffix.size()) + "_v" + deviceVersion;
 }
 
-// Prefix of the versioned FPU add/sub generator IPs (fpu_addsub_generator_v1_0, ...).
-const char* const kFpuAddsubPrefix = "fpu_addsub_generator_v";
-
-bool isFpuAddsubGenerator(const std::string& ipName) {
-  return ipName.rfind(kFpuAddsubPrefix, 0) == 0;
-}
-
-// Single source of truth for whether a catalog IP is supported by the current
-// device, shared by the ip_catalog listing, the ip_catalog <name> query, and
-// configure_ip so all three agree.
-//
-// Only DSP generators are device-gated: of the versions shipped, only the one
-// matching the device's DSP_TYPE is valid (e.g. a v2 IP is unsupported on a v1
-// device). The match is exact against "dsp_generator_v<major>_<minor>", the
-// suffix from QLDeviceManager::deviceDSPVersion() (e.g. "2_0"); if the catalog
-// ships no matching version, every dsp_generator_v* is unsupported.
-bool isIpVersionSupported(const std::string& ipName) {
-  if (isDspGenerator(ipName)) {
-    return ipName ==
-           kDspPrefix + QLDeviceManager::getInstance()->deviceDSPVersion();
+// Prepends `line` as a comment to the generated wrapper source, so a preview
+// IP carries its status into the netlist and not just into the session log.
+// Best effort: an absent or unwritable wrapper is not a generation failure.
+void stampWrapperComment(const std::filesystem::path& srcDir,
+                         const std::string& moduleName,
+                         const std::string& line) {
+  for (const char* extension : {".v", ".sv"}) {
+    const std::filesystem::path wrapper = srcDir / (moduleName + extension);
+    if (!FileUtils::FileExists(wrapper)) continue;
+    std::string body;
+    {
+      std::ifstream in(wrapper.string());
+      if (!in) continue;
+      std::stringstream buffer;
+      buffer << in.rdbuf();
+      body = buffer.str();
+    }
+    if (body.rfind(line, 0) == 0) continue;  // already stamped
+    std::ofstream out(wrapper.string(), std::ios::trunc);
+    if (!out) continue;
+    out << line << "\n" << body;
   }
-  // FPU IPs are gated on a device capability token in the "FPU_TYPE" array of
-  // config.json (opt-in): the multiplier requires "FPUMULT". Absent/empty/
-  // non-array FPU_TYPE (or one lacking FPUMULT) hides the IP.
-  if (isFpuMultGenerator(ipName)) {
-    const auto types = QLDeviceManager::getInstance()->deviceFPUTypes();
-    return types.count("FPUMULT") > 0;
-  }
-  // The add/sub member requires the "FPUADDSUB" capability token, same scheme.
-  if (isFpuAddsubGenerator(ipName)) {
-    const auto types = QLDeviceManager::getInstance()->deviceFPUTypes();
-    return types.count("FPUADDSUB") > 0;
-  }
-  return true;  // other IPs are not device-gated
 }
 }  // namespace
+
+std::string IPGenerator::PreviewNotice(const IPDefinition* def) {
+  std::string notice = "IP " + def->Name() +
+                       " is a preview IP and is not production-qualified";
+  const std::string& note = def->Availability().maturityNote;
+  if (!note.empty()) notice += ": " + note;
+  notice += ".";
+  return notice;
+}
+
+IPGenerator::IPStatus IPGenerator::EvaluateAvailability(
+    const IPDefinition* def, IPCatalog* catalog, bool haveDevice,
+    const std::string& deviceName, const std::string& deviceDspVersion) {
+  IPStatus status;
+  const IPAvailability& availability = def->Availability();
+  status.preview = availability.maturity == IPAvailability::Maturity::Preview;
+  status.state = status.preview ? "preview" : "production";
+
+  std::vector<std::string> clauses;
+  if (availability.requiredDspVersion.empty()) {
+    clauses.push_back("available on all devices.");
+  } else if (!haveDevice) {
+    // With no device selected there is nothing to gate against. Say so and
+    // keep the IP listed, rather than judging it against a
+    // default-constructed target that would silently look like a DSPV1 part.
+    clauses.push_back("requires " +
+                      dspFabricName(availability.requiredDspVersion) +
+                      " fabric; no device is selected, so availability is not "
+                      "evaluated.");
+  } else if (deviceDspVersion == availability.requiredDspVersion) {
+    clauses.push_back("requires " +
+                      dspFabricName(availability.requiredDspVersion) +
+                      " fabric; device " + deviceName + " provides " +
+                      dspFabricName(deviceDspVersion) + ".");
+  } else {
+    status.available = false;
+    status.listed = false;
+    status.state = "unavailable";
+    std::string clause = "requires " +
+                         dspFabricName(availability.requiredDspVersion) +
+                         " fabric; device " + deviceName + " provides " +
+                         dspFabricName(deviceDspVersion) + ".";
+    const std::string alternative = siblingForDspVersion(
+        def->Name(), availability.requiredDspVersion, deviceDspVersion);
+    if (!alternative.empty() && catalog != nullptr &&
+        catalog->Definition(alternative) != nullptr) {
+      clause += " Use " + alternative + " on this device.";
+    } else {
+      clause += " No version of this IP targets this device.";
+    }
+    clauses.push_back(clause);
+  }
+
+  if (status.preview) {
+    std::string clause = "Preview IP, not production-qualified";
+    if (!availability.maturityNote.empty())
+      clause += ": " + availability.maturityNote;
+    clause += ".";
+    clauses.push_back(clause);
+  }
+  if (!availability.manifestWarning.empty())
+    clauses.push_back(availability.manifestWarning);
+
+  status.reason = StringUtils::join(clauses, " ");
+  return status;
+}
+
+IPGenerator::IPStatus IPGenerator::EvaluateAvailability(const IPDefinition* def,
+                                                        IPCatalog* catalog) {
+  auto* devices = QLDeviceManager::getInstance();
+  const auto target = devices->getCurrentDeviceTarget();
+  const bool haveDevice = devices->isDeviceTargetValid(target);
+  // deviceDSPVersion() defaults to "1_0" for devices that declare no DSP_TYPE,
+  // which is most of them - only ask for it once a device is actually
+  // selected, so the default cannot stand in for a device that isn't there.
+  return EvaluateAvailability(
+      def, catalog, haveDevice,
+      haveDevice ? target.device_variant.devicename : std::string{},
+      haveDevice ? devices->deviceDSPVersion(target) : std::string{});
+}
 
 std::filesystem::path IPGenerator::EnvsPath() const {
   return std::filesystem::weakly_canonical(m_installDir / "envs");
@@ -281,24 +359,58 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
                                      path.lexically_normal().string() + "}");
     }
 
-    bool status = true;
-    if (argc == 1) {
-      // List all IPs, hiding those unsupported by the current device (see
-      // isIpVersionSupported).
-      std::string ips;
-      for (auto def : generator->Catalog()->Definitions()) {
-        const std::string& name = def->Name();
-        if (!isIpVersionSupported(name)) continue;
-        ips += name + " ";
-      }
-      compiler->TclInterp()->setResult(ips);
-    } else if (argc == 2) {
-      const std::string ipName{argv[1]};
-      // Reject querying an unsupported IP so the Tcl API matches the listing.
-      if (!isIpVersionSupported(ipName)) {
-        compiler->ErrorMessage("IP " + ipName +
-                               " is not supported by the current device");
+    // Argument scan. `ip_catalog` used to be a flat argc test; the options
+    // below need a real scan, but the no-argument result must not change:
+    // shipped testcases and user scripts do `foreach ip [ip_catalog]` against
+    // the space-separated name list it returns.
+    const std::string usage{
+        "\n\nUsage:\nip_catalog ?<IP_NAME>? ?-all? ?-format text|json?"};
+    bool listAll = false;
+    bool jsonFormat = false;
+    std::string ipName;
+    for (int i = 1; i < argc; i++) {
+      const std::string arg{argv[i]};
+      if (arg == "-all") {
+        listAll = true;
+      } else if (arg == "-format") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("ip_catalog: -format requires a value" +
+                                 usage);
+          return TCL_ERROR;
+        }
+        const std::string format{argv[++i]};
+        if (format == "json") {
+          jsonFormat = true;
+        } else if (format != "text") {
+          compiler->ErrorMessage("ip_catalog: unknown -format '" + format +
+                                 "', expected text or json" + usage);
+          return TCL_ERROR;
+        }
+      } else if (arg.size() > 1 && arg[0] == '-') {
+        compiler->ErrorMessage("ip_catalog: unknown option '" + arg + "'" +
+                               usage);
         return TCL_ERROR;
+      } else if (ipName.empty()) {
+        ipName = arg;
+      } else {
+        compiler->ErrorMessage("ip_catalog: unexpected argument '" + arg + "'" +
+                               usage);
+        return TCL_ERROR;
+      }
+    }
+
+    if (!ipName.empty()) {
+      // Querying a named IP. An unknown name still yields an empty result, as
+      // it always has; only an IP the current device cannot use is rejected,
+      // and then with the same reason the listing would have given.
+      IPDefinition* named = generator->Catalog()->Definition(ipName);
+      if (named != nullptr) {
+        const IPGenerator::IPStatus status =
+            IPGenerator::EvaluateAvailability(named, generator->Catalog());
+        if (!status.available) {
+          compiler->ErrorMessage(named->Name() + " " + status.reason);
+          return TCL_ERROR;
+        }
       }
       std::string ip_def;
       for (auto def : generator->Catalog()->Definitions()) {
@@ -324,8 +436,48 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
         }
       }
       compiler->TclInterp()->setResult(ip_def);
+      return TCL_OK;
     }
-    return (status) ? TCL_OK : TCL_ERROR;
+
+    // Listing. -all and -format json both report every IP, including the ones
+    // the device cannot take, because an entry that is hidden without a stated
+    // reason is exactly what this model exists to prevent. The `listed` flag
+    // records what the default listing would have shown.
+    if (jsonFormat) {
+      nlohmann::ordered_json records = nlohmann::ordered_json::array();
+      for (auto def : generator->Catalog()->Definitions()) {
+        const IPGenerator::IPStatus status =
+            IPGenerator::EvaluateAvailability(def, generator->Catalog());
+        nlohmann::ordered_json record;
+        record["name"] = def->Name();
+        record["state"] = status.state;
+        record["maturity"] = status.preview ? "preview" : "production";
+        record["available"] = status.available;
+        record["listed"] = status.listed;
+        record["reason"] = status.reason;
+        records.push_back(record);
+      }
+      compiler->TclInterp()->setResult(records.dump());
+    } else if (listAll) {
+      std::vector<std::string> lines;
+      for (auto def : generator->Catalog()->Definitions()) {
+        const IPGenerator::IPStatus status =
+            IPGenerator::EvaluateAvailability(def, generator->Catalog());
+        lines.push_back(def->Name() + " [" + status.state + "] " +
+                        status.reason);
+      }
+      compiler->TclInterp()->setResult(StringUtils::join(lines, "\n"));
+    } else {
+      std::string ips;
+      for (auto def : generator->Catalog()->Definitions()) {
+        if (!IPGenerator::EvaluateAvailability(def, generator->Catalog())
+                 .listed)
+          continue;
+        ips += def->Name() + " ";
+      }
+      compiler->TclInterp()->setResult(ips);
+    }
+    return TCL_OK;
   };
   interp->registerCmd("ip_catalog", ip_catalog, this, 0);
 
@@ -402,16 +554,25 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       ok = false;
       return TCL_ERROR;
     }
-    // Enforce the device gate here too: hiding an IP from the ip_catalog listing
-    // only affects what is shown. A script can still call configure_ip with a
-    // hard-coded name without ever listing the catalog, so generation must be
-    // blocked at this point, not just in the listing.
-    if (!isIpVersionSupported(ip_name)) {
-      compiler->ErrorMessage(
-          "IP " + ip_name +
-          " is not supported by the current device and cannot be configured");
+    // Enforce the device gate here too: hiding an IP from the ip_catalog
+    // listing only affects what is shown. A script can still call configure_ip
+    // with a hard-coded name without ever listing the catalog, so generation
+    // must be blocked at this point, not just in the listing.
+    const IPGenerator::IPStatus status =
+        IPGenerator::EvaluateAvailability(def, generator->Catalog());
+    if (!status.available) {
+      compiler->ErrorMessage(def->Name() + " " + status.reason);
       ok = false;
       return TCL_ERROR;
+    }
+    // A preview IP is buildable, so it builds. It just says what it is, on the
+    // console and in the flow log; the wrapper gets the same line stamped into
+    // it at generation time so the provenance survives the session.
+    if (status.preview) {
+      const std::string notice = IPGenerator::PreviewNotice(def);
+      compiler->Message("WARNING: " + notice + " Continuing.");
+      if (GlobalSession && GlobalSession->CmdStack())
+        LOG_OUTPUT("WARNING: " + notice + " Continuing.\n");
     }
     if (!out_location.empty()) {
       generator->setIpOutputLocation(mod_name, version, out_location);
@@ -829,6 +990,12 @@ bool IPGenerator::Generate() {
                 .code) {
           m_compiler->ErrorMessage("IP Generate, " + help.str());
           return false;
+        }
+
+        if (def->Availability().maturity ==
+            IPAvailability::Maturity::Preview) {
+          stampWrapperComment(GetBuildDir(inst) / "src", inst->ModuleName(),
+                              "// WARNING: " + PreviewNotice(def));
         }
 
         break;

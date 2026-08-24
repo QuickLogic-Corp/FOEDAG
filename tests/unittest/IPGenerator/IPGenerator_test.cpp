@@ -25,7 +25,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 
+#include <filesystem>
+
 #include "Compiler/Compiler.h"
+#include "IPGenerate/IPCatalogBuilder.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/PathUtils.h"
@@ -290,6 +293,264 @@ TEST(IPParameterValidate, Describe) {
   EXPECT_NE(table.find("choices: AxB, AxB+CxD"), std::string::npos);
   // One line per parameter (3 params -> 2 newline separators).
   EXPECT_EQ(std::count(table.begin(), table.end(), '\n'), 2);
+}
+
+// ---------------------------------------------------------------------------
+// IP availability model (aurora2 #2246)
+//
+// These exercise the real manifest reader against real ip_manifest.json files
+// on disk, and the real availability rule against real IPDefinitions. Nothing
+// here is mocked: the only thing handed to the rule instead of being looked up
+// is the device's identity, so the rule can be checked on more than the one
+// device that happens to be installed.
+// ---------------------------------------------------------------------------
+
+namespace {
+const std::filesystem::path kDummyGenerators =
+    std::filesystem::path{FOEDAG_TEST_DATA_DIR} / "Testcases" / "IPGenerate" /
+    "IP_Catalog" / "dummy_generators";
+
+// readIPManifest() is given a generator script path and reads the manifest
+// beside it, so only the directory has to exist.
+std::filesystem::path manifestFixture(const std::string& name) {
+  return kDummyGenerators / "manifests" / name / (name + "_gen.py");
+}
+
+IPAvailability readFixture(const std::filesystem::path& generator) {
+  static Compiler* compiler = new Compiler();
+  IPCatalogBuilder builder{compiler};
+  return builder.readIPManifest(generator);
+}
+
+IPDefinition* makeIP(const std::string& name,
+                     const IPAvailability& availability) {
+  auto* def = new IPDefinition(IPDefinition::IPType::LiteXGenerator, name,
+                               name + "_wrapper", "path_to_nowhere", {}, {});
+  def->Availability(availability);
+  return def;
+}
+}  // namespace
+
+TEST(IPManifest, AbsentManifestIsProductionAndUngated) {
+  // An IP that ships no manifest at all - the common case.
+  const auto availability = readFixture(kDummyGenerators / "RapidSilicon" /
+                                        "IP" / "axi_ram" / "V1_0" /
+                                        "axi_ram_gen.py");
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_TRUE(availability.manifestWarning.empty());
+}
+
+TEST(IPManifest, ProductionManifest) {
+  const auto availability = readFixture(manifestFixture("production"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_TRUE(availability.manifestWarning.empty());
+}
+
+TEST(IPManifest, PreviewManifestCarriesItsNote) {
+  const auto availability = readFixture(manifestFixture("preview"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Preview);
+  EXPECT_EQ(availability.maturityNote,
+            "characterisation is incomplete above 100 MHz");
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_TRUE(availability.manifestWarning.empty());
+}
+
+TEST(IPManifest, PreviewWithoutANoteIsStillPreview) {
+  const auto availability = readFixture(manifestFixture("preview_no_note"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Preview);
+  EXPECT_TRUE(availability.maturityNote.empty());
+}
+
+TEST(IPManifest, RequiresDspVersion) {
+  const auto availability = readFixture(manifestFixture("requires_dsp2"));
+  EXPECT_EQ(availability.requiredDspVersion, "2_0");
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
+}
+
+TEST(IPManifest, EmptyRequiresBlockGatesNothing) {
+  const auto availability = readFixture(manifestFixture("empty_requires"));
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_TRUE(availability.manifestWarning.empty());
+}
+
+TEST(IPManifest, MalformedJsonWarnsButLeavesTheIPUsable) {
+  const auto availability = readFixture(manifestFixture("malformed"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_FALSE(availability.manifestWarning.empty());
+}
+
+TEST(IPManifest, NonObjectManifestWarnsButLeavesTheIPUsable) {
+  const auto availability = readFixture(manifestFixture("not_an_object"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
+  EXPECT_TRUE(availability.requiredDspVersion.empty());
+  EXPECT_FALSE(availability.manifestWarning.empty());
+}
+
+TEST(IPManifest, UnknownMaturityIsTreatedAsProduction) {
+  const auto availability = readFixture(manifestFixture("unknown_maturity"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Production);
+  EXPECT_EQ(availability.manifestWarning,
+            "Manifest declares unknown maturity \"experimental\"; treated as "
+            "production.");
+}
+
+TEST(IPManifest, NewerSchemaHonoursTheFieldsItKnows) {
+  const auto availability = readFixture(manifestFixture("newer_schema"));
+  EXPECT_EQ(availability.maturity, IPAvailability::Maturity::Preview);
+  EXPECT_EQ(availability.maturityNote, "from the future");
+  EXPECT_EQ(availability.requiredDspVersion, "2_0");
+  // A newer schema is not an error: the IP stays fully usable.
+  EXPECT_TRUE(availability.manifestWarning.empty());
+}
+
+TEST(IPAvailabilityGate, UngatedIPIsAlwaysAvailable) {
+  IPCatalog catalog;
+  IPDefinition* def = makeIP("axi_ram_V1_0", IPAvailability{});
+  catalog.addIP(def);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      def, &catalog, true, "IDAHO-FPGA0806_WLBL", "1_0");
+  EXPECT_TRUE(status.available);
+  EXPECT_TRUE(status.listed);
+  EXPECT_EQ(status.state, "production");
+  EXPECT_EQ(status.reason, "available on all devices.");
+}
+
+TEST(IPAvailabilityGate, MatchingFabricIsAvailableAndSaysSo) {
+  IPCatalog catalog;
+  IPAvailability requiresV1;
+  requiresV1.requiredDspVersion = "1_0";
+  IPDefinition* def = makeIP("dsp_generator_v1_0", requiresV1);
+  catalog.addIP(def);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      def, &catalog, true, "IDAHO-FPGA0806_WLBL", "1_0");
+  EXPECT_TRUE(status.available);
+  EXPECT_TRUE(status.listed);
+  EXPECT_EQ(status.reason,
+            "requires DSPV1 fabric; device IDAHO-FPGA0806_WLBL provides "
+            "DSPV1.");
+}
+
+TEST(IPAvailabilityGate, FabricMismatchNamesTheCauseAndTheAlternative) {
+  IPCatalog catalog;
+  IPAvailability requiresV1;
+  requiresV1.requiredDspVersion = "1_0";
+  catalog.addIP(makeIP("dsp_generator_v1_0", requiresV1));
+  // The v2 requirement comes off a real manifest file on disk.
+  IPDefinition* v2 = makeIP("dsp_generator_v2_0",
+                            readFixture(manifestFixture("requires_dsp2")));
+  catalog.addIP(v2);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      v2, &catalog, true, "IDAHO-FPGA0806_WLBL", "1_0");
+  EXPECT_FALSE(status.available);
+  EXPECT_FALSE(status.listed);
+  EXPECT_EQ(status.state, "unavailable");
+  // This is the exact line ip_catalog <name> and configure_ip print.
+  EXPECT_EQ(v2->Name() + " " + status.reason,
+            "dsp_generator_v2_0 requires DSPV2 fabric; device "
+            "IDAHO-FPGA0806_WLBL provides DSPV1. Use dsp_generator_v1_0 on "
+            "this device.");
+}
+
+TEST(IPAvailabilityGate, FabricMismatchWithNoSiblingSaysThereIsNone) {
+  IPCatalog catalog;
+  IPDefinition* v2 = makeIP("dsp_generator_v2_0",
+                            readFixture(manifestFixture("requires_dsp2")));
+  catalog.addIP(v2);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      v2, &catalog, true, "IDAHO-FPGA0806_WLBL", "1_0");
+  EXPECT_FALSE(status.available);
+  EXPECT_EQ(v2->Name() + " " + status.reason,
+            "dsp_generator_v2_0 requires DSPV2 fabric; device "
+            "IDAHO-FPGA0806_WLBL provides DSPV1. No version of this IP targets "
+            "this device.");
+}
+
+TEST(IPAvailabilityGate, MinorFabricVersionsAreSpelledOut) {
+  IPCatalog catalog;
+  IPAvailability requiresV11;
+  requiresV11.requiredDspVersion = "1_1";
+  IPDefinition* def = makeIP("dsp_generator_v1_1", requiresV11);
+  catalog.addIP(def);
+
+  const auto status =
+      IPGenerator::EvaluateAvailability(def, &catalog, true, "SOMEDEV", "2_0");
+  EXPECT_FALSE(status.available);
+  EXPECT_EQ(def->Name() + " " + status.reason,
+            "dsp_generator_v1_1 requires DSPV1.1 fabric; device SOMEDEV "
+            "provides DSPV2. No version of this IP targets this device.");
+}
+
+TEST(IPAvailabilityGate, NoDeviceSelectedListsEverythingAndAnnotates) {
+  // REQ-015: with no device selected the gate must not run against a
+  // default-constructed target - the IP is listed and the situation is stated.
+  IPCatalog catalog;
+  IPDefinition* v2 = makeIP("dsp_generator_v2_0",
+                            readFixture(manifestFixture("requires_dsp2")));
+  catalog.addIP(v2);
+
+  const auto status =
+      IPGenerator::EvaluateAvailability(v2, &catalog, false, {}, {});
+  EXPECT_TRUE(status.available);
+  EXPECT_TRUE(status.listed);
+  EXPECT_EQ(status.state, "production");
+  EXPECT_EQ(status.reason,
+            "requires DSPV2 fabric; no device is selected, so availability is "
+            "not evaluated.");
+}
+
+TEST(IPAvailabilityGate, PreviewIsAvailableAndStatesWhyItIsFlagged) {
+  IPCatalog catalog;
+  IPDefinition* def =
+      makeIP("preview_ip_V1_0", readFixture(manifestFixture("preview")));
+  catalog.addIP(def);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      def, &catalog, true, "IDAHO-FPGA0806_WLBL", "1_0");
+  EXPECT_TRUE(status.available);
+  EXPECT_TRUE(status.listed);
+  EXPECT_TRUE(status.preview);
+  EXPECT_EQ(status.state, "preview");
+  EXPECT_EQ(status.reason,
+            "available on all devices. Preview IP, not production-qualified: "
+            "characterisation is incomplete above 100 MHz.");
+  EXPECT_EQ(IPGenerator::PreviewNotice(def),
+            "IP preview_ip_V1_0 is a preview IP and is not "
+            "production-qualified: characterisation is incomplete above 100 "
+            "MHz.");
+}
+
+TEST(IPAvailabilityGate, PreviewWithoutANoteStillWarns) {
+  IPCatalog catalog;
+  IPDefinition* def = makeIP("preview_ip_V1_0",
+                             readFixture(manifestFixture("preview_no_note")));
+  catalog.addIP(def);
+
+  EXPECT_EQ(IPGenerator::PreviewNotice(def),
+            "IP preview_ip_V1_0 is a preview IP and is not "
+            "production-qualified.");
+}
+
+TEST(IPAvailabilityGate, BrokenManifestLeavesTheIPUsableAndSaysWhy) {
+  IPCatalog catalog;
+  IPDefinition* def =
+      makeIP("broken_ip_V1_0", readFixture(manifestFixture("unknown_maturity")));
+  catalog.addIP(def);
+
+  const auto status = IPGenerator::EvaluateAvailability(
+      def, &catalog, true, "IDAHO-FPGA0806_WLBL", "1_0");
+  EXPECT_TRUE(status.available);
+  EXPECT_TRUE(status.listed);
+  EXPECT_EQ(status.state, "production");
+  EXPECT_EQ(status.reason,
+            "available on all devices. Manifest declares unknown maturity "
+            "\"experimental\"; treated as production.");
 }
 
 }  // namespace FOEDAG

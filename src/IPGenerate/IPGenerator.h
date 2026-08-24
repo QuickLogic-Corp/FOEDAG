@@ -42,9 +42,51 @@ class IPInstance;
 
 class IPGenerator {
  public:
+  // Availability of one catalog IP against a device.
+  //
+  // Every field is filled in for every IP. The governing rule of the IP
+  // availability model is that nothing is hidden without a stated reason and
+  // nothing that would build is rejected, so `reason` is never empty - not
+  // even for a plainly available IP.
+  struct IPStatus {
+    bool available{true};  // may be configured
+    bool listed{true};     // appears in the default `ip_catalog` listing
+    bool preview{false};   // configure_ip warns about it, then proceeds
+    std::string state;     // "production" | "preview" | "unavailable"
+    std::string reason;    // never empty; reads as a predicate on the IP name
+  };
+
+  // Single source of truth for whether a catalog IP can be used, shared by the
+  // ip_catalog listing, the ip_catalog <name> query and configure_ip so the
+  // three surfaces cannot drift.
+  //
+  // Gating is entirely data driven: it comes from the IP's optional
+  // ip_manifest.json (see IPAvailability), never from the IP's name. An IP
+  // with no manifest, or with a manifest this build cannot make sense of, is
+  // available - a manifest can only make an IP infeasible on a given device,
+  // and only with a reason that names the requirement, the device and the way
+  // out. `catalog` is consulted only to check that a suggested alternative
+  // really exists.
+  //
+  // The device facts are arguments rather than lookups so the rule can be
+  // exercised on its own. `haveDevice` false means no device is selected: the
+  // IP is then listed and annotated instead of being judged against a
+  // default-constructed target.
+  static IPStatus EvaluateAvailability(const IPDefinition* def,
+                                       IPCatalog* catalog, bool haveDevice,
+                                       const std::string& deviceName,
+                                       const std::string& deviceDspVersion);
+  // As above, against the device currently selected in QLDeviceManager.
+  static IPStatus EvaluateAvailability(const IPDefinition* def,
+                                       IPCatalog* catalog);
+
+  // Warning text for a preview IP, shared by the console, the flow log and the
+  // comment stamped into the generated wrapper so the three cannot drift.
+  static std::string PreviewNotice(const IPDefinition* def);
+
   IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
-  
+
   void setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation);
   void shareContext();
   const std::map<std::string, std::string>& environment() const { return m_environment; }

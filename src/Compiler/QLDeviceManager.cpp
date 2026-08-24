@@ -3986,31 +3986,6 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   return major + "_" + minor;
 }
 
-std::set<std::string> QLDeviceManager::deviceFPUTypes(QLDeviceTarget device_target) {
-
-  // The FPU IP family is gated by a capability set (not a version, unlike DSP).
-  // config.json carries "FPU_TYPE" as a JSON array of tokens, e.g.
-  //   "FPU_TYPE": ["FPUADDSUB", "FPUMULT", "FPUMAC"]
-  // Absent / empty / non-array => empty set (opt-in: the FPU IP stays hidden).
-  std::set<std::string> types;
-
-  json device_target_config_json;
-  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
-    if( device_target_config_json.contains("FPU_TYPE") ) {
-      const auto& fpu_type = device_target_config_json["FPU_TYPE"];
-      if( fpu_type.is_array() ) {
-        for( const auto& entry : fpu_type ) {
-          if( entry.is_string() ) {
-            types.insert(entry.get<std::string>());
-          }
-        }
-      }
-    }
-  }
-
-  return types;
-}
-
 // Load the device's `config.json` into the supplied json object.
 // Returns true on success, false if the file does not exist or parsing fails.
 // config.json is always plaintext device data; it is never encrypted.

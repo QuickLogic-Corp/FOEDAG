@@ -84,10 +84,19 @@ bool IPCatalogBuilder::buildLiteXCatalog(
       if (exec_name.find("_gen.py") != std::string::npos) {
         foundCount++;
         m_compiler->GetIPGenerator()->shareContext();
+        // Read the availability manifest here, in the discovery walk, where
+        // the generator path is already in hand: this covers both the
+        // names-only (GUI) path and the full path with no extra traversal and
+        // without spawning python.
+        const IPAvailability availability = readIPManifest(entry);
         bool res = namesOnly ? buildLiteXIPFromGeneratorInternal(catalog, entry)
                              : buildLiteXIPFromGenerator(catalog, entry);
         if (res == false) {
           result = false;
+        }
+        if (IPDefinition* def =
+                catalog->Definition(ipNameFromGeneratorPath(entry))) {
+          def->Availability(availability);
         }
       }
     }
@@ -107,6 +116,96 @@ static std::string& rtrim(std::string& str, char c) {
                           [c](char ch) { return (ch == c); });
   if (it1 != str.rend()) str.erase(it1.base() - 1, str.end());
   return str;
+}
+
+std::string IPCatalogBuilder::ipNameFromGeneratorPath(
+    const std::filesystem::path& pythonConverterScript) {
+  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
+  std::string basename = basepath.string();
+  std::string IPName = rtrim(basename, '.');
+
+  // Remove _gen from IPName
+  static const std::string suffix = "_gen";
+  if (StringUtils::endsWith(IPName, suffix)) {
+    IPName.erase(IPName.length() - suffix.length());
+  }
+
+  // Add version number to IPName
+  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
+  IPName += "_" + info.version;
+  return IPName;
+}
+
+// Returns obj[key] when it is present and a string, "" otherwise. Manifests are
+// hand written, so a wrong type must degrade to "unset", never throw.
+static std::string manifestString(const json& obj, const char* key) {
+  if (obj.contains(key) && obj[key].is_string())
+    return obj[key].get<std::string>();
+  return {};
+}
+
+IPAvailability IPCatalogBuilder::readIPManifest(
+    const std::filesystem::path& pythonConverterScript) {
+  IPAvailability availability{};
+
+  const std::filesystem::path manifestPath =
+      pythonConverterScript.parent_path() / "ip_manifest.json";
+  if (!FileUtils::FileExists(manifestPath)) {
+    // No manifest is the normal case: the IP is a production IP with no
+    // fabric requirement.
+    return availability;
+  }
+
+  auto warn = [&](const std::string& text) {
+    availability.manifestWarning = text;
+    m_compiler->Message("WARNING: IP Catalog, " + manifestPath.string() + ": " +
+                        text);
+  };
+
+  json manifest;
+  try {
+    std::ifstream ifs(manifestPath.string());
+    manifest = json::parse(ifs);
+  } catch (const std::exception& e) {
+    warn("Manifest could not be parsed (" + std::string(e.what()) +
+         "); treated as production and ungated.");
+    return availability;
+  }
+
+  if (!manifest.is_object()) {
+    warn("Manifest is not a JSON object; treated as production and ungated.");
+    return availability;
+  }
+
+  // Forward compatibility: a newer schema is read for the fields we do know
+  // and the rest is ignored. Reported once per catalog walk, not per IP.
+  if (manifest.contains("schema") && manifest["schema"].is_number_integer()) {
+    const int schema = manifest["schema"].get<int>();
+    if (schema > kIPManifestSchema && !m_newerSchemaReported) {
+      m_newerSchemaReported = true;
+      m_compiler->Message(
+          "IP Catalog, ip_manifest.json declares schema " +
+          std::to_string(schema) + " but this build understands schema " +
+          std::to_string(kIPManifestSchema) +
+          "; known fields are honoured and the rest ignored");
+    }
+  }
+
+  const std::string maturity = manifestString(manifest, "maturity");
+  if (maturity == "preview") {
+    availability.maturity = IPAvailability::Maturity::Preview;
+  } else if (!maturity.empty() && maturity != "production") {
+    warn("Manifest declares unknown maturity \"" + maturity +
+         "\"; treated as production.");
+  }
+  availability.maturityNote = manifestString(manifest, "maturity_note");
+
+  if (manifest.contains("requires") && manifest["requires"].is_object()) {
+    availability.requiredDspVersion =
+        manifestString(manifest["requires"], "dsp_version");
+  }
+
+  return availability;
 }
 
 std::vector<std::string> JsonArrayToStringVector(
@@ -200,19 +299,7 @@ bool IPCatalogBuilder::buildLiteXIPFromJson(
     return false;
   }
 
-  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
-  std::string basename = basepath.string();
-  std::string IPName = rtrim(basename, '.');
-
-  // Remove _gen from IPName
-  std::string suffix = "_gen";
-  if (StringUtils::endsWith(IPName, suffix)) {
-    IPName.erase(IPName.length() - suffix.length());
-  }
-
-  // Add version number to IPName
-  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
-  IPName += "_" + info.version;
+  const std::string IPName = ipNameFromGeneratorPath(pythonConverterScript);
 
   std::vector<Value*> parameters;
   std::vector<Connector*> connections;
@@ -302,19 +389,7 @@ bool IPCatalogBuilder::buildLiteXIPFromGeneratorInternal(
   std::ostringstream help;
   std::string command;
 
-  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
-  std::string basename = basepath.string();
-  std::string IPName = rtrim(basename, '.');
-
-  // Remove _gen from IPName
-  std::string suffix = "_gen";
-  if (StringUtils::endsWith(IPName, suffix)) {
-    IPName.erase(IPName.length() - suffix.length());
-  }
-
-  // Add version number to IPName
-  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
-  IPName += "_" + info.version;
+  const std::string IPName = ipNameFromGeneratorPath(pythonConverterScript);
 
   IPDefinition* def =
       new IPDefinition(IPDefinition::IPType::LiteXGenerator, IPName,

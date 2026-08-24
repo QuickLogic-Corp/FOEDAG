@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <QList>
 #include <QTreeWidget>
 #include <filesystem>
 
@@ -41,9 +42,22 @@ class IpCatalogTree : public QTreeWidget {
   void itemSelectionHasChanged();
 
  private:
-  QStringList prevIpCatalogResults;
+  // One row of the catalog as reported by `ip_catalog -all -format json`.
+  // The reason travels with the name so an IP the device cannot take can be
+  // shown greyed out and still explain itself, instead of just disappearing.
+  struct IpEntry {
+    QString name;
+    QString state;  // "production" | "preview" | "unavailable"
+    QString reason;
+    bool available{true};
+    bool operator==(const IpEntry& other) const {
+      return name == other.name && state == other.state &&
+             reason == other.reason && available == other.available;
+    }
+  };
+  QList<IpEntry> prevIpCatalogResults;
 
-  QStringList getAvailableIPs(const std::vector<std::filesystem::path>& paths);
+  QList<IpEntry> getAvailableIPs(const std::vector<std::filesystem::path>& paths);
 };
 
 }  // namespace FOEDAG
