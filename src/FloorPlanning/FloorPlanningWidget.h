@@ -23,7 +23,6 @@ class CheckableButton;
 class SynthResourceHierarchyWidget;
 class DeviceGridWidget;
 class PartitionsListWidget;
-class NewUniqueNameDialog;
 class IssuesListWidget;
 
 class FloorPlanningWidget : public QWidget {
@@ -100,7 +99,6 @@ private:
     SynthResourceHierarchyWidget* m_partitionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};
     PartitionsListWidget* m_partitionsListWidget{nullptr};
-    NewUniqueNameDialog* m_newPartitionNameDialog{nullptr};
     IssuesListWidget* m_issuesListWidget{nullptr};
 
     // [aurora2#1725] Options menu state, persisted in floorplanning.cfg beside the .qdc.
@@ -113,7 +111,6 @@ private:
     void loadOptions();
     void saveOptions() const;
 
-    void createNewPartition();
     void checkErrors();
     void onNotify(QString, QString);
 

@@ -798,6 +798,22 @@ void DeviceGridWidget::removeSelected()
   }
 }
 
+void DeviceGridWidget::removePartitionById(int id)
+{
+    const auto& partitions = m_device.partitions();
+    const auto found = partitions.find(id);
+    if (found == partitions.end()) return;
+
+    // Clear the selection when it is the partition being removed, so the grid does not keep
+    // a dangling pointer to it; a selection on some other partition is left alone.
+    if (m_selectedPartition && (m_selectedPartition->id() == id)) {
+        unselect();
+    }
+    m_device.removePartition(found->second);
+    reportPartitionChanges();
+    update();
+}
+
 void DeviceGridWidget::removeSelectedPartition()
 {
     if (m_selectedPartition) {

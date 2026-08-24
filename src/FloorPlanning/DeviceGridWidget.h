@@ -76,6 +76,9 @@ public:
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelected();
+    // [aurora2#1725] Remove one partition by id, whatever is selected. The partitions list
+    // deletes a row directly, which is not necessarily the row the grid has selected.
+    void removePartitionById(int id);
     void unselect();
     std::unordered_set<std::string> existedPartitionNames() const;
 

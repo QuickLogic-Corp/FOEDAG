@@ -5,7 +5,6 @@
 #include "SynthResourceHierarchyWidget.h"
 #include "DeviceGridWidget.h"
 #include "PartitionsListWidget.h"
-#include "NewUniqueNameDialog.h"
 #include "IssuesListWidget.h"
 #include "CheckableButton.h"
 #include "Widgets/RoundProgressWidget.h"
@@ -58,7 +57,14 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_partitionsListWidget = new PartitionsListWidget;
     rightPaneLayout->addWidget(m_partitionsListWidget);
     connect(m_partitionsListWidget, &PartitionsListWidget::selectionChanged, m_deviceWidget, &DeviceGridWidget::onPartitionSelected);
-    m_partitionsListWidget->setEnabled(false);
+
+    // [aurora2#1725] The list owns creating and deleting partitions. A new one is created
+    // unnamed: Partition's constructor assigns "partition<n>", and the list opens that cell
+    // for editing, so the name is typed in place of a prompt shown before it exists.
+    connect(m_partitionsListWidget, &PartitionsListWidget::newPartitionRequested,
+            this, [this] { m_deviceWidget->createNewPartition(); });
+    connect(m_partitionsListWidget, &PartitionsListWidget::partitionRemoveRequested,
+            m_deviceWidget, &DeviceGridWidget::removePartitionById);
 
     int flags = SynthResourceHierarchyWidget::Flag::ShowOnlyCheckedItems | SynthResourceHierarchyWidget::Flag::HidePartitionsColumn;
     m_partitionResourcesWidget = new SynthResourceHierarchyWidget(flags);
@@ -130,16 +136,18 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     auto* saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, [this]() { saveQdc(); });
 
-    QPushButton* bnCreateNewPartition = new QPushButton(QIcon(":/add.png"), "");
-    connect(bnCreateNewPartition, &QPushButton::clicked, this, &FloorPlanningWidget::createNewPartition);
-    bnCreateNewPartition->setToolTip(tr("Create new partition"));
-
     m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/erase.png"), "");
     connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelected);
-    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected partition or region"));
+    // [aurora2#1725] Partitions are deleted from their own row in the partitions list now;
+    // a selected region has no row of its own, so it is still removed from here.
+    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected region"));
     m_bnRemoveSelectedPartition->setEnabled(false);
 
-    connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested, this, &FloorPlanningWidget::createNewPartition);
+    // [aurora2#1725] Drawing a region with no partition yet: create one unnamed rather than
+    // interrupting the gesture with a name prompt. It appears in the list, where its name can
+    // be edited in place like any other.
+    connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested,
+            this, [this] { m_deviceWidget->createNewPartition(); });
 
     QCheckBox* bnScrollPartition = new QCheckBox("Scroll to partition");
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
@@ -283,7 +291,6 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(m_bnRemoveAllPartitions);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(bnCreateNewPartition);
     toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(bnOptions);
@@ -391,7 +398,8 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
     m_partitionsListWidget->onPartitionsChanged(partitions);
 
     const bool partitionsNotEmpty = !partitions.empty();
-    m_partitionsListWidget->setEnabled(partitionsNotEmpty);
+    // The list stays enabled even when empty -- its "+" row is how the first partition is
+    // created, and disabling the widget would disable that too.
 
     m_bnRemoveAllPartitions->setEnabled(partitionsNotEmpty);
 
@@ -538,20 +546,6 @@ void FloorPlanningWidget::setDesignResources(DesignResources resources)
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)
 {
     m_deviceWidget->constructTiles(descriptor);
-}
-
-void FloorPlanningWidget::createNewPartition()
-{
-    if (!m_newPartitionNameDialog) {
-        m_newPartitionNameDialog = new NewUniqueNameDialog("Enter unique partition name", this);
-    }
-    m_newPartitionNameDialog->setExistedNames(m_deviceWidget->existedPartitionNames());
-    if (m_newPartitionNameDialog->exec()) {
-        std::string name = m_newPartitionNameDialog->name();
-        if (!name.empty()) {
-            m_deviceWidget->createNewPartition(name);
-        }
-    }
 }
 
 void FloorPlanningWidget::onNotify(QString title, QString msg)

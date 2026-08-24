@@ -4,6 +4,9 @@
 #include <QLabel>
 #include <QHeaderView>
 #include <QStyle>
+#include <QHBoxLayout>
+#include <QMessageBox>
+#include <QToolButton>
 
 #include <array>
 
@@ -39,9 +42,9 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     m_lbResourceSource->setVisible(false);
     layout->addWidget(m_lbResourceSource);
 
-    m_tableWidget->setColumnCount(5);
+    m_tableWidget->setColumnCount(6);
     m_tableWidget->setHorizontalHeaderLabels(
-        {tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM"), tr("Placed")});
+        {tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM"), tr("Placed"), QString()});
 
     // [aurora2#1725 stage P7] The cells explain their own tier, but only once you know which
     // cell to hover. Say what each column IS on the header, so the difference between the
@@ -81,6 +84,11 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Dsp, QHeaderView::ResizeToContents);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Bram, QHeaderView::ResizeToContents);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Placed, QHeaderView::ResizeToContents);
+    // Fixed, not ResizeToContents: the cell holds a widget, and section auto-sizing measures
+    // items rather than cell widgets, so the button would be given a column too narrow for it.
+    m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Remove, QHeaderView::Fixed);
+    m_tableWidget->horizontalHeader()->resizeSection(
+        Column::Remove, m_tableWidget->style()->pixelMetric(QStyle::PM_SmallIconSize) + 16);
 
     // [aurora2#1725] Before any partitions exist the header text alone decides the width;
     // onPartitionsChanged() re-measures once there are rows.
@@ -98,7 +106,9 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
             this, [this]{
                 const QList<QTableWidgetItem*> items = m_tableWidget->selectedItems();
                 if (!items.isEmpty()) {
-                    QTableWidgetItem* nameItem = m_tableWidget->item(items.first()->row(), Column::Name);
+                    const int row = items.first()->row();
+                    if (row == newPartitionRow()) return;   // the "+" row is not a partition
+                    QTableWidgetItem* nameItem = m_tableWidget->item(row, Column::Name);
                     if (!nameItem) return;
                     const int id = getId(nameItem->text());
                     m_selectedIdBackupOpt = id;
@@ -140,14 +150,88 @@ void PartitionsListWidget::unselectPartition()
     m_tableWidget->clearSelection();
 }
 
+// [aurora2#1725] The delete button on a partition's own row. Confirmation is asked only for
+// a partition that holds something -- regions and elements are work the user would lose. An
+// empty partition is a placeholder, and a prompt for one is just an extra click.
+QWidget* PartitionsListWidget::buildRemoveButton(int partitionId, const QString& name,
+                                                 bool wellFormed)
+{
+    QToolButton* button = new QToolButton;
+    button->setIcon(QIcon(":/erase.png"));
+    button->setAutoRaise(true);   // flat until hovered, so a column of these is not noisy
+    button->setToolTip(tr("Delete partition '%1'").arg(name));
+
+    connect(button, &QToolButton::clicked, this, [this, partitionId, name, wellFormed] {
+        if (wellFormed) {
+            const QMessageBox::StandardButton answer = QMessageBox::question(
+                this, tr("Delete partition"),
+                tr("Delete partition '%1'?\n\nIts regions and the instances assigned to it "
+                   "are removed with it.").arg(name),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (answer != QMessageBox::Yes) return;
+        }
+        emit partitionRemoveRequested(partitionId);
+    });
+
+    // Centred in the cell: a button stretched across the column looks like a banner.
+    QWidget* host = new QWidget;
+    QHBoxLayout* layout = new QHBoxLayout(host);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(button, 0, Qt::AlignCenter);
+    return host;
+}
+
+// [aurora2#1725] The trailing row: "+ New partition". A row rather than a toolbar button, so
+// creating one reads as adding to this list, and so the new name is typed in the Name column
+// (see onPartitionsChanged) instead of in a modal dialog before the partition exists.
+void PartitionsListWidget::buildNewPartitionRow(int row)
+{
+    for (int column = Column::Clb; column <= Column::Remove; ++column) {
+        auto* filler = new QTableWidgetItem();
+        filler->setFlags(Qt::NoItemFlags);   // not selectable, not editable, not a partition
+        m_tableWidget->setItem(row, column, filler);
+    }
+    auto* nameCell = new QTableWidgetItem();
+    nameCell->setFlags(Qt::NoItemFlags);
+    m_tableWidget->setItem(row, Column::Name, nameCell);
+
+    QToolButton* button = new QToolButton;
+    button->setIcon(QIcon(":/add.png"));
+    button->setText(tr("New partition"));
+    button->setToolTipDuration(-1);
+    button->setToolTip(tr("Create a partition and name it here"));
+    button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    button->setAutoRaise(true);
+    connect(button, &QToolButton::clicked, this, [this] {
+        // Remember what exists now: the repopulate that follows identifies the new partition
+        // as the one id that was not here before, and starts editing its name.
+        m_idsBeforeCreate.clear();
+        for (const auto& [name, id] : m_names2ids) {
+            (void)name;
+            m_idsBeforeCreate.insert(id);
+        }
+        m_editNewRowOnRefresh = true;
+        emit newPartitionRequested();
+    });
+
+    QWidget* host = new QWidget;
+    QHBoxLayout* layout = new QHBoxLayout(host);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(button, 0, Qt::AlignLeft);
+    m_tableWidget->setCellWidget(row, Column::Name, host);
+}
+
 void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
 {
     m_tableWidget->clearContents();
-    m_tableWidget->setRowCount(static_cast<int>(partitions.size()));
+    // +1 for the trailing "New partition" row, which is not a partition and is skipped by
+    // everything that walks rows looking for one.
+    m_tableWidget->setRowCount(static_cast<int>(partitions.size()) + 1);
     m_names2ids.clear();
 
     int row = 0;
     QTableWidgetItem* autoSelectedItem{nullptr};
+    QTableWidgetItem* newlyCreatedItem{nullptr};
     for (const auto& [id, partition]: partitions) {
         std::string name = partition->name();
 
@@ -222,15 +306,38 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         }
         m_tableWidget->setItem(row, Column::Placed, placedItem);
 
+        // Well formed = it holds something worth confirming the loss of.
+        const bool wellFormed = !partition->regions().empty() && !partition->elements().empty();
+        m_tableWidget->setCellWidget(
+            row, Column::Remove,
+            buildRemoveButton(id, QString::fromStdString(name), wellFormed));
+
         m_names2ids[name] = id;
         if (m_selectedIdBackupOpt && (id == m_selectedIdBackupOpt.value())) {
             autoSelectedItem = nameItem;
         }
+        if (m_editNewRowOnRefresh && !m_idsBeforeCreate.count(id)) {
+            newlyCreatedItem = nameItem;
+        }
         ++row;
     }
 
+    buildNewPartitionRow(row);
+
     if (autoSelectedItem) {
         setSelectedItemSilently(autoSelectedItem);
+    }
+
+    // [aurora2#1725] A partition just created from the "+" row: select it and open its name
+    // for editing, which is where the user types the name that used to be asked for up front.
+    // The default the Partition constructor assigned ("partition<n>") stands if they leave it.
+    if (m_editNewRowOnRefresh) {
+        m_editNewRowOnRefresh = false;
+        if (newlyCreatedItem) {
+            setSelectedItemSilently(newlyCreatedItem);
+            m_tableWidget->scrollToItem(newlyCreatedItem);
+            m_tableWidget->editItem(newlyCreatedItem);
+        }
     }
 
     updateResourceSourceLabel(partitions);
