@@ -91,7 +91,6 @@ private:
     FOEDAG::RoundProgressWidget* m_busyOverlayWidget{nullptr};
     QPushButton* m_bnSaveQdc{nullptr};
     QPushButton* m_bnRemoveSelectedPartition{nullptr};
-    QPushButton* m_bnRemoveAllPartitions{nullptr};
     CheckableButton* m_bnZoomInRegion{nullptr};
     CheckableButton* m_drawRegion{nullptr};
     QPushButton* m_bnPartitionColor{nullptr};

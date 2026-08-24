@@ -214,18 +214,11 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
     m_drawRegion->setToolTip(tr("Draw new region"));
 
-    m_bnRemoveAllPartitions = new QPushButton(QIcon(":/delete-10402_32.png"), "");
-    //
-
-    //
-    connect(m_bnRemoveAllPartitions, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::clearPartitions);
     connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
       m_bnRemoveSelectedPartition->setEnabled(m_deviceWidget->hasSelection());
       m_bnPartitionColor->setEnabled(m_deviceWidget->hasSelectedPartition());
     });
 
-    m_bnRemoveAllPartitions->setToolTip(tr("Delete all partitions"));
-    m_bnRemoveAllPartitions->setEnabled(false);
 
     // color
     m_bnPartitionColor = new QPushButton(QIcon(":/icons8-color-palette-48.png"), "");
@@ -289,7 +282,6 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     }
     toolBarLayout->addStretch();
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnRemoveAllPartitions);
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
     toolBarLayout->addSpacing(spacing);
@@ -397,11 +389,9 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
     m_partitionResourcesWidget->onPartitionsChanged(partitions);
     m_partitionsListWidget->onPartitionsChanged(partitions);
 
-    const bool partitionsNotEmpty = !partitions.empty();
     // The list stays enabled even when empty -- its "+" row is how the first partition is
     // created, and disabling the widget would disable that too.
 
-    m_bnRemoveAllPartitions->setEnabled(partitionsNotEmpty);
 
     // Any partition change is an edit worth saving -- except the ones loadQdc() and
     // setQdcFilePath() cause, which clear the flag again once the load has finished.

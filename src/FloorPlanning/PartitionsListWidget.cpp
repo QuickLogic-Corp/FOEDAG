@@ -157,7 +157,7 @@ QWidget* PartitionsListWidget::buildRemoveButton(int partitionId, const QString&
                                                  bool wellFormed)
 {
     QToolButton* button = new QToolButton;
-    button->setIcon(QIcon(":/erase.png"));
+    button->setIcon(QIcon(":/delete-10402_32.png"));   // trash bin: this deletes, not clears
     button->setAutoRaise(true);   // flat until hovered, so a column of these is not noisy
     button->setToolTip(tr("Delete partition '%1'").arg(name));
 
