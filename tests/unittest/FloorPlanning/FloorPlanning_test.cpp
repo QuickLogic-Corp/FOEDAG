@@ -34,10 +34,9 @@ std::string toString(const fp::HierarhyElements& elements)
         if (!result.empty()) {
             result += ",";
         }
+        // No ".*" for a non-leaf: the .qdc states RTL names, and the whole-instance form is
+        // the plain path (see QdcSerializer::serialize()).
         result += element.path;
-        if (!element.isLeaf) {
-            result += ".*";
-        }
     }
     return result;
 };
@@ -49,7 +48,7 @@ fp::HierarhyElements genTestElements()
                       fp::HierarhyElement{"dut.tri.el1", false},
                       fp::HierarhyElement{"dut.tri.el2", true},
                       fp::HierarhyElement{"top", false}});
-    EXPECT_EQ("dut.tri.el0.sub2,dut.tri.el1.*,dut.tri.el2,top.*", toString(elements));
+    EXPECT_EQ("dut.tri.el0.sub2,dut.tri.el1,dut.tri.el2,top", toString(elements));
     return elements;
 }
 
@@ -294,12 +293,79 @@ TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
     fp::QdcSerializer qdc;
     const std::string content = qdc.serialize(device);
 
-    EXPECT_NE(content.find("i_mul_24.*"), std::string::npos)
+    EXPECT_NE(content.find("i_mul_24"), std::string::npos)
         << "the whole-instance RTL form must be written";
     EXPECT_EQ(content.find("fract_o_adder_carry_sumout_cout"), std::string::npos)
         << "a post-synthesis atom name reached the .qdc (REQ-002 violation)";
     EXPECT_EQ(content.find("count_sdffre_Q_1_D"), std::string::npos)
         << "a post-synthesis atom name reached the .qdc (REQ-002 violation)";
+}
+
+// [aurora2#1725 stage P1] REQ-002/REQ-003: a whole-instance selection is its RTL name.
+//
+// Reported on fft256: selecting dut.instPerm20009 -- an instance with 9 children, five of
+// them optimised out by synthesis -- saved as "dut.instPerm20009.*". The suffix was written
+// for any element whose tree row had children, so the file described the user's selection as
+// a glob they had never typed, and did it at .qdc write time, where REQ-003 allows no
+// post-synthesis-facing expansion at all.
+TEST(QdcSerializer, AWholeInstanceIsWrittenAsItsRtlNameNotAGlob)
+{
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
+    fp::DeviceGrid device(descriptor);
+
+    std::optional<QPointF> bl = findBottomLeftTilePoint(device, fp::Tile::Index{2, 2});
+    std::optional<QPointF> tr = findTopRightTilePoint(device, fp::Tile::Index{4, 4});
+    ASSERT_TRUE(bl.has_value());
+    ASSERT_TRUE(tr.has_value());
+
+    fp::RegionPtr region = std::make_shared<fp::Region>(bl.value(), tr.value());
+    region->setTiles(device.findTiles(region->rect()));
+
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p1");
+    partition->addRegion(region);
+    // isLeaf=false is the whole-subtree selection -- the case that used to grow a suffix.
+    partition->addElement(fp::HierarhyElement{"dut.instPerm20009", /*isLeaf=*/false});
+    device.addPartition(partition);
+
+    fp::QdcSerializer qdc;
+    const std::string content = qdc.serialize(device);
+
+    EXPECT_EQ(content.find("dut.instPerm20009.*"), std::string::npos)
+        << "a wildcard was manufactured at .qdc write time (REQ-003 violation)";
+    EXPECT_NE(content.find("dut.instPerm20009"), std::string::npos)
+        << "the RTL name itself must still be written";
+}
+
+// The older form has to keep working: every build before stage P1 wrote it, and the
+// floorplanning testcases are hand-written with it. It loads as the RTL name it stands for,
+// so re-saving the project normalises the file rather than preserving two spellings of one
+// constraint.
+TEST(QdcSerializer, ALegacyWildcardLoadsAsTheRtlNameAndIsNormalisedOnSave)
+{
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
+    fp::DeviceGrid device(descriptor);
+
+    fp::QdcSerializer qdc;
+    const std::vector<std::string> lines{
+        "set_region dut.instPerm20009.* clb(2,2):clb(4,4) p1"};
+    qdc.load(device, lines);
+
+    ASSERT_EQ(1u, device.partitions().size());
+    const fp::PartitionPtr& loaded = device.partitions().at(0);
+    EXPECT_TRUE(loaded->elements().contains("dut.instPerm20009"))
+        << "the suffix belongs to the file format, not to the instance path";
+    EXPECT_FALSE(loaded->elements().contains("dut.instPerm20009.*"));
+
+    const std::string content = qdc.serialize(device);
+    EXPECT_EQ(content.find("dut.instPerm20009.*"), std::string::npos)
+        << "saving must not write the legacy form back";
+    EXPECT_NE(content.find("dut.instPerm20009"), std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

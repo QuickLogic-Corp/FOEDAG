@@ -30,7 +30,8 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             continue;
         }
 
-        // [aurora2#1725 stage P1] RTL names only -- never element.vprNames.
+        // [aurora2#1725 stage P1] RTL names only -- never element.vprNames, and never a
+        // pattern derived from the tree's shape.
         //
         // Writing resolved VPR atom names here is what produced the defect this feature
         // exists to fix: a .qdc holding 39 enumerated atom names for an instance that has
@@ -38,17 +39,23 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         // resynthesis. An enumerated list cannot be complete, and the names are in a
         // different namespace from the atoms VPR actually places (A.P3).
         //
-        // The whole-instance form (path + ".*") is expanded at emission time instead, which
-        // is REQ-003: expansion happens when the constraints XML is generated, never at .qdc
-        // write time and never in the UI.
+        // A whole-instance selection is written as the plain RTL path the tree shows --
+        // "dut.instPerm20009", not "dut.instPerm20009.*". The trailing ".*" this used to
+        // append to every non-leaf element was a post-synthesis-facing pattern manufactured
+        // at .qdc write time, which is exactly what REQ-003 reserves for _constraints.xml
+        // generation. It also misdescribed the user's own selection: the suffix appeared on
+        // any row that had children, so a .qdc read back as a glob nobody had typed.
+        //
+        // Dropping it loses nothing, because the suffix was never what gave a token its
+        // meaning. A leaf instance ("dut.tri.el0.sub2") and a literal atom name ("out[0]",
+        // "$false") are both written bare and always were, so instances.json has always been
+        // what tells a whole instance from an exact atom name -- and
+        // GenerateIOFloorPlanConstraints() asks it about every token either way, appending
+        // ".*" itself for the ones it recognises as instances.
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
-            if (element.isLeaf) {
-                elementsStr += element.path;
-            } else {
-                elementsStr += element.path + ".*";
-            }
+            elementsStr += element.path;
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {
                 elementsStr += ",";
@@ -253,6 +260,14 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
 
             // extract elements
             std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
+            // A ".*" suffix is still accepted: serialize() wrote one for every non-leaf
+            // element until stage P1, and the testcase .qdc files are hand-written in that
+            // form. It is stripped rather than kept, so the path stored here is the RTL name
+            // in both cases and a load/save round trip normalises the older form to it.
+            //
+            // isLeaf is a note about the tree, not about the file, and a bare path cannot say
+            // which it was -- so it never decides anything outside the panel, which recomputes
+            // it from the rows it actually has (see fillPartitionWithSelectedElements()).
             for (std::string path: pathesDirtyTokens) {
                 if (FOEDAG::StringUtils::endsWith(path, ".*")) {
                     FOEDAG::StringUtils::removeSuffix(path, ".*");

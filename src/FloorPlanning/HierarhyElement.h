@@ -100,8 +100,13 @@ public:
     HierarhyElement(const std::string& path, bool isLeaf, std::set<std::string> vprNames)
         : path(path), isLeaf(isLeaf), vprNames(std::move(vprNames)) {}
 
+    // Identity is the RTL path, and only the path -- which is what operator< already
+    // orders by, so a set holding this can never contain two elements that compare equal
+    // here. Comparing isLeaf as well made the two disagree: a .qdc round trip returns the
+    // same constraint with isLeaf defaulted (the file states RTL names, not tree shape),
+    // and an element-wise == then reported the partition as changed when nothing had.
     bool operator==(const HierarhyElement& rhs) const {
-        return ((path == rhs.path) && (isLeaf == rhs.isLeaf));
+        return path == rhs.path;
     }
 
     std::string path;          // user RTL name
