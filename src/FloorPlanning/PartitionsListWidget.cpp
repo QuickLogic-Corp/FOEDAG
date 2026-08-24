@@ -3,10 +3,23 @@
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QHeaderView>
+#include <QStyle>
 
 #include <array>
 
 namespace fp {
+
+namespace {
+
+// [aurora2#1725] Room for a name of about this length before the Name column starts
+// eliding. Measured rather than written down in pixels, so it still holds under a
+// different font, style or DPI.
+constexpr auto kNameWidthSample = "partition_00";
+
+// The horizontal text margin a table cell puts either side of its text.
+constexpr int kCellTextMargin = 12;
+
+}  // namespace
 
 PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     : QWidget(parent),
@@ -68,6 +81,10 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Dsp, QHeaderView::ResizeToContents);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Bram, QHeaderView::ResizeToContents);
     m_tableWidget->horizontalHeader()->setSectionResizeMode(Column::Placed, QHeaderView::ResizeToContents);
+
+    // [aurora2#1725] Before any partitions exist the header text alone decides the width;
+    // onPartitionsChanged() re-measures once there are rows.
+    updateTableMinimumWidth();
 
     m_tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -217,6 +234,10 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
     }
 
     updateResourceSourceLabel(partitions);
+
+    // The resource cells are what set the column widths, so the floor can only be
+    // computed once they are in place.
+    updateTableMinimumWidth();
 }
 
 // [aurora2#1725 stage P7] Name the source of the numbers in the table.
@@ -265,6 +286,41 @@ void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, Partiti
 
     m_lbResourceSource->setText(text);
     m_lbResourceSource->setVisible(true);
+}
+
+// [aurora2#1725] Floor the table's width at what its five columns actually need, so all of
+// them are visible the first time the panel is shown.
+//
+// The partitions pane is the narrowest thing in FloorPlanningWidget's splitter, and nothing
+// told it how wide the table wants to be: QAbstractScrollArea's size hint is a generic
+// 256x192 that knows nothing about columns, and splitter->setSizes({1,2,1}) is a ratio
+// rather than a guarantee -- the device pane's 800px hint wins the negotiation and this pane
+// collapses to its minimum, cutting the rightmost columns off. Widening the window grew the
+// pane and they reappeared, which is the bug as it was reported: the numbers were there the
+// whole time, just out of view.
+//
+// Only the ResizeToContents columns are measured. Name is Stretch, so its width follows the
+// pane, and feeding that back in would ratchet the minimum up every time the user widened
+// the window and never let it shrink again; it gets a text-derived floor instead.
+void PartitionsListWidget::updateTableMinimumWidth()
+{
+    const QHeaderView* header = m_tableWidget->horizontalHeader();
+
+    int width = 0;
+    for (int column = 0; column < m_tableWidget->columnCount(); ++column) {
+        if (column == Column::Name) continue;
+        width += header->sectionSize(column);
+    }
+
+    width += m_tableWidget->fontMetrics().horizontalAdvance(QLatin1String(kNameWidthSample)) +
+             2 * kCellTextMargin;
+    width += 2 * m_tableWidget->frameWidth();
+
+    // Reserve the vertical scrollbar now: it takes its width out of the viewport as soon as
+    // there are more partitions than fit, and must not do that by pushing Placed out of view.
+    width += m_tableWidget->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
+
+    m_tableWidget->setMinimumWidth(width);
 }
 
 void PartitionsListWidget::onPartitionSelectedOutside(const PartitionPtr& partition)

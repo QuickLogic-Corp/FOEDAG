@@ -42,6 +42,10 @@ private:
     QLabel* m_lbResourceSource{nullptr};
     void updateResourceSourceLabel(const std::map<int, PartitionPtr>& partitions);
 
+    // [aurora2#1725] Keeps the table from being handed less width than its columns need,
+    // which is what hid the rightmost ones until the window was widened.
+    void updateTableMinimumWidth();
+
     std::optional<int> m_selectedIdBackupOpt;
     int getId(const QString& name);
 
