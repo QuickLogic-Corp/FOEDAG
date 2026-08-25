@@ -95,9 +95,10 @@ bool IPCatalogBuilder::buildLiteXCatalog(
                              : buildLiteXIPFromGenerator(catalog, entry);
         if (res == false) {
           result = false;
-        }
-        if (IPDefinition* def =
-                catalog->Definition(ipNameFromGeneratorPath(entry))) {
+        } else if (IPDefinition* def =
+                       catalog->Definition(ipNameFromGeneratorPath(entry))) {
+          // Only on success: a build refused as a cross-root duplicate must
+          // not stamp ITS manifest onto the already-loaded definition.
           def->Availability(availability);
         }
       }
@@ -283,6 +284,25 @@ IPAvailability IPCatalogBuilder::readIPManifest(
   return availability;
 }
 
+// IP names must be unique across all loaded catalogs: a name found again at
+// a DIFFERENT generator path than the already-loaded definition is a hard
+// error naming both locations. An unchanged path is a plain rescan of the
+// same root — a refresh, not a duplicate — and must pass, or every GUI
+// refresh and explicit reload would fail.
+static bool isDuplicateDefinition(Compiler* compiler, IPDefinition* def,
+                                  const std::filesystem::path& newScript) {
+  if (std::filesystem::weakly_canonical(def->FilePath()) ==
+      std::filesystem::weakly_canonical(newScript)) {
+    return false;
+  }
+  compiler->ErrorMessage(
+      "IP Catalog, duplicate IP name '" + def->Name() +
+      "': already loaded from " + def->FilePath().parent_path().string() +
+      ", also found at " + newScript.parent_path().string() +
+      "; IP names must be unique across catalogs — rename one of them");
+  return true;
+}
+
 std::vector<std::string> JsonArrayToStringVector(
     const json& jsonArray, bool removeOuterQuotes = true) {
   std::vector<std::string> vals{};
@@ -445,6 +465,11 @@ bool IPCatalogBuilder::buildLiteXIPFromJson(
 
   auto def = catalog->Definition(IPName);
   if (def) {
+    // A cross-root duplicate is refused; a re-parse from the same script
+    // refreshes the definition in place.
+    if (isDuplicateDefinition(m_compiler, def, pythonConverterScript)) {
+      return false;
+    }
     def->apply(IPDefinition::IPType::LiteXGenerator, IPName, build_name,
                pythonConverterScript, connections, parameters);
     def->Valid(true);
@@ -465,6 +490,16 @@ bool IPCatalogBuilder::buildLiteXIPFromGeneratorInternal(
   std::string command;
 
   const std::string IPName = ipNameFromGeneratorPath(pythonConverterScript);
+
+  if (IPDefinition* existing = catalog->Definition(IPName)) {
+    // Same script path: a rescan of an already-loaded root — leave the
+    // definition (and its Valid state) untouched. Different path: a
+    // cross-root duplicate, refused.
+    if (isDuplicateDefinition(m_compiler, existing, pythonConverterScript)) {
+      return false;
+    }
+    return result;
+  }
 
   IPDefinition* def =
       new IPDefinition(IPDefinition::IPType::LiteXGenerator, IPName,
