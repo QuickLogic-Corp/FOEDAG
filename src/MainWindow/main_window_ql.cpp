@@ -303,7 +303,16 @@ void MainWindow::ProgressVisible(bool visible) {
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (confirmExitProgram()) {
     if (m_floorPlanningWidget) {
-      m_floorPlanningWidget->close();
+      // [aurora2#1725] Destroy the panel here and now rather than close()ing it. close()
+      // goes through the closed() handler, which disposes of the widget with deleteLater();
+      // on this path the event loop never runs again -- accepting this event closes the
+      // last window, which sends Qt's lastWindowClosed straight into Tcl's "exit" -- so
+      // that deferred delete is only serviced from an atexit handler, by which point Qt's
+      // GUI state is half torn down and destroying a widget segfaults. Nothing here is
+      // running inside the panel's own code, so deleting it outright is safe.
+      fp::FloorPlanningWidget* floorPlanningWidget = m_floorPlanningWidget;
+      m_floorPlanningWidget = nullptr;
+      delete floorPlanningWidget;
     }
     forceStopCompilation();
     event->accept();
