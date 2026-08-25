@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #include <QProcess>
 #include <QCoreApplication>
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -1055,6 +1056,49 @@ void IPGenerator::DeleteIPInstance(const std::string& moduleName) {
   DeleteIPInstance(GetIPInstance(moduleName));
 }
 
+// Fingerprint of an RPM IP's shipped artifacts (the netlists/ dir beside its
+// generator): relative path, size and mtime of every file, sorted. Embedded
+// in the parameter-cache JSON so the byte-identity reuse check below also
+// catches a re-authored netlist/stub — without it, re-packaging an IP
+// (package_rpm_ip) would silently keep serving the previously generated
+// copy. Deliberately scoped to netlists/ (empty string for IPs without one):
+// fingerprinting every IP's whole version dir would force a spurious
+// regenerate of all configured IPs after each tool reinstall, since the
+// install re-copies the catalog and refreshes its mtimes.
+static std::string NetlistArtifactsFingerprint(
+    const std::filesystem::path& netlistsDir) {
+  std::error_code ec;
+  if (!std::filesystem::is_directory(netlistsDir, ec)) return {};
+  std::vector<std::string> entries;
+  // error_code throughout: a fingerprinting hiccup must degrade to "changed
+  // -> regenerate once", never abort generation.
+  for (auto it = std::filesystem::recursive_directory_iterator(netlistsDir, ec);
+       !ec && it != std::filesystem::recursive_directory_iterator();
+       it.increment(ec)) {
+    if (!it->is_regular_file(ec)) continue;
+    const auto mtime = it->last_write_time(ec).time_since_epoch().count();
+    const auto size = it->file_size(ec);
+    entries.push_back(
+        std::filesystem::relative(it->path(), netlistsDir, ec)
+            .generic_string() +
+        ":" + std::to_string(size) + ":" + std::to_string(mtime));
+  }
+  std::sort(entries.begin(), entries.end());
+  std::string fingerprint;
+  for (const auto& e : entries) {
+    fingerprint += e + ";";
+  }
+  // The fingerprint is embedded in a JSON string literal: escape the two
+  // characters that could break it (filenames with quotes/backslashes).
+  std::string escaped;
+  escaped.reserve(fingerprint.size());
+  for (const char c : fingerprint) {
+    if (c == '"' || c == '\\') escaped += '\\';
+    escaped += c;
+  }
+  return escaped;
+}
+
 bool IPGenerator::Generate() {
   shareContext();
 
@@ -1143,6 +1187,14 @@ bool IPGenerator::Generate() {
         jsonF << "   \"build\": true," << std::endl;
         jsonF << "   \"json\": \"" << jsonFile.filename().string() << "\","
               << std::endl;
+        // RPM IPs only (empty otherwise); the generators read the cache with
+        // json.load + cfg.get, so the extra key is invisible to them.
+        const std::string netlistsFingerprint = NetlistArtifactsFingerprint(
+            def->FilePath().parent_path() / "netlists");
+        if (!netlistsFingerprint.empty()) {
+          jsonF << "   \"netlists_fingerprint\": \"" << netlistsFingerprint
+                << "\"," << std::endl;
+        }
         jsonF << "   \"json_template\": false" << std::endl;
         jsonF << "}" << std::endl;
         jsonF.close();
