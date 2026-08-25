@@ -136,12 +136,12 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     auto* saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, [this]() { saveQdc(); });
 
-    m_bnRemoveSelectedPartition = new QPushButton(QIcon(":/erase.png"), "");
-    connect(m_bnRemoveSelectedPartition, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelected);
+    m_bnRemoveSelectedRegion = new QPushButton(QIcon(":/erase.png"), "");
+    connect(m_bnRemoveSelectedRegion, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelected);
     // [aurora2#1725] Partitions are deleted from their own row in the partitions list now;
     // a selected region has no row of its own, so it is still removed from here.
-    m_bnRemoveSelectedPartition->setToolTip(tr("Remove selected region"));
-    m_bnRemoveSelectedPartition->setEnabled(false);
+    m_bnRemoveSelectedRegion->setToolTip(tr("Remove selected region"));
+    m_bnRemoveSelectedRegion->setEnabled(false);
 
     // [aurora2#1725] Drawing a region with no partition yet: create one unnamed rather than
     // interrupting the gesture with a name prompt. It appears in the list, where its name can
@@ -215,7 +215,11 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_drawRegion->setToolTip(tr("Draw new region"));
 
     connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
-      m_bnRemoveSelectedPartition->setEnabled(m_deviceWidget->hasSelection());
+      // [aurora2#1725] Region selection only, not hasSelection(): the button is labelled
+      // "Remove selected region", and a partition is deleted from its own row in the
+      // partitions list. Enabling it for a selected partition offered a second, unlabelled
+      // way to delete one.
+      m_bnRemoveSelectedRegion->setEnabled(m_deviceWidget->hasSelectedRegion());
       m_bnPartitionColor->setEnabled(m_deviceWidget->hasSelectedPartition());
     });
 
@@ -283,7 +287,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     toolBarLayout->addStretch();
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnRemoveSelectedPartition);
+    toolBarLayout->addWidget(m_bnRemoveSelectedRegion);
     toolBarLayout->addSpacing(spacing);
     toolBarLayout->addWidget(bnOptions);
 

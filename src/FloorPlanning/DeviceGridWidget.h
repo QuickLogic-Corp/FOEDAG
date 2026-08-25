@@ -99,6 +99,7 @@ public:
     void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
 
     bool hasSelectedPartition() const { return m_selectedPartition != nullptr; }
+    bool hasSelectedRegion() const { return m_selectedRegion != nullptr; }
     void changeSelectedPartitionColor(const QColor& color) {
       if (m_selectedPartition) {
         m_selectedPartition->setColor(color);
