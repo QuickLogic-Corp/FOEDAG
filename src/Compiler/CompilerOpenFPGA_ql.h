@@ -178,9 +178,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// Register an annotated relative-placement IP netlist (via the
   /// `ip_add_to_design` Tcl command, either as an explicit .eblif/.blif path
   /// or auto-discovered from a catalog IP instance's rel_macro/ dir).
-  /// Duplicates are ignored. See
-  /// docs/development/relative_macro_placement/ in aurora2.
+  /// Duplicates are ignored. Registrations are per project — see
+  /// PruneRelIpBlifs(). See docs/development/relative_macro_placement/ in
+  /// aurora2.
   void AddRelIpBlif(const std::filesystem::path& path) {
+    PruneRelIpBlifs();
     if (std::find(m_relIpBlifs.begin(), m_relIpBlifs.end(), path) ==
         m_relIpBlifs.end()) {
       m_relIpBlifs.push_back(path);
@@ -189,6 +191,12 @@ class CompilerOpenFPGA_ql : public Compiler {
   const std::vector<std::filesystem::path>& RelIpBlifs() const {
     return m_relIpBlifs;
   }
+  /// Registered netlists belong to the project they were registered under;
+  /// clear them when the session's project changed since. Called on
+  /// registration and by every consumer of m_relIpBlifs, so netlists cannot
+  /// leak into another project's synthesis through ANY project-switch path —
+  /// GUI open_project in particular never passes through CreateDesign.
+  void PruneRelIpBlifs();
 
  protected:
   virtual bool IPGenerate();
@@ -218,6 +226,17 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// are registered; the default flow's <project>_constraints.xml is never
   /// touched.
   bool GenerateRelMacroConstraints(const std::string& netlistFile);
+  /// RPM authoring intent, declared by the `rpm_authoring on` Tcl command
+  /// BEFORE the place stage (batch script or interactive console): with the
+  /// flag on, getPlacementCommand() emits the authoring inputs
+  /// package_rpm_ip checks for. Reset when a new design is created.
+  void RpmAuthoring(bool on) { m_rpmAuthoring = on; }
+  bool RpmAuthoring() const { return m_rpmAuthoring; }
+  /// Clears per-design RPM state: netlists registered by an earlier design
+  /// of the session (ip_add_to_design) must not leak -rel_ip_blif options
+  /// into the next design's synthesis.
+  bool CreateDesign(const std::string& name,
+                    const std::string& type = std::string{}) override;
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
@@ -264,8 +283,12 @@ class CompilerOpenFPGA_ql : public Compiler {
   // Annotated relative-placement IP netlists (registered via
   // ip_add_to_design). Empty in the default flow; every consumer is gated on
   // this so that projects without relative-placement IPs behave identically
-  // to before.
+  // to before. Valid only for the project recorded in m_relIpBlifsProject
+  // (see PruneRelIpBlifs).
   std::vector<std::filesystem::path> m_relIpBlifs;
+  std::filesystem::path m_relIpBlifsProject;
+  // See RpmAuthoring().
+  bool m_rpmAuthoring = false;
   /*!
    * \brief m_architectureFile
    * We required from user explicitly specify architecture file.

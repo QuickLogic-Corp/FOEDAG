@@ -274,6 +274,9 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
       << "   pnr_netlist_lang <blif, edif, verilog, vhdl> : Chooses vpr input "
          "netlist format"
       << std::endl;
+  (*out) << "   rpm_authoring <on/off>     : Declare RPM-IP authoring intent "
+            "before place, so place emits the inputs package_rpm_ip needs"
+         << std::endl;
   (*out) << "   packing ?clean?            : Packing" << std::endl;
   // (*out) << "   global_placement ?clean?   : Analytical placer" << std::endl;
   (*out) << "   place ?clean?              : Detailed placer" << std::endl;
@@ -735,6 +738,26 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_OK;
   };
   interp->registerCmd("ip_add_to_design", ip_add_to_design, this, nullptr);
+
+  // Declare RPM-authoring intent BEFORE the place stage: with the flag on,
+  // place emits the authoring inputs package_rpm_ip checks for (--echo_file
+  // on / --write_flat_place). An explicit command rather than inferring it
+  // from the script: real state instead of text matching, and it works from
+  // the interactive console too.
+  auto rpm_authoring = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    if (argc == 2) {
+      const std::string arg = argv[1];
+      if (arg == "on" || arg == "off") {
+        compiler->RpmAuthoring(arg == "on");
+        return TCL_OK;
+      }
+    }
+    compiler->ErrorMessage("Usage: rpm_authoring <on|off>");
+    return TCL_ERROR;
+  };
+  interp->registerCmd("rpm_authoring", rpm_authoring, this, nullptr);
 
   auto message_severity = [](void* clientData, Tcl_Interp* interp, int argc,
                              const char* argv[]) -> int {
@@ -2618,6 +2641,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    PruneRelIpBlifs();
     if (!m_relIpBlifs.empty()) {
       // Relative-placement IPs registered: merge the relative-macro
       // constraints (derived from the annotated netlist) with the IO
@@ -3022,6 +3046,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    PruneRelIpBlifs();
     if (!m_relIpBlifs.empty()) {
       // Relative-placement IPs registered: merge the relative-macro
       // constraints (derived from the annotated netlist) with the IO
@@ -7515,6 +7540,36 @@ bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlist
   return true;
 }
 
+void CompilerOpenFPGA_ql::PruneRelIpBlifs() {
+  // Registered netlists belong to one project. A session can switch
+  // projects through several paths (GUI open_project in particular never
+  // passes through CreateDesign), so instead of hooking every path, the
+  // registrations are stamped with their project and expired lazily by
+  // every consumer: a leaked netlist can then never reach another project's
+  // synthesis (-rel_ip_blif) or constraint generation.
+  const std::filesystem::path current =
+      (ProjManager() != nullptr && ProjManager()->HasDesign())
+          ? std::filesystem::path(ProjManager()->projectPath())
+          : std::filesystem::path{};
+  if (current != m_relIpBlifsProject) {
+    m_relIpBlifs.clear();
+    m_relIpBlifsProject = current;
+  }
+}
+
+bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
+                                       const std::string& type) {
+  // Eager clear on top of the lazy PruneRelIpBlifs(): a new design must not
+  // inherit the previous design's registered relative-placement IP netlists
+  // even transiently (RelIpBlifs() is a public accessor). The authoring
+  // declaration is per design too — leaking it would only cost extra echo
+  // files on the next design's place run, but intent should not carry over.
+  m_relIpBlifs.clear();
+  m_relIpBlifsProject.clear();
+  m_rpmAuthoring = false;
+  return Compiler::CreateDesign(name, type);
+}
+
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
   bool status = true;
 #if UPSTREAM_UNUSED
@@ -10122,8 +10177,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    yosys_modules_dir_path_string;
 
   // Relative-placement IPs: link each annotated netlist at the end of
-  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration so the
-  // default flow's synthesis script stays byte-identical.
+  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration — with
+  // stale registrations from another project pruned first — so the default
+  // flow's synthesis script stays byte-identical.
+  PruneRelIpBlifs();
   for (const auto& rel_ip_blif : m_relIpBlifs) {
     yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
   }
@@ -10286,7 +10343,21 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   else {
     command->append("--place");
   }
-  
+
+  // RPM authoring support: with `rpm_authoring on` declared, this placement
+  // run must emit the authoring inputs package_rpm_ip checks for — the flat
+  // placement (with primitive site paths) and the echo files.
+  // package_rpm_ip itself never runs placement. Skipped when the user
+  // already passed either option through custom_vpr_options_str above.
+  if (RpmAuthoring()) {
+    if (command->string().find("--echo_file") == std::string::npos) {
+      command->append("--echo_file on");
+    }
+    if (command->string().find("--write_flat_place") == std::string::npos) {
+      command->append("--write_flat_place " + ProjManager()->projectName() +
+                      "_rpm_author.fplace");
+    }
+  }
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
   //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
