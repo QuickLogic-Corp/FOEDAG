@@ -51,27 +51,25 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     // three "required/available" columns and the measured one is readable at a glance.
     const std::array<std::pair<int, QString>, 4> headerTips{{
         {Column::Clb, tr("Required / available CLB tiles.\n\n"
-                         "Required is a sizing hint, not a placement result: clb atoms are "
-                         "luts and flops that pack many to a tile, so the figure is an atom "
-                         "count divided by a packing density. A leading ~ marks a row whose "
+                         "Required is a sizing hint, not a placement result: clb atoms are\n"
+                         "luts and flops that pack many to a tile, so the figure is an atom\n"
+                         "count divided by a packing density. A leading ~ marks a row whose\n"
                          "figures are a pre-synthesis estimate.")},
         {Column::Dsp, tr("Required / available DSP tiles.\n\n"
-                         "One DSP atom is one tile, so unlike CLB this needs no packing "
-                         "estimate. It is exact even before synthesis: a multiplier in the "
+                         "One DSP atom is one tile, so unlike CLB this needs no packing\n"
+                         "estimate. It is exact even before synthesis: a multiplier in the\n"
                          "RTL always becomes a DSP.")},
         {Column::Bram, tr("Required / available BRAM tiles.\n\n"
-                          "One BRAM atom is one tile. Blank before synthesis, because whether "
-                          "a memory becomes a BRAM is decided by synthesis rather than by the "
-                          "RTL.")},
-        {Column::Placed, tr("CLB tiles this partition ACTUALLY occupies, from the "
-                            "placement.\n\n"
-                            "The measured counterpart to the CLB column's estimate — compare "
-                            "the two to see how well a region was sized.\n\n"
-                            "≥ means at least one instance shares clusters with logic "
-                            "outside it, so those tiles are counted for both and the total is "
-                            "an upper bound. A dash means placement has not run yet: it is "
-                            "not shown as 0, because \"not measured\" is not \"measured "
-                            "zero\".")},
+                          "One BRAM atom is one tile. Blank before synthesis,\n"
+                          "because whether a memory becomes a BRAM is decided by\n"
+                          "synthesis rather than by the RTL.")},
+        {Column::Placed, tr("CLB tiles this partition ACTUALLY occupies, from the placement.\n\n"
+                            "The measured counterpart to the CLB column's estimate — compare the\n"
+                            "two to see how well a region was sized.\n\n"
+                            "≥ means at least one instance shares clusters with logic outside it,\n"
+                            "so those tiles are counted for both and the total is an upper bound.\n"
+                            "A dash means placement has not run yet: it is not shown as 0,\n"
+                            "because \"not measured\" is not \"measured zero\".")},
     }};
     for (const auto& [column, tip]: headerTips) {
         if (auto* header = m_tableWidget->horizontalHeaderItem(column)) {
@@ -257,21 +255,21 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
             item->setToolTip(estimated
                 ? QObject::tr(
-                      "Estimated — no netlist exists yet, so these figures come from the "
-                      "RTL.\n\n"
+                      "Estimated — no netlist exists yet, so these\n"
+                      "figures come from the RTL.\n\n"
                       "DSP is exact: a multiplier in the RTL always becomes a DSP.\n\n"
-                      "CLB is approximate: it divides an estimated cell count by a packing "
+                      "CLB is approximate: it divides an estimated cell count by a packing\n"
                       "density, and packing has not happened yet.\n\n"
-                      "BRAM is left blank rather than guessed, because synthesis — not the "
-                      "RTL — decides whether a memory becomes a BRAM: small or awkwardly "
-                      "ported ones are turned into flops and logic instead. Showing a "
-                      "number here would have you reserve BRAM columns the design may never "
-                      "use.\n\n"
-                      "Synthesize to replace all of these with figures counted from the "
-                      "netlist.")
-                : QObject::tr("Counted from the post-synthesis netlist. The CLB figure "
-                              "is still packing-density derived, so it is a sizing hint "
-                              "rather than the tile count the placer will use."));
+                      "BRAM is left blank rather than guessed, because synthesis —\n"
+                      "not the RTL — decides whether a memory becomes a BRAM: small\n"
+                      "or awkwardly ported ones are turned into flops and logic\n"
+                      "instead. Showing a number here would have you reserve BRAM\n"
+                      "columns the design may never use.\n\n"
+                      "Synthesize to replace all of these with figures\n"
+                      "counted from the netlist.")
+                : QObject::tr("Counted from the post-synthesis netlist. The CLB figure is still\n"
+                              "packing-density derived, so it is a sizing hint rather than the tile\n"
+                              "count the placer will use."));
             return item;
         };
         m_tableWidget->setItem(row, Column::Clb, resourceItem(partition->clbRequiredCount(), partition->clbAvailableCount()));
@@ -288,23 +286,24 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
             // subtree: those tiles are counted for both, so the sum is an upper bound.
             const QString prefix = contribution.actualShared ? QString::fromUtf8("\u2265") : QString();
             placedItem->setText(prefix + QString::number(contribution.clbActual));
-            QString tip = QObject::tr("Measured from the placement -- CLB tiles this "
+            QString tip = QObject::tr("Measured from the placement -- CLB tiles this\n"
                                       "partition actually occupies.");
             if (contribution.actualShared) {
-                tip += QObject::tr(" At least one instance shares clusters with logic outside "
-                                   "it, so those tiles are counted for both and this is an "
-                                   "upper bound.");
+                tip += QObject::tr("\n"
+                                   "At least one instance shares clusters with logic outside it, so\n"
+                                   "those tiles are counted for both and this is an upper bound.");
             }
             if (contribution.actualPartial) {
-                tip += QObject::tr(" Some elements of this partition have no measurement, so "
+                tip += QObject::tr("\n"
+                                   "Some elements of this partition have no measurement, so\n"
                                    "the total is incomplete.");
             }
             placedItem->setToolTip(tip);
         } else {
             placedItem->setText(QStringLiteral("-"));
             placedItem->setToolTip(QObject::tr(
-                "No placement measurement yet. Run placement to compare what this partition "
-                "needs against the tiles it actually occupies."));
+                "No placement measurement yet. Run placement to compare what this\n"
+                "partition needs against the tiles it actually occupies."));
         }
         m_tableWidget->setItem(row, Column::Placed, placedItem);
 

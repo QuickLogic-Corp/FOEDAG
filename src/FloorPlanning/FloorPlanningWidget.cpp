@@ -243,7 +243,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_actTreatWarningsAsErrors = optionsMenu->addAction(tr("Treat warnings as errors"));
     m_actTreatWarningsAsErrors->setCheckable(true);
     m_actTreatWarningsAsErrors->setToolTip(
-        tr("Count every advisory as an error, which stops the QDC being saved while any remains."));
+        tr("Count every advisory as an error, which stops the QDC being\n"
+           "saved while any remains."));
     connect(m_actTreatWarningsAsErrors, &QAction::toggled, this, [this](bool on) {
         // Re-checks and so refreshes the issues list and the Save QDC button.
         m_deviceWidget->setTreatWarningsAsErrors(on);

@@ -967,7 +967,7 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
                 } else if (graded.verdict == "partial") {
                     child->setForeground(QBrush(QColor(0xB8, 0x86, 0x0B)));  // dark goldenrod
                     child->setToolTip(
-                        tr("This instance can be constrained, but its atom set may be "
+                        tr("This instance can be constrained, but its atom set may be\n"
                            "incomplete, so its resource figures are a lower bound."));
                 }
             }
