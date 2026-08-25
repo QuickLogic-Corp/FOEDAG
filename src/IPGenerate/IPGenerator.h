@@ -122,7 +122,7 @@ class IPGenerator {
   // RPM IPs are packaged here by default (package_rpm_ip).
   std::filesystem::path ProjectUserCatalogPath() const;
   // Lazily load the catalog roots the tool knows about (installed first,
-  // project-local second, so a colliding user IP deliberately wins), each at
+  // then project-local; a name found in both roots is a load error), each at
   // most once per session. Called by ip_catalog/configure_ip; explicit
   // add_litex_ip_catalog calls always rescan. Replaces the old "load the
   // default iff the catalog is empty" guard, under which an early explicit

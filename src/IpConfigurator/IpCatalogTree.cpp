@@ -62,8 +62,8 @@ IpCatalogTree::IpCatalogTree(QWidget* parent /*nullptr*/)
 void IpCatalogTree::refresh() {
   // The installed catalog plus the project-local user catalog
   // (<project>/IP_Catalog, empty when no project is open); loadIps skips
-  // paths that do not exist. Loading the user catalog second makes a
-  // colliding user IP shadow the shipped one, matching the Tcl-side rule.
+  // paths that do not exist. A name found in both roots is a load error —
+  // IP names are unique across catalogs, matching the Tcl-side rule.
   IPGenerator* generator = GlobalSession->GetCompiler()->GetIPGenerator();
   std::filesystem::path IpCatalogPath = generator->DefaultIPCatalogPath();
   std::filesystem::path UserCatalogPath = generator->ProjectUserCatalogPath();
