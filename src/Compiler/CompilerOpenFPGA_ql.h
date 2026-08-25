@@ -226,6 +226,20 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// are registered; the default flow's <project>_constraints.xml is never
   /// touched.
   bool GenerateRelMacroConstraints(const std::string& netlistFile);
+  /// `package_rpm_ip` Tcl command body: capture the current project's tuned
+  /// placement as a relative-placement-macro catalog IP. Never runs
+  /// placement itself — the authoring inputs (flat placement with site
+  /// paths, echo files) are produced by the `place` stage, which appends
+  /// --echo_file on / --write_flat_place when authoring was declared first
+  /// (`rpm_authoring on`). Refuses when the flag is off; missing or stale
+  /// inputs are a hard error naming the remedy. Drives scripts/rel_macro_placement/package_rpm_ip.py to
+  /// annotate the netlist, validate and package the user-provided blackbox
+  /// stub (`stub`), and write the catalog layout into `catalog` (default:
+  /// <project>/IP_Catalog), which is then (re)loaded into the session's
+  /// catalog. See docs/development/relative_macro_placement/ in aurora2.
+  bool PackageRpmIp(const std::string& name, const std::string& version,
+                    const std::string& macroType, const std::string& stub,
+                    const std::string& catalog, bool force);
   /// RPM authoring intent, declared by the `rpm_authoring on` Tcl command
   /// BEFORE the place stage (batch script or interactive console): with the
   /// flag on, getPlacementCommand() emits the authoring inputs

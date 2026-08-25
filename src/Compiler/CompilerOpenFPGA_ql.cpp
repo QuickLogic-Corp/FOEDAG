@@ -54,6 +54,7 @@
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TilesCfgParser.h"
+#include "Compiler/WorkerThread.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/tcl_command_integration.h"
@@ -276,6 +277,12 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
       << std::endl;
   (*out) << "   rpm_authoring <on/off>     : Declare RPM-IP authoring intent "
             "before place, so place emits the inputs package_rpm_ip needs"
+         << std::endl;
+  (*out) << "   package_rpm_ip -name <ip_name> -stub <stub.v> ?-macro_type "
+            "<type>? ?-version v1_0? ?-catalog <dir>? ?-force? : Package the "
+            "current design's tuned placement as a relative-placement-macro "
+            "catalog IP (default catalog: <project>/IP_Catalog); the stub is "
+            "the user-written port-only (* blackbox *) module of the IP"
          << std::endl;
   (*out) << "   packing ?clean?            : Packing" << std::endl;
   // (*out) << "   global_placement ?clean?   : Analytical placer" << std::endl;
@@ -758,6 +765,75 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_ERROR;
   };
   interp->registerCmd("rpm_authoring", rpm_authoring, this, nullptr);
+
+  // Author a relative-placement-macro catalog IP from the current project's
+  // tuned placement (run after rpm_authoring on + synth/packing/place of the
+  // IP standalone). Packages into <project>/IP_Catalog by default, which
+  // configure_ip searches in addition to the installed catalog. See
+  // docs/development/relative_macro_placement/ in aurora2.
+  auto package_rpm_ip = [](void* clientData, Tcl_Interp* interp, int argc,
+                           const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    const std::string usage =
+        "Usage: package_rpm_ip -name <ip_name> -stub <stub.v> "
+        "?-macro_type <type>? ?-version v1_0? ?-catalog <dir>? ?-force?";
+    std::string name;
+    std::string version = "v1_0";
+    std::string macroType;
+    std::string stub;
+    std::string catalog;
+    bool force = false;
+    for (int i = 1; i < argc; i++) {
+      const std::string arg = argv[i];
+      if (arg == "-force") {
+        force = true;
+      } else if (arg == "-name" || arg == "-macro_type" ||
+                 arg == "-version" || arg == "-stub" || arg == "-catalog") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("Missing value for " + arg + "\n" + usage);
+          return TCL_ERROR;
+        }
+        const std::string value = argv[++i];
+        if (arg == "-name") {
+          name = value;
+        } else if (arg == "-macro_type") {
+          macroType = value;
+        } else if (arg == "-version") {
+          version = value;
+        } else if (arg == "-stub") {
+          stub = value;
+        } else {
+          catalog = value;
+        }
+      } else {
+        compiler->ErrorMessage("Unsupported option " + arg + "\n" + usage);
+        return TCL_ERROR;
+      }
+    }
+    if (name.empty()) {
+      compiler->ErrorMessage("-name is required\n" + usage);
+      return TCL_ERROR;
+    }
+    if (stub.empty()) {
+      compiler->ErrorMessage(
+          "-stub is required: the user-written port-only (* blackbox *) "
+          "synthesis stub of the IP\n" +
+          usage);
+      return TCL_ERROR;
+    }
+    if (macroType.empty()) {
+      macroType = compiler->ToUpper(name);
+    }
+    auto fn = [compiler, name, version, macroType, stub, catalog,
+               force]() -> bool {
+      return compiler->PackageRpmIp(name, version, macroType, stub, catalog,
+                                    force);
+    };
+    WorkerThread* thread =
+        new WorkerThread{{}, Compiler::Action::NoAction, compiler};
+    return thread->Start(fn) ? TCL_OK : TCL_ERROR;
+  };
+  interp->registerCmd("package_rpm_ip", package_rpm_ip, this, nullptr);
 
   auto message_severity = [](void* clientData, Tcl_Interp* interp, int argc,
                              const char* argv[]) -> int {
@@ -7568,6 +7644,279 @@ bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
   m_relIpBlifsProject.clear();
   m_rpmAuthoring = false;
   return Compiler::CreateDesign(name, type);
+}
+
+bool CompilerOpenFPGA_ql::PackageRpmIp(const std::string& name,
+                                       const std::string& version,
+                                       const std::string& macroType,
+                                       const std::string& stub,
+                                       const std::string& catalog,
+                                       bool force) {
+  if (!ProjManager()->HasDesign()) {
+    ErrorMessage("Create a design first: create_design <name>");
+    return false;
+  }
+
+  // Authoring must have been declared before the tuning `place` ran: without
+  // the flag that placement run did not emit the authoring inputs, and a
+  // leftover set from some earlier declared run must not be packaged as if
+  // it were current. Refuse up front rather than failing on the files.
+  if (!RpmAuthoring()) {
+    ErrorMessage(
+        "package_rpm_ip requires `rpm_authoring on`, declared before the "
+        "place stage so the placement run emits the authoring inputs; "
+        "declare it, re-run place, then package.");
+    return false;
+  }
+
+  // The user-written stub, resolved like other file arguments (relative to
+  // the invocation directory). Contents are validated by the driver.
+  const std::filesystem::path stub_filepath = FileUtils::GetFullPath(stub);
+  if (!fs::exists(stub_filepath)) {
+    ErrorMessage("package_rpm_ip: stub file does not exist: " + stub);
+    return false;
+  }
+
+  const std::filesystem::path project_path = ProjManager()->projectPath();
+  const std::string project_name = ProjManager()->projectName();
+  const std::filesystem::path netlist_filepath =
+      project_path / (project_name + "_post_synth.blif");
+  const std::filesystem::path net_filepath =
+      project_path / (project_name + "_post_synth.net");
+  const std::filesystem::path place_filepath =
+      project_path / (project_name + "_post_synth.place");
+
+  // The command captures a layout that was tuned and inspected: the full
+  // standalone flow of the IP must have run — packaging without a tuned
+  // .place would ship a layout nobody reviewed.
+  const std::pair<std::filesystem::path, const char*> stage_inputs[] = {
+      {netlist_filepath, "synth"},
+      {net_filepath, "packing"},
+      {place_filepath, "place"}};
+  for (const auto& [file, stage] : stage_inputs) {
+    if (!fs::exists(file)) {
+      ErrorMessage("package_rpm_ip: " + file.string() +
+                   " does not exist (run " + std::string(stage) + " first)");
+      return false;
+    }
+  }
+
+  // A tuning run must be unconstrained: a design that itself consumes
+  // relative-placement IPs replays their shape, it does not author one.
+  PruneRelIpBlifs();
+  if (!m_relIpBlifs.empty()) {
+    std::string blifs;
+    for (const auto& p : m_relIpBlifs) blifs += "\n  " + p.string();
+    ErrorMessage(
+        "package_rpm_ip requires an unconstrained tuning run, but this "
+        "design consumes relative-placement IP netlist(s) registered via "
+        "ip_add_to_design:" +
+        blifs + "\nAuthor the IP as a standalone design without RPM IPs.");
+    return false;
+  }
+
+  // The RPM flow does not support the analytical placer, and authoring from
+  // an AP run is unvalidated; require the traditional placer.
+  if (QLSettingsManager::getStringValue("general", "options",
+                                        "analytical_place") == "checked") {
+    ErrorMessage(
+        "package_rpm_ip requires the traditional placer; disable analytical "
+        "placement for the tuning run.");
+    return false;
+  }
+
+  // The authoring inputs — the flat placement with primitive site paths and
+  // the echo files — are produced by the `place` stage itself:
+  // getPlacementCommand() appends --echo_file on / --write_flat_place
+  // automatically when the running batch script mentions package_rpm_ip.
+  // This command never runs placement; it only checks the inputs are present
+  // (and that the flat placement is not stale) and errors otherwise.
+  const std::filesystem::path fplace_filepath =
+      project_path / (project_name + "_rpm_author.fplace");
+  const std::filesystem::path macros_echo_filepath =
+      project_path / "place_macros.echo";
+  const bool have_atom_echo =
+      fs::exists(project_path / "atom_netlist.orig.echo.blif") ||
+      fs::exists(project_path / "atom_netlist.cleaned.echo.blif");
+  const std::string remedy =
+      "; the place stage produces it when authoring is declared first — run "
+      "`rpm_authoring on` before place, then re-run place";
+  if (!fs::exists(fplace_filepath)) {
+    ErrorMessage("package_rpm_ip: " + fplace_filepath.string() +
+                 " is missing" + remedy);
+    return false;
+  }
+  if (!fs::exists(macros_echo_filepath) || !have_atom_echo) {
+    ErrorMessage(
+        "package_rpm_ip: the placement echo files (place_macros.echo, "
+        "atom_netlist.*.echo.blif) are missing from " +
+        project_path.string() + remedy);
+    return false;
+  }
+  {
+    // Not just existence: a flat placement older than the tuned .place was
+    // captured from a different layout and must not be packaged silently.
+    // ec overloads so a racing delete degrades to this error, not to an
+    // exception escaping the worker thread.
+    std::error_code ec_fplace;
+    std::error_code ec_place;
+    const auto fplace_time = fs::last_write_time(fplace_filepath, ec_fplace);
+    const auto place_time = fs::last_write_time(place_filepath, ec_place);
+    if (ec_fplace || ec_place || fplace_time < place_time) {
+      ErrorMessage("package_rpm_ip: " + fplace_filepath.string() +
+                   " is older than the tuned placement" + remedy);
+      return false;
+    }
+  }
+
+  // Locate the installed packaging driver, same probing as
+  // GenerateRelMacroConstraints above.
+  std::filesystem::path driver_script_path;
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  const std::filesystem::path script_rel_path =
+      std::filesystem::path("scripts") /
+      std::filesystem::path("rel_macro_placement") /
+      std::filesystem::path("package_rpm_ip.py");
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    std::filesystem::path candidate =
+        (root / script_rel_path).lexically_normal();
+    if (fs::exists(candidate)) {
+      driver_script_path = candidate;
+      break;
+    }
+  }
+  if (driver_script_path.empty()) {
+    ErrorMessage(
+        "Cannot locate scripts/rel_macro_placement/package_rpm_ip.py in the "
+        "installation. RPM IP packaging failed!");
+    return false;
+  }
+
+  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if (!QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice)) {
+    ErrorMessage(
+        "package_rpm_ip: no valid target device; the annotated netlist is "
+        "filed per device family (set the device first)");
+    return false;
+  }
+  const std::string family =
+      StringUtils::toLower(targetDevice.device_variant.family);
+
+  std::filesystem::path catalog_dir =
+      catalog.empty() ? (project_path / "IP_Catalog")
+                      : std::filesystem::path(catalog);
+  if (!catalog_dir.is_absolute()) {
+    catalog_dir = fs::absolute(catalog_dir).lexically_normal();
+  }
+
+  // IP names are unique across all catalogs (a cross-root duplicate is a
+  // load error), so refuse a -name/-version that already belongs to another
+  // catalog location before anything is written. A definition already
+  // loaded from THIS catalog is the legitimate re-package case (new family,
+  // overwrite) and passes.
+  GetIPGenerator()->LoadDefaultCatalogs();
+  const std::string catalog_ip_name = name + "_" + version;
+  if (IPDefinition* existing =
+          GetIPGenerator()->Catalog()->Definition(catalog_ip_name)) {
+    const std::string existing_path =
+        fs::weakly_canonical(existing->FilePath()).string();
+    const std::string target_prefix =
+        fs::weakly_canonical(catalog_dir).string();
+    if (existing_path.rfind(target_prefix, 0) != 0) {
+      ErrorMessage("package_rpm_ip: IP name '" + catalog_ip_name +
+                   "' already exists in the catalog (from " +
+                   existing->FilePath().parent_path().string() +
+                   "); IP names must be unique — choose a different -name "
+                   "or -version");
+      return false;
+    }
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else   // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif  // _WIN32
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " RPM IP packaging failed!");
+    return false;
+  }
+
+  std::vector<std::string> args;
+  args.push_back(driver_script_path.string());
+  args.push_back("--blif");
+  args.push_back(netlist_filepath.string());
+  args.push_back("--flat-placement");
+  args.push_back(fplace_filepath.string());
+  args.push_back("--place-macros-echo");
+  args.push_back(macros_echo_filepath.string());
+  args.push_back("--stub");
+  args.push_back(stub_filepath.string());
+  args.push_back("--name");
+  args.push_back(name);
+  args.push_back("--version");
+  args.push_back(version);
+  args.push_back("--macro-type");
+  args.push_back(macroType);
+  args.push_back("--family");
+  args.push_back(family);
+  args.push_back("--catalog-dir");
+  args.push_back(catalog_dir.string());
+  // The driver copies rpm_common.py into the user catalog so it is
+  // self-contained; hand it the installed catalog's copy. Missing both here
+  // and in the target catalog is a broken installation — error now, with a
+  // real path, rather than letting the driver suggest a --rpm-common flag
+  // this command does not expose.
+  const std::filesystem::path rpm_common_path =
+      GetIPGenerator()->DefaultIPCatalogPath() / "quicklogic" / "lib" /
+      "rpm_common.py";
+  if (fs::exists(rpm_common_path)) {
+    args.push_back("--rpm-common");
+    args.push_back(rpm_common_path.string());
+  } else if (!fs::exists(catalog_dir / "quicklogic" / "lib" /
+                         "rpm_common.py")) {
+    ErrorMessage("package_rpm_ip: the installed catalog's packaging library "
+                 "is missing (" +
+                 rpm_common_path.string() +
+                 ") and the target catalog does not carry one yet; the "
+                 "installation is incomplete");
+    return false;
+  }
+  // When the tuning run was region-constrained, the driver's report reminds
+  // the author that only the relative shape travels with the IP.
+  const std::filesystem::path io_constraints_filepath =
+      project_path / (project_name + "_constraints.xml");
+  if (fs::exists(io_constraints_filepath)) {
+    args.push_back("--tuning-constraints");
+    args.push_back(io_constraints_filepath.string());
+  }
+  if (force) {
+    args.push_back("--force");
+  }
+
+  int status = FileUtils::ExecuteSystemCommand(python_exec.string(), args,
+                                               m_out, /*timeout_ms*/ -1)
+                   .realCode;
+  if (status != 0) {
+    ErrorMessage("Design " + project_name + " RPM IP packaging failed!");
+    return false;
+  }
+
+  // (Re)load the user catalog so the same script can configure_ip the new IP
+  // immediately. Called directly (we are already on a worker thread); the
+  // builder updates an already-loaded definition in place.
+  if (!BuildLiteXIPCatalog(catalog_dir)) {
+    ErrorMessage("package_rpm_ip: packaged successfully, but loading the "
+                 "user catalog failed: " +
+                 catalog_dir.string());
+    return false;
+  }
+  Message("package_rpm_ip: IP '" + name + "' (" + version +
+          ") packaged into " + catalog_dir.string());
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
