@@ -74,15 +74,31 @@ std::string dspFabricName(const std::string& version) {
 std::string siblingForDspVersion(const std::string& ipName,
                                  const std::string& requiredVersion,
                                  const std::string& deviceVersion) {
-  const size_t suffixLength = 2 + requiredVersion.size();  // "_v" + version
+  // The suffix is a two-character marker followed by the version:
+  //
+  //     dsp_generator_v2_0
+  //                  |||
+  //     underscoreAt -+||
+  //         markerAt --+|   'v' or 'V'
+  //        versionAt ---+
+  //
+  constexpr size_t kVersionMarkerLength = 2;  // the '_' and the 'v'
+  const size_t suffixLength = kVersionMarkerLength + requiredVersion.size();
   if (ipName.size() <= suffixLength) return {};
-  const size_t at = ipName.size() - suffixLength;
-  if (ipName[at] != '_') return {};
-  const char marker = ipName[at + 1];
+
+  const size_t underscoreAt = ipName.size() - suffixLength;
+  const size_t markerAt = underscoreAt + 1;
+  const size_t versionAt = underscoreAt + kVersionMarkerLength;
+
+  if (ipName[underscoreAt] != '_') return {};
+  const char marker = ipName[markerAt];
   if (marker != 'v' && marker != 'V') return {};
-  if (ipName.compare(at + 2, requiredVersion.size(), requiredVersion) != 0)
+  if (ipName.compare(versionAt, requiredVersion.size(), requiredVersion) != 0)
     return {};
-  return ipName.substr(0, at) + "_" + marker + deviceVersion;
+
+  // substr() first, so the '_' and the marker are appended to a std::string
+  // rather than doing pointer arithmetic on a string literal.
+  return ipName.substr(0, underscoreAt) + '_' + marker + deviceVersion;
 }
 
 }  // namespace

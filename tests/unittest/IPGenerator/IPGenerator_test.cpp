@@ -575,6 +575,36 @@ TEST(IPAvailabilityGate, AlternativeIsFoundWithAnUppercaseVersionMarker) {
             "this device.");
 }
 
+TEST(IPAvailabilityGate, AlternativeLookupRespectsTheSuffixBounds) {
+  // The "_v<version>" arithmetic is easy to get wrong at the edges. None of
+  // these names carries the required version as a suffix, so none may claim a
+  // sibling - even though a plausible one is sitting in the catalog.
+  IPCatalog catalog;
+  IPAvailability requiresV1;
+  requiresV1.manifestPresent = true;
+  requiresV1.requiredDspVersion = "1_0";
+  catalog.addIP(makeIP("dsp_generator_v1_0", requiresV1));
+  catalog.addIP(makeIP("_v1_0", requiresV1));
+  catalog.addIP(makeIP("v1_0", requiresV1));
+
+  for (const char* name : {
+           "v2_0",                   // shorter than the suffix
+           "_v2_0",                  // exactly the suffix, no stem left
+           "dsp_generator_x2_0",     // right length, wrong marker character
+           "dsp_generator_v2_0_ext"  // version is not at the end
+       }) {
+    IPDefinition* def =
+        makeIP(name, readFixture(manifestFixture("requires_dsp2")));
+    catalog.addIP(def);
+    const auto status = IPGenerator::EvaluateAvailability(
+        def, &catalog, onDevice(kSmokeDevice, "1_0"));
+    EXPECT_FALSE(status.available) << name;
+    EXPECT_NE(status.reason.find("No version of this IP targets this device."),
+              std::string::npos)
+        << name << ": " << status.reason;
+  }
+}
+
 TEST(IPAvailabilityGate, FabricMismatchWithNoSiblingSaysThereIsNone) {
   IPCatalog catalog;
   IPDefinition* v2 = makeIP("dsp_generator_v2_0",
