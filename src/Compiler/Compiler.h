@@ -312,9 +312,13 @@ class Compiler {
 
   void SetEnvironmentVariable(const std::string variable,
                               const std::string value);
+  // quiet: run the command without echoing its stdout/stderr (or the "Command:"
+  // line) to the compiler output. For a tool that already writes its own log --
+  // yosys -l, say -- echoing it a second time only doubles the size of
+  // aurora.log. logFile still receives everything when one is given.
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
-      bool appendLog = false);
+      bool appendLog = false, bool quiet = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(

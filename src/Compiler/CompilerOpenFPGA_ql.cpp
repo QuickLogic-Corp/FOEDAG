@@ -1981,12 +1981,23 @@ bool CompilerOpenFPGA_ql::RunElaboration() {
   }
 #endif // #if(AURORA_USE_TABBYCAD == 1)
 
+  std::filesystem::path elab_log_path =
+      std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.log");
   std::string command = yosys_executable_path.string() + " -s " + script_path.string() +
                          " -l " + topModule + "_elab.log";
-  Message("Elaboration command: " + command);
-  int status = ExecuteAndMonitorSystemCommand(command);
+  // [aurora2#1725 stage P0] quiet: this is a second, extra Yosys run that exists only to
+  // produce <top>_elab.json, and `-l <top>_elab.log` above already keeps a full record of
+  // it. Echoing that record to the console as well made aurora.log carry a whole
+  // elaboration transcript per compile that master never had (measured on
+  // tests/testcases/floorplanning_regions/whole_instance: ~350 lines for a 7-file design,
+  // and it scales with the RTL). Instance discovery is a diagnostic side-channel, so it
+  // reports itself in its own artifact -- see <top>_elab.log for the transcript and
+  // <top>_elab.ys for the script that produced it. Only the failure below is said out loud.
+  int status = ExecuteAndMonitorSystemCommand(command, /*logFile*/ std::string{},
+                                              /*appendLog*/ false, /*quiet*/ true);
   if (status) {
-    ErrorMessage("Design " + ProjManager()->projectName() + " elaboration failed");
+    ErrorMessage("Design " + ProjManager()->projectName() + " elaboration failed, see " +
+                 elab_log_path.string());
     return false;
   }
   return true;
@@ -2039,12 +2050,11 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
     args.push_back(instances_json_path.string());
   }
 
-  int status =
-      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
-          .realCode;
+  int status = RunFloorplanningStage(python_exec.string(), args);
   if (status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " instance-tree derivation (floorplanning_elab_instances.py) failed");
+                 " instance-tree derivation (floorplanning_elab_instances.py) failed, see " +
+                 FloorplanningStageLog().string());
     return false;
   }
   return true;
@@ -2065,10 +2075,12 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
     return true;
   }
 
-  Message("##################################################");
-  Message("Elaborating design for instance discovery: " +
-          ProjManager()->projectName());
-  Message("##################################################");
+  // [aurora2#1725] Deliberately unannounced. This is not a compile stage the user asked
+  // for -- it is bookkeeping that enables floorplanning -- and a banner per compile is
+  // exactly the kind of noise master did not have. Its transcript is <top>_elab.log and
+  // its result is <project>_floorplanning_instances.json; the only thing said out loud is
+  // a failure.
+  ResetFloorplanningStageLog();
 
   // [aurora2#1725 stage P0b] Best-effort, like every other stage this feature adds.
   //
@@ -2120,6 +2132,57 @@ std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
                                          ProjManager()->projectName(), "atomsets.json");
 }
 
+// [aurora2#1725] Where the helper stages talk.
+//
+// Every stage this feature adds is a diagnostic side-channel: it produces a file that the
+// FloorPlanning panel or a testcase validator reads, and nothing downstream in the compile
+// depends on what it says on the way there. Sent to m_out, that chatter landed in the
+// console and in aurora.log on every compile of every design -- including designs with no
+// floorplan at all -- which master never did. So it goes here instead, one file per
+// project, truncated at the start of each run so it describes that run and not the history
+// of the session.
+//
+// What is deliberately NOT redirected: ErrorMessage() on a stage that failed, and the
+// stage-P7 floorplan verdicts, which only appear when the project actually has a .qdc and
+// are the answer the user asked for.
+std::filesystem::path CompilerOpenFPGA_ql::FloorplanningStageLog() {
+  return FloorplanningArtifact("stages.log");
+}
+
+void CompilerOpenFPGA_ql::ResetFloorplanningStageLog() {
+  std::ofstream truncate(FloorplanningStageLog(), std::ios_base::trunc);
+}
+
+// Runs one helper script, with its stdout AND stderr appended to the stage log rather than
+// echoed to the console. Returns the script's exit code.
+int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
+                                               const std::vector<std::string>& args) {
+  std::ofstream log(FloorplanningStageLog(), std::ios_base::app);
+  std::ostream* out = log.is_open() ? static_cast<std::ostream*>(&log) : m_out;
+  return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).realCode;
+}
+
+// [aurora2#1725] The price of running the in-session tcl scripts under `tee -q`: a hard
+// Yosys error inside one of them goes to that script's artifact log and nowhere else --
+// log_error() writes through the same redirection everything else does, so <top>_synth.log
+// would just stop after synth_ql with no reason given. Quiet on success is the point;
+// quiet on failure is a debugging trap. So when synthesis fails, say what these logs
+// blamed it on, if anything. Nothing is printed when they hold no error, which is every
+// run where the failure was synthesis' own.
+void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
+  for (const char* suffix : {"atomsets.log", "rehier.log"}) {
+    std::filesystem::path path = FloorplanningArtifact(suffix);
+    std::ifstream in(path);
+    if (!in.is_open()) continue;
+    std::string line;
+    while (std::getline(in, line)) {
+      if (line.rfind("ERROR", 0) == 0) {
+        ErrorMessage(path.filename().string() + ": " + line);
+      }
+    }
+  }
+}
+
 // [aurora2#1725 stage P2b] name maps -- OPTIONAL, off unless general.options.namemap is
 // "checked". An absent key reads as empty, so a project that has never heard of the option
 // simply does not run this.
@@ -2166,12 +2229,11 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   args.push_back("-o");
   args.push_back((FloorplanningArtifact("namemap.csv")).string());
 
-  int status =
-      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
-          .realCode;
+  int status = RunFloorplanningStage(python_exec.string(), args);
   if (status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " name map generation (floorplanning_netlist_namemap.py) failed");
+                 " name map generation (floorplanning_netlist_namemap.py) failed, see " +
+                 FloorplanningStageLog().string());
     return true;  // no namemap.csv to audit
   }
 
@@ -2206,10 +2268,7 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   std::filesystem::path p2b_log_path = FloorplanningArtifact("p2b.log");
   audit_args.push_back(p2b_log_path.string());
 
-  int audit_status =
-      FileUtils::ExecuteSystemCommand(python_exec.string(), audit_args, m_out,
-                                      /*timeout_ms*/ -1)
-          .realCode;
+  int audit_status = RunFloorplanningStage(python_exec.string(), audit_args);
   if (audit_status != 0) {
     ErrorMessage(
         "Design " + ProjManager()->projectName() +
@@ -2306,14 +2365,13 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   args.push_back("-o");
   args.push_back(validation_json_path.string());
 
-  int status =
-      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
-          .realCode;
+  int status = RunFloorplanningStage(python_exec.string(), args);
   if (status != 0) {
     // Best-effort: synthesis has already succeeded by the time this runs, so a
     // validation failure is reported but must not fail the build over it.
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " instance validation (floorplanning_validate_instances.py) failed");
+                 " instance validation (floorplanning_validate_instances.py) failed, see " +
+                 FloorplanningStageLog().string());
   }
   return true;
 }
@@ -2392,14 +2450,13 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   args.push_back("-o");
   args.push_back(design_resources_path.string());
 
-  int status =
-      FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out, /*timeout_ms*/ -1)
-          .realCode;
+  int status = RunFloorplanningStage(python_exec.string(), args);
   if (status != 0) {
     // Best-effort, as above: report it, but a resource-report failure must not fail a
     // compile stage that has already succeeded.
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " resource reporting (floorplanning_design_resources.py) failed");
+                 " resource reporting (floorplanning_design_resources.py) failed, see " +
+                 FloorplanningStageLog().string());
   }
   return true;
 }
@@ -2409,10 +2466,10 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
 // docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P7).
 //
 // Called with --mode warning: a soft constraint. Every region violation this finds is
-// printed to the console, but it must never fail a compile that has already placed
-// successfully -- that is the whole point of the distinction from --mode error, which
-// scripts/tests/floorplan_check.py's per-testcase validators use instead, where the same
-// violation SHOULD fail the run.
+// written to <project>_floorplanning_constraint_compliance.rpt, but it must never fail a
+// compile that has already placed successfully -- that is the whole point of the
+// distinction from --mode error, which scripts/tests/floorplan_check.py's per-testcase
+// validators use instead, where the same violation SHOULD fail the run.
 bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   const std::string projectName = ProjManager()->projectName();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
@@ -2484,10 +2541,10 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   args.push_back(placement_json_path.string());
 
   // Soft constraint: the exit code is intentionally not checked. --mode warning already
-  // returns 0 unconditionally: any FAIL/STALE verdict is in compliance_rpt_path and in
-  // m_out's console output, not in this function's return value.
-  FileUtils::ExecuteSystemCommand(python_exec.string(), args, m_out,
-                                  /*timeout_ms*/ -1);
+  // returns 0 unconditionally: any FAIL/STALE verdict is in compliance_rpt_path -- the
+  // report a human reads -- and in placement_json_path, which the FloorPlanning panel
+  // reads, not in this function's return value.
+  RunFloorplanningStage(python_exec.string(), args);
   return true;
 }
 
@@ -2535,6 +2592,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
+  // [aurora2#1725] Start this compile's stage log from empty. EnsureElaborated() does the
+  // same, but only when it actually elaborates -- an unchanged design skips it, and the
+  // stages after it would then append to the previous run's file.
+  ResetFloorplanningStageLog();
+
   // [aurora2#1725 stage P0] instance discovery -- lazily (re-)derive instances.json
   // before synthesis dissolves the RTL hierarchy. See EnsureElaborated().
   if (!EnsureElaborated()) return false;
@@ -2556,6 +2618,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       if (status) {
         ErrorMessage("Design " + ProjManager()->projectName() +
                     " synthesis failed");
+        ReportFloorplanningYosysErrors();
         return false;
       } else {
         m_state = State::Synthesized;
@@ -2631,6 +2694,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
     " synthesis failed");
+    ReportFloorplanningYosysErrors();
     return false;
   } else {
     m_state = State::Synthesized;
@@ -10666,9 +10730,19 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       std::filesystem::path("scripts") /
       std::filesystem::path("aurora_rehier.tcl");
 
-  yosysScript->apply("${CALL_TCL_REHIER_SCRIPT}", std::string("tcl") +
-                                                  std::string(" ") +
-                                                  aurora_rehier_script_path.string());
+  // [aurora2#1725] Wrapped in `tee -q -o`, which is what keeps the synthesis log the size
+  // it is on master. Rebuilding the hierarchy runs `submod` once per level of it, and
+  // submod narrates every cell it moves: measured on
+  // tests/testcases/floorplanning_regions/whole_instance, this one script contributed
+  // ~1500 of the synthesis log's ~9400 lines, all of it about a netlist that packing,
+  // placement, routing and bitstream never read. `-q` drops it from both the console and
+  // <top>_synth.log (yosys' -l); `-o` keeps every line, in the artifact that names the
+  // stage that produced it. Truncating rather than appending, so the file describes this
+  // run -- and so the two placeholders here cannot depend on which order the device
+  // template happens to invoke them in.
+  yosysScript->apply("${CALL_TCL_REHIER_SCRIPT}",
+                     "tee -q -o " + FloorplanningPrefix() + "_rehier.log" +
+                     " tcl " + aurora_rehier_script_path.string());
   yosysScript->addFile(aurora_rehier_script_path);
   // -- rehier_script ----------------------------------------------------------------
 
@@ -10711,9 +10785,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // universe with instances.json's full list, so a deleted (zero-atom) instance
   // absent from atomsets.json is still correctly graded "deleted". Confirmed on
   // fpu_single: i_serial_mul graded deleted correctly even without this.
-  yosysScript->apply("${CALL_TCL_ATOMSETS_SCRIPT}", std::string("tcl") +
-                                                    std::string(" ") +
-                                                    aurora_atomsets_script_path.string());
+  // [aurora2#1725] Wrapped in `tee -q -o` for the same reason as the rehier script above:
+  // atom extraction asks yosys to enumerate the netlist, and `select -list` answers with
+  // one line per atom -- ~2700 lines of the synthesis log on whole_instance, a design with
+  // 1176 atoms in five instances. The answer belongs in atomsets.json, which is exactly
+  // where the script puts it; the enumeration itself belongs nowhere the user has to read.
+  yosysScript->apply("${CALL_TCL_ATOMSETS_SCRIPT}",
+                     "tee -q -o " + FloorplanningPrefix() + "_atomsets.log" +
+                     " tcl " + aurora_atomsets_script_path.string());
   yosysScript->addFile(aurora_atomsets_script_path);
   // -- atomsets_script --------------------------------------------------------------
 

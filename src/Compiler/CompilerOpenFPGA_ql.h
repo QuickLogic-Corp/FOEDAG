@@ -329,6 +329,24 @@ private:
   // atomsets.json, resolved to the name the device template actually wrote.
   std::filesystem::path FloorplanningAtomsets();
 
+  // [aurora2#1725] "<project>_floorplanning_stages.log" -- where the helper stages this
+  // feature adds write what they have to say. They are diagnostics, not compile stages the
+  // user asked for, so their chatter belongs in an artifact rather than in the console and
+  // aurora.log, which is where it went at first and where master has nothing like it.
+  std::filesystem::path FloorplanningStageLog();
+
+  // Truncate the stage log, so it describes the run in progress and not the whole session.
+  void ResetFloorplanningStageLog();
+
+  // Run one helper script with its output appended to the stage log instead of echoed.
+  // Returns the script's exit code.
+  int RunFloorplanningStage(const std::string& command,
+                            const std::vector<std::string>& args);
+
+  // Echo any ERROR the in-session tcl scripts recorded in their own logs. Called only when
+  // synthesis failed, so `tee -q` cannot hide the reason it failed.
+  void ReportFloorplanningYosysErrors();
+
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
   // scripts/floorplanning_design_resources.py. Best-effort, exactly like RunValidateInstances()
