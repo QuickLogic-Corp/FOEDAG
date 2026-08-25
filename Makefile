@@ -195,6 +195,7 @@ test/batch: run-cmake-release
 	./build/bin/aurora --batch --script tests/TestBatch/test_compiler_batch.tcl
 	./build/bin/aurora --batch --script tests/TestBatch/test_task_clean.tcl
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_recursive_load.tcl
+	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ip_catalog_availability.tcl
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ipgenerate_instances.tcl
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ipgenerate_modules.tcl
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ipgenerate_cache.tcl

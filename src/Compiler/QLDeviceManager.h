@@ -246,11 +246,6 @@ class QLDeviceManager : public QObject {
   // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
   // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPV1.0) when not specified.
   std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
-  // Set of FPU IP capability tokens the device supports, from the "FPU_TYPE"
-  // JSON string-array in config.json (e.g. {"FPUADDSUB","FPUMULT","FPUMAC"}).
-  // Returns an empty set when the key is absent, empty, or not a string array
-  // (opt-in gating: no token => the corresponding FPU IP is unavailable).
-  std::set<std::string> deviceFPUTypes(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
