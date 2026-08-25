@@ -21,6 +21,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "IPGenerate/IPCatalogBuilder.h"
 
+#include <cctype>
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -84,10 +86,19 @@ bool IPCatalogBuilder::buildLiteXCatalog(
       if (exec_name.find("_gen.py") != std::string::npos) {
         foundCount++;
         m_compiler->GetIPGenerator()->shareContext();
+        // Read the availability manifest here, in the discovery walk, where
+        // the generator path is already in hand: this covers both the
+        // names-only (GUI) path and the full path with no extra traversal and
+        // without spawning python.
+        const IPAvailability availability = readIPManifest(entry);
         bool res = namesOnly ? buildLiteXIPFromGeneratorInternal(catalog, entry)
                              : buildLiteXIPFromGenerator(catalog, entry);
         if (res == false) {
           result = false;
+        }
+        if (IPDefinition* def =
+                catalog->Definition(ipNameFromGeneratorPath(entry))) {
+          def->Availability(availability);
         }
       }
     }
@@ -107,6 +118,169 @@ static std::string& rtrim(std::string& str, char c) {
                           [c](char ch) { return (ch == c); });
   if (it1 != str.rend()) str.erase(it1.base() - 1, str.end());
   return str;
+}
+
+std::string IPCatalogBuilder::ipNameFromGeneratorPath(
+    const std::filesystem::path& pythonConverterScript) {
+  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
+  std::string basename = basepath.string();
+  std::string IPName = rtrim(basename, '.');
+
+  // Remove _gen from IPName
+  static const std::string suffix = "_gen";
+  if (StringUtils::endsWith(IPName, suffix)) {
+    IPName.erase(IPName.length() - suffix.length());
+  }
+
+  // Add version number to IPName
+  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
+  IPName += "_" + info.version;
+  return IPName;
+}
+
+// True for "<digits>_<digits>", the form QLDeviceManager::deviceDSPVersion()
+// produces and the only form the gate can compare against. A plausible typo -
+// "2.0", copying the DSPV1.1 spelling from DSP_TYPE - would otherwise be
+// accepted verbatim and then match no device at all, hiding the IP from the
+// very fabric it targets. That is fail-closed, which the model forbids.
+static bool isDspVersionWellFormed(const std::string& value) {
+  const size_t separator = value.find('_');
+  if (separator == std::string::npos || separator == 0 ||
+      separator + 1 == value.size())
+    return false;
+  if (value.find('_', separator + 1) != std::string::npos) return false;
+  for (size_t i = 0; i < value.size(); ++i) {
+    if (i == separator) continue;
+    if (!std::isdigit(static_cast<unsigned char>(value[i]))) return false;
+  }
+  return true;
+}
+
+// Returns obj[key] when it is present and a string, "" otherwise. Manifests are
+// hand written, so a wrong type must degrade to "unset", never throw.
+static std::string manifestString(const json& obj, const char* key) {
+  if (obj.contains(key) && obj[key].is_string())
+    return obj[key].get<std::string>();
+  return {};
+}
+
+IPAvailability IPCatalogBuilder::readIPManifest(
+    const std::filesystem::path& pythonConverterScript) {
+  IPAvailability availability{};
+
+  const std::filesystem::path manifestPath =
+      pythonConverterScript.parent_path() / "ip_manifest.json";
+  if (!FileUtils::FileExists(manifestPath)) {
+    // Defaulting when the file is absent is a robustness rule for third-party
+    // and field installs - it is NOT the shipping configuration. Every IP we
+    // ship is expected to carry a manifest, so `ip_catalog -all` reports a
+    // defaulted IP differently from one the file declares as production; that
+    // is what makes a bad catalog pin visible instead of silently ungating.
+    return availability;
+  }
+  availability.manifestPresent = true;
+
+  // Every problem is printed and every problem is carried in the reason
+  // string, so nothing about a half-usable manifest is invisible.
+  auto warn = [&](const std::string& text) {
+    if (!availability.manifestWarning.empty())
+      availability.manifestWarning += " ";
+    availability.manifestWarning += text;
+    m_compiler->WarningMessage("IP Catalog, " + manifestPath.string() + ": " +
+                               text);
+  };
+
+  json manifest;
+  try {
+    std::ifstream ifs(manifestPath.string());
+    manifest = json::parse(ifs);
+  } catch (const std::exception& e) {
+    // Fail open on visibility, never on the fabric gate (IPAvailability
+    // invariant 3): we cannot see whether this IP declared a requires block,
+    // so the requirement is recorded as unverifiable, not as absent.
+    availability.requirementUnverifiable = true;
+    warn("Manifest could not be parsed (" + std::string(e.what()) +
+         "); its fabric requirement cannot be read.");
+    return availability;
+  }
+
+  if (!manifest.is_object()) {
+    availability.requirementUnverifiable = true;
+    warn(
+        "Manifest is not a JSON object; its fabric requirement cannot be "
+        "read.");
+    return availability;
+  }
+
+  // Forward compatibility: a newer schema is read for the fields we do know
+  // and the rest is ignored. Reported once per catalog walk, not per IP.
+  if (manifest.contains("schema")) {
+    if (!manifest["schema"].is_number_integer()) {
+      warn("Manifest \"schema\" is not an integer; ignored.");
+    } else {
+      const int schema = manifest["schema"].get<int>();
+      if (schema > kIPManifestSchema && !m_newerSchemaReported) {
+        m_newerSchemaReported = true;
+        m_compiler->Message(
+            "IP Catalog, ip_manifest.json declares schema " +
+            std::to_string(schema) + " but this build understands schema " +
+            std::to_string(kIPManifestSchema) +
+            "; known fields are honoured and the rest ignored");
+      }
+    }
+  }
+
+  const std::string maturity = manifestString(manifest, "maturity");
+  if (maturity == "preview") {
+    availability.maturity = IPAvailability::Maturity::Preview;
+  } else if (!maturity.empty() && maturity != "production") {
+    warn("Manifest declares unknown maturity \"" + maturity +
+         "\"; treated as production.");
+  }
+  availability.maturityNote = manifestString(manifest, "maturity_note");
+
+  // "requires" is a CLOSED set, unlike the top level: an unrecognised key
+  // there is most likely a misspelt requirement, and ignoring it would drop a
+  // fabric gate on the floor. Anything we cannot read as written makes the
+  // requirement unverifiable rather than absent.
+  if (manifest.contains("requires")) {
+    const json& requiresNode = manifest["requires"];
+    if (!requiresNode.is_object()) {
+      availability.requirementUnverifiable = true;
+      warn(
+          "Manifest \"requires\" is not an object; the fabric requirement "
+          "cannot be read.");
+    } else {
+      for (const auto& item : requiresNode.items()) {
+        if (item.key() == "dsp_version") {
+          if (!item.value().is_string()) {
+            availability.requirementUnverifiable = true;
+            warn(
+                "Manifest \"requires.dsp_version\" is not a string; the fabric "
+                "requirement cannot be read.");
+          } else {
+            const std::string value = item.value().get<std::string>();
+            if (isDspVersionWellFormed(value)) {
+              availability.requiredDspVersion = value;
+            } else {
+              // Do not gate on a value we cannot compare: it would match no
+              // device and hide the IP everywhere, including on its own.
+              availability.requirementUnverifiable = true;
+              warn("Manifest \"requires.dsp_version\" value \"" + value +
+                   "\" is not of the form <major>_<minor>; the fabric "
+                   "requirement cannot be read.");
+            }
+          }
+        } else {
+          availability.requirementUnverifiable = true;
+          warn("Manifest \"requires\" contains unknown key \"" + item.key() +
+               "\"; the fabric requirement cannot be read.");
+        }
+      }
+    }
+  }
+
+  return availability;
 }
 
 std::vector<std::string> JsonArrayToStringVector(
@@ -200,19 +374,7 @@ bool IPCatalogBuilder::buildLiteXIPFromJson(
     return false;
   }
 
-  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
-  std::string basename = basepath.string();
-  std::string IPName = rtrim(basename, '.');
-
-  // Remove _gen from IPName
-  std::string suffix = "_gen";
-  if (StringUtils::endsWith(IPName, suffix)) {
-    IPName.erase(IPName.length() - suffix.length());
-  }
-
-  // Add version number to IPName
-  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
-  IPName += "_" + info.version;
+  const std::string IPName = ipNameFromGeneratorPath(pythonConverterScript);
 
   std::vector<Value*> parameters;
   std::vector<Connector*> connections;
@@ -302,19 +464,7 @@ bool IPCatalogBuilder::buildLiteXIPFromGeneratorInternal(
   std::ostringstream help;
   std::string command;
 
-  std::filesystem::path basepath = FileUtils::Basename(pythonConverterScript);
-  std::string basename = basepath.string();
-  std::string IPName = rtrim(basename, '.');
-
-  // Remove _gen from IPName
-  std::string suffix = "_gen";
-  if (StringUtils::endsWith(IPName, suffix)) {
-    IPName.erase(IPName.length() - suffix.length());
-  }
-
-  // Add version number to IPName
-  auto info = FOEDAG::getIpInfoFromPath(pythonConverterScript);
-  IPName += "_" + info.version;
+  const std::string IPName = ipNameFromGeneratorPath(pythonConverterScript);
 
   IPDefinition* def =
       new IPDefinition(IPDefinition::IPType::LiteXGenerator, IPName,

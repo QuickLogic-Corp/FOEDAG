@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "IPGenerate/IPCatalog.h"
 #include "IPGenerate/IPCatalogBuilder.h"
 #include "MainWindow/Session.h"
+#include "nlohmann_json/json.hpp"
 
 #include <QDebug>
 
@@ -69,8 +70,7 @@ void IpCatalogTree::refresh() {
   #endif
   std::vector<std::filesystem::path> IpPaths{IpCatalogPath, UserCatalogPath};
 
-  QStringList ips;
-  ips = getAvailableIPs(IpPaths);
+  const QList<IpEntry> ips = getAvailableIPs(IpPaths);
 
   // If available IPs have changed
   if (ips != prevIpCatalogResults) {
@@ -78,7 +78,12 @@ void IpCatalogTree::refresh() {
     // Add a tree entry for each IP name
     for (const auto& ip : std::as_const(ips)) {
       QTreeWidgetItem* item = new QTreeWidgetItem();
-      item->setText(0, ip);
+      item->setText(0, ip.name);
+      // An IP the current device cannot take stays visible but unusable, and
+      // carries the reason in its tooltip. Hiding it would leave the user with
+      // no way to find out why the IP they expected is not there.
+      if (!ip.available) item->setDisabled(true);
+      if (!ip.reason.isEmpty()) item->setToolTip(0, ip.reason);
       this->addTopLevelItem(item);
     }
     sortItems(0, Qt::SortOrder::AscendingOrder);
@@ -86,20 +91,37 @@ void IpCatalogTree::refresh() {
   }
 }
 
-QStringList IpCatalogTree::getAvailableIPs(
+QList<IpCatalogTree::IpEntry> IpCatalogTree::getAvailableIPs(
     const std::vector<std::filesystem::path>& paths) {
-  QStringList ips;
+  QList<IpEntry> ips;
 
   // Load IPs
   loadIps(paths);
 
-  // Request loaded IPs
-  if (tclCmdExists("ip_catalog")) {
-    std::string result = GlobalSession->TclInterp()->evalCmd("ip_catalog");
-    ips = QString::fromStdString(result).trimmed().split(" ");
-    //std::cout << "~~~ ip catalog result=" << result << std::endl;
-  } else {
+  if (!tclCmdExists("ip_catalog")) {
     qCritical() << "cmd ip_catalog is not registered";
+    return ips;
+  }
+
+  // `-all -format json` is the only catalog surface that carries availability
+  // and its reason; the plain listing is names only.
+  const std::string result =
+      GlobalSession->TclInterp()->evalCmd("ip_catalog -all -format json");
+  try {
+    const auto records = nlohmann::ordered_json::parse(result);
+    for (const auto& record : records) {
+      IpEntry entry;
+      entry.name = QString::fromStdString(record.value("name", std::string{}));
+      entry.state =
+          QString::fromStdString(record.value("state", std::string{}));
+      entry.reason =
+          QString::fromStdString(record.value("reason", std::string{}));
+      entry.available = record.value("available", true);
+      entry.verified = record.value("requirement_verified", true);
+      if (!entry.name.isEmpty()) ips.push_back(entry);
+    }
+  } catch (const std::exception& e) {
+    qCritical() << "ip_catalog -all -format json is not parsable:" << e.what();
   }
 
   return ips;

@@ -151,6 +151,9 @@ class Compiler {
   virtual void Help(std::ostream* out);
   virtual void Version(std::ostream* out);
   virtual void Message(const std::string& message) const;
+  // Same stream as Message(), but prefixed WARNING: instead of INFO:. Callers
+  // used to write Message("WARNING: ...") and get "INFO: WARNING: ..." out.
+  virtual void WarningMessage(const std::string& message) const;
   virtual void ErrorMessage(const std::string& message,
                             bool append = true) const;
   virtual std::vector<std::string> GetCleanFiles(

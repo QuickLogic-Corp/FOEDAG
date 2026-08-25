@@ -49,10 +49,26 @@ class IPCatalogBuilder {
                             const std::string& jsonStr,
                             const std::string& command = std::string{});
 
+  // Reads the IP availability manifest that optionally sits beside an IP's
+  // generator script: for Vendor/Library/Name/Version/<name>_gen.py that is
+  // Version/ip_manifest.json. Never fails and never drops an IP; see the
+  // fail-open contract on IPAvailability (IPCatalog.h) for what a problem with
+  // the manifest is and is not allowed to do.
+  IPAvailability readIPManifest(
+      const std::filesystem::path& pythonConverterScript);
+
+  // Catalog name of the IP a generator script implements:
+  // ".../axi_ram/V1_0/axi_ram_gen.py" -> "axi_ram_V1_0".
+  static std::string ipNameFromGeneratorPath(
+      const std::filesystem::path& pythonConverterScript);
+
  protected:
   bool buildLiteXIPFromGeneratorInternal(
       IPCatalog* catalog, const std::filesystem::path& pythonConverterScript);
   Compiler* m_compiler = nullptr;
+  // "schema newer than we know" is a property of the catalog, not of each IP:
+  // report it once per catalog walk instead of once per manifest.
+  bool m_newerSchemaReported = false;
 };
 
 }  // namespace FOEDAG
