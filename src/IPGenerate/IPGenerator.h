@@ -113,6 +113,21 @@ class IPGenerator {
   
   std::filesystem::path EnvsPath() const;
   std::filesystem::path IPCatalogPath() const;
+  // The installed catalog root the tool ships (dev/IP_Catalog in the aurora
+  // layout) — the one definition of that path, shared by the Tcl lazy load
+  // and the GUI catalog tree.
+  std::filesystem::path DefaultIPCatalogPath() const;
+  // The project-local user catalog (<project>/IP_Catalog), searched in
+  // addition to the installed one. Empty when no project is open. Authored
+  // RPM IPs are packaged here by default (package_rpm_ip).
+  std::filesystem::path ProjectUserCatalogPath() const;
+  // Lazily load the catalog roots the tool knows about (installed first,
+  // project-local second, so a colliding user IP deliberately wins), each at
+  // most once per session. Called by ip_catalog/configure_ip; explicit
+  // add_litex_ip_catalog calls always rescan. Replaces the old "load the
+  // default iff the catalog is empty" guard, under which an early explicit
+  // add_litex_ip_catalog silently suppressed the shipped catalog.
+  void LoadDefaultCatalogs();
 
   IPCatalog* Catalog() { return m_catalog; }
   Compiler* GetCompiler() { return m_compiler; }

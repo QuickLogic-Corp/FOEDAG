@@ -384,6 +384,14 @@ bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
   }
+  // Record the root for the lazy default/project-local load (which loads each
+  // known root at most once — see IPGenerator::LoadDefaultCatalogs). Recorded
+  // only when the directory exists, so a root created later (e.g. a user
+  // catalog authored mid-session) is still picked up.
+  if (FileUtils::FileExists(litexPath)) {
+    m_loadedIpCatalogRoots.insert(
+        std::filesystem::weakly_canonical(litexPath).string());
+  }
   IPCatalogBuilder builder(this);
   bool result = builder.buildLiteXCatalog(GetIPGenerator()->Catalog(),
                                           litexPath, namesOnly);

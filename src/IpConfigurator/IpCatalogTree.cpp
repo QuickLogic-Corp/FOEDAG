@@ -60,14 +60,13 @@ IpCatalogTree::IpCatalogTree(QWidget* parent /*nullptr*/)
 }
 
 void IpCatalogTree::refresh() {
-  // TODO @skyler-rs AUG-2022 In future updates we plan to allow a user
-  // catalog path. This path should be loaded in addition to the default
-  std::filesystem::path UserCatalogPath = std::filesystem::path("");
-  #ifdef UPSTREAM_IP_GENERATOR
-      std::filesystem::path IpCatalogPath = GlobalSession->Context()->DataPath() / "IP_Catalog";
-  #else
-      std::filesystem::path IpCatalogPath = GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
-  #endif
+  // The installed catalog plus the project-local user catalog
+  // (<project>/IP_Catalog, empty when no project is open); loadIps skips
+  // paths that do not exist. Loading the user catalog second makes a
+  // colliding user IP shadow the shipped one, matching the Tcl-side rule.
+  IPGenerator* generator = GlobalSession->GetCompiler()->GetIPGenerator();
+  std::filesystem::path IpCatalogPath = generator->DefaultIPCatalogPath();
+  std::filesystem::path UserCatalogPath = generator->ProjectUserCatalogPath();
   std::vector<std::filesystem::path> IpPaths{IpCatalogPath, UserCatalogPath};
 
   const QList<IpEntry> ips = getAvailableIPs(IpPaths);

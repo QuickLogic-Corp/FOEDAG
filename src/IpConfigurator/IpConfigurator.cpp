@@ -88,6 +88,12 @@ void IpConfigurator::ReloadIps() {
   ProjectManager* projManager = nullptr;
   if (GlobalSession && (compiler = GlobalSession->GetCompiler()) &&
       (projManager = compiler->ProjManager())) {
+    // Re-scan the catalog tree first: the newly opened project may carry a
+    // project-local user catalog (<project>/IP_Catalog) whose IPs the
+    // replayed configure_ip commands below reference.
+    if (IpTreesWidget* trees = IpTreesWidget::Instance()) {
+      trees->refresh();
+    }
     // Get Ip Configuration/Generate cmds from project file
     QString projPath = projManager->getProjectPath();
     auto cmds = projManager->ipInstanceCmdList();

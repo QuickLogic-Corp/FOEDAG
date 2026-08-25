@@ -329,6 +329,55 @@ std::filesystem::path IPGenerator::IPCatalogPath() const {
   return std::filesystem::weakly_canonical(m_installDir / "IP_Catalog");
 }
 
+std::filesystem::path IPGenerator::DefaultIPCatalogPath() const {
+  // Keep the historical DataPath()-relative computation (rather than the
+  // m_installDir-based IPCatalogPath() above): the two agree in the aurora
+  // layout (DataPath = <install>/device_data), but DataPath falls back to
+  // <install>/share/<exe> when device_data is absent, and this path must
+  // match what the tool has always loaded.
+#ifdef UPSTREAM_IP_GENERATOR
+  std::filesystem::path path =
+      GlobalSession->Context()->DataPath() / "IP_Catalog";
+#else
+  std::filesystem::path path =
+      GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
+#endif
+  return path.lexically_normal();
+}
+
+std::filesystem::path IPGenerator::ProjectUserCatalogPath() const {
+  if (m_compiler == nullptr || m_compiler->ProjManager() == nullptr ||
+      !m_compiler->ProjManager()->HasDesign()) {
+    return {};
+  }
+  return std::filesystem::path(m_compiler->ProjManager()->projectPath()) /
+         "IP_Catalog";
+}
+
+void IPGenerator::LoadDefaultCatalogs() {
+  const std::filesystem::path defaultRoot = DefaultIPCatalogPath();
+  const std::filesystem::path userRoot = ProjectUserCatalogPath();
+  for (const std::filesystem::path& root : {defaultRoot, userRoot}) {
+    if (root.empty()) continue;
+    const std::string key = std::filesystem::weakly_canonical(root).string();
+    if (m_compiler->LoadedIpCatalogRoots().count(key)) continue;
+    if (!FileUtils::FileExists(root)) {
+      // The project-local catalog is optional and usually absent; the
+      // installed one missing is worth a warning (but not a hard failure —
+      // an explicitly added catalog may be all the session needs).
+      if (root == defaultRoot) {
+        m_compiler->Message("WARNING: installed IP catalog not found: " +
+                            root.string());
+      }
+      continue;
+    }
+    // Through the Tcl command (not BuildLiteXIPCatalog directly) so the
+    // load runs with the same threading as an explicit user call.
+    m_compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" + root.string() +
+                                     "}");
+  }
+}
+
 void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation)
 {
   m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
@@ -485,16 +534,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     IPGenerator* generator = (IPGenerator*)clientData;
     Compiler* compiler = generator->GetCompiler();
 
-    // Load IPs if no definitions are available
-    if (!compiler->HasIPDefinitions()) {
-  #ifdef UPSTREAM_IP_GENERATOR
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / "IP_Catalog";
-  #else
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
-  #endif
-      compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" +
-                                     path.lexically_normal().string() + "}");
-    }
+    // Load the installed and (if a project is open) project-local catalogs,
+    // each at most once per session.
+    generator->LoadDefaultCatalogs();
 
     // Argument scan. `ip_catalog` used to be a flat argc test; the options
     // below need a real scan, but the no-argument result must not change:
@@ -647,16 +689,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       return TCL_ERROR;
     }
 
-    // Load IPs if no definitions are available
-    if (!compiler->HasIPDefinitions()) {
-  #ifdef UPSTREAM_IP_GENERATOR
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / "IP_Catalog";
-  #else
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
-  #endif
-      compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" +
-                                     path.lexically_normal().string() + "}");
-    }
+    // Load the installed and project-local catalogs, each at most once per
+    // session (a design exists here, so the project-local root is known).
+    generator->LoadDefaultCatalogs();
 
     auto printWrongUsageMsgHelperFn = [compiler](const std::string& msg){
         compiler->ErrorMessage(msg +
