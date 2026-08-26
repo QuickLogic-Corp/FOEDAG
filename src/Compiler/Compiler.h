@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define COMPILER_H
 
 #include <filesystem>
+#include <set>
 #include <iostream>
 #include <map>
 #include <string>
@@ -172,6 +173,13 @@ class Compiler {
                            bool namesOnly = false);
   bool HasIPInstances();
   bool HasIPDefinitions();
+  // Catalog roots already scanned this session (weakly_canonical strings).
+  // BuildLiteXIPCatalog records every root it scans and never skips one; the
+  // record is consulted ONLY by IPGenerator::LoadDefaultCatalogs, so explicit
+  // add_litex_ip_catalog calls and GUI refreshes always rescan.
+  const std::set<std::string>& LoadedIpCatalogRoots() const {
+    return m_loadedIpCatalogRoots;
+  }
 
   // VPR, Yosys generic opt
   void ChannelWidth(uint32_t width) { m_channel_width = width; }
@@ -390,6 +398,9 @@ class Compiler {
   std::map<std::string, MsgSeverity> m_severityMap;
 
   std::map<std::string, std::string> m_environmentVariableMap;
+
+  // See LoadedIpCatalogRoots().
+  std::set<std::string> m_loadedIpCatalogRoots;
 
   NetlistType m_netlistType = NetlistType::Blif;
 
