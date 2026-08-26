@@ -772,8 +772,9 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   // ?-version v1_0? ?-catalog <dir>?` declares that this project's product
   // is an RPM catalog IP named after the project. -rpm_ip is a flag
   // orthogonal to -type: the -type axis keeps meaning source kind +
-  // synthesis tool, and authoring requires the default RTL/Yosys flow (the
-  // netlist link is a Yosys pass), so -rpm_ip refuses any other -type.
+  // synthesis tool. Authoring works from any flow that produces the
+  // post-synthesis BLIF and a placement (-type rtl and synplify); the
+  // netlist-input types (gate-level/post-map) are refused as unvalidated.
   // Without the flag the base behavior is reproduced for all supported
   // forms; unlike the base (which silently ignores unknown arguments),
   // unknown options are rejected with the usage. Every
@@ -836,11 +837,16 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
           "-stub/-version/-catalog are only valid with -rpm_ip\n" + usage);
       return TCL_ERROR;
     }
-    if (rpmIp && type != "rtl") {
+    // Authoring is synthesis-tool-agnostic: it consumes the post-synthesis
+    // BLIF plus the place-stage authoring outputs, all of which the rtl
+    // (yosys) and synplify flows both produce. Gate-level/post-map projects
+    // start from an already-mapped netlist and are unvalidated as authoring
+    // inputs; keep refusing those.
+    if (rpmIp && type != "rtl" && type != "synplify") {
       compiler->ErrorMessage(
-          "-rpm_ip requires the default RTL/Yosys flow and cannot be "
-          "combined with -type " + type +
-          " (the RPM netlist link is a Yosys synthesis pass)");
+          "-rpm_ip cannot be combined with -type " + type +
+          "; authoring is validated for the rtl (yosys) and synplify "
+          "flows only");
       return TCL_ERROR;
     }
 
@@ -877,10 +883,15 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
         compiler->ErrorMessage("-stub file does not exist: " + stub);
         return TCL_ERROR;
       }
-      // The same form rules the driver enforces at packaging, applied here
-      // so the flow fails before any stage runs: exactly one module
-      // declaration (renamed to the instance name at ipgenerate time),
-      // carrying (* blackbox *) so yosys hierarchy cleanup keeps it.
+      // Structural check only, applied here so the flow fails before any
+      // stage runs: exactly one module declaration (its name is renamed to
+      // the instance name at ipgenerate time). Directive checks
+      // ((* blackbox *), syn_black_box) deliberately do NOT run at
+      // authoring — the authoring run never uses the stub, it only ships
+      // it. Each consuming flow checks the directive it depends on:
+      // rpm_common refuses a stub without (* blackbox *) at ipgenerate
+      // (every flow's link step is a yosys pass), and the -type synplify
+      // synthesis refuses one without syn_black_box.
       {
         std::ifstream in(record.stub);
         std::stringstream buffer;
@@ -896,13 +907,6 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
           compiler->ErrorMessage(
               "-stub " + stub + ": expected exactly one module declaration, "
               "found " + std::to_string(count));
-          return TCL_ERROR;
-        }
-        if (text.find("blackbox") == std::string::npos) {
-          compiler->ErrorMessage(
-              "-stub " + stub + ": the stub module must carry a "
-              "(* blackbox *) attribute; a plain empty module is deleted by "
-              "yosys hierarchy cleanup before the -rel_ip_blif link step");
           return TCL_ERROR;
         }
       }
