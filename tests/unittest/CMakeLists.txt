@@ -46,6 +46,7 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
+    Compiler/CompilerOpenFPGA_ql_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp

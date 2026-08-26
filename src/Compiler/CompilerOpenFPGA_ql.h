@@ -327,6 +327,20 @@ private:
   const std::filesystem::path& error(const std::string& msg);
 };
 
+// Validate a vpr>filename>circuit_format value against the netlist the flow
+// actually produces. Returns an empty string when the value is usable,
+// otherwise the message to report to the user.
+//
+// synth_quicklogic writes the post-synthesis netlist with `write_blif -param`,
+// so it carries .param lines -- DSP MODE_BITS today. VPR treats .param/.attr as
+// a FATAL parse error in strict BLIF mode, and the format cannot be inferred
+// either: the file is named .blif, so "auto" resolves to strict BLIF and fails
+// the same way. Only "eblif", or an empty value meaning "pass no flag", works.
+//
+// A free function declared here rather than kept file-local so the rule is
+// unit-testable without reaching into the settings singleton.
+std::string vprCircuitFormatError(const std::string& format);
+
 }  // namespace FOEDAG
 
 #endif

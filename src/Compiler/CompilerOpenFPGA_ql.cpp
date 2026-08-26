@@ -97,6 +97,31 @@ static inline void initPowerCalcResource() {
 #define GENERATE_NEW_DEVICE_FPGA_AUTO 1
 #define GENERATE_RR_GRAPH_FPGA_AUTO 0
 
+// Declared in CompilerOpenFPGA_ql.h; see there for why an unusable value is
+// rejected up front rather than left to fail inside VPR.
+//
+// eblif is a strict superset of blif, so there is no design for which "blif"
+// works and "eblif" does not. Rejecting the value therefore costs nothing and
+// replaces a bare parse error from inside VPR with a message naming the
+// setting.
+std::string FOEDAG::vprCircuitFormatError(const std::string& format) {
+  // Empty means the setting contributes no flag, leaving the format the
+  // OpenFPGA script template substitutes -- which is eblif.
+  if (format.empty() || format == "eblif") return {};
+  return "vpr>filename>circuit_format is set to \"" + format +
+         "\", but the post-synthesis netlist carries .param annotations that "
+         "VPR accepts only as extended BLIF. Set it to \"eblif\" (the "
+         "default). Note that \"auto\" fails too: it infers strict BLIF from "
+         "the .blif file extension.";
+}
+
+// Thin wrapper reading the setting, so the call sites stay one line. The two of
+// them have different return types, so each reports and bails itself.
+static std::string checkVprCircuitFormatSetting() {
+  return FOEDAG::vprCircuitFormatError(
+      QLSettingsManager::getStringValue("vpr", "filename", "circuit_format"));
+}
+
 //#define USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
 
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
@@ -2235,9 +2260,14 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   }
 
   // parse vpr filename options
+  if( const std::string circuit_format_error = checkVprCircuitFormatSetting();
+      !circuit_format_error.empty() ) {
+    ErrorMessage(circuit_format_error + "\n");
+    return std::make_tuple(std::string(""), std::string(""));
+  }
   if( !QLSettingsManager::getStringValue("vpr", "filename", "circuit_format").empty() ) {
-    vpr_options += std::string(" --circuit_format") + 
-                   std::string(" ") + 
+    vpr_options += std::string(" --circuit_format") +
+                   std::string(" ") +
                    QLSettingsManager::getStringValue("vpr", "filename", "circuit_format");
   }
 
@@ -2664,6 +2694,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 
   // parse vpr filename options
+  if( const std::string circuit_format_error = checkVprCircuitFormatSetting();
+      !circuit_format_error.empty() ) {
+    ErrorMessage(circuit_format_error + "\n");
+    return nullptr;
+  }
   if( !QLSettingsManager::getStringValue("vpr", "filename", "circuit_format").empty() ) {
     command->append("--circuit_format", QLSettingsManager::getStringValue("vpr", "filename", "circuit_format"));
   }
@@ -6202,7 +6237,21 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       netlistFormat = "edif";
       break;
     case NetlistType::Blif:
-      netlistFormat = "blif";
+      // "eblif", not "blif": synth_quicklogic writes the post-synthesis netlist
+      // with `write_blif -param`, so it carries .param lines -- DSP MODE_BITS
+      // today. VPR treats .param/.attr as a FATAL parse error unless the
+      // circuit format is eblif (read_blif.cpp vpr_throw()s on them in strict
+      // BLIF mode).
+      //
+      // The file is still named .blif, so --circuit_format auto is not an
+      // option either: auto infers strict BLIF from the extension.
+      //
+      // The vpr>filename>circuit_format setting already defaults to eblif and
+      // is appended to the VPR command line later, so before this change the
+      // flow was correct only because that later flag overrode the "blif"
+      // substituted here. Emitting eblif makes the two sources agree instead of
+      // leaving correctness to argument order.
+      netlistFormat = "eblif";
       break;
   }
 
