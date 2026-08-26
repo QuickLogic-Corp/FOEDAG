@@ -181,15 +181,27 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// Duplicates are ignored. Registrations are per project — see
   /// PruneRelIpBlifs(). See docs/development/relative_macro_placement/ in
   /// aurora2.
-  void AddRelIpBlif(const std::filesystem::path& path) {
+  ///
+  /// `stub` is the IP's generated blackbox stub source (catalog IPs only;
+  /// empty for the direct-netlist form, which carries no stub). It is only
+  /// consumed by the Synplify synthesis flow, whose yosys pass reads the
+  /// Synplify netlist instead of the design sources and therefore must read
+  /// the stub explicitly. m_relIpStubs stays index-aligned with
+  /// m_relIpBlifs.
+  void AddRelIpBlif(const std::filesystem::path& path,
+                    const std::filesystem::path& stub = {}) {
     PruneRelIpBlifs();
     if (std::find(m_relIpBlifs.begin(), m_relIpBlifs.end(), path) ==
         m_relIpBlifs.end()) {
       m_relIpBlifs.push_back(path);
+      m_relIpStubs.push_back(stub);
     }
   }
   const std::vector<std::filesystem::path>& RelIpBlifs() const {
     return m_relIpBlifs;
+  }
+  const std::vector<std::filesystem::path>& RelIpStubs() const {
+    return m_relIpStubs;
   }
   /// Registered netlists belong to the project they were registered under;
   /// clear them when the session's project changed since. Called on
@@ -318,6 +330,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   // to before. Valid only for the project recorded in m_relIpBlifsProject
   // (see PruneRelIpBlifs).
   std::vector<std::filesystem::path> m_relIpBlifs;
+  // Index-aligned with m_relIpBlifs: the IP's blackbox stub source, empty
+  // for the direct-netlist registration form. See AddRelIpBlif().
+  std::vector<std::filesystem::path> m_relIpStubs;
   std::filesystem::path m_relIpBlifsProject;
   // See RpmAuthor().
   RpmAuthorProject m_rpmAuthorProject;

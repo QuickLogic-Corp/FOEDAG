@@ -740,11 +740,22 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
             std::filesystem::path relMacroDir =
                 ipGen->GetBuildDir(inst) / "rel_macro";
             if (std::filesystem::is_directory(relMacroDir)) {
+              // The instance's generated stub (src/<instance>.v, per the
+              // rpm_common packaging contract). Registered alongside the
+              // netlist for the Synplify synthesis flow, whose yosys pass
+              // reads Synplify's netlist instead of the design sources and
+              // must read the blackbox stub explicitly. Registering the
+              // generated copy (not the project-fileset copy) keeps the
+              // path independent of the fileset layout; the two are
+              // identical by construction.
+              std::filesystem::path stubPath =
+                  ipGen->GetBuildDir(inst) / "src" / (arg + ".v");
+              if (!std::filesystem::exists(stubPath)) stubPath.clear();
               for (const auto& entry :
                    std::filesystem::directory_iterator(relMacroDir)) {
                 const std::string entryExt = entry.path().extension().string();
                 if (entryExt == ".eblif" || entryExt == ".blif") {
-                  compiler->AddRelIpBlif(entry.path());
+                  compiler->AddRelIpBlif(entry.path(), stubPath);
                 }
               }
             }
@@ -7807,6 +7818,7 @@ void CompilerOpenFPGA_ql::PruneRelIpBlifs() {
           : std::filesystem::path{};
   if (current != m_relIpBlifsProject) {
     m_relIpBlifs.clear();
+    m_relIpStubs.clear();
     m_relIpBlifsProject = current;
   }
 }
@@ -7819,6 +7831,7 @@ bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
   // record is per design too; the re-registered create_design repopulates
   // it AFTER this returns for -rpm_ip projects.
   m_relIpBlifs.clear();
+  m_relIpStubs.clear();
   m_relIpBlifsProject.clear();
   m_rpmAuthorProject = {};
   return Compiler::CreateDesign(name, type);
@@ -10451,7 +10464,58 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
+    // Relative-placement IPs: Synplify keeps the IP a black box but emits
+    // no module shell for it in the .vm, so yosys must read the blackbox
+    // stub or synth_ql's `hierarchy -check` fails on the unresolved module.
+    // Read AFTER the .vm with -overwrite: should a Synplify version ever
+    // emit an empty (non-blackbox) shell, the attributed stub still wins —
+    // a shell winning instead would make `flatten` dissolve the instance
+    // and the link step fail far downstream with a misleading error.
+    // Gated on registration, so the default flow's script stays
+    // byte-identical.
+    PruneRelIpBlifs();
+    {
+      const auto& relStubs = RelIpStubs();
+      for (size_t i = 0; i < m_relIpBlifs.size(); ++i) {
+        if (relStubs[i].empty()) {
+          ErrorMessage(
+              "ip_add_to_design " + m_relIpBlifs[i].string() +
+              ": a directly-registered annotated netlist carries no "
+              "synthesis stub, which the Synplify flow requires (its yosys "
+              "pass reads Synplify's netlist, not the design sources). Use "
+              "the catalog IP form, or synthesize with yosys.");
+          return {};
+        }
+        // Synplify keeps the IP a black box only when the stub declares it
+        // (`syn_black_box`); without the directive current Synplify happens
+        // to black-box the empty module by inference, but that is implicit,
+        // warning-level behavior — refuse rather than depend on it. Checked
+        // here and not at authoring, because only this flow needs it.
+        {
+          std::ifstream in(relStubs[i]);
+          std::stringstream buffer;
+          buffer << in.rdbuf();
+          if (buffer.str().find("syn_black_box") == std::string::npos) {
+            ErrorMessage(
+                relStubs[i].string() +
+                ": the IP's synthesis stub does not carry Synplify's "
+                "black-box directive (`) /* synthesis syn_black_box */;` "
+                "on the module header), which the -type synplify flow "
+                "requires. Add the directive to the authored stub and "
+                "re-run ipgenerate, or synthesize with yosys.");
+            return {};
+          }
+        }
+        designFiles += "read_verilog -overwrite " + relStubs[i].string() + "\n";
+        yosysScript->addFile(relStubs[i]);
+      }
+    }
     yosysScript->apply("${READ_DESIGN_FILES}", designFiles);
+    // The .vm is the hand-off from the Synplify command to this yosys
+    // command; track it so a re-synthesized .vm invalidates the yosys task
+    // even when the script text is unchanged.
+    yosysScript->addFile(std::filesystem::path(ProjManager()->projectPath()) /
+                         vm_file_path);
     for (const std::string& file: ProjManager()->CollectDesignFiles()) {
       yosysScript->addFile(std::filesystem::path{file});
     }
@@ -10630,10 +10694,25 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // Relative-placement IPs: link each annotated netlist at the end of
   // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration — with
   // stale registrations from another project pruned first — so the default
-  // flow's synthesis script stays byte-identical.
+  // flow's synthesis script stays byte-identical. The netlist is also
+  // tracked as a task input: it reaches yosys only through this option
+  // string, so without addFile a re-authored netlist would never invalidate
+  // the synthesis task.
   PruneRelIpBlifs();
+  if (!m_relIpBlifs.empty() &&
+      m_projManager->projectType() == PostMapSynplify) {
+    // A post-map project's sources are already a mapped netlist; nothing
+    // has validated that the RPM stub/link machinery composes with that
+    // input, so refuse rather than risk a silently unconstrained build.
+    ErrorMessage(
+        "relative-placement IPs are not supported in post-map projects; "
+        "consume the IP from an RTL project (yosys or -type synplify "
+        "synthesis)");
+    return {};
+  }
   for (const auto& rel_ip_blif : m_relIpBlifs) {
     yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
+    yosysScript->addFile(rel_ip_blif);
   }
 
   // TODO: trim yosys_options at the front
