@@ -14,6 +14,7 @@
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Utils/FileUtils.h"
+#include "Utils/QtUtils.h"
 #include "Utils/StringUtils.h"
 #include "nlohmann_json/json.hpp"
 
@@ -25,19 +26,21 @@ using json = nlohmann::ordered_json;
 
 namespace {
 
-// The VPR device grid wraps the device core with an IO ring this many cells
-// wide on each side. config.json is in core coordinates:
-//   DEVICE_SIZE  = grid - 2*ring                (both sides)
-//   <col in cfg> = grid column - (ring - 1)     (1-based core column)
-constexpr int kGridRingPerSide = 2;
-
-// config.json uses 1-based core columns (the first core column is 1).
-constexpr int kFirstCoreColumn = 1;
+// The VPR device grid wraps the device core with an IO ring, and its thickness
+// is not fixed: 2 cells per side on every device but EVAL-2024Q1-MULTI, where
+// it is 1. It is therefore read from the vpr report's FLOORPLAN_IO_BOUNDS
+// line, never assumed. config.json is in core coordinates, derived from the
+// perimeter rather than from a ring constant:
+//   DEVICE_SIZE  = (ioRight - ioLeft - 1) x (ioTop - ioBottom - 1)
+//   <col in cfg> = grid column - ioLeft        (1-based core column)
+// See aurora2 issue #2283.
 
 // The keys DeviceGridDescriptor / generate_floorplanning need.
 const std::vector<std::string>& requiredKeys() {
   static const std::vector<std::string> keys = {
-      "DEVICE_SIZE", "DSP_COLS", "BRAM_COLS", "DSP_SIZE", "BRAM_SIZE"};
+      "DEVICE_SIZE", "DSP_COLS",  "BRAM_COLS", "DSP_SIZE",
+      "BRAM_SIZE",   "IO_BOTTOM", "IO_LEFT",   "IO_TOP",
+      "IO_RIGHT"};
   return keys;
 }
 
@@ -49,6 +52,19 @@ bool parseWxH(const QString& value, int& w, int& h) {
   w = parts.at(0).trimmed().toInt(&okW);
   h = parts.at(1).trimmed().toInt(&okH);
   return okW && okH;
+}
+
+// Parse "<bottom> <left> <top> <right>" into the four IO perimeter bounds.
+bool parseIoBounds(const QString& value, int& bottom, int& left, int& top,
+                   int& right) {
+  const QStringList parts = QtUtils::StringSplit(value.trimmed(), ' ');
+  if (parts.size() != 4) return false;
+  bool okB = false, okL = false, okT = false, okR = false;
+  bottom = parts.at(0).toInt(&okB);
+  left = parts.at(1).toInt(&okL);
+  top = parts.at(2).toInt(&okT);
+  right = parts.at(3).toInt(&okR);
+  return okB && okL && okT && okR;
 }
 
 // Parse "a,b,c" into integers. Empty string yields an empty list.
@@ -65,12 +81,13 @@ bool parseColumnList(const QString& value, std::vector<int>& out) {
   return true;
 }
 
-// Shift raw grid columns into config (1-based core) columns and join as CSV:
-// drop the leading IO ring (-> 0-based core), then make it 1-based.
-std::string toConfigColumns(const std::vector<int>& gridColumns) {
+// Shift raw grid columns into config (1-based core) columns and join as CSV.
+// The first core column sits one cell inside the left IO column, and config
+// numbers it 1, so the shift is exactly ioLeft whatever the ring thickness.
+std::string toConfigColumns(const std::vector<int>& gridColumns, int ioLeft) {
   std::vector<std::string> shifted;
   for (int col : gridColumns) {
-    shifted.push_back(std::to_string(col - kGridRingPerSide + kFirstCoreColumn));
+    shifted.push_back(std::to_string(col - ioLeft));
   }
   return StringUtils::join(shifted, ",");
 }
@@ -170,8 +187,10 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
   // Parse the FLOORPLAN_* block (raw grid coordinates).
   int gridW = 0, gridH = 0;
   int dspW = 1, dspH = 1, bramW = 1, bramH = 1;
+  int ioBottom = 0, ioLeft = 0, ioTop = 0, ioRight = 0;
   std::vector<int> dspGridCols, bramGridCols;
   bool haveGrid = false, haveDspSize = false, haveBramSize = false;
+  bool haveIoBounds = false;
 
   const QString output = QString::fromUtf8(vpr.readAllStandardOutput());
   for (const QString& rawLine : output.split('\n')) {
@@ -186,6 +205,9 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
       haveDspSize = parseWxH(line.section(' ', 1), dspW, dspH);
     } else if (line.startsWith("FLOORPLAN_BRAM_TILE_SIZE ")) {
       haveBramSize = parseWxH(line.section(' ', 1), bramW, bramH);
+    } else if (line.startsWith("FLOORPLAN_IO_BOUNDS ")) {
+      haveIoBounds =
+          parseIoBounds(line.section(' ', 1), ioBottom, ioLeft, ioTop, ioRight);
     }
   }
 
@@ -193,11 +215,22 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
     error = "could not parse vpr resource report";
     return {};
   }
+  if (!haveIoBounds) {
+    // Guessing a 2-cell ring here would put every IO constraint one cell
+    // inside the real perimeter on a ring-1 device, silently. Fail instead.
+    error =
+        "vpr resource report has no FLOORPLAN_IO_BOUNDS line (stale "
+        "hotfix-vpr-floorplan-resources?); the IO perimeter cannot be guessed";
+    return {};
+  }
 
-  // Convert raw grid coordinates into config (core) coordinates.
-  const int deviceW = gridW - 2 * kGridRingPerSide;
-  const int deviceH = gridH - 2 * kGridRingPerSide;
-  if (deviceW <= 0 || deviceH <= 0) {
+  // Convert raw grid coordinates into config (core) coordinates. The core
+  // spans the cells strictly inside the perimeter, whatever the ring
+  // thickness -- no ring constant is involved.
+  const int deviceW = ioRight - ioLeft - 1;
+  const int deviceH = ioTop - ioBottom - 1;
+  if (deviceW <= 0 || deviceH <= 0 || ioBottom < 0 || ioLeft < 0 ||
+      ioRight >= gridW || ioTop >= gridH) {
     error = "implausible device grid size from vpr";
     return {};
   }
@@ -206,8 +239,12 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
   cfg["DEVICE_SIZE"] = std::to_string(deviceW) + "x" + std::to_string(deviceH);
   cfg["DSP_SIZE"] = std::to_string(dspW) + "x" + std::to_string(dspH);
   cfg["BRAM_SIZE"] = std::to_string(bramW) + "x" + std::to_string(bramH);
-  cfg["DSP_COLS"] = toConfigColumns(dspGridCols);
-  cfg["BRAM_COLS"] = toConfigColumns(bramGridCols);
+  cfg["DSP_COLS"] = toConfigColumns(dspGridCols, ioLeft);
+  cfg["BRAM_COLS"] = toConfigColumns(bramGridCols, ioLeft);
+  cfg["IO_BOTTOM"] = std::to_string(ioBottom);
+  cfg["IO_LEFT"] = std::to_string(ioLeft);
+  cfg["IO_TOP"] = std::to_string(ioTop);
+  cfg["IO_RIGHT"] = std::to_string(ioRight);
 
   const std::filesystem::path outPath =
       projectDir / "failback_floorplanning_config.json";
