@@ -299,8 +299,11 @@ class Compiler {
   virtual bool VerifyTargetDevice() const;
   bool HasTargetDevice();
 
-  bool CreateDesign(const std::string& name,
-                    const std::string& type = std::string{});
+  // Virtual so a derived compiler can reset per-design state (e.g. the QL
+  // compiler clears its registered relative-placement IP netlists, which
+  // must not leak from one design of a session into the next).
+  virtual bool CreateDesign(const std::string& name,
+                            const std::string& type = std::string{});
 
   /* Compiler class utilities */
   bool RunBatch();

@@ -2618,6 +2618,7 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    PruneRelIpBlifs();
     if (!m_relIpBlifs.empty()) {
       // Relative-placement IPs registered: merge the relative-macro
       // constraints (derived from the annotated netlist) with the IO
@@ -3022,6 +3023,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
+    PruneRelIpBlifs();
     if (!m_relIpBlifs.empty()) {
       // Relative-placement IPs registered: merge the relative-macro
       // constraints (derived from the annotated netlist) with the IO
@@ -4252,6 +4254,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
+
    std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /
@@ -7515,6 +7518,33 @@ bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlist
   return true;
 }
 
+void CompilerOpenFPGA_ql::PruneRelIpBlifs() {
+  // Registered netlists belong to one project. A session can switch
+  // projects through several paths (GUI open_project in particular never
+  // passes through CreateDesign), so instead of hooking every path, the
+  // registrations are stamped with their project and expired lazily by
+  // every consumer: a leaked netlist can then never reach another project's
+  // synthesis (-rel_ip_blif) or constraint generation.
+  const std::filesystem::path current =
+      (ProjManager() != nullptr && ProjManager()->HasDesign())
+          ? std::filesystem::path(ProjManager()->projectPath())
+          : std::filesystem::path{};
+  if (current != m_relIpBlifsProject) {
+    m_relIpBlifs.clear();
+    m_relIpBlifsProject = current;
+  }
+}
+
+bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
+                                       const std::string& type) {
+  // Eager clear on top of the lazy PruneRelIpBlifs(): a new design must not
+  // inherit the previous design's registered relative-placement IP netlists
+  // even transiently (RelIpBlifs() is a public accessor).
+  m_relIpBlifs.clear();
+  m_relIpBlifsProject.clear();
+  return Compiler::CreateDesign(name, type);
+}
+
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
   bool status = true;
 #if UPSTREAM_UNUSED
@@ -10122,8 +10152,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    yosys_modules_dir_path_string;
 
   // Relative-placement IPs: link each annotated netlist at the end of
-  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration so the
-  // default flow's synthesis script stays byte-identical.
+  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration — with
+  // stale registrations from another project pruned first — so the default
+  // flow's synthesis script stays byte-identical.
+  PruneRelIpBlifs();
   for (const auto& rel_ip_blif : m_relIpBlifs) {
     yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
   }
@@ -10286,7 +10318,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   else {
     command->append("--place");
   }
-  
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
   //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
