@@ -226,9 +226,47 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// are registered; the default flow's <project>_constraints.xml is never
   /// touched.
   bool GenerateRelMacroConstraints(const std::string& netlistFile);
+  /// RPM-authoring project record, populated by the QL-extended
+  /// `create_design <name> -rpm_ip -stub <f> ?-version v1_0?
+  /// ?-catalog <dir>?` (a flag orthogonal to -type, which keeps meaning
+  /// source kind + synthesis tool) and reset whenever a design is created. While
+  /// active: the place stage emits the authoring inputs (--echo_file on,
+  /// --write_flat_place) and re-packages the IP on every success path of
+  /// Placement() except `place clean` (PackageRpmAuthorProject). The IP
+  /// name IS the project name; REL_MACRO_TYPE derives from it. Session-only
+  /// state, stamped with its project: a project switch expires it
+  /// (RpmAuthorProjectActive), and re-running create_design re-establishes
+  /// it — batch scripts always do. See docs/development/relative_macro_placement/
+  /// in aurora2 (AUTHORING_PROJECT_TYPE_PLAN.md).
+  struct RpmAuthorProject {
+    bool active = false;
+    std::string name;               // == project name
+    std::filesystem::path stub;     // absolute, validated at create
+    std::string version;            // v<major>_<minor>
+    std::filesystem::path catalog;  // absolute target catalog root
+    std::filesystem::path project;  // the project this record belongs to
+  };
+  const RpmAuthorProject& RpmAuthor() const { return m_rpmAuthorProject; }
+  void RpmAuthor(const RpmAuthorProject& record) {
+    m_rpmAuthorProject = record;
+  }
+  /// True when the authoring record belongs to the CURRENTLY open project.
+  /// The record is stamped with its project and expired lazily here — a
+  /// session that switches projects without create_design (GUI
+  /// open_project) must not author the old IP from the new project's
+  /// artifacts. Same leak class and same lazy-expiry pattern as
+  /// PruneRelIpBlifs().
+  bool RpmAuthorProjectActive();
+  /// Annotate + package the authoring project's IP from the current
+  /// placement artifacts by driving
+  /// scripts/rel_macro_placement/package_rpm_ip.py, then (re)load the
+  /// target catalog. Called from Placement()'s success paths; a failure
+  /// fails the stage ("placement succeeded; RPM packaging failed").
+  bool PackageRpmAuthorProject();
   /// Clears per-design RPM state: netlists registered by an earlier design
   /// of the session (ip_add_to_design) must not leak -rel_ip_blif options
-  /// into the next design's synthesis.
+  /// into the next design's synthesis, and the authoring record is per
+  /// design.
   bool CreateDesign(const std::string& name,
                     const std::string& type = std::string{}) override;
   virtual bool LoadDeviceData(const std::string& deviceName);
@@ -281,6 +319,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   // (see PruneRelIpBlifs).
   std::vector<std::filesystem::path> m_relIpBlifs;
   std::filesystem::path m_relIpBlifsProject;
+  // See RpmAuthor().
+  RpmAuthorProject m_rpmAuthorProject;
   /*!
    * \brief m_architectureFile
    * We required from user explicitly specify architecture file.
