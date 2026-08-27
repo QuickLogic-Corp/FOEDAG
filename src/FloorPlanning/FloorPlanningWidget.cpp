@@ -6,21 +6,21 @@
 #include "DeviceGridWidget.h"
 #include "PartitionsListWidget.h"
 #include "IssuesListWidget.h"
-#include "CheckableButton.h"
 #include "Widgets/RoundProgressWidget.h"
 
 #include <QAction>
-#include <QButtonGroup>
+#include <QActionGroup>
 #include <QColorDialog>
 #include <QHBoxLayout>
 #include <QMenu>
 #include <QMessageBox>
-#include <QPushButton>
 #include <QCheckBox>
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStyle>
+#include <QToolBar>
+#include <QToolButton>
 #include <QKeyEvent>
 
 namespace fp {
@@ -31,6 +31,10 @@ namespace {
 // section rather than QSettings' anonymous "[General]".
 constexpr auto kCfgTreatWarningsAsErrors = "FloorPlanning/treat_warnings_as_errors";
 constexpr auto kCfgShowAtomColumns = "FloorPlanning/show_atom_list_and_type_columns";
+
+// [aurora2#1725] QToolBar's default icon size is the style's large one, noticeably bigger
+// than the QPushButtons this toolbar used to hold. Match what was there.
+constexpr int kToolBarIconPx = 16;
 
 }  // namespace
 
@@ -115,20 +119,43 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
             this, &FloorPlanningWidget::onCheckIssuesFinished);
 
     // toolBar
-    QWidget* toolBarContainer = new QWidget;
-    QHBoxLayout* toolBarLayout = new QHBoxLayout;
-    toolBarContainer->setLayout(toolBarLayout);
-    toolBarLayout->setContentsMargins(m,m,m,m);
-    toolBarLayout->setSpacing(m);
+    //
+    // [aurora2#1725] A QToolBar of QActions, where this was a QWidget wrapping a QHBoxLayout
+    // of QPushButtons. A layout's minimum width is the sum of everything in it, and that sum
+    // -- measured at 628px -- became the device pane's floor inside the splitter: it is what
+    // made the hierarchy pane undraggable on a 1366-wide screen and the whole panel too wide
+    // for anything smaller. A toolbar moves what does not fit behind the standard extension
+    // button instead, so the pane can be dragged as narrow as the user likes.
+    //
+    // QActions rather than the buttons added through QToolBar::addWidget(): a widget can only
+    // live in one place at a time, so the extension menu cannot show one, and a button that
+    // stopped fitting simply vanished -- at a 150px pane, 4 of 21 controls were visible and
+    // the popup could offer none of the rest. Actions move into the popup properly. They also
+    // carry a text, unused by the toolbar itself (icons only, as before) but shown as the
+    // label in that popup.
+    QToolBar* toolBar = new QToolBar;
+    toolBar->setMovable(false);
+    toolBar->setFloatable(false);
+    toolBar->setContentsMargins(m,m,m,m);
+    toolBar->setIconSize(QSize(kToolBarIconPx, kToolBarIconPx));
 
-    QPushButton* bnLoadQdc = new QPushButton(QIcon(":/load-action.png"), "");
-    connect(bnLoadQdc, &QPushButton::clicked, this, &FloorPlanningWidget::loadQdc);
-    bnLoadQdc->setToolTip(tr("Load QDC"));
+    // A toolbar has no addStretch(); an expanding blank widget is the equivalent. It is the
+    // one thing here that is still a widget, which is harmless -- it has nothing to offer a
+    // popup menu, and its minimum is zero so it never competes for space.
+    auto addStretch = [toolBar]() {
+        QWidget* stretch = new QWidget;
+        stretch->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        toolBar->addWidget(stretch);
+    };
 
-    m_bnSaveQdc = new QPushButton(QIcon(":/save-action.png"), "");
-    connect(m_bnSaveQdc, &QPushButton::clicked, m_deviceWidget, [this]() { saveQdc(); });
-    m_bnSaveQdc->setToolTip(tr("Save QDC (Ctrl+S)"));
-    m_bnSaveQdc->setEnabled(false);
+    QAction* actLoadQdc = new QAction(QIcon(":/load-action.png"), tr("Load QDC"), this);
+    connect(actLoadQdc, &QAction::triggered, this, &FloorPlanningWidget::loadQdc);
+    actLoadQdc->setToolTip(tr("Load QDC"));
+
+    m_actSaveQdc = new QAction(QIcon(":/save-action.png"), tr("Save QDC"), this);
+    connect(m_actSaveQdc, &QAction::triggered, this, [this]() { saveQdc(); });
+    m_actSaveQdc->setToolTip(tr("Save QDC (Ctrl+S)"));
+    m_actSaveQdc->setEnabled(false);
 
     // [aurora2#1725] Ctrl+S saves, same as the button. Scoped to this window (a QShortcut on
     // a widget defaults to Qt::WindowShortcut), so it cannot reach the main window's own
@@ -136,12 +163,12 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     auto* saveShortcut = new QShortcut(QKeySequence::Save, this);
     connect(saveShortcut, &QShortcut::activated, this, [this]() { saveQdc(); });
 
-    m_bnRemoveSelectedRegion = new QPushButton(QIcon(":/erase.png"), "");
-    connect(m_bnRemoveSelectedRegion, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::removeSelected);
+    m_actRemoveSelectedRegion = new QAction(QIcon(":/erase.png"), tr("Remove selected region"), this);
+    connect(m_actRemoveSelectedRegion, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::removeSelected);
     // [aurora2#1725] Partitions are deleted from their own row in the partitions list now;
     // a selected region has no row of its own, so it is still removed from here.
-    m_bnRemoveSelectedRegion->setToolTip(tr("Remove selected region"));
-    m_bnRemoveSelectedRegion->setEnabled(false);
+    m_actRemoveSelectedRegion->setToolTip(tr("Remove selected region"));
+    m_actRemoveSelectedRegion->setEnabled(false);
 
     // [aurora2#1725] Drawing a region with no partition yet: create one unnamed rather than
     // interrupting the gesture with a name prompt. It appears in the list, where its name can
@@ -149,6 +176,8 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     connect(m_deviceWidget, &DeviceGridWidget::createFirstPartitionRequested,
             this, [this] { m_deviceWidget->createNewPartition(); });
 
+    // [aurora2#1725] Never shown -- setVisible(false) below, and it is not put on the toolbar.
+    // It survives only because its checked state is what turns scroll-to-partition on.
     QCheckBox* bnScrollPartition = new QCheckBox("Scroll to partition");
 #if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
     connect(bnScrollPartition, &QCheckBox::checkStateChanged, m_deviceWidget,
@@ -162,83 +191,86 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     bnScrollPartition->setVisible(false);
 
     // move controls
-    QPushButton* bnLeft = new QPushButton(QIcon(":/left-arrow.png"), "");
-    QPushButton* bnRight = new QPushButton(QIcon(":/right-arrow.png"), "");
-    QPushButton* bnDown = new QPushButton(QIcon(":/down-arrow.png"), "");
-    QPushButton* bnUp = new QPushButton(QIcon(":/up-arrow.png"), "");
+    auto* actLeft = new QAction(QIcon(":/left-arrow.png"), tr("Pan left"), this);
+    auto* actRight = new QAction(QIcon(":/right-arrow.png"), tr("Pan right"), this);
+    auto* actDown = new QAction(QIcon(":/down-arrow.png"), tr("Pan down"), this);
+    auto* actUp = new QAction(QIcon(":/up-arrow.png"), tr("Pan up"), this);
 
-    bnLeft->setToolTip(tr("Pan view left"));
-    bnRight->setToolTip(tr("Pan view right"));
-    bnDown->setToolTip(tr("Pan view down"));
-    bnUp->setToolTip(tr("Pan view up"));
+    actLeft->setToolTip(tr("Pan view left"));
+    actRight->setToolTip(tr("Pan view right"));
+    actDown->setToolTip(tr("Pan view down"));
+    actUp->setToolTip(tr("Pan view up"));
 
-    connect(bnLeft, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewLeft);
-    connect(bnUp, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewUp);
-    connect(bnRight, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewRight);
-    connect(bnDown, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::moveViewDown);
+    connect(actLeft, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::moveViewLeft);
+    connect(actUp, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::moveViewUp);
+    connect(actRight, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::moveViewRight);
+    connect(actDown, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::moveViewDown);
 
     // zoom controls
-    QPushButton* bnZoomIn = new QPushButton(QIcon(":/zoom-in.svg"), "");
-    QPushButton* bnZoomOut = new QPushButton(QIcon(":/zoom-out.svg"), "");
-    QPushButton* bnZoomFit = new QPushButton(QIcon(":/expand.png"), "");
-    m_bnZoomInRegion = new CheckableButton(QIcon(":/zoom-in-area.png"));
-    m_drawRegion = new CheckableButton(QIcon(":/selection.png"));
-    m_drawRegion->setChecked(true);
+    auto* actZoomIn = new QAction(QIcon(":/zoom-in.svg"), tr("Zoom in"), this);
+    auto* actZoomOut = new QAction(QIcon(":/zoom-out.svg"), tr("Zoom out"), this);
+    auto* actZoomFit = new QAction(QIcon(":/expand.png"), tr("Zoom to fit"), this);
+    m_actZoomInRegion = new QAction(QIcon(":/zoom-in-area.png"), tr("Zoom to area"), this);
+    m_actDrawRegion = new QAction(QIcon(":/selection.png"), tr("Draw region"), this);
+    m_actZoomInRegion->setCheckable(true);
+    m_actDrawRegion->setCheckable(true);
+    m_actDrawRegion->setChecked(true);
 
-    connect(bnZoomIn, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomIn);
-    connect(bnZoomOut, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomOut);
-    connect(bnZoomFit, &QPushButton::clicked, m_deviceWidget, &DeviceGridWidget::zoomFit);
+    connect(actZoomIn, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::zoomIn);
+    connect(actZoomOut, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::zoomOut);
+    connect(actZoomFit, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::zoomFit);
 
-    // exclusive toggle
-    auto* group = new QButtonGroup(this);
+    // exclusive toggle -- a QActionGroup where this was a QButtonGroup, for the same reason
+    // the buttons became actions.
+    auto* group = new QActionGroup(this);
     group->setExclusive(true);
+    group->addAction(m_actZoomInRegion);
+    group->addAction(m_actDrawRegion);
 
-    group->addButton(m_bnZoomInRegion);
-    group->addButton(m_drawRegion);
-    //
-
-    connect(m_bnZoomInRegion, &QPushButton::toggled, this, [this](bool checked){
+    connect(m_actZoomInRegion, &QAction::toggled, this, [this](bool checked){
       if (checked) {
         m_deviceWidget->activateZoomInRegionMode();
       }
     });
-    connect(m_drawRegion, &QPushButton::toggled, this, [this](bool checked){
+    connect(m_actDrawRegion, &QAction::toggled, this, [this](bool checked){
       if (checked) {
         m_deviceWidget->deactivateZoomInRegionMode();
       }
     });
 
-    bnZoomIn->setToolTip(tr("Zoom in"));
-    bnZoomOut->setToolTip(tr("Zoom out"));
-    bnZoomFit->setToolTip(tr("Fit view to device grid"));
-    m_bnZoomInRegion->setToolTip(tr("Zoom to selected area"));
-    m_drawRegion->setToolTip(tr("Draw new region"));
+    actZoomIn->setToolTip(tr("Zoom in"));
+    actZoomOut->setToolTip(tr("Zoom out"));
+    actZoomFit->setToolTip(tr("Fit view to device grid"));
+    m_actZoomInRegion->setToolTip(tr("Zoom to selected area"));
+    m_actDrawRegion->setToolTip(tr("Draw new region"));
 
     connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
       // [aurora2#1725] Region selection only, not hasSelection(): the button is labelled
       // "Remove selected region", and a partition is deleted from its own row in the
       // partitions list. Enabling it for a selected partition offered a second, unlabelled
       // way to delete one.
-      m_bnRemoveSelectedRegion->setEnabled(m_deviceWidget->hasSelectedRegion());
-      m_bnPartitionColor->setEnabled(m_deviceWidget->hasSelectedPartition());
+      m_actRemoveSelectedRegion->setEnabled(m_deviceWidget->hasSelectedRegion());
+      m_actPartitionColor->setEnabled(m_deviceWidget->hasSelectedPartition());
     });
 
 
     // color
-    m_bnPartitionColor = new QPushButton(QIcon(":/icons8-color-palette-48.png"), "");
-    connect(m_bnPartitionColor, &QPushButton::clicked, this, [this](){
+    m_actPartitionColor =
+        new QAction(QIcon(":/icons8-color-palette-48.png"), tr("Partition colour"), this);
+    connect(m_actPartitionColor, &QAction::triggered, this, [this](){
       QColor color = QColorDialog::getColor(Qt::white, this, "Select color");
       m_deviceWidget->changeSelectedPartitionColor(color);
     });
-    m_bnPartitionColor->setToolTip(tr("Change selected partition color"));
-    m_bnPartitionColor->setEnabled(false);
+    m_actPartitionColor->setToolTip(tr("Change selected partition color"));
+    m_actPartitionColor->setEnabled(false);
 
     // [aurora2#1725] Options. A standard style icon rather than another PNG resource, and a
     // menu of checkable actions rather than a dialog, so flipping one costs a single click.
     // Both default off, and both are persisted in floorplanning.cfg by the handlers below.
-    QPushButton* bnOptions = new QPushButton(style()->standardIcon(QStyle::SP_FileDialogDetailedView), "");
-    bnOptions->setToolTip(tr("Options"));
-    QMenu* optionsMenu = new QMenu(bnOptions);
+    QAction* actOptions =
+        new QAction(style()->standardIcon(QStyle::SP_FileDialogDetailedView), tr("Options"), this);
+    actOptions->setToolTip(tr("Options"));
+    QMenu* optionsMenu = new QMenu(this);
 
     m_actTreatWarningsAsErrors = optionsMenu->addAction(tr("Treat warnings as errors"));
     m_actTreatWarningsAsErrors->setCheckable(true);
@@ -262,35 +294,37 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     });
 
     optionsMenu->setToolTipsVisible(true);
-    bnOptions->setMenu(optionsMenu);
+    actOptions->setMenu(optionsMenu);
 
-    const int spacing = 20;
-    toolBarLayout->addWidget(bnLoadQdc);
-    toolBarLayout->addWidget(m_bnSaveQdc);
-    toolBarLayout->addStretch();
-    toolBarLayout->addWidget(bnLeft);
-    toolBarLayout->addWidget(bnRight);
-    toolBarLayout->addWidget(bnDown);
-    toolBarLayout->addWidget(bnUp);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(bnZoomIn);
-    toolBarLayout->addWidget(bnZoomOut);
-    toolBarLayout->addWidget(bnZoomFit);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnZoomInRegion);
-    toolBarLayout->addWidget(m_drawRegion);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnPartitionColor);
-    toolBarLayout->addSpacing(spacing);
-    if (bnScrollPartition->isVisible()) {
-      toolBarLayout->addWidget(bnScrollPartition);
+    // Separators where the old layout inserted fixed 20px gaps: they group the same way,
+    // and unlike a gap they carry over into the extension menu when the group overflows.
+    toolBar->addAction(actLoadQdc);
+    toolBar->addAction(m_actSaveQdc);
+    addStretch();
+    toolBar->addAction(actLeft);
+    toolBar->addAction(actRight);
+    toolBar->addAction(actDown);
+    toolBar->addAction(actUp);
+    toolBar->addSeparator();
+    toolBar->addAction(actZoomIn);
+    toolBar->addAction(actZoomOut);
+    toolBar->addAction(actZoomFit);
+    toolBar->addSeparator();
+    toolBar->addAction(m_actZoomInRegion);
+    toolBar->addAction(m_actDrawRegion);
+    toolBar->addSeparator();
+    toolBar->addAction(m_actPartitionColor);
+    addStretch();
+    toolBar->addSeparator();
+    toolBar->addAction(m_actRemoveSelectedRegion);
+    toolBar->addSeparator();
+    toolBar->addAction(actOptions);
+
+    // The menu opens on the first click rather than on a press-and-hold, which is what the
+    // QPushButton this replaced did.
+    if (auto* optionsButton = qobject_cast<QToolButton*>(toolBar->widgetForAction(actOptions))) {
+        optionsButton->setPopupMode(QToolButton::InstantPopup);
     }
-    toolBarLayout->addStretch();
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(m_bnRemoveSelectedRegion);
-    toolBarLayout->addSpacing(spacing);
-    toolBarLayout->addWidget(bnOptions);
 
     bnScrollPartition->setChecked(true);
     m_deviceWidget->setScrollToPartitionWhenSelected(bnScrollPartition->isChecked());
@@ -305,20 +339,25 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     deviceWidgetContainerLayout->setContentsMargins(m,m,m,m);
     deviceWidgetContainerLayout->setSpacing(m);
     deviceWidgetContainer->setLayout(deviceWidgetContainerLayout);
-    deviceWidgetContainerLayout->addWidget(toolBarContainer);
+    deviceWidgetContainerLayout->addWidget(toolBar);
     deviceWidgetContainerLayout->addWidget(m_deviceWidget);
 
-    QSplitter* splitter = new QSplitter(Qt::Horizontal);
-    splitter->setChildrenCollapsible(false); // don't let panes disappear
-    splitter->setHandleWidth(6);
+    m_splitter = new QSplitter(Qt::Horizontal);
+    m_splitter->setChildrenCollapsible(false); // don't let panes disappear
+    m_splitter->setHandleWidth(6);
 
-    splitter->addWidget(m_synthResourcesWidget);
-    splitter->addWidget(deviceWidgetContainer);
-    splitter->addWidget(wRightPane);
+    m_splitter->addWidget(m_synthResourcesWidget);
+    m_splitter->addWidget(deviceWidgetContainer);
+    m_splitter->addWidget(wRightPane);
 
-    splitter->setSizes({1, 2, 1});    // initial proportions (relative)
+    // [aurora2#1725] Growing the window keeps the three panes in a 1:2:1 relationship. The
+    // opening widths are set separately, in applyInitialSplitterSizes(), because they need a
+    // window width to divide and there is none yet here.
+    m_splitter->setStretchFactor(0, 1);
+    m_splitter->setStretchFactor(1, 2);
+    m_splitter->setStretchFactor(2, 1);
 
-    bodyLayout->addWidget(splitter);
+    bodyLayout->addWidget(m_splitter);
 
     // main layout
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
@@ -420,7 +459,7 @@ void FloorPlanningWidget::updateSaveQdcButtonEnability()
     // loading a .qdc, reaches here through onPartitionsChanged() like any edit does, so
     // without the flag the button came up enabled on a floorplan identical to the file on
     // disk -- offering to save what was just read.
-    m_bnSaveQdc->setEnabled(m_hasUnsavedChanges && m_deviceWidget->isSaveQdcAllowed());
+    m_actSaveQdc->setEnabled(m_hasUnsavedChanges && m_deviceWidget->isSaveQdcAllowed());
 }
 
 void FloorPlanningWidget::loadQdc()
@@ -568,10 +607,39 @@ void FloorPlanningWidget::saveQdc()
     }
 }
 
+// [aurora2#1725] Opening widths for the three panes: a quarter, a half, a quarter, with the
+// partitions pane widened to fit its columns if a quarter is not enough (that pane is the one
+// whose rightmost columns used to fall outside it).
+//
+// This used to be splitter->setSizes({1,2,1}) at construction, read as a ratio. It never was
+// one: QSplitter treats those as pixel widths, clamps each to the pane's minimum, and shares
+// what is left by weight -- so the layout that appeared was really the old minimums (628 for
+// the device pane, 306 for the partitions pane) plus the remainder. Removing those minimums
+// to make the panes draggable therefore also removed what was, by accident, holding the
+// proportions up, and the device pane opened at a fifth of the window. Hence a real division
+// of a real width, done once, on the first resize that carries one.
+void FloorPlanningWidget::applyInitialSplitterSizes()
+{
+    const int total = m_splitter->width();
+    if (total <= 0) {
+        return;  // not laid out yet; the next resize will carry a width
+    }
+    m_splitterSized = true;
+
+    const int quarter = total / 4;
+    int right = qMax(quarter, m_splitter->widget(2)->sizeHint().width());
+    right = qMin(right, total / 2);  // never at the expense of the grid being the smallest pane
+    const int left = quarter;
+    m_splitter->setSizes({left, total - left - right, right});
+}
+
 void FloorPlanningWidget::resizeEvent(QResizeEvent* event)
 {
     QWidget::resizeEvent(event);
     m_busyOverlayWidget->resize(event->size());
+    if (!m_splitterSized) {
+        applyInitialSplitterSizes();
+    }
 }
 
 void FloorPlanningWidget::closeEvent(QCloseEvent* event)

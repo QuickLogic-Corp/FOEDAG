@@ -12,14 +12,13 @@
 #include <set>
 #include <vector>
 
-class QPushButton;
 class QAction;
+class QSplitter;
 
 namespace FOEDAG { class RoundProgressWidget; }
 
 namespace fp {
 
-class CheckableButton;
 class SynthResourceHierarchyWidget;
 class DeviceGridWidget;
 class PartitionsListWidget;
@@ -89,16 +88,25 @@ protected:
 
 private:
     FOEDAG::RoundProgressWidget* m_busyOverlayWidget{nullptr};
-    QPushButton* m_bnSaveQdc{nullptr};
-    QPushButton* m_bnRemoveSelectedRegion{nullptr};
-    CheckableButton* m_bnZoomInRegion{nullptr};
-    CheckableButton* m_drawRegion{nullptr};
-    QPushButton* m_bnPartitionColor{nullptr};
+    // [aurora2#1725] QActions, not QPushButtons: the device toolbar is a QToolBar now, and
+    // only an action can move into its extension menu when the pane is too narrow to show
+    // everything. Enabling/checking them works the same either way.
+    QAction* m_actSaveQdc{nullptr};
+    QAction* m_actRemoveSelectedRegion{nullptr};
+    QAction* m_actZoomInRegion{nullptr};
+    QAction* m_actDrawRegion{nullptr};
+    QAction* m_actPartitionColor{nullptr};
     SynthResourceHierarchyWidget* m_synthResourcesWidget{nullptr};
     SynthResourceHierarchyWidget* m_partitionResourcesWidget{nullptr};
     DeviceGridWidget* m_deviceWidget{nullptr};
     PartitionsListWidget* m_partitionsListWidget{nullptr};
     IssuesListWidget* m_issuesListWidget{nullptr};
+
+    // [aurora2#1725] The three panes, and whether they have been given their opening widths
+    // yet. See applyInitialSplitterSizes().
+    QSplitter* m_splitter{nullptr};
+    bool m_splitterSized = false;
+    void applyInitialSplitterSizes();
 
     // [aurora2#1725] Options menu state, persisted in floorplanning.cfg beside the .qdc.
     // The actions are the single source of truth for the values -- they are what the user

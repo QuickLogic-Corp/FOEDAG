@@ -66,8 +66,14 @@ QSize DeviceGridWidget::sizeHint() const {
   return QSize(800, 600);
 }
 
+// [aurora2#1725] No floor of its own. The grid is drawn scaled to whatever room it gets, so
+// there is no width below which it stops working -- and inside FloorPlanningWidget's splitter
+// a floor here is width the other two panes cannot borrow, which on a low-resolution screen
+// is the difference between a hierarchy pane the user can widen and one they cannot. The
+// splitter keeps the pane from vanishing entirely (setChildrenCollapsible(false)) and the
+// toolbar above the grid supplies what little minimum the pane has left.
 QSize DeviceGridWidget::minimumSizeHint() const {
-  return QSize(200, 200);
+  return QSize(0, 0);
 }
 
 void DeviceGridWidget::constructTiles(const DeviceGridDescriptorPtr& descriptor)

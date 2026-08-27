@@ -4,9 +4,14 @@
 #include <FloorPlanning/QdcSerializer.h>
 #include <FloorPlanning/RtlInstanceModel.h>
 #include <FloorPlanning/Partition.h>
+#include <FloorPlanning/FloorPlanningWidget.h>
 #include <FloorPlanning/PartitionsListWidget.h>
 
 #include <QPoint>
+#include <QApplication>
+#include <QSplitter>
+#include <QToolBar>
+#include <QWidgetAction>
 #include <QTableWidget>
 #include <QTemporaryDir>
 
@@ -1062,6 +1067,107 @@ TEST(QdcSerializer, AValidRegionStillLoadsNormally)
     EXPECT_EQ(partition->name(), "p1");
     EXPECT_EQ(partition->elements().size(), 1u);
     EXPECT_FALSE(partition->regions().empty());
+}
+
+// [aurora2#1725] Splitter sizing. The three panes share one window, so width one pane keeps
+// is width the others cannot have -- and on a 1366-wide screen the floors added up to more
+// than the window, leaving the hierarchy pane 134px and no way to widen it. These pin that
+// none of them holds width back, and that they still open in the intended proportions.
+
+namespace {
+
+// The panel paints its grid as soon as it is shown, so it needs a device and a netlist to
+// paint -- showing an empty one crashes in the grid's paint path.
+void prepare(fp::FloorPlanningWidget& panel, int windowWidth)
+{
+    panel.loadNetList(fp::NaturalStringSet{"dut.tri.el0.sub2", "dut.tri.el1", "top"});
+    panel.setDeviceGridDescriptor(genTestDescriptor());
+    panel.resize(windowWidth, 768);
+    panel.show();
+    qApp->processEvents();
+}
+
+}  // namespace
+
+TEST(FloorPlanningLayout, NoPaneHoldsWidthTheOthersCannotBorrow)
+{
+    fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
+    prepare(panel, 1366);
+
+    auto* splitter = panel.findChild<QSplitter*>();
+    ASSERT_NE(splitter, nullptr);
+    ASSERT_EQ(splitter->count(), 3);
+
+    // The whole panel used to need 1049px before it could be laid out at all: 628 of it the
+    // toolbar above the grid, 306 the partitions table's minimum width. A 1024-wide screen
+    // could not show it.
+    EXPECT_LT(splitter->minimumSizeHint().width(), 400)
+        << "the panel cannot be opened on a low-resolution screen";
+    for (int pane = 0; pane < splitter->count(); ++pane) {
+        EXPECT_LT(splitter->widget(pane)->minimumSizeHint().width(), 150)
+            << "pane " << pane << " holds width the other two cannot borrow";
+    }
+
+    // Widen the hierarchy pane at the device pane's expense -- the gesture that did not work.
+    splitter->setSizes({900, 200, 266});
+    qApp->processEvents();
+    EXPECT_GE(splitter->sizes().at(0), 880);
+    EXPECT_LT(splitter->sizes().at(1), 300);
+}
+
+TEST(FloorPlanningLayout, EveryToolbarControlCanFoldIntoTheExtensionMenu)
+{
+    // The device toolbar only stops flooring the pane if what does not fit can go somewhere.
+    // QToolBar's extension menu shows ACTIONS; a control added through addWidget() cannot go
+    // in it, because the widget is already parented to the toolbar and can only be in one
+    // place. Measured on the first attempt at this, which did use addWidget(): at a 150px
+    // pane 4 of 21 items were visible and the popup could offer none of the missing ones --
+    // the controls were simply gone. So every control here has to be a plain QAction, and
+    // the only widget on the toolbar is the blank stretch, which has nothing to offer a menu
+    // and is not meant to appear in one.
+    fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
+    prepare(panel, 1366);
+
+    auto* toolBar = panel.findChild<QToolBar*>();
+    ASSERT_NE(toolBar, nullptr);
+    ASSERT_GT(toolBar->actions().size(), 10);
+
+    for (QAction* action : toolBar->actions()) {
+        if (action->isSeparator()) {
+            continue;
+        }
+        QWidget* widget = toolBar->widgetForAction(action);
+        const bool isStretch = (qobject_cast<QWidgetAction*>(action) != nullptr) &&
+                               (widget != nullptr) &&
+                               widget->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding;
+        EXPECT_TRUE(qobject_cast<QWidgetAction*>(action) == nullptr || isStretch)
+            << "'" << action->text().toStdString()
+            << "' is a widget on the toolbar, so it disappears instead of folding into the "
+               "extension menu when the pane is dragged narrow";
+    }
+}
+
+TEST(FloorPlanningLayout, PanesOpenInAOneTwoOneSplit)
+{
+    // Removing the minimums also removed what had been holding the opening proportions up --
+    // they were the minimums, not the setSizes({1,2,1}) that looked like a ratio and never
+    // was one. Without applyInitialSplitterSizes() the device pane opens at a fifth of the
+    // window with the hierarchy pane twice its width.
+    fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
+    prepare(panel, 1366);
+
+    auto* splitter = panel.findChild<QSplitter*>();
+    ASSERT_NE(splitter, nullptr);
+    const QList<int> sizes = splitter->sizes();
+    ASSERT_EQ(sizes.size(), 3);
+
+    EXPECT_GT(sizes.at(1), sizes.at(0)) << "the device grid must be the widest pane";
+    EXPECT_GT(sizes.at(1), sizes.at(2)) << "the device grid must be the widest pane";
+    EXPECT_NEAR(sizes.at(1), 2 * sizes.at(0), 40);
+
+    // The partitions pane opens wide enough for its columns, which is why it has a size hint
+    // at all -- that used to be a minimum, and the columns fell outside the pane without it.
+    EXPECT_GE(sizes.at(2), splitter->widget(2)->sizeHint().width());
 }
 
 // [aurora2#1725 stage P7] Header tooltips are set through horizontalHeaderItem(), which is

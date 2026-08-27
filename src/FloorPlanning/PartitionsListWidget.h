@@ -16,6 +16,10 @@ class PartitionsListWidget final : public QWidget {
 public:
     PartitionsListWidget(QWidget* parent = nullptr);
 
+    // [aurora2#1725] Wide enough for every column, so the pane opens showing all of them.
+    // A preference, not a floor: the splitter may hand it less and the table scrolls.
+    QSize sizeHint() const override;
+
 signals:
     void selectionChanged(int);
     void partitionRenamed(int partitionId, QString newName);
@@ -50,9 +54,11 @@ private:
     QLabel* m_lbResourceSource{nullptr};
     void updateResourceSourceLabel(const std::map<int, PartitionPtr>& partitions);
 
-    // [aurora2#1725] Keeps the table from being handed less width than its columns need,
-    // which is what hid the rightmost ones until the window was widened.
-    void updateTableMinimumWidth();
+    // [aurora2#1725] Keeps the pane from being handed less width than its columns need,
+    // which is what hid the rightmost ones until the window was widened. Feeds sizeHint()
+    // rather than a minimum, so the pane stays draggable.
+    void updateTablePreferredWidth();
+    int m_preferredWidth = 0;
 
     // [aurora2#1725] Set when the "+" row asks for a partition, so the next repopulate can
     // put the new row's name straight into edit mode instead of a modal name prompt. The ids

@@ -86,7 +86,7 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
 
     // [aurora2#1725] Before any partitions exist the header text alone decides the width;
     // onPartitionsChanged() re-measures once there are rows.
-    updateTableMinimumWidth();
+    updateTablePreferredWidth();
 
     m_tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_tableWidget->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -321,9 +321,9 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
 
     updateResourceSourceLabel(partitions);
 
-    // The resource cells are what set the column widths, so the floor can only be
+    // The resource cells are what set the column widths, so the figure can only be
     // computed once they are in place.
-    updateTableMinimumWidth();
+    updateTablePreferredWidth();
 }
 
 // [aurora2#1725 stage P7] Name the source of the numbers in the table.
@@ -357,21 +357,26 @@ void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, Partiti
     m_lbResourceSource->setVisible(true);
 }
 
-// [aurora2#1725] Floor the table's width at what its five columns actually need, so all of
-// them are visible the first time the panel is shown.
+// [aurora2#1725] Measure what the table's five columns actually need, so all of them are
+// visible the first time the panel is shown.
 //
-// The partitions pane is the narrowest thing in FloorPlanningWidget's splitter, and nothing
-// told it how wide the table wants to be: QAbstractScrollArea's size hint is a generic
-// 256x192 that knows nothing about columns, and splitter->setSizes({1,2,1}) is a ratio
-// rather than a guarantee -- the device pane's 800px hint wins the negotiation and this pane
-// collapses to its minimum, cutting the rightmost columns off. Widening the window grew the
-// pane and they reappeared, which is the bug as it was reported: the numbers were there the
-// whole time, just out of view.
+// Nothing else tells the splitter how wide this pane wants to be: QAbstractScrollArea's size
+// hint is a generic 256x192 that knows nothing about columns, so without this the pane is
+// handed whatever is left over and the rightmost columns fall outside it. Widening the window
+// made them reappear, which is the bug as it was originally reported: the numbers were there
+// the whole time, just out of view.
+//
+// It is the pane's PREFERRED width, not a minimum. It used to be a hard
+// m_tableWidget->setMinimumWidth(), which fixed the columns but also made this the one pane
+// in the splitter that could not be dragged narrower -- 306px of the window that the
+// hierarchy pane could never borrow. Now the pane asks for the width and gives it up when
+// dragged; the table falls back to its horizontal scrollbar, which is the ordinary way a
+// table too narrow for its columns behaves.
 //
 // Only the ResizeToContents columns are measured. Name is Stretch, so its width follows the
-// pane, and feeding that back in would ratchet the minimum up every time the user widened
-// the window and never let it shrink again; it gets a text-derived floor instead.
-void PartitionsListWidget::updateTableMinimumWidth()
+// pane, and feeding that back in would ratchet the figure up every time the user widened the
+// window and never let it shrink again; it gets a text-derived width instead.
+void PartitionsListWidget::updateTablePreferredWidth()
 {
     const QHeaderView* header = m_tableWidget->horizontalHeader();
 
@@ -389,7 +394,18 @@ void PartitionsListWidget::updateTableMinimumWidth()
     // there are more partitions than fit, and must not do that by pushing Placed out of view.
     width += m_tableWidget->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
 
-    m_tableWidget->setMinimumWidth(width);
+    if (width == m_preferredWidth) {
+        return;
+    }
+    m_preferredWidth = width;
+    updateGeometry();  // the new sizeHint() is only consulted once the layout re-reads it
+}
+
+QSize PartitionsListWidget::sizeHint() const
+{
+    QSize hint = QWidget::sizeHint();
+    hint.setWidth(qMax(hint.width(), m_preferredWidth));
+    return hint;
 }
 
 void PartitionsListWidget::onPartitionSelectedOutside(const PartitionPtr& partition)
