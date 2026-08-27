@@ -3006,13 +3006,8 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 }
 
 
-// Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'.
-// The 'x' separator is not cosmetic: plain concatenation makes a 12x10 layout
-// read as 'AUTOFPGA1210', which is equally 1x210 and 121x0. All construction
-// sites go through here so they cannot drift apart.
 // Drop a "--flag <value>" pair from a whitespace-separated option string.
-// Reuses StringUtils::tokenize/join rather than a regex so a value that happens
-// to contain the flag text cannot be mangled.
+// Token-exact, so a value that happens to contain the flag text is not mangled.
 static std::string removeVprOption(const std::string& options, const std::string& flag) {
   const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
   std::vector<std::string> kept;
@@ -3028,6 +3023,9 @@ static std::string removeVprOption(const std::string& options, const std::string
 }
 
 
+// Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'. The 'x' is
+// load-bearing: plain concatenation makes 12x10 read as 'AUTOFPGA1210', equally 1x210
+// and 121x0. Every construction site goes through here so they cannot drift apart.
 static std::string generatedLayoutName(const std::string& prefix, int width, int height) {
 
   return prefix + std::string("FPGA") +
@@ -4021,7 +4019,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // '.../TURNKEY-FPGA_AUTO/.../vpr.xml' and the sdc/net file paths, which must
     // keep pointing at the original device directory. A blunt ReplaceAll on the
     // bare layout name rewrote those paths to a non-existent
-    // 'TURNKEY-AUTOFPGA<w><h>' directory (in plaintext mode the arch path is the
+    // 'TURNKEY-AUTOFPGA<w>x<h>' directory (in plaintext mode the arch path is the
     // on-disk device file), so the architecture-file swap below could no longer
     // match old_m_architectureFile and VPR failed to open the arch file.
     command_rerun = ReplaceAll(command_rerun, "--device " + source_layout_name, "--device " + m_autoLayoutGeneratedLayoutName);
@@ -6657,13 +6655,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 #endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
-  // A device's openfpga template may pass --sb_maps itself: the 2026.3 eval
-  // packages do, TURNKEY-FPGA3030 does not. Substituting ours in on top of that
-  // makes OpenFPGA abort with "Argument --sb_maps specified multiple times", so
-  // when the template supplies it, the template wins - it names the regenerated
-  // SB map the template's own add_layout step just produced, which is the one
-  // this run should use.
-  if(result.find("--sb_maps") != std::string::npos) {
+  // A device's openfpga template may pass --sb_maps itself; OpenFPGA then aborts with
+  // "Argument --sb_maps specified multiple times". The template wins: it names the SB
+  // map its own add_layout step just produced. Tested on the raw template, not on
+  // 'result' - by here result already carries our own --sb_maps, substituted in with
+  // ${VPR_ANALYSIS_COMMAND}, so matching on it would strip a flag we still need.
+  if(script.find("--sb_maps") != std::string::npos) {
     base_vpr_options = removeVprOption(base_vpr_options, "--sb_maps");
   }
 
