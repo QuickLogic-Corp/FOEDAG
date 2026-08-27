@@ -74,35 +74,25 @@ class QLDeviceTarget  {
 // the device package's layout-generation settings, read from its config.json:
 //   "DEVICE_TYPE": "CUSTOM"                      -- may this fabric be re-shaped at all?
 //   "DEVICE_TYPE_SETTINGS": {"LAYOUT_MODE": ...} -- how should the layout be produced?
-// these are two independent axes with overlapping vocabularies, and they are
-// normalised by two DIFFERENT helpers - see normalizeDeviceType() /
-// normalizeLayoutMode() in QLDeviceManager.cpp.
-// everything is returned as one value so the caller resolves the mode in a
-// single decision instead of stitching out-params together.
+// two independent axes with overlapping vocabularies, normalised separately - see
+// normalizeDeviceType() / normalizeLayoutMode() in QLDeviceManager.cpp.
 class QLDeviceLayoutSettings {
   public:
     // config.json was found and parsed.
     bool config_found = false;
-    // config.json exists but could not be parsed. This is deliberately NOT
-    // folded into 'config_found == false': a genuinely absent config.json is the
-    // pre-contract package that must keep taking the layout-name path, whereas a
-    // corrupt one must fail loudly. Treating them alike would make a truncated
-    // file skip layout generation on a CUSTOM device, and - worse - make the
-    // FIXED gate unreachable, which is the only guard there is.
+    // config.json exists but did not parse. Distinct from absent: absent is a
+    // pre-contract package and takes the layout-name path; corrupt must fail loudly.
     bool config_parse_failed = false;
     std::string config_parse_error;
     // "DEVICE_TYPE" was present and understood. when false, 'device_type' is
     // empty and the package predates the layout-mode contract.
     bool device_type_present = false;
-    // "DEVICE_TYPE_SETTINGS" was present at all. On a FIXED device the release
-    // task deletes the whole section, so its mere presence there is a
-    // configuration error - reported separately from LAYOUT_MODE, which is only
-    // one of the keys it can carry.
+    // "DEVICE_TYPE_SETTINGS" was present at all. Reported separately from LAYOUT_MODE,
+    // which is only one of the keys the section can carry.
     bool device_type_settings_present = false;
     // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" was present and understood.
     bool layout_mode_present = false;
-    // a key was present but carried a value we do not understand. the caller
-    // must fail: guessing here is exactly the silent fallback we are removing.
+    // a key carried a value we do not understand. The caller must fail rather than guess.
     bool invalid = false;
     // the offending key and its verbatim value, for the error message.
     std::string invalid_key;

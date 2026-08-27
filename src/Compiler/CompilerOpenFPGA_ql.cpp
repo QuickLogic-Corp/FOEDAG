@@ -3006,6 +3006,28 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 }
 
 
+// True when the openfpga template passes --sb_maps as an option of its own.
+// Matched per token so '--sb_maps_dir' does not count, and comment lines are skipped
+// so a mention in prose does not suppress a flag the run still needs.
+static bool templatePassesSbMaps(const std::string& script) {
+  std::istringstream lines(script);
+  std::string line;
+  while(std::getline(lines, line)) {
+    const size_t first = line.find_first_not_of(" \t");
+    if(first == std::string::npos || line[first] == '#') {
+      continue;
+    }
+    for(char& c : line) { if(c == '\t') c = ' '; }
+    for(const std::string& token : StringUtils::tokenize(line, " ")) {
+      if(token == "--sb_maps") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+
 // Escape a literal so it can be used as a std::regex pattern.
 // FileUtils::findAndReplaceInFile compiles its search string as a regex, and the
 // patterns below are device and layout names read off disk. Unescaped, a '.' in a
@@ -3420,40 +3442,26 @@ bool CompilerOpenFPGA_ql::Packing() {
 
 
   // LAYOUT GENERATION MODE RESOLUTION ++
-  // The mode is a property of the DEVICE PACKAGE - 'DEVICE_TYPE' and
-  // 'DEVICE_TYPE_SETTINGS.LAYOUT_MODE' in its config.json - and not of the name
-  // the user picked in the layout selector. Resolve it once, here, into the same
-  // two booleans the rest of this function has always worked off.
+  // The mode comes from the device package - 'DEVICE_TYPE' and
+  // 'DEVICE_TYPE_SETTINGS.LAYOUT_MODE' in its config.json - not from the name picked
+  // in the layout selector. Resolved once here into the two booleans the rest of this
+  // function already works off.
   //
-  // THE ORDER OF THE THREE ARMS BELOW IS LOAD-BEARING, and nothing in the code
-  // says so, hence:
-  //
-  // 1. 'DEVICE_TYPE' is inspected FIRST. 'FIXED' means there is silicon behind
-  //    this fabric, so no layout is generated for it - which is the normal,
-  //    successful path for a customer part - and it must never be re-shaped, not
-  //    by a 'LAYOUT_MODE' and not by a user-supplied custom_layout.yml. Were the
-  //    override read first, a user could resize hard silicon just by dropping a
-  //    yml beside the project. And there is no second line of defence
-  //    downstream: add_layout.py runs 'DEVICE_TYPE' through its 'LAYOUT_MODE'
-  //    alias map, which maps FIXED to CUSTOM, then finds no
-  //    'DEVICE_TYPE_SETTINGS' and falls back to 'LAYOUT_MODE': 'AUTO' - so it
-  //    will auto-size a fixed device without a word. This gate is the only guard
-  //    there is.
-  // 2. Only on a re-shapable ('CUSTOM') device does the project-level
-  //    custom_layout.yml mean anything, and there it wins over 'LAYOUT_MODE'.
-  // 3. Only when the package carries no 'DEVICE_TYPE' at all do we fall back to
-  //    keying off the layout name, which is what Aurora did before this contract
-  //    existed. An already released kit therefore keeps working unchanged, with
-  //    no re-sync.
+  // The order of the three arms is load-bearing and the code cannot show it:
+  //  1. 'DEVICE_TYPE' first. FIXED means silicon, so nothing may re-shape it: not a
+  //     LAYOUT_MODE, not a user custom_layout.yml. Read the override first and a user
+  //     resizes hard silicon by dropping a file beside the project. There is no
+  //     backstop downstream - see normalizeDeviceType() for why.
+  //  2. On a CUSTOM device the project-level custom_layout.yml wins over LAYOUT_MODE.
+  //  3. No 'DEVICE_TYPE' at all keys off the layout name, as before this contract, so
+  //     released kits keep working without a re-sync.
   m_autoLayoutGenerationMode = false;
   m_customLayoutGenerationMode = false;
 
-  // The layout this device package ships, and the device it belongs to. Every
-  // 'FPGA_AUTO'/'FPGA_CUSTOM' literal in the generated-device logic further down
-  // is driven off these instead, so a package that names its layout after the
-  // fabric ('FPGA0808') gets the same substitutions a legacy one does. On a
-  // legacy package source_layout_name IS 'FPGA_AUTO'/'FPGA_CUSTOM', so those
-  // sites behave exactly as before.
+  // The layout this package ships and the device it belongs to. The generated-device
+  // logic below is driven off these rather than 'FPGA_AUTO'/'FPGA_CUSTOM' literals, so
+  // a package naming its layout after the fabric ('FPGA0808') gets the same
+  // substitutions. On a legacy package these two ARE those literals.
   const std::string& source_layout_name = current_device_target.device_variant_layout.name;
   const std::string& source_devicename = current_device_target.device_variant.devicename;
 
@@ -3527,6 +3535,10 @@ bool CompilerOpenFPGA_ql::Packing() {
                      "/../custom_layout.yml': the project path could not be canonicalized.\n");
         return false;
       }
+      // FIXME(aurora2#2291): a device generated from an override is stamped FIXED, so
+      // re-running on it with that same custom_layout.yml still present lands here. Give
+      // a generated package provenance in its config.json and exempt it, rather than
+      // relaxing this guard, which real silicon depends on.
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
         ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
                      layout_settings.config_json_path.string() +
@@ -3568,13 +3580,9 @@ bool CompilerOpenFPGA_ql::Packing() {
                                                                 layout_override_json,
                                                                 &layout_override_parse_error) ||
            !layout_override_json.is_object()) {
-          // Never synthesise a bare overlay from nothing here. The script takes
-          // 'BRAM_SIZE', 'DSP_SIZE', 'IO_CAPACITY' and 'MARGIN' from the very
-          // file it is handed, so an overlay missing them drops it back to its
-          // built-in 1x6 / 1x3 / 20 / 1.2 geometry - the exact silent fallback
-          // this change exists to delete. Unreachable today, since reaching this
-          // arm means the same file already parsed as an object, but
-          // "currently unreachable" does not survive a refactor.
+          // The script reads 'BRAM_SIZE', 'DSP_SIZE', 'IO_CAPACITY' and 'MARGIN' from
+          // the very file it is handed, so an overlay synthesised from nothing would
+          // silently fall back to its built-in 1x6 / 1x3 / 20 / 1.2 geometry.
           ErrorMessage("Device '" + source_devicename + "': cannot read device config " +
                        layout_settings.config_json_path.string() +
                        " needed to build the layout override" +
@@ -3631,10 +3639,9 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
     }
     else if(layout_settings.device_type_settings_present) {
-      // Layout settings with nothing saying whether this fabric may be re-shaped
-      // - a half-migrated package. Falling through to the layout-name path would
-      // leave the settings inert with no diagnostic, which is the silent
-      // misconfiguration this whole change exists to remove.
+      // Layout settings with nothing saying whether this fabric may be re-shaped: a
+      // half-migrated package. Falling through to the layout-name path would leave the
+      // settings inert with no diagnostic.
       ErrorMessage("Device '" + source_devicename + "' carries 'DEVICE_TYPE_SETTINGS' but no "
                    "'DEVICE_TYPE' in " + layout_settings.config_json_path.string() +
                    ". Add 'DEVICE_TYPE': 'CUSTOM' or 'FIXED', or remove the layout settings.\n");
@@ -3755,14 +3762,14 @@ bool CompilerOpenFPGA_ql::Packing() {
             std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
       }
 
-      // On the legacy arm the size can only come from the user's yml, so a
-      // missing file is an error here exactly as before. On a config-driven arm
-      // the yml is optional and the resolver has already turned it into the
-      // overlay that add_layout_device_config_path points at.
+      // On the legacy arm the size can only come from the user's yml, so a missing file
+      // is an error. On a config-driven arm the yml is optional and the resolver has
+      // already turned it into the overlay add_layout_device_config_path points at.
       if(m_customLayoutGenerationMode && add_layout_device_config_path.empty()) {
         if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
                                        custom_layout_yml_filepath)) {
-          ErrorMessage("Error Canonicalizing Directory Paths\n");
+          ErrorMessage("Could not resolve '" + std::string(ProjManager()->projectPath()) +
+                       "/../custom_layout.yml': the project path could not be canonicalized.\n");
           return false;
         }
         if(!FileUtils::FileExists(custom_layout_yml_filepath)) {
@@ -3848,15 +3855,13 @@ bool CompilerOpenFPGA_ql::Packing() {
         return false;
       }
 
+      // a unique name, so the generated layout is distinguishable from the one the
+      // device package ships.
       if(m_autoLayoutGenerationMode) {
-        // set a unique layout name, so the generated layout is distinguishable
-        // from the one the device package ships.
         m_autoLayoutGeneratedLayoutName =
                 generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
       }
       if(m_customLayoutGenerationMode) {
-        // set a unique layout name, so the generated layout is distinguishable
-        // from the one the device package ships.
         m_autoLayoutGeneratedLayoutName =
                 generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height);
       }
@@ -4232,16 +4237,11 @@ bool CompilerOpenFPGA_ql::Packing() {
         }
 
         // TWO axes, and both are needed. A device is identified by the pair
-        // (devicename, layout), and the layout side is enumerated from the device
-        // directory's own vpr.xml - so a clone whose settings still name the
-        // SOURCE devicename resolves to the source package, which has no such
-        // layout, and every example shipped inside the generated device fails to
-        // open. Before this change one substitution happened to fix both fields,
-        // because a legacy devicename embedded the layout name; a package that
-        // names its directory after the part does not.
-        // Devicename first: in the append case the layout pass would otherwise
-        // leave the devicename occurrences behind. On a legacy package the two
-        // passes compose to exactly the single pre-change substitution.
+        // (devicename, layout), and the layout side is enumerated from the clone's own
+        // vpr.xml - so a clone whose settings still name the SOURCE devicename resolves
+        // back to the source package, which has no such layout, and the examples shipped
+        // inside the generated device fail to open. Devicename first: the layout pass
+        // would otherwise leave appended-name occurrences behind.
         for(auto filepath: filepath_list) {
           FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_devicename), target_device_copy_devicename);
           FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
@@ -6681,7 +6681,11 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // map its own add_layout step just produced. Tested on the raw template, not on
   // 'result' - by here result already carries our own --sb_maps, substituted in with
   // ${VPR_ANALYSIS_COMMAND}, so matching on it would strip a flag we still need.
-  if(script.find("--sb_maps") != std::string::npos) {
+  //
+  // FIXME(aurora2#2290): this only sanitises ${VPR_STANDARD_OPTS}. A template using the
+  // ${VPR_ANALYSIS_COMMAND} form AND passing its own --sb_maps still receives it twice,
+  // because that expansion carries vpr_options. No shipped template does both today.
+  if(templatePassesSbMaps(script)) {
     base_vpr_options = removeVprOption(base_vpr_options, "--sb_maps");
   }
 
