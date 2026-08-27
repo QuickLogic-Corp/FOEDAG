@@ -266,7 +266,16 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceVPRArchitectureFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAArchitectureFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamAnnotationFile(QLDeviceTarget device_target = QLDeviceTarget());
-  std::filesystem::path deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target = QLDeviceTarget());
+  // device_only=true returns the device's own repack design constraint file,
+  // skipping the project- and TCL-directory lookups. Used when the file is
+  // wanted as a *template* to rewrite: the generated result is written into the
+  // project directory, so consulting that directory here would feed a previous
+  // run's output back in as its own template.
+  // report_missing=false suppresses the ErrorMessage when the device has no such
+  // file, for callers where it is optional.
+  std::filesystem::path deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target = QLDeviceTarget(),
+                                                                bool device_only = false,
+                                                                bool report_missing = true);
   std::filesystem::path deviceOpenFPGAFixedSimFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAFabricKeyFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamRemappingFile(QLDeviceTarget device_target = QLDeviceTarget());

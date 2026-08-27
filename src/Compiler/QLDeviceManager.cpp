@@ -4463,7 +4463,9 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGABitstreamAnnotationFile(QLD
 }
 
 
-std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target) {
+std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target,
+                                                                                bool device_only,
+                                                                                bool report_missing) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
@@ -4482,14 +4484,19 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
   std::string repack_design_constraint_file_name = "repack_design_constraint.xml";
 
   // 1. project path check
-  std::filesystem::path project_path = std::filesystem::path(compiler->ProjManager()->projectPath());
-  repack_design_constraint_file_path = project_path / repack_design_constraint_file_name;
-  if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-    repack_design_constraint_file_path.clear();
+  //    Skipped for device_only callers: the generated repack constraints are
+  //    written into the project directory, so looking there for a template
+  //    would pick up this design's own previous output.
+  if(!device_only) {
+    std::filesystem::path project_path = std::filesystem::path(compiler->ProjManager()->projectPath());
+    repack_design_constraint_file_path = project_path / repack_design_constraint_file_name;
+    if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+      repack_design_constraint_file_path.clear();
+    }
   }
 
   // 2. tcl script dir path check
-  if(repack_design_constraint_file_path.empty()) {
+  if(!device_only && repack_design_constraint_file_path.empty()) {
     if(settings_manager != nullptr) {
       std::filesystem::path tcl_script_dir_path = settings_manager->getTCLScriptDirPath();
         if(!tcl_script_dir_path.empty()) {
@@ -4521,7 +4528,9 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
         repack_design_constraint_file_path += ".en";
         if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          if(report_missing) {
+            compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          }
           return empty_path;
         }
       }
@@ -4537,7 +4546,9 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
         repack_design_constraint_file_path += ".en";
         if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          if(report_missing) {
+            compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          }
           return empty_path;
         }
       }
