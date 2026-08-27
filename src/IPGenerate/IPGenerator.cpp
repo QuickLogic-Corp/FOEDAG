@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDebug>
 #include <QProcess>
 #include <QCoreApplication>
+#include <algorithm>
 #include <chrono>
 #include <ctime>
 #include <filesystem>
@@ -329,6 +330,55 @@ std::filesystem::path IPGenerator::IPCatalogPath() const {
   return std::filesystem::weakly_canonical(m_installDir / "IP_Catalog");
 }
 
+std::filesystem::path IPGenerator::DefaultIPCatalogPath() const {
+  // DataPath()-relative (rather than the m_installDir-based
+  // IPCatalogPath() above): the two agree in the aurora layout (DataPath =
+  // <install>/device_data), but DataPath falls back to <install>/share/<exe>
+  // when device_data is absent, and this path must match what the rest of
+  // the tool resolves.
+#ifdef UPSTREAM_IP_GENERATOR
+  std::filesystem::path path =
+      GlobalSession->Context()->DataPath() / "IP_Catalog";
+#else
+  std::filesystem::path path =
+      GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
+#endif
+  return path.lexically_normal();
+}
+
+std::filesystem::path IPGenerator::ProjectUserCatalogPath() const {
+  if (m_compiler == nullptr || m_compiler->ProjManager() == nullptr ||
+      !m_compiler->ProjManager()->HasDesign()) {
+    return {};
+  }
+  return std::filesystem::path(m_compiler->ProjManager()->projectPath()) /
+         "IP_Catalog";
+}
+
+void IPGenerator::LoadDefaultCatalogs() {
+  const std::filesystem::path defaultRoot = DefaultIPCatalogPath();
+  const std::filesystem::path userRoot = ProjectUserCatalogPath();
+  for (const std::filesystem::path& root : {defaultRoot, userRoot}) {
+    if (root.empty()) continue;
+    const std::string key = std::filesystem::weakly_canonical(root).string();
+    if (m_compiler->LoadedIpCatalogRoots().count(key)) continue;
+    if (!FileUtils::FileExists(root)) {
+      // The project-local catalog is optional and usually absent; the
+      // installed one missing is worth a warning (but not a hard failure —
+      // an explicitly added catalog may be all the session needs).
+      if (root == defaultRoot) {
+        m_compiler->Message("WARNING: installed IP catalog not found: " +
+                            root.string());
+      }
+      continue;
+    }
+    // Through the Tcl command (not BuildLiteXIPCatalog directly) so the
+    // load runs with the same threading as an explicit user call.
+    m_compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" + root.string() +
+                                     "}");
+  }
+}
+
 void IPGenerator::setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation)
 {
   m_ipOutputLocations[moduleName + "_" + version] = ipOutputLocation;
@@ -485,16 +535,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     IPGenerator* generator = (IPGenerator*)clientData;
     Compiler* compiler = generator->GetCompiler();
 
-    // Load IPs if no definitions are available
-    if (!compiler->HasIPDefinitions()) {
-  #ifdef UPSTREAM_IP_GENERATOR
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / "IP_Catalog";
-  #else
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
-  #endif
-      compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" +
-                                     path.lexically_normal().string() + "}");
-    }
+    // Load the installed and (if a project is open) project-local catalogs,
+    // each at most once per session.
+    generator->LoadDefaultCatalogs();
 
     // Argument scan. `ip_catalog` used to be a flat argc test; the options
     // below need a real scan, but the no-argument result must not change:
@@ -647,16 +690,9 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       return TCL_ERROR;
     }
 
-    // Load IPs if no definitions are available
-    if (!compiler->HasIPDefinitions()) {
-  #ifdef UPSTREAM_IP_GENERATOR
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / "IP_Catalog";
-  #else
-      std::filesystem::path path = GlobalSession->Context()->DataPath() / ".." / "IP_Catalog";
-  #endif
-      compiler->TclInterp()->evalCmd("add_litex_ip_catalog {" +
-                                     path.lexically_normal().string() + "}");
-    }
+    // Load the installed and project-local catalogs, each at most once per
+    // session (a design exists here, so the project-local root is known).
+    generator->LoadDefaultCatalogs();
 
     auto printWrongUsageMsgHelperFn = [compiler](const std::string& msg){
         compiler->ErrorMessage(msg +
@@ -1020,6 +1056,52 @@ void IPGenerator::DeleteIPInstance(const std::string& moduleName) {
   DeleteIPInstance(GetIPInstance(moduleName));
 }
 
+// Fingerprint of an RPM IP's shipped artifacts (the netlists/ dir beside its
+// generator): relative path, size and mtime of every file, sorted. Embedded
+// in the parameter-cache JSON so the byte-identity reuse check below also
+// catches a re-authored netlist/stub — otherwise re-packaging an IP (an
+// -rpm_ip authoring project's place stage does this automatically) would
+// silently keep serving the stale generated copy. Deliberately scoped to netlists/ (empty string for IPs without one):
+// fingerprinting every IP's whole version dir would force a spurious
+// regenerate of all configured IPs after each tool reinstall, since the
+// install re-copies the catalog and refreshes its mtimes.
+static std::string NetlistArtifactsFingerprint(
+    const std::filesystem::path& netlistsDir) {
+  std::error_code ec;
+  if (!std::filesystem::is_directory(netlistsDir, ec)) return {};
+  std::vector<std::string> entries;
+  // error_code throughout: a fingerprinting hiccup must degrade to "changed
+  // -> regenerate once", never abort generation.
+  for (auto it = std::filesystem::recursive_directory_iterator(netlistsDir, ec);
+       !ec && it != std::filesystem::recursive_directory_iterator();
+       it.increment(ec)) {
+    if (!it->is_regular_file(ec)) continue;
+    // Skip the driver's transient write-if-changed temp files: a crash
+    // between write and rename must not force a spurious regenerate.
+    if (it->path().extension() == ".tmp") continue;
+    const auto mtime = it->last_write_time(ec).time_since_epoch().count();
+    const auto size = it->file_size(ec);
+    entries.push_back(
+        std::filesystem::relative(it->path(), netlistsDir, ec)
+            .generic_string() +
+        ":" + std::to_string(size) + ":" + std::to_string(mtime));
+  }
+  std::sort(entries.begin(), entries.end());
+  std::string fingerprint;
+  for (const auto& e : entries) {
+    fingerprint += e + ";";
+  }
+  // The fingerprint is embedded in a JSON string literal: escape the two
+  // characters that could break it (filenames with quotes/backslashes).
+  std::string escaped;
+  escaped.reserve(fingerprint.size());
+  for (const char c : fingerprint) {
+    if (c == '"' || c == '\\') escaped += '\\';
+    escaped += c;
+  }
+  return escaped;
+}
+
 bool IPGenerator::Generate() {
   shareContext();
 
@@ -1108,6 +1190,14 @@ bool IPGenerator::Generate() {
         jsonF << "   \"build\": true," << std::endl;
         jsonF << "   \"json\": \"" << jsonFile.filename().string() << "\","
               << std::endl;
+        // RPM IPs only (empty otherwise); the generators read the cache with
+        // json.load + cfg.get, so the extra key is invisible to them.
+        const std::string netlistsFingerprint = NetlistArtifactsFingerprint(
+            def->FilePath().parent_path() / "netlists");
+        if (!netlistsFingerprint.empty()) {
+          jsonF << "   \"netlists_fingerprint\": \"" << netlistsFingerprint
+                << "\"," << std::endl;
+        }
         jsonF << "   \"json_template\": false" << std::endl;
         jsonF << "}" << std::endl;
         jsonF.close();
