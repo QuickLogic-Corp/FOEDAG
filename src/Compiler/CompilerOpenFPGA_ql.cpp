@@ -6653,6 +6653,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     return std::string("");
   }
 
+  // A device's openfpga template may pass --sb_maps itself; OpenFPGA then aborts with
+  // "Argument --sb_maps specified multiple times". The template wins: it names the SB map
+  // its own add_layout step just produced. Decided on the raw template, because both
+  // expansions below already carry our own copy of the flag.
+  const bool template_supplies_sb_maps = templatePassesSbMaps(script);
+
   vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
@@ -6662,6 +6668,13 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 #endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
+
+  // Our --sb_maps can arrive through EITHER placeholder: ${VPR_ANALYSIS_COMMAND} expands
+  // to base_vpr_command, which concatenates vpr_options. Strip it from both, so the
+  // template's copy is the only one however that template is written.
+  if(template_supplies_sb_maps) {
+    vpr_analysis_command = removeVprOption(vpr_analysis_command, "--sb_maps");
+  }
 
   result = ReplaceAll(result, "${VPR_ANALYSIS_COMMAND}", vpr_analysis_command);
 
@@ -6676,16 +6689,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 #endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
-  // A device's openfpga template may pass --sb_maps itself; OpenFPGA then aborts with
-  // "Argument --sb_maps specified multiple times". The template wins: it names the SB
-  // map its own add_layout step just produced. Tested on the raw template, not on
-  // 'result' - by here result already carries our own --sb_maps, substituted in with
-  // ${VPR_ANALYSIS_COMMAND}, so matching on it would strip a flag we still need.
-  //
-  // FIXME(aurora2#2290): this only sanitises ${VPR_STANDARD_OPTS}. A template using the
-  // ${VPR_ANALYSIS_COMMAND} form AND passing its own --sb_maps still receives it twice,
-  // because that expansion carries vpr_options. No shipped template does both today.
-  if(templatePassesSbMaps(script)) {
+  if(template_supplies_sb_maps) {
     base_vpr_options = removeVprOption(base_vpr_options, "--sb_maps");
   }
 
