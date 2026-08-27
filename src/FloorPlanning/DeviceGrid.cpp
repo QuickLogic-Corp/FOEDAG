@@ -337,22 +337,27 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         // [aurora2#1725] Enough clb tiles by the estimate, but only just -- which is where
         // packing actually breaks, precisely because the estimate can sit below what the
         // packer needs. On fft256, dut.instPerm20009 estimated 20 and filled all 22 clb
-        // tiles it was given: 22 packed with nothing to spare, 20 failed. So a region within
-        // this margin of the estimate deserves saying out loud, even though it is not short.
-        // clb only: dsp/bram need no packing slack.
+        // tiles it was given: 22 packed with nothing to spare, 20 failed.
+        //
+        // An ERROR, like the outright shortfall above. It was a warning on the grounds that
+        // the region is not actually short and only the packer could settle it; but the
+        // estimate it is measured against runs optimistic, so "not short by the estimate"
+        // does not mean "not short", and letting a region this tight through only moves the
+        // failure to VPR, where it arrives without the partition's name or these numbers.
+        // clb only: dsp/bram are exact, one atom to one tile, and need no packing slack.
         const int clbRequired = partition->clbRequiredCount();
         const int clbAvailable = partition->clbAvailableCount();
         if ((clbRequired > 0) && (clbAvailable >= clbRequired)
             && (clbAvailable < clbRequired + (clbRequired * kClbHeadroomPercent + 99) / 100)) {
-            m_issues->warnings.insert({"Partition '" + partition->name() + "' has " +
-                                       std::to_string(clbAvailable) +
-                                       " clb tiles for an estimated " +
-                                       std::to_string(clbRequired) + " -- little packing slack",
-                                       "The estimate can be lower than what the packer needs, so a "
-                                       "region this tight may fail to pack even though it looks "
-                                       "big enough. Allow roughly "
-                                       + std::to_string(kClbHeadroomPercent)
-                                       + "% more clb tiles than the estimate."});
+            m_issues->errors.insert({"Partition '" + partition->name() + "' has " +
+                                     std::to_string(clbAvailable) +
+                                     " clb tiles for an estimated " +
+                                     std::to_string(clbRequired) + " -- little packing slack",
+                                     "The estimate can be lower than what the packer needs, so a "
+                                     "region this tight may fail to pack even though it looks "
+                                     "big enough. Allow roughly "
+                                     + std::to_string(kClbHeadroomPercent)
+                                     + "% more clb tiles than the estimate."});
         }
 
         // [aurora2#1725 stage P4] Elements the .qdc names that synthesis deleted. Loading such

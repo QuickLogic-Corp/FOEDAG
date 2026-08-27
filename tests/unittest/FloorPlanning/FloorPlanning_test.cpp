@@ -860,11 +860,13 @@ TEST(FloorplanIssues, ADspShortfallIsAnErrorToo)
     EXPECT_FALSE(mentions(issues->warnings, "dsp tiles but only"));
 }
 
-TEST(FloorplanIssues, EnoughClbTilesButNoSlackStaysAWarning)
+TEST(FloorplanIssues, EnoughClbTilesButNoPackingSlackIsAnErrorToo)
 {
-    // The complement of the two above, and the reason they are separate checks: a region
-    // that MEETS the estimate with little room to spare is a judgement call about packing
-    // density, which only the packer can settle, so it must not block anything.
+    // A region that MEETS the clb estimate with nothing to spare is where packing actually
+    // breaks, because the estimate runs optimistic: on fft256, dut.instPerm20009 estimated
+    // 20 clb and filled all 22 tiles it was given. It was a warning while "not short by the
+    // estimate" was read as "not short"; it is an error now, so the panel will not save it
+    // and a batch compile will not run it.
     fp::Partition::resetIdGenerator();
     fp::Region::resetIdGenerator();
     fp::Partition::setAtomsPerTile(14);
@@ -876,8 +878,28 @@ TEST(FloorplanIssues, EnoughClbTilesButNoSlackStaysAWarning)
     ASSERT_EQ(partition->clbRequiredCount(), 3);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(mentions(issues->errors, "little packing slack"));
+    EXPECT_TRUE(issues->warnings.empty());
+}
+
+TEST(FloorplanIssues, ARegionWithRoomToSpareIsNoIssueAtAll)
+{
+    // The other side of the margin: clear it and nothing is reported. Without this, the two
+    // checks above would still pass if every floorplan were declared an error.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+    fp::Partition::setAtomsPerTile(14);
+
+    fp::DeviceGrid device(genTestDescriptor());
+    // clb(2,2):clb(2,9) is 8 clb tiles; 29 atoms need 3, so there is well over the 25%
+    // headroom the margin asks for.
+    fp::PartitionPtr partition = constrain(device, {2, 2}, {2, 9}, atoms("dut.i_a.lut", 29));
+    ASSERT_EQ(partition->clbRequiredCount(), 3);
+    ASSERT_GE(partition->clbAvailableCount(), 4);
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
     EXPECT_TRUE(issues->errors.empty());
-    EXPECT_TRUE(mentions(issues->warnings, "little packing slack"));
+    EXPECT_FALSE(mentions(issues->warnings, "little packing slack"));
 }
 
 // [aurora2#1725] QdcSerializer round-trip safety. This file persists the user's floorplan,

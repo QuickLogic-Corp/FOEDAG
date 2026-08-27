@@ -8095,10 +8095,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // flow ran and the packer quietly dealt with whatever it was given.
   //
   // Errors stop the compile here, matching the panel, which refuses to save a .qdc that has
-  // any: a partition with no region, regions overlapping inside one partition, or a region
-  // too small to hold what it constrains are all things the flow cannot make sense of, and
-  // failing at the point the .qdc is read names the offending partition far more usefully
-  // than whatever the packer does with it later. Warnings are advisory and let it proceed.
+  // any: a partition with no region, regions overlapping inside one partition, a region too
+  // small to hold what it constrains, or one within the packing margin of it, are all things
+  // the flow cannot make sense of, and failing at the point the .qdc is read names the
+  // offending partition far more usefully than whatever the packer does with it later.
+  // Warnings are advisory and let it proceed.
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::shared_ptr<VprArchitectureFileProfider> archProvider =
         std::make_shared<VprArchitectureFileProfider>(this);

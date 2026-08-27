@@ -20,9 +20,10 @@ namespace fp {
 //
 // Classifies; the caller decides. Errors mean the floorplan cannot be made sense of as
 // written -- an empty partition, regions overlapping inside one, a region too small for what
-// it constrains -- and GenerateIOFloorPlanConstraints() stops the compile on them, as the
-// panel refuses to save such a .qdc. Warnings stay advisory: the packer is the authority on
-// how tight is too tight, so those are reported and the flow proceeds.
+// it constrains or too tight to pack it -- and GenerateIOFloorPlanConstraints() stops the
+// compile on them, as the panel refuses to save such a .qdc. What is left is advisory: a
+// constraint naming an instance synthesis deleted, an overlap between partitions, a parent
+// whose own logic no partition takes. Those are reported and the flow proceeds.
 class FloorplanChecker {
 public:
     // projectPath holds the flow's artifacts; qdcPath is the file the flow is
