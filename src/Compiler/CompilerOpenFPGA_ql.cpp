@@ -3006,6 +3006,25 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
 }
 
 
+// Escape a literal so it can be used as a std::regex pattern.
+// FileUtils::findAndReplaceInFile compiles its search string as a regex, and the
+// patterns below are device and layout names read off disk. Unescaped, a '.' in a
+// package name matches any character and silently rewrites neighbouring text, and a
+// '+', '(' or '[' throws std::regex_error out of the middle of a half-copied clone.
+static std::string regexEscapeLiteral(const std::string& literal) {
+  static const std::string special = R"(\^$.|?*+()[]{})";
+  std::string escaped;
+  escaped.reserve(literal.size());
+  for(char c : literal) {
+    if(special.find(c) != std::string::npos) {
+      escaped.push_back('\\');
+    }
+    escaped.push_back(c);
+  }
+  return escaped;
+}
+
+
 // Drop a "--flag <value>" pair from a whitespace-separated option string.
 // Token-exact, so a value that happens to contain the flag text is not mangled.
 static std::string removeVprOption(const std::string& options, const std::string& flag) {
@@ -3504,7 +3523,8 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
       if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
                                      custom_layout_yml_filepath)) {
-        ErrorMessage("Error Canonicalizing Directory Paths\n");
+        ErrorMessage("Could not resolve '" + std::string(ProjManager()->projectPath()) +
+                     "/../custom_layout.yml': the project path could not be canonicalized.\n");
         return false;
       }
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
@@ -3520,7 +3540,8 @@ bool CompilerOpenFPGA_ql::Packing() {
       // 2. 'DEVICE_TYPE': 'CUSTOM' - this fabric may be re-shaped.
       if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
                                      custom_layout_yml_filepath)) {
-        ErrorMessage("Error Canonicalizing Directory Paths\n");
+        ErrorMessage("Could not resolve '" + std::string(ProjManager()->projectPath()) +
+                     "/../custom_layout.yml': the project path could not be canonicalized.\n");
         return false;
       }
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
@@ -3840,7 +3861,7 @@ bool CompilerOpenFPGA_ql::Packing() {
                 generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height);
       }
 
-      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(add_layout_script_generated_layout_name), m_autoLayoutGeneratedLayoutName);
     }
     else if(m_autoLayoutGenerationMode && (status == 0)) {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
@@ -3865,7 +3886,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       // device config was available, which means a pre-contract package, whose
       // layout really is named 'FPGA_AUTO' - but take the name from the device
       // target anyway so nothing here depends on that literal.
-      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, source_layout_name, m_autoLayoutGeneratedLayoutName);
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
     }
 
 
@@ -4222,8 +4243,8 @@ bool CompilerOpenFPGA_ql::Packing() {
         // leave the devicename occurrences behind. On a legacy package the two
         // passes compose to exactly the single pre-change substitution.
         for(auto filepath: filepath_list) {
-          FileUtils::findAndReplaceInFile(filepath, source_devicename, target_device_copy_devicename);
-          FileUtils::findAndReplaceInFile(filepath, source_layout_name, m_autoLayoutGeneratedLayoutName);
+          FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_devicename), target_device_copy_devicename);
+          FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
         }
       }
 
