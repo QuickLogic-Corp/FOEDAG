@@ -10499,7 +10499,15 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
           std::ifstream in(relStubs[i]);
           std::stringstream buffer;
           buffer << in.rdbuf();
-          if (buffer.str().find("syn_black_box") == std::string::npos) {
+          // Match the directive in one of the forms Synplify honors — a
+          // `/* synthesis ... */` or `// synthesis ...` comment, or a
+          // `(* syn_black_box *)` attribute — not the bare substring, so a
+          // comment merely mentioning syn_black_box cannot pass the check.
+          static const std::regex kSynBlackBox(
+              "(/\\*\\s*synthesis\\b[^*]*\\bsyn_black_box\\b)"
+              "|(//\\s*synthesis\\b[^\\n]*\\bsyn_black_box\\b)"
+              "|(\\(\\*[^)]*\\bsyn_black_box\\b)");
+          if (!std::regex_search(buffer.str(), kSynBlackBox)) {
             ErrorMessage(
                 relStubs[i].string() +
                 ": the IP's synthesis stub does not carry Synplify's "
