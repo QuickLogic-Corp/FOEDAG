@@ -2,6 +2,7 @@
 
 #include <QWidget>
 
+#include "AtomSets.h"
 #include "DeviceGridDescriptor.h"
 #include "DeviceGrid.h"
 #include "Partition.h"
@@ -36,6 +37,10 @@ public:
     // [aurora2#1725 stage P3] Feeds the "Atom List"/"Type" columns: RTL path -> the
     // atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
+
+    // [aurora2#1725] Per-instance cell-type counts, for the Atoms tab of "Selected RTL
+    // Resources". Only the netlist tree has that table, so only it is told.
+    void setAtomResources(AtomResourceMap atomResources);
 
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
     // one tile, so a partition's required clb can be reported in the same unit as what its

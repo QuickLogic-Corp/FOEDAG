@@ -764,6 +764,12 @@ void SynthResourceHierarchyWidget::setAtomNames(std::map<std::string, std::vecto
     updateSelectedResources();
 }
 
+void SynthResourceHierarchyWidget::setAtomResources(AtomResourceMap atomResources)
+{
+    m_atomResources = std::move(atomResources);
+    updateSelectedResources();
+}
+
 // [aurora2#1725] Tally the selected rows into the "Selected RTL Resources" table.
 //
 // The union of the selected instances' atom sets, not the sum of their tallies: an
@@ -776,6 +782,7 @@ void SynthResourceHierarchyWidget::updateSelectedResources()
     }
 
     std::set<std::string> atoms;
+    std::set<std::string> paths;
     int instances = 0;
     for (const QModelIndex& index : m_view->selectionModel()->selectedRows(Column::Netlist)) {
         const QStandardItem* item = m_model->itemFromIndex(index);
@@ -785,11 +792,16 @@ void SynthResourceHierarchyWidget::updateSelectedResources()
             continue;
         }
         ++instances;
-        const std::set<std::string> covered = atomNamesFor(pathForItem(item));
+        const std::string path = pathForItem(item);
+        paths.insert(path);
+        const std::set<std::string> covered = atomNamesFor(path);
         atoms.insert(covered.begin(), covered.end());
     }
 
+    // Tiles from the atom set, cell types from the counts: two routes to the same selection,
+    // both of which drop what a parent and its child name in common.
     m_selectedResourcesWidget->setTally(tallyResources(atoms, Partition::atomsPerTile()),
+                                        tallyAtomResources(m_atomResources, paths),
                                         instances);
 }
 

@@ -14,6 +14,7 @@
 #include <QItemSelectionModel>
 #include <QSplitter>
 #include <QToolBar>
+#include <QTabWidget>
 #include <QTreeView>
 #include <QWidgetAction>
 #include <QTableWidget>
@@ -1102,6 +1103,18 @@ TEST(QdcSerializer, AValidRegionStillLoadsNormally)
 
 namespace {
 
+// The cell-type counts that go with layoutTestAtoms(), nested the same way: dut.b's entry
+// covers dut.b.sub's dsps, exactly as atomsets.json writes it.
+fp::AtomResourceMap layoutTestResources()
+{
+    fp::AtomResourceMap resources;
+    resources["dut.a"] = {{"$lut", 28}};
+    resources["dut.b"] = {{"$lut", 14}, {"QL_DSPV2_MULT", 3}};
+    resources["dut.b.sub"] = {{"QL_DSPV2_MULT", 3}};
+    resources["dut.c"] = {{"TDP_ECC36K_BRAM_A1_X18_B1_X18_A2_X18_B2_X18_split", 2}};
+    return resources;
+}
+
 // Subtree-inclusive atom sets, as atomsets.json writes them: an instance's entry also names
 // the atoms of everything inside it.
 fp::AtomNameMap layoutTestAtoms()
@@ -1133,9 +1146,32 @@ QModelIndex rowNamed(QTreeView* view, const QString& text)
     return hits.isEmpty() ? QModelIndex() : hits.first();
 }
 
+QTableWidget* tabTable(const fp::SelectedResourcesWidget* widget, const QString& tabText)
+{
+    auto* tabs = widget->findChild<QTabWidget*>();
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (tabs->tabText(i) == tabText) {
+            return qobject_cast<QTableWidget*>(tabs->widget(i));
+        }
+    }
+    return nullptr;
+}
+
+// The Tiles tab is label/value rows in a fixed order: CLB, DSP, BRAM.
 int tableValue(const fp::SelectedResourcesWidget* widget, int row)
 {
-    return widget->findChild<QTableWidget*>()->item(row, 0)->text().toInt();
+    return tabTable(widget, "Tiles")->item(row, 1)->text().toInt();
+}
+
+// The Atoms tab's rows depend on the selection, so they are read back by cell type.
+std::map<std::string, int> atomRows(const fp::SelectedResourcesWidget* widget)
+{
+    QTableWidget* table = tabTable(widget, "Atoms");
+    std::map<std::string, int> rows;
+    for (int row = 0; row < table->rowCount(); ++row) {
+        rows[table->item(row, 0)->text().toStdString()] = table->item(row, 1)->text().toInt();
+    }
+    return rows;
 }
 
 }  // namespace
@@ -1168,6 +1204,7 @@ TEST(SelectedResources, SelectingInstancesTalliesWhatTheyCost)
         fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
     tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
     tree.setAtomNames(layoutTestAtoms());
+    tree.setAtomResources(layoutTestResources());
 
     auto* view = tree.findChild<QTreeView*>();
     auto* table = tree.findChild<fp::SelectedResourcesWidget*>();
@@ -1205,6 +1242,7 @@ TEST(SelectedResources, AParentAndItsChildAreNotCountedTwice)
         fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
     tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
     tree.setAtomNames(layoutTestAtoms());
+    tree.setAtomResources(layoutTestResources());
 
     auto* view = tree.findChild<QTreeView*>();
     auto* table = tree.findChild<fp::SelectedResourcesWidget*>();
@@ -1218,6 +1256,110 @@ TEST(SelectedResources, AParentAndItsChildAreNotCountedTwice)
                                    QItemSelectionModel::Select | QItemSelectionModel::Rows);
     EXPECT_EQ(tableValue(table, 1), 3) << "selecting the child as well must change nothing";
     EXPECT_EQ(tableValue(table, 0), clb);
+}
+
+TEST(SelectedResources, AtomResourcesAreSummedOverTheOutermostEntriesOnly)
+{
+    // The entries nest, so summing every covered one charges an inner instance twice. Only
+    // the outermost covered entries count -- the same rule the atom-set union arrives at.
+    const fp::AtomResourceMap resources = layoutTestResources();
+
+    const std::map<std::string, int> parentOnly = fp::tallyAtomResources(resources, {"dut.b"});
+    EXPECT_EQ(parentOnly.at("QL_DSPV2_MULT"), 3);
+    EXPECT_EQ(parentOnly.at("$lut"), 14);
+
+    const std::map<std::string, int> both =
+        fp::tallyAtomResources(resources, {"dut.b", "dut.b.sub"});
+    EXPECT_EQ(both, parentOnly) << "selecting a child as well must not add its dsps again";
+
+    // Disjoint selections do add up.
+    const std::map<std::string, int> two = fp::tallyAtomResources(resources, {"dut.a", "dut.b"});
+    EXPECT_EQ(two.at("$lut"), 42);
+    EXPECT_EQ(two.at("QL_DSPV2_MULT"), 3);
+
+    // A scope with no entry of its own is not empty: its descendants' entries are what count.
+    const std::map<std::string, int> scope = fp::tallyAtomResources(resources, {"dut"});
+    EXPECT_EQ(scope.at("$lut"), 42);
+    EXPECT_EQ(scope.at("QL_DSPV2_MULT"), 3);
+    EXPECT_EQ(scope.at("TDP_ECC36K_BRAM_A1_X18_B1_X18_A2_X18_B2_X18_split"), 2);
+
+    EXPECT_TRUE(fp::tallyAtomResources(resources, {}).empty());
+    // A path that is a string prefix of a real one, but not its ancestor, covers nothing.
+    EXPECT_TRUE(fp::tallyAtomResources(resources, {"dut.b_other"}).empty());
+}
+
+TEST(SelectedResources, TheAtomsTabNamesCellsAsSynthesisNamedThem)
+{
+    // Raw netlist names, not friendlier labels: they are what the Atom List column shows and
+    // what a user greps the .blif for.
+    fp::Partition::setAtomsPerTile(14);
+    fp::SynthResourceHierarchyWidget tree(
+        fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
+    tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
+    tree.setAtomNames(layoutTestAtoms());
+    tree.setAtomResources(layoutTestResources());
+
+    auto* view = tree.findChild<QTreeView*>();
+    auto* widget = tree.findChild<fp::SelectedResourcesWidget*>();
+
+    // Tiles is what opens: sizing a region is what the panel is for.
+    EXPECT_EQ(tree.findChild<QTabWidget*>()->currentIndex(), 0);
+    EXPECT_EQ(tree.findChild<QTabWidget*>()->tabText(0), "Tiles");
+    EXPECT_TRUE(atomRows(widget).empty()) << "nothing selected, so no atom rows";
+
+    view->selectionModel()->select(rowNamed(view, "b"),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    const std::map<std::string, int> rows = atomRows(widget);
+    EXPECT_EQ(rows.at("$lut"), 14);
+    EXPECT_EQ(rows.at("QL_DSPV2_MULT"), 3);
+
+    // The two tabs answer for the same selection, so their totals must agree.
+    int atomTotal = 0;
+    for (const auto& [type, count] : rows) {
+        atomTotal += count;
+    }
+    EXPECT_EQ(atomTotal, 17) << "14 luts and 3 dsps is what dut.b holds";
+
+    // Biggest first, so the row that decides whether this fits needs no scrolling.
+    QTableWidget* table = tabTable(widget, "Atoms");
+    ASSERT_EQ(table->rowCount(), 2);
+    EXPECT_EQ(table->item(0, 0)->text(), "$lut");
+    EXPECT_EQ(table->item(1, 0)->text(), "QL_DSPV2_MULT");
+
+    view->selectionModel()->clearSelection();
+    EXPECT_TRUE(atomRows(widget).empty()) << "clearing the selection empties the tab";
+}
+
+TEST(SelectedResources, ALoadedAtomsetsFileCarriesBothHalves)
+{
+    // atomsets.json's "resources" was read and thrown away until the Atoms tab needed it.
+    // This pins that the loader keeps it, and keeps it beside the atom list it belongs to.
+    const auto path = writeQdc("fp_atomsets_resources", R"({
+      "top": "dut",
+      "atoms_per_tile": 14,
+      "atomsets": {
+        "dut.a": {
+          "count": 3,
+          "resources": {"$lut": 2, "sdffre": 1},
+          "atoms": ["dut.a.n0_$lut_Y", "dut.a.n1_$lut_Y", "dut.a.n2_sdffre_Q"]
+        },
+        "dut.b": {"count": 0, "atoms": []}
+      }
+    })");
+
+    fp::AtomNameMap names;
+    fp::AtomResourceMap resources;
+    int atomsPerTile = 1;
+    ASSERT_TRUE(fp::loadAtomSets(path, names, resources, atomsPerTile));
+
+    EXPECT_EQ(atomsPerTile, 14);
+    EXPECT_EQ(names["dut.a"].size(), 3u);
+    EXPECT_EQ(resources["dut.a"]["$lut"], 2);
+    EXPECT_EQ(resources["dut.a"]["sdffre"], 1);
+    // An entry with no "resources" is not a failure -- it costs the Atoms tab its numbers
+    // for that instance and nothing else.
+    EXPECT_EQ(resources.count("dut.b"), 0u);
+    EXPECT_EQ(names.count("dut.b"), 1u);
 }
 
 TEST(SelectedResources, ThePartitionTreeDoesNotGetTheTable)

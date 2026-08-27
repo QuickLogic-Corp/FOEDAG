@@ -19,10 +19,25 @@ namespace fp {
 // in the other.
 using AtomNameMap = std::map<std::string, std::vector<std::string>, NaturalLess>;
 
+// [aurora2#1725] The other half of an atomsets.json entry: RTL instance path -> the raw
+// synthesized cell types it holds and how many of each ("$lut", "sdffre", "adder_carry",
+// "TDP_ECC36K_BRAM_...", ...). Names are the netlist's own, not friendlier labels: they are
+// what the Atom List column shows and what a user greps the .blif for.
+//
+// Subtree-inclusive exactly like the atom lists, and consistent with them -- measured on
+// fft256, all 411 entries have sum(resources) == count == atoms.size(), and a parent's
+// counts equal the sum over its children.
+using AtomResourceMap = std::map<std::string, std::map<std::string, int>, NaturalLess>;
+
 // Reads atomsets.json. Returns false if the file is missing or unreadable; atomsPerTile is
 // left untouched unless the file states it.
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
                   int& atomsPerTile);
+
+// As above, and also the per-instance cell-type counts. A separate overload rather than a
+// wider AtomNameMap: the batch checker (REQ-004) sizes regions and has no use for them.
+bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
+                  AtomResourceMap& atomResources, int& atomsPerTile);
 
 // Every atom belonging to `path`, its sub-instances included.
 //
@@ -56,5 +71,18 @@ struct ResourceTally {
 // Counts by type. Pass atoms as a set: an atom named by two selected instances -- a parent
 // and its child, say -- must be paid for once.
 ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile);
+
+// [aurora2#1725] Cell type -> count over everything `paths` covers.
+//
+// The entries nest, so this is NOT a sum over the selected paths: selecting an instance and
+// something inside it would then pay for the inner one twice. Only the outermost covered
+// entries are added -- the same rule Partition::resourceContribution() applies for the same
+// reason, and the same answer the atom-set union gives, arrived at without materialising
+// tens of thousands of atom names.
+//
+// A path with no entry of its own is not empty: floorplanning_atomsets.tcl gives no entry to
+// a scope that holds only sub-instances, so its descendants' entries are what count.
+std::map<std::string, int> tallyAtomResources(const AtomResourceMap& atomResources,
+                                              const std::set<std::string>& paths);
 
 }  // namespace fp

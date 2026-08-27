@@ -2327,10 +2327,14 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     // required-clb figure. Two readers of that would mean the two paths could report
     // different tile counts for the same .qdc.
     fp::AtomNameMap atomNames;
+    fp::AtomResourceMap atomResources;
     int atomsPerTile = fp::Partition::atomsPerTile();  // A.13.3 default unless the file says
-    if (fp::loadAtomSets(atomsetsJsonPath, atomNames, atomsPerTile)) {
+    if (fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile)) {
       m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
       m_floorPlanningWidget->setAtomNames(std::move(atomNames));
+      // The same file's "resources" map: the cell types behind those atoms, which the
+      // Atoms tab of "Selected RTL Resources" reports.
+      m_floorPlanningWidget->setAtomResources(std::move(atomResources));
     }
   }
 

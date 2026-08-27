@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AtomSets.h"
 #include "Partition.h"
 #include "NaturalSort.h"
 
@@ -61,6 +62,11 @@ public:
     // the atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
 
+    // [aurora2#1725] Cell-type counts per instance, for the Atoms tab of the selected-
+    // resources table. Independent of setAtomNames(): a file without a "resources" map
+    // leaves that tab empty and everything else working.
+    void setAtomResources(AtomResourceMap atomResources);
+
     // [aurora2#1725] "Show Atom List and Type columns" from the Options menu. Off by
     // default: the atom names are long and mostly of interest when debugging a mapping.
     void setAtomColumnsVisible(bool visible);
@@ -116,6 +122,7 @@ private:
     // just an empty-map check.
     bool m_hasAtomNames = false;
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
+    AtomResourceMap m_atomResources;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
     std::map<std::string, InstancePlacement> m_placements;

@@ -10,6 +10,13 @@ namespace fp {
 
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames, int& atomsPerTile)
 {
+    AtomResourceMap ignored;
+    return loadAtomSets(path, atomNames, ignored, atomsPerTile);
+}
+
+bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
+                  AtomResourceMap& atomResources, int& atomsPerTile)
+{
     std::ifstream stream(path);
     if (!stream) {
         return false;
@@ -42,6 +49,19 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames, int
             }
         }
         atomNames[it.key()] = std::move(atoms);
+
+        // "resources": the cell types behind those atoms. Older files may not have it, and a
+        // missing map is not a failure -- it costs the Atoms tab its numbers, nothing else.
+        if (it.value().contains("resources") && it.value()["resources"].is_object()) {
+            std::map<std::string, int> resources;
+            for (auto res = it.value()["resources"].begin();
+                 res != it.value()["resources"].end(); ++res) {
+                if (res.value().is_number_integer()) {
+                    resources[res.key()] = res.value().get<int>();
+                }
+            }
+            atomResources[it.key()] = std::move(resources);
+        }
     }
     return true;
 }
@@ -99,6 +119,45 @@ ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPe
     const int perTile = (atomsPerTile > 0) ? atomsPerTile : 1;
     tally.clbTiles = (tally.clbAtoms + perTile - 1) / perTile;
     return tally;
+}
+
+std::map<std::string, int> tallyAtomResources(const AtomResourceMap& atomResources,
+                                              const std::set<std::string>& paths)
+{
+    // Every entry the selection covers: named by it, or sitting under something it named.
+    std::set<std::string> covered;
+    for (const auto& [entry, resources] : atomResources) {
+        for (const std::string& path : paths) {
+            if (entry == path || entry.compare(0, path.size() + 1, path + ".") == 0) {
+                covered.insert(entry);
+                break;
+            }
+        }
+    }
+
+    std::map<std::string, int> totals;
+    for (const std::string& entry : covered) {
+        // Drop it if an ancestor of it is covered too: that ancestor's counts already
+        // include this one's, and adding both charges for the same atoms twice.
+        bool nested = false;
+        for (std::size_t dot = entry.rfind('.'); dot != std::string::npos;
+             dot = entry.rfind('.', dot - 1)) {
+            if (covered.count(entry.substr(0, dot)) != 0) {
+                nested = true;
+                break;
+            }
+            if (dot == 0) {
+                break;
+            }
+        }
+        if (nested) {
+            continue;
+        }
+        for (const auto& [type, count] : atomResources.at(entry)) {
+            totals[type] += count;
+        }
+    }
+    return totals;
 }
 
 }  // namespace fp

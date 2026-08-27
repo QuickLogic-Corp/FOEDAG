@@ -4,7 +4,11 @@
 
 #include <QWidget>
 
+#include <map>
+#include <string>
+
 class QLabel;
+class QTabWidget;
 class QTableWidget;
 
 namespace fp {
@@ -18,8 +22,14 @@ namespace fp {
 // checkboxes: checking an instance assigns it to a partition, which is a change to the
 // floorplan; selecting is just pointing at something.
 //
-// Three rows, CLB/DSP/BRAM, one value column. The figures come from tallyResources(), the
-// same arithmetic behind the partitions table, so the two cannot disagree.
+// Two tabs, because the answer has two units and neither substitutes for the other:
+//
+//   Tiles  what the floorplan is drawn in -- CLB/DSP/BRAM. The CLB figure is an estimate
+//          (atoms over a packing density), and it is the only estimate in this widget.
+//   Atoms  what the netlist actually holds -- $lut, sdffre, adder_carry, TDP_ECC36K_...,
+//          named as synthesis named them, and exact.
+//
+// Tiles opens first: sizing a region is what the panel is for.
 class SelectedResourcesWidget final : public QWidget {
     Q_OBJECT
 public:
@@ -28,18 +38,23 @@ public:
     // `instances` is how many tree rows the tally covers -- shown alongside it, because "0
     // CLB" means something different for an empty selection than for a selected instance
     // that synthesis emptied.
-    void setTally(const ResourceTally& tally, int instances);
+    void setTally(const ResourceTally& tally, const std::map<std::string, int>& atomResources,
+                  int instances);
 
     // Nothing selected: zeroes, not a stale answer from the previous selection.
     void clear();
 
 private:
-    enum Row { Clb = 0, Dsp = 1, Bram = 2, RowCount = 3 };
+    enum TileRow { Clb = 0, Dsp = 1, Bram = 2, TileRowCount = 3 };
+    enum AtomColumn { Type = 0, Count = 1 };
 
     QLabel* m_lbSelection{nullptr};
-    QTableWidget* m_table{nullptr};
+    QTabWidget* m_tabs{nullptr};
+    QTableWidget* m_tiles{nullptr};
+    QTableWidget* m_atoms{nullptr};
 
-    void setValue(Row row, int value, const QString& tip);
+    void setTileValue(TileRow row, int value, const QString& tip);
+    void setAtomRows(const std::map<std::string, int>& atomResources);
 };
 
 }  // namespace fp
