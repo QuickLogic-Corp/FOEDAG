@@ -434,7 +434,7 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
     // item "fix" it: fillPartitionWithSelectedElements() does this same lookup,
     // just only for whichever one partition is currently selected. Cheap and
     // idempotent: an element that already carries the right vprNames just gets the
-    // same set back, and if m_atomNames is empty (pre-synthesis, no atomsets.json
+    // same set back, and if m_atomNames is empty (no atomsets.json for this device
     // yet) every element keeps whatever it already had.
     for (const auto& [id, partition]: partitions) {
         const HierarhyElements existing = partition->elements();

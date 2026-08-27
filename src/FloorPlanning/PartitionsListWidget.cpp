@@ -46,23 +46,19 @@ PartitionsListWidget::PartitionsListWidget(QWidget* parent)
     m_tableWidget->setHorizontalHeaderLabels(
         {tr("Name"), tr("CLB"), tr("DSP"), tr("BRAM"), tr("Placed"), QString()});
 
-    // [aurora2#1725 stage P7] The cells explain their own tier, but only once you know which
-    // cell to hover. Say what each column IS on the header, so the difference between the
-    // three "required/available" columns and the measured one is readable at a glance.
+    // [aurora2#1725 stage P7] The cells explain their own source, but only once you know
+    // which cell to hover. Say what each column IS on the header, so the difference between
+    // the three "required/available" columns and the measured one is readable at a glance.
     const std::array<std::pair<int, QString>, 4> headerTips{{
         {Column::Clb, tr("Required / available CLB tiles.\n\n"
                          "Required is a sizing hint, not a placement result: clb atoms are\n"
                          "luts and flops that pack many to a tile, so the figure is an atom\n"
-                         "count divided by a packing density. A leading ~ marks a row whose\n"
-                         "figures are a pre-synthesis estimate.")},
+                         "count divided by a packing density.")},
         {Column::Dsp, tr("Required / available DSP tiles.\n\n"
                          "One DSP atom is one tile, so unlike CLB this needs no packing\n"
-                         "estimate. It is exact even before synthesis: a multiplier in the\n"
-                         "RTL always becomes a DSP.")},
+                         "estimate.")},
         {Column::Bram, tr("Required / available BRAM tiles.\n\n"
-                          "One BRAM atom is one tile. Blank before synthesis,\n"
-                          "because whether a memory becomes a BRAM is decided by\n"
-                          "synthesis rather than by the RTL.")},
+                          "One BRAM atom is one tile.")},
         {Column::Placed, tr("CLB tiles this partition ACTUALLY occupies, from the placement.\n\n"
                             "The measured counterpart to the CLB column's estimate — compare the\n"
                             "two to see how well a region was sized.\n\n"
@@ -242,41 +238,23 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
         // the view label these are always shown, even 0/available, since a table
         // column can't disappear per-row the way free text can.
         //
-        // [aurora2#1725 stage P7] A partition whose counts came from a tier-1 estimate
-        // rather than from measured atoms is marked "~180/224" and says so on hover. The
-        // three tiers share a shape, so without this the panel would show a pre-synthesis
-        // guess in the same cell, in the same format, as a measurement (A.13.5).
-        const bool estimated = partition->isEstimated();
-        auto resourceItem = [estimated](int required, int available) {
-            auto* item = new QTableWidgetItem(QString("%1%2/%3")
-                                                  .arg(estimated ? "~" : "")
-                                                  .arg(required)
-                                                  .arg(available));
+        // [aurora2#1725] Every figure here is counted from the post-synthesis netlist --
+        // the panel does not open before synthesis, so there is no pre-synthesis estimate
+        // to distinguish these from and no "~" marker to carry.
+        auto resourceItem = [](int required, int available) {
+            auto* item = new QTableWidgetItem(QString("%1/%2").arg(required).arg(available));
             item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-            item->setToolTip(estimated
-                ? QObject::tr(
-                      "Estimated — no netlist exists yet, so these\n"
-                      "figures come from the RTL.\n\n"
-                      "DSP is exact: a multiplier in the RTL always becomes a DSP.\n\n"
-                      "CLB is approximate: it divides an estimated cell count by a packing\n"
-                      "density, and packing has not happened yet.\n\n"
-                      "BRAM is left blank rather than guessed, because synthesis —\n"
-                      "not the RTL — decides whether a memory becomes a BRAM: small\n"
-                      "or awkwardly ported ones are turned into flops and logic\n"
-                      "instead. Showing a number here would have you reserve BRAM\n"
-                      "columns the design may never use.\n\n"
-                      "Synthesize to replace all of these with figures\n"
-                      "counted from the netlist.")
-                : QObject::tr("Counted from the post-synthesis netlist. The CLB figure is still\n"
-                              "packing-density derived, so it is a sizing hint rather than the tile\n"
-                              "count the placer will use."));
+            item->setToolTip(
+                QObject::tr("Counted from the post-synthesis netlist. The CLB figure is still\n"
+                            "packing-density derived, so it is a sizing hint rather than the tile\n"
+                            "count the placer will use."));
             return item;
         };
         m_tableWidget->setItem(row, Column::Clb, resourceItem(partition->clbRequiredCount(), partition->clbAvailableCount()));
         m_tableWidget->setItem(row, Column::Dsp, resourceItem(partition->dspRequiredCount(), partition->dspAvailableCount()));
         m_tableWidget->setItem(row, Column::Bram, resourceItem(partition->bramRequiredCount(), partition->bramAvailableCount()));
 
-        // [aurora2#1725 stage P7] Tier 3: CLB tiles the placer actually used. Blank until a
+        // [aurora2#1725 stage P7] Tier 2: CLB tiles the placer actually used. Blank until a
         // placement exists, because there is no honest number to show before then.
         const Partition::ResourceContribution contribution = partition->resourceContribution();
         auto* placedItem = new QTableWidgetItem();
@@ -350,45 +328,28 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
 
 // [aurora2#1725 stage P7] Name the source of the numbers in the table.
 //
-// Deliberately reports the tier of the CLB/DSP/BRAM columns, which is not the same as the
-// tier of design_resources.json. Those columns are fed by the atom-based tally, so a row is
-// tier 2 whenever it has atoms; the tier-1 estimate only fills in for rows that have none.
-// A tier-3 file on disk does NOT make them tier 3: claiming placed-tile accuracy for a
-// packing-density estimate is exactly the confusion A.13.5 exists to prevent.
+// Deliberately reports the source of the CLB/DSP/BRAM columns, which is not the same as the
+// tier of design_resources.json. Those columns are fed by the atom-based tally, so they are
+// always counted from the post-synthesis netlist. A tier-2 file on disk does NOT make them
+// tier 2: claiming placed-tile accuracy for a packing-density estimate is exactly the
+// confusion A.13.5 exists to prevent.
 //
-// The tier-3 measurement has its own column, Placed, and is named separately below --
-// keeping the two apart is the whole reason it is a column rather than a third number
+// The tier-2 measurement has its own column, Placed, and is named separately below --
+// keeping the two apart is the whole reason it is a column rather than a second number
 // folded into CLB.
 void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, PartitionPtr>& partitions)
 {
-    int estimatedRows = 0;
-    for (const auto& [id, partition]: partitions) {
-        if (partition->isEstimated()) ++estimatedRows;
-    }
-    const int total = static_cast<int>(partitions.size());
-
-    if (total == 0) {
+    if (partitions.empty()) {
         m_lbResourceSource->setVisible(false);
         return;
     }
 
-    QString text;
-    if (estimatedRows == 0) {
-        text = tr("Resources: counted from the post-synthesis netlist.");
-    } else if (estimatedRows == total) {
-        text = tr("Resources: estimated before synthesis (~). "
-                  "DSP exact, CLB approximate, BRAM left blank until synthesis decides "
-                  "whether a memory becomes one. Hover a cell for detail.");
-    } else {
-        text = tr("Resources: mixed — %1 of %2 partition(s) are a pre-synthesis estimate (~); "
-                  "the rest are counted from the post-synthesis netlist.")
-                   .arg(estimatedRows).arg(total);
-    }
+    QString text = tr("Resources: counted from the post-synthesis netlist.");
 
     // Only ever a hint, at any tier: CLB required is atoms divided by packing density, not
     // the tile count the placer will settle on. "Placed" is where the real figure lives.
     text += tr("  CLB is a sizing hint in tiles, not a placement result.");
-    if (Partition::designResources().tier >= 3) {
+    if (Partition::designResources().tier >= 2) {
         text += tr("  Placed shows tiles measured from the placement.");
     }
 

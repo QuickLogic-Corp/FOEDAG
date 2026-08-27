@@ -170,8 +170,8 @@ class Compiler {
   // [aurora2#1725 stage P0] instance discovery -- elaboration only, RTL sources ->
   // <top>_elab.json -> instances.json. No-op in the base FOEDAG compiler (returns
   // true); CompilerOpenFPGA_ql is the flow that knows how to run it. Public (not one
-  // of the protected Compile-stage virtuals above) because it's also called directly
-  // from MainWindow's FloorPlanning QAction handler, not only from Synthesize().
+  // of the protected Compile-stage virtuals above) because the open_project Tcl handler
+  // calls it directly, not only Synthesize().
   // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0).
   virtual bool EnsureElaborated() { return true; }
 

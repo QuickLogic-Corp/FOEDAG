@@ -558,8 +558,8 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     // previously derived instances.json. Not eagerly elaborated here: real Tcl flows
     // call set_top_module *before* add_design_file (see e.g. and2.tcl, dsp2.tcl), so
     // at this point there are no design files yet and elaboration would be a no-op.
-    // EnsureElaborated() runs lazily from Synthesize() and from the FloorPlanning
-    // QAction handler instead, once files are actually present.
+    // EnsureElaborated() runs lazily from Synthesize() and eagerly from the open_project
+    // handler instead, once files are actually present.
     compiler->MarkDesignDirty();
     return TCL_OK;
   };

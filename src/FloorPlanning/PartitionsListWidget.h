@@ -35,7 +35,7 @@ private:
     // [aurora2#1725] Name (editable, drives rename/selection) + required/available
     // resource columns, read-only, one row per partition. Column::Name must stay 0:
     // rename/selection/lookup all key off the item in that column.
-    // Placed is the tier-3 measurement -- CLB tiles the placer actually used -- kept in its
+    // Placed is the tier-2 measurement -- CLB tiles the placer actually used -- kept in its
     // own column rather than folded into Clb, because required and placed are different
     // questions and A.13.5 forbids rendering an estimate and a measurement identically.
     // Remove is last so the existing indices are untouched; it holds one delete button per
@@ -45,8 +45,8 @@ private:
     QTableWidget* m_tableWidget{nullptr};
 
     // [aurora2#1725 stage P7] Says where the numbers above it came from. A.13.5 requires the
-    // tier be surfaced: the three tiers are indistinguishable by shape, so without this a
-    // pre-synthesis guess and a measured count render identically.
+    // tier be surfaced: the two tiers are indistinguishable by shape, so without this a
+    // packing-density estimate and a measured tile count render identically.
     QLabel* m_lbResourceSource{nullptr};
     void updateResourceSourceLabel(const std::map<int, PartitionPtr>& partitions);
 

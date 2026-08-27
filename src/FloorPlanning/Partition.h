@@ -19,9 +19,9 @@ class Partition {
 public:
     static void resetIdGenerator() { s_idGenerator = 0; }
 
-    // [aurora2#1725 stage P7] design_resources.json, for the pre-synthesis case only.
-    // Static for the same reason s_atomsPerTile is: it describes the design every
-    // partition is measured against, not one partition.
+    // [aurora2#1725 stage P7] design_resources.json. Static for the same reason
+    // s_atomsPerTile is: it describes the design every partition is measured against,
+    // not one partition.
     static void setDesignResources(DesignResources resources) {
         s_designResources = std::move(resources);
     }
@@ -82,17 +82,15 @@ public:
 
     // [aurora2#1725 stage P7] What design_resources.json contributes to this partition.
     //
-    // Computed on demand rather than accumulated in addElement(), because tier-1 entries
-    // NEST -- the estimator walks the whole instance tree, so a parent's figures already
-    // include its children's. Adding them incrementally would count a partition holding
-    // both a parent and a child twice; only the maximal elements may contribute.
+    // Only the tier-2 measurement: the clb/dsp/bram the panel shows are tallied from this
+    // partition's own atoms, which are exact post-synthesis and need nothing from this file.
+    //
+    // Computed on demand rather than accumulated in addElement(), because the entries NEST
+    // -- atomsets.json reports a parent's figures as already including its children's.
+    // Adding them incrementally would count a partition holding both a parent and a child
+    // twice; only the maximal elements may contribute.
     struct ResourceContribution {
-        int clbTiles = 0;      // tier-1 estimate, already in tiles
-        int dsp = 0;
-        int bram = 0;
-        bool estimated = false;
-
-        int clbActual = 0;     // tier-3 measured tiles
+        int clbActual = 0;     // tier-2 measured tiles
         bool hasActual = false;
         bool actualShared = false;   // at least one contributor shares clusters
         bool actualPartial = false;  // some contributor had no measurement
@@ -116,14 +114,6 @@ public:
                 out.actualPartial = true;
                 continue;
             }
-            // The tier-1 estimate only stands in where there are no atoms at all. Once
-            // atomsets.json exists the atom tally above is exact and must win.
-            if (s_designResources.isEstimate() && element.vprNames.empty()) {
-                out.clbTiles += it->second.clbEst;
-                out.dsp += it->second.dsp;
-                out.bram += it->second.bram;
-                out.estimated = true;
-            }
             if (it->second.hasClbActual) {
                 out.clbActual += it->second.clbActual;
                 out.hasActual = true;
@@ -135,10 +125,6 @@ public:
         return out;
     }
 
-    // [aurora2#1725 stage P7] True when any part of this partition's counts came from a
-    // tier-1 estimate rather than from measured atoms. A.13.5 requires that a consumer
-    // never present the two as the same thing, and shape alone cannot tell them apart.
-    bool isEstimated() const { return resourceContribution().estimated; }
 
     const HierarhyElements& elements() const { return m_elements; }
     const std::map<int, RegionPtr> regions() const { return m_regions; }
@@ -154,11 +140,10 @@ public:
     // carries the A.13.2b safety margin), so it is added after the atom->tile division,
     // not before it.
     int clbRequiredCount() const {
-        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile
-               + resourceContribution().clbTiles;
+        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile;
     }
-    int dspRequiredCount() const { return m_dspRequiredCount + resourceContribution().dsp; }
-    int bramRequiredCount() const { return m_bramRequiredCount + resourceContribution().bram; }
+    int dspRequiredCount() const { return m_dspRequiredCount; }
+    int bramRequiredCount() const { return m_bramRequiredCount; }
 
     // Raw atom count behind clbRequiredCount(), for anything reporting atoms rather than
     // the tiles they pack into.

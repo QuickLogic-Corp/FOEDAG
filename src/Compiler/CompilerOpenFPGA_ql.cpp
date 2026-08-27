@@ -2104,10 +2104,15 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
     // done: whatever blocked it may be fixed by the time the design is next compiled.
     return true;
   }
-  // [aurora2#1725 stage P7] tier 1 -- the only sizing figures available before synthesis
-  // runs, and capped at 1 so an RTL edit replaces any tier-2 file left by the previous
-  // revision. Best-effort; see RunDesignResources().
-  RunDesignResources(1);
+  // [aurora2#1725 stage P7] There is no pre-synthesis tier to produce here -- resource
+  // figures are post-synthesis only. What still has to happen is the other half of what the
+  // tier-1 call did: design_resources.json describes the netlist of the PREVIOUS revision,
+  // and the RTL has just changed. Left in place it would keep feeding the panel counts for
+  // a netlist that no longer exists, which is the failure the tier field exists to prevent.
+  // Removed rather than replaced: "no figures yet" is the truthful state until synthesis
+  // produces atom sets. The append-only resource_estimation.log is deliberately untouched.
+  std::error_code resources_ec;
+  std::filesystem::remove(FloorplanningArtifact("design_resources.json"), resources_ec);
 
   m_designDirty = false;
   return true;
@@ -2382,24 +2387,22 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   const std::string projectName = ProjManager()->projectName();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
 
-  std::filesystem::path elab_json_path = projectPath / (topModule + "_elab.json");
   std::filesystem::path atomsets_path = FloorplanningAtomsets();
   // VPR names these after the project, not the top module -- see Placement(), which
   // builds the same two paths to decide whether placement can be reused.
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
 
-  // Pick the highest tier the inputs support, capped by the calling stage. atomsets.json
-  // only exists for devices whose template has the P2/P3 blocks, so tier 2 is not always
-  // reachable even after a successful synthesis; tier 1 covers that case.
-  const bool useAtomsets = (maxTier >= 2) && FileUtils::FileExists(atomsets_path);
-  const bool usePlacement = (maxTier >= 3) && useAtomsets &&
+  // [aurora2#1725] Both tiers are post-synthesis. atomsets.json only exists for devices
+  // whose template carries the P2/P3 blocks, so a device without them reports nothing at
+  // all rather than falling back to a pre-synthesis estimate -- there is no such tier.
+  const bool useAtomsets = (maxTier >= 1) && FileUtils::FileExists(atomsets_path);
+  const bool usePlacement = (maxTier >= 2) && useAtomsets &&
                             FileUtils::FileExists(net_path) &&
                             FileUtils::FileExists(place_path);
-  const bool useElab = !useAtomsets && FileUtils::FileExists(elab_json_path);
 
-  if (!useAtomsets && !useElab) {
-    // Neither input on disk yet. Nothing to report, and nothing has gone wrong.
+  if (!useAtomsets) {
+    // No atom sets on disk yet. Nothing to report, and nothing has gone wrong.
     return true;
   }
 
@@ -2424,26 +2427,21 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   }
 
   std::filesystem::path design_resources_path = FloorplanningArtifact("design_resources.json");
-  // Persists across tiers 1/2/3's separate invocations, unlike design_resources_path above,
-  // which each tier overwrites. Once tier 3 supplies clb_actual, the script appends the
-  // error against whichever tier 1/2 clb_est this same log already holds.
+  // Persists across tier 1 and tier 2's separate invocations, unlike design_resources_path
+  // above, which each of them overwrites. Once tier 2 supplies clb_actual, the script
+  // appends the error against that run's own clb_est.
   std::filesystem::path estimation_log_path =
       FloorplanningArtifact("resource_estimation.log");
 
   std::vector<std::string> args;
   args.push_back(design_resources_script_path.string());
-  if (useAtomsets) {
-    args.push_back("--atomsets");
-    args.push_back(atomsets_path.string());
-    if (usePlacement) {
-      args.push_back("--net");
-      args.push_back(net_path.string());
-      args.push_back("--place");
-      args.push_back(place_path.string());
-    }
-  } else {
-    args.push_back("--elab");
-    args.push_back(elab_json_path.string());
+  args.push_back("--atomsets");
+  args.push_back(atomsets_path.string());
+  if (usePlacement) {
+    args.push_back("--net");
+    args.push_back(net_path.string());
+    args.push_back("--place");
+    args.push_back(place_path.string());
   }
   args.push_back("--estimation-log");
   args.push_back(estimation_log_path.string());
@@ -2646,7 +2644,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
     RunValidateInstances();
-    RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning
+    RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
   }
   #endif
@@ -2676,7 +2674,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
     RunValidateInstances();
-    RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning
+    RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
   }
   // incr compilation
@@ -2709,7 +2707,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     RunValidateInstances();
     // [aurora2#1725 stage P7] tier 2 -- exact per-instance primitive counts, now that
     // atomsets.json describes the netlist just written.
-    RunDesignResources(2);
+    RunDesignResources(1);
     return true;
   }
 }
@@ -4780,7 +4778,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Design " + ProjManager()->projectName() + " placement reused");
     // [aurora2#1725 stage P7] tier 3 -- the .net/.place this path just found up-to-date
     // are exactly what tier 3 reads, so regenerate even though VPR did not re-run.
-    RunDesignResources(3);
+    RunDesignResources(2);
     RunConstraintCompliance();
     return true;
   }
@@ -4891,7 +4889,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement skipped, not required");
     Message("##################################################");
     m_state = State::Placed;
-    RunDesignResources(3);  // [aurora2#1725 stage P7] tier 3, same reasoning as above
+    RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning as above
     RunConstraintCompliance();
     return true;
   }
@@ -4927,7 +4925,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   // [aurora2#1725 stage P7] tier 3 -- actual placed tiles, the only ground truth the
   // FloorPlanning UI can compare its estimates against. Runs before the place2pcf.py
   // block below, which returns early when no pin table is found.
-  RunDesignResources(3);
+  RunDesignResources(2);
   // [aurora2#1725 stage P7] post-placement compliance -- soft constraint, see
   // RunConstraintCompliance()'s own comment for why this never fails the build.
   RunConstraintCompliance();

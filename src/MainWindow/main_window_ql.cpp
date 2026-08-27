@@ -1906,10 +1906,10 @@ void MainWindow::ReShowWindow(QString strProject) {
     m_compiler->finish();
     showMessagesTab();
     showReportsTab();
-    // [aurora2#1725 stage P7] A compile advances design_resources.json (tier 1 -> 2 -> 3)
-    // and rewrites atomsets.json / validation.json. Without this an open panel keeps
-    // showing whatever was on disk when it was opened -- pre-synthesis estimates, marked
-    // "~", that never clear. No-op when the panel is closed.
+    // [aurora2#1725 stage P7] A compile advances design_resources.json (tier 1 -> 2) and
+    // rewrites atomsets.json / validation.json. Without this an open panel keeps showing
+    // whatever was on disk when it was opened -- post-synthesis counts that a later
+    // placement has already improved on. No-op when the panel is closed.
     refreshFloorPlanningData();
   });
 
@@ -2279,11 +2279,11 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   }
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
 
-  // [aurora2#1725 stage P0] instance discovery -- best-effort (re)derive instances.json
-  // here too, so the RTL hierarchy is available even if the user opens FloorPlanning
-  // before ever running synthesis. Failure is already reported via ErrorMessage() inside
-  // EnsureElaborated() and must not block this, which is why the result isn't checked.
-  compiler->EnsureElaborated();
+  // [aurora2#1725 stage P0] instances.json is produced by RunElabInstances() during the
+  // SYNTHESIS task, and floorPlanningActionTriggered() will not open this panel until that
+  // task has produced a netlist -- so the file is already on disk and there is nothing to
+  // (re)derive here. The on-demand EnsureElaborated() call this replaces existed only to
+  // support opening the panel before synthesis, which is no longer allowed.
 
   // [aurora2#1725 stage P1] instances.json (RtlInstanceModel) is the sole source of the
   // tree below, pre- or post-synthesis alike -- a real Yosys/Verific elaboration,
@@ -2301,9 +2301,11 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // [aurora2#1725 stage P4] Merge the verdicts. Written by RunValidateInstances() at the
   // end of the SYNTHESIS task -- including its "skipped, not required" paths -- so it is
   // already there by the time this panel opens, on any project that has been synthesised.
-  // Optional by design: pre-synthesis there is no file and every instance stays "unknown",
-  // which renders exactly as the tree did before this was wired up. Failure isn't checked
-  // for the same reason -- a missing or stale verdict must not stop the user floorplanning.
+  // Still optional rather than required: a device whose template carries no P2/P3 blocks
+  // produces no validation.json even after a successful synthesis, and every instance then
+  // stays "unknown", rendering exactly as the tree did before this was wired up. Failure
+  // isn't checked for the same reason -- a stale verdict must not stop the user
+  // floorplanning.
   std::filesystem::path validationJsonPath =
       fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
                                 compiler->ProjManager()->projectName(), "validation.json");
@@ -2311,10 +2313,10 @@ bool MainWindow::loadFloorPlanningData(QString& error)
 
   // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
   // atoms belonging to it, straight from atomsets.json (floorplanning_atomsets.tcl,
-  // in-session, stage P3). Only available post-synthesis; pre-synthesis there's no
-  // atom data yet, so setAtomNames() is simply not called and every leaf stays
-  // visible (see SynthResourceHierarchyWidget::populateAtomColumns()'s early-return
-  // on !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
+  // in-session, stage P3). Absent on a device whose template carries no P2/P3 blocks, in
+  // which case setAtomNames() is simply not called and every leaf stays visible (see
+  // SynthResourceHierarchyWidget::populateAtomColumns()'s early-return on
+  // !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
   // populateAtomColumns() itself, so the atom-name map has to already be set.
   std::filesystem::path atomsetsJsonPath =
       fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
@@ -2334,8 +2336,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
 
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
   // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
-  // Written by RunDesignResources() at elaboration (tier 1), synthesis (tier 2) and
-  // placement (tier 3). Must be set before loadNetList() below, which builds the trees
+  // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must
+  // be set before loadNetList() below, which builds the trees
   // and populates every partition: Partition::addElement() reads it as it goes.
   //
   // Absent for a project that has never been compiled, and for devices whose template
@@ -2372,9 +2374,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
         for (auto it = instances.begin(); it != instances.end(); ++it) {
           const auto& entry = it.value();
           if (!entry.is_object()) continue;
-          // Read what the tier actually provides and leave the rest at 0: tier 1 omits
-          // bram deliberately (a guess there is a false positive -- "design has $mem*"
-          // does not mean the netlist keeps a BRAM), and only tier 3 has clb_actual.
+          // Read what the tier actually provides and leave the rest at 0: only tier 2
+          // has clb_actual.
           fp::DesignResourceEntry resourceEntry;
           auto readInt = [&entry](const char* key, int& target) {
             if (entry.contains(key) && entry[key].is_number_integer()) {
@@ -2384,8 +2385,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
           readInt("clb_est", resourceEntry.clbEst);
           readInt("dsp", resourceEntry.dsp);
           readInt("bram", resourceEntry.bram);
-          // Tier 3 only. The flag is explicit rather than a sentinel so "not measured"
-          // cannot be read as "measured zero" -- at tiers 1 and 2 CLBs do not exist yet.
+          // Tier 2 only. The flag is explicit rather than a sentinel so "not measured"
+          // cannot be read as "measured zero" -- before placement, CLBs do not exist yet.
           if (entry.contains("clb_actual") && entry["clb_actual"].is_number_integer()) {
             resourceEntry.clbActual = entry["clb_actual"].get<int>();
             resourceEntry.hasClbActual = true;
@@ -2448,7 +2449,7 @@ void MainWindow::refreshFloorPlanningData()
 
   // Only ask when there is genuinely better data to load. The panel keeps the tier it was
   // populated with, so comparing it against what is now on disk answers that directly:
-  // tier 2 arriving after a synthesis, or tier 3 after a placement, is worth interrupting
+  // tier 1 arriving after a synthesis, or tier 2 after a placement, is worth interrupting
   // for; another compile that produced nothing newer is not.
   const int loadedTier = fp::Partition::designResources().tier;
   int diskTier = 0;
@@ -2483,14 +2484,11 @@ void MainWindow::refreshFloorPlanningData()
   box.setIcon(QMessageBox::Question);
   box.setWindowTitle(tr("Floor Planning"));
   // [aurora2#1725 stage P7] Name the source that arrived rather than its level number.
-  // The reason to interrupt is that the figures got better, which "tier 3" only conveys to
+  // The reason to interrupt is that the figures got better, which "tier 2" only conveys to
   // someone who already knows the ladder.
-  QString arrived = tr("estimated from the RTL");
-  if (diskTier >= 3) {
-    arrived = tr("measured from the placement");
-  } else if (diskTier == 2) {
-    arrived = tr("counted from the post-synthesis netlist");
-  }
+  const QString arrived = (diskTier >= 2)
+                              ? tr("measured from the placement")
+                              : tr("counted from the post-synthesis netlist");
   box.setText(tr("More accurate resource data is available: %1.").arg(arrived));
   box.setInformativeText(
       dirty ? tr("Restarting floorplanning reloads the panel from the .qdc on disk, so your "
@@ -2541,6 +2539,23 @@ void MainWindow::floorPlanningActionTriggered()
 
   if (floorPlanningAction->isChecked()) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+    // [aurora2#1725] Floorplanning is a post-synthesis activity. Every figure the panel
+    // shows -- the atom counts per instance, the resource tiers, each instance's
+    // complete/partial/deleted verdict -- is derived from the synthesised netlist, and
+    // none of it exists before synthesis has run. Opening earlier used to show an RTL
+    // tree with empty columns and an estimate the user could not act on.
+    //
+    // Gated on the artifact rather than the SYNTHESIS task's in-memory status, matching
+    // how Pin Planner gates itself above: a project reopened in a later session has a
+    // netlist on disk but no task history, and refusing there would be wrong.
+    if (!FileUtils::FileExists(compiler->getPostSynthBlifFilePath())) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.",
+                            "The post-synthesis netlist is missing. Please run the "
+                            "SYNTHESIS task, then open Floorplanning again.");
+      cleanFloorPlanningUI();
+      return;
+    }
 
     // [aurora2#1725 stage P7] Everything read from disk now lives in
     // loadFloorPlanningData(), called once the widget below exists, so the post-compile

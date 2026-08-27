@@ -542,10 +542,10 @@ TEST(RtlInstanceModel, VerdictsForUnknownInstancesAreIgnoredNotFatal)
 
 // [aurora2#1725 stage P7] design_resources.json -> Partition sizing.
 //
-// The whole point of the tier-1 path is the window BEFORE synthesis, where no atoms exist
-// and the panel previously sized every partition at 0. These pin the two things that must
-// not regress: that an estimate is used when there is nothing else, and that it is never
-// mixed into or mistaken for measured atom counts.
+// Both tiers are post-synthesis, so the clb/dsp/bram columns are always tallied from the
+// partition's own atoms and design_resources.json contributes only the tier-2 measurement.
+// These pin that split: that the tally is atom-based, and that a measured tile count is
+// never folded into the required column.
 
 namespace {
 
@@ -553,7 +553,7 @@ fp::DesignResources makeResources(int tier, std::map<std::string, fp::DesignReso
 {
     fp::DesignResources resources;
     resources.tier = tier;
-    resources.tierName = (tier == 1) ? "estimated from the RTL, before synthesis"
+    resources.tierName = (tier >= 2) ? "measured from the placement"
                                      : "counted from the post-synthesis netlist";
     resources.instances = std::move(instances);
     return resources;
@@ -570,27 +570,27 @@ fp::DesignResourceEntry entry(int clbEst, int dsp, int bram)
 
 }  // namespace
 
-TEST(PartitionResources, PreSynthesisEstimateSizesAPartitionWithNoAtoms)
+TEST(PartitionResources, AnElementWithNoAtomsContributesNothing)
 {
-    // Before synthesis there is no atomsets.json, so every element's vprNames is empty and
-    // the atom-based tally has nothing to count. Without the tier-1 fallback this partition
-    // reports 0 clb for a design that needs 40 tiles.
+    // The panel does not open before synthesis, so an element with no atoms is a genuinely
+    // empty instance rather than a not-yet-synthesised one. It must contribute 0 -- there is
+    // no longer a pre-synthesis estimate to stand in, and inventing one would size a region
+    // for logic that does not exist.
     fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
 
     fp::Partition partition("p");
     partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
 
-    EXPECT_EQ(partition.clbRequiredCount(), 40);
-    EXPECT_EQ(partition.dspRequiredCount(), 4);
-    EXPECT_TRUE(partition.isEstimated());
+    EXPECT_EQ(partition.clbRequiredCount(), 0);
+    EXPECT_EQ(partition.dspRequiredCount(), 0);
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
-TEST(PartitionResources, MeasuredAtomsAreNeverMarkedAsEstimated)
+TEST(PartitionResources, AtomsAreTheOnlySourceOfTheRequiredColumns)
 {
-    // An element that HAS atoms is counted from them, exactly, and the estimate is not
-    // consulted at all -- even though a tier-1 file is loaded and names this instance.
+    // An element that HAS atoms is counted from them, exactly. design_resources.json names
+    // this instance with a clb_est of 40 and that figure must not reach the column.
     fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
     fp::Partition::setAtomsPerTile(14);
 
@@ -601,16 +601,15 @@ TEST(PartitionResources, MeasuredAtomsAreNeverMarkedAsEstimated)
 
     EXPECT_EQ(partition.clbRequiredCount(), 1);  // 3 atoms / 14 per tile, rounded up
     EXPECT_EQ(partition.dspRequiredCount(), 0);
-    EXPECT_FALSE(partition.isEstimated());
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
-TEST(PartitionResources, PostSynthesisTiersNeverFeedThePerPartitionTally)
+TEST(PartitionResources, DesignResourceEntriesNeverFeedThePerPartitionTally)
 {
-    // Tier 2/3 entries NEST -- an ancestor's counts already include its descendants' -- so
-    // adding them to a per-partition tally would double-count a partition holding both a
-    // parent and a child. Only tier 1, whose entries are flat, may be used this way.
+    // The entries NEST -- an ancestor's counts already include its descendants' -- so adding
+    // them to a per-partition tally would double-count a partition holding both a parent and
+    // a child. The tally is atom-based for exactly that reason.
     fp::Partition::setDesignResources(makeResources(2, {{"i_mul_24", entry(40, 4, 0)}}));
 
     fp::Partition partition("p");
@@ -618,22 +617,6 @@ TEST(PartitionResources, PostSynthesisTiersNeverFeedThePerPartitionTally)
 
     EXPECT_EQ(partition.clbRequiredCount(), 0);
     EXPECT_EQ(partition.dspRequiredCount(), 0);
-    EXPECT_FALSE(partition.isEstimated());
-
-    fp::Partition::setDesignResources(fp::DesignResources{});
-}
-
-TEST(PartitionResources, AnInstanceWithNoEstimateContributesNothing)
-{
-    // A path deeper than the flat tier-1 map goes has no entry. It must contribute 0 rather
-    // than fall back to some other instance's figures.
-    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
-
-    fp::Partition partition("p");
-    partition.addElement(fp::HierarhyElement{"i_mul_24.inner", /*isLeaf*/ true});
-
-    EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_FALSE(partition.isEstimated());
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
@@ -648,31 +631,30 @@ TEST(PartitionResources, NoDesignResourcesFileLeavesTheOldBehaviourUntouched)
     partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
 
     EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_FALSE(partition.isEstimated());
     EXPECT_FALSE(fp::Partition::designResources().valid());
 }
 
-TEST(PartitionResources, ClearingElementsAlsoClearsTheEstimate)
+TEST(PartitionResources, ClearingElementsAlsoClearsTheTally)
 {
-    // clearElemenets() is what a reload goes through; a stale estimate surviving it would
-    // be added a second time when the elements come back.
-    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
+    // clearElemenets() is what a reload goes through; atoms surviving it would be counted a
+    // second time when the elements come back.
+    fp::Partition::setAtomsPerTile(14);
 
     fp::Partition partition("p");
-    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
-    ASSERT_EQ(partition.clbRequiredCount(), 40);
+    const fp::HierarhyElement element{
+        "i_mul_24", /*isLeaf*/ true,
+        std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}};
+    partition.addElement(element);
+    ASSERT_EQ(partition.clbRequiredCount(), 1);
 
     partition.clearElemenets();
     EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_FALSE(partition.isEstimated());
 
-    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
-    EXPECT_EQ(partition.clbRequiredCount(), 40);  // not 80
-
-    fp::Partition::setDesignResources(fp::DesignResources{});
+    partition.addElement(element);
+    EXPECT_EQ(partition.clbRequiredCount(), 1);  // not 2
 }
 
-// [aurora2#1725 stage P7] tier-1 nesting and tier-3 measured tiles.
+// [aurora2#1725 stage P7] tier-2 measured tiles, and the ancestor collapse they need.
 
 namespace {
 
@@ -688,21 +670,20 @@ fp::DesignResourceEntry entryWithActual(int clbEst, int clbActual, bool shared =
 
 }  // namespace
 
-TEST(PartitionResources, NestedTier1EstimatesAreNotCountedTwice)
+TEST(PartitionResources, NestedMeasuredTilesAreNotCountedTwice)
 {
-    // The tier-1 estimator now walks the whole instance tree, so a parent's figures already
-    // include its children's. A partition holding both must count the parent only.
-    fp::Partition::setDesignResources(makeResources(1, {
-        {"dut", entry(100, 4, 0)},
-        {"dut.a", entry(40, 2, 0)},
+    // atomsets.json entries NEST, so a parent's clb_actual already includes its children's.
+    // A partition holding both must count the parent only.
+    fp::Partition::setDesignResources(makeResources(2, {
+        {"dut", entryWithActual(100, 90)},
+        {"dut.a", entryWithActual(40, 35)},
     }));
 
     fp::Partition partition("p");
     partition.addElement(fp::HierarhyElement{"dut", true});
     partition.addElement(fp::HierarhyElement{"dut.a", true});
 
-    EXPECT_EQ(partition.clbRequiredCount(), 100);  // not 140
-    EXPECT_EQ(partition.dspRequiredCount(), 4);    // not 6
+    EXPECT_EQ(partition.resourceContribution().clbActual, 90);  // not 125
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
@@ -710,17 +691,16 @@ TEST(PartitionResources, NestedTier1EstimatesAreNotCountedTwice)
 TEST(PartitionResources, SiblingsOnDifferentBranchesStillAddUp)
 {
     // Only ancestors collapse -- two unrelated instances are both maximal.
-    fp::Partition::setDesignResources(makeResources(1, {
-        {"dut.a", entry(40, 1, 0)},
-        {"dut.b", entry(25, 2, 0)},
+    fp::Partition::setDesignResources(makeResources(2, {
+        {"dut.a", entryWithActual(40, 35)},
+        {"dut.b", entryWithActual(25, 20)},
     }));
 
     fp::Partition partition("p");
     partition.addElement(fp::HierarhyElement{"dut.a", true});
     partition.addElement(fp::HierarhyElement{"dut.b", true});
 
-    EXPECT_EQ(partition.clbRequiredCount(), 65);
-    EXPECT_EQ(partition.dspRequiredCount(), 3);
+    EXPECT_EQ(partition.resourceContribution().clbActual, 55);
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
@@ -728,7 +708,7 @@ TEST(PartitionResources, SiblingsOnDifferentBranchesStillAddUp)
 TEST(PartitionResources, MeasuredTilesAreReportedSeparatelyFromTheEstimate)
 {
     // clb_actual is a measurement and clb_est a projection; they must not be conflated.
-    fp::Partition::setDesignResources(makeResources(3, {{"i_a", entryWithActual(40, 37)}}));
+    fp::Partition::setDesignResources(makeResources(2, {{"i_a", entryWithActual(40, 37)}}));
 
     fp::Partition partition("p");
     partition.addElement(fp::HierarhyElement{"i_a", true});
@@ -737,8 +717,6 @@ TEST(PartitionResources, MeasuredTilesAreReportedSeparatelyFromTheEstimate)
     EXPECT_TRUE(contribution.hasActual);
     EXPECT_EQ(contribution.clbActual, 37);
     EXPECT_FALSE(contribution.actualShared);
-    // Tier 3 is not an estimate, so the required column must not be marked with "~".
-    EXPECT_FALSE(partition.isEstimated());
 
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
@@ -747,7 +725,7 @@ TEST(PartitionResources, SharedClustersMakeTheMeasuredTotalAnUpperBound)
 {
     // A cluster holding atoms from two branches is counted for both, so the sum over-counts
     // and the UI must not present it as exact.
-    fp::Partition::setDesignResources(makeResources(3, {
+    fp::Partition::setDesignResources(makeResources(2, {
         {"i_a", entryWithActual(10, 8, /*shared*/ true)},
     }));
 
@@ -762,7 +740,7 @@ TEST(PartitionResources, SharedClustersMakeTheMeasuredTotalAnUpperBound)
 TEST(PartitionResources, AnElementWithNoMeasurementMarksTheTotalIncomplete)
 {
     // Silently summing what IS measured would understate the partition without saying so.
-    fp::Partition::setDesignResources(makeResources(3, {{"i_a", entryWithActual(10, 8)}}));
+    fp::Partition::setDesignResources(makeResources(2, {{"i_a", entryWithActual(10, 8)}}));
 
     fp::Partition partition("p");
     partition.addElement(fp::HierarhyElement{"i_a", true});

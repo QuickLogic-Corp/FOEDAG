@@ -36,8 +36,8 @@ struct DesignResourceEntry {
     int dsp = 0;
     int bram = 0;
 
-    // [aurora2#1725 stage P7] Tier 3 only: CLB tiles the placer actually used for this
-    // instance. Absent at tiers 1 and 2, where CLBs do not exist yet -- hence the explicit
+    // [aurora2#1725 stage P7] Tier 2 only: CLB tiles the placer actually used for this
+    // instance. Absent at tier 1, before packing, where CLBs do not exist yet -- hence the explicit
     // flag rather than a sentinel, so "not measured" cannot be read as "measured zero".
     int clbActual = 0;
     bool hasClbActual = false;
@@ -46,15 +46,15 @@ struct DesignResourceEntry {
     bool clbActualShared = false;
 };
 
-// [aurora2#1725 stage P7] design_resources.json as a whole. `tier` is not decoration: all
-// three tiers share a shape, so it is the only thing distinguishing an estimate from a
-// measurement, and A.13.5 requires it be surfaced rather than silently absorbed.
+// [aurora2#1725 stage P7] design_resources.json as a whole. `tier` is not decoration: both
+// tiers share a shape, so it is the only thing distinguishing tier 1's packing-density
+// estimate of CLB tiles from tier 2's measured placement, and A.13.5 requires it be
+// surfaced rather than silently absorbed. Both tiers are post-synthesis -- there is no
+// tier derived from the RTL, so no figure here is ever a pre-synthesis guess.
 struct DesignResources {
-    int tier = 0;                 // 0 = no file loaded, else 1..3
+    int tier = 0;                 // 0 = no file loaded, else 1 (synthesis) or 2 (placement)
     std::string tierName;
     std::map<std::string, DesignResourceEntry> instances;
-
-    bool isEstimate() const { return tier == 1; }
     bool valid() const { return tier > 0; }
 };
 
