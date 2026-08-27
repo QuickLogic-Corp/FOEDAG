@@ -38,4 +38,23 @@ std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::stri
 // sub-instances and leaves this logic unconstrained.
 std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames);
 
+// [aurora2#1725] What a set of atoms costs in tiles.
+//
+// The same arithmetic Partition does for its required columns, on any atom set rather than
+// on a partition's: dsp and bram atoms are one tile each, clb atoms are luts and flops that
+// pack many to a tile and so are divided by the atoms-per-tile hint. Shared rather than
+// repeated, so the "Selected RTL Resources" table and a partition's row cannot disagree
+// about what the same instances cost.
+struct ResourceTally {
+    int clbAtoms = 0;   // luts, flops, carries -- many to a tile
+    int clbTiles = 0;   // clbAtoms over atomsPerTile, rounded up: an estimate, see Partition
+    int dsp = 0;        // one atom, one tile
+    int bram = 0;       // one atom, one tile
+    int atoms() const { return clbAtoms + dsp + bram; }
+};
+
+// Counts by type. Pass atoms as a set: an atom named by two selected instances -- a parent
+// and its child, say -- must be paid for once.
+ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile);
+
 }  // namespace fp

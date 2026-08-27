@@ -6,11 +6,15 @@
 #include <FloorPlanning/Partition.h>
 #include <FloorPlanning/FloorPlanningWidget.h>
 #include <FloorPlanning/PartitionsListWidget.h>
+#include <FloorPlanning/SelectedResourcesWidget.h>
+#include <FloorPlanning/SynthResourceHierarchyWidget.h>
 
 #include <QPoint>
 #include <QApplication>
+#include <QItemSelectionModel>
 #include <QSplitter>
 #include <QToolBar>
+#include <QTreeView>
 #include <QWidgetAction>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -1089,6 +1093,145 @@ TEST(QdcSerializer, AValidRegionStillLoadsNormally)
     EXPECT_EQ(partition->name(), "p1");
     EXPECT_EQ(partition->elements().size(), 1u);
     EXPECT_FALSE(partition->regions().empty());
+}
+
+// [aurora2#1725] "Selected RTL Resources" -- the table under the RTL hierarchy tree that
+// says what the selected instances would cost. Selection drives it, deliberately: checking an
+// instance assigns it to a partition, so asking "how big would this have to be?" must not be
+// a change to the floorplan.
+
+namespace {
+
+// Subtree-inclusive atom sets, as atomsets.json writes them: an instance's entry also names
+// the atoms of everything inside it.
+fp::AtomNameMap layoutTestAtoms()
+{
+    fp::AtomNameMap atoms;
+    for (int i = 0; i < 28; ++i) {
+        atoms["dut.a"].push_back("dut.a.n" + std::to_string(i) + "_$lut");
+    }
+    for (int i = 0; i < 14; ++i) {
+        atoms["dut.b"].push_back("dut.b.n" + std::to_string(i) + "_$lut");
+    }
+    for (int i = 0; i < 3; ++i) {
+        const std::string dsp = "dut.b.sub.QL_DSPV2_MULT_" + std::to_string(i);
+        atoms["dut.b.sub"].push_back(dsp);
+        atoms["dut.b"].push_back(dsp);   // the parent's entry covers the child's atoms
+    }
+    for (int i = 0; i < 2; ++i) {
+        atoms["dut.c"].push_back("dut.c.TDP_ECC36K_" + std::to_string(i));
+    }
+    return atoms;
+}
+
+// The tree row displaying `text`, wherever it sits in the hierarchy.
+QModelIndex rowNamed(QTreeView* view, const QString& text)
+{
+    const QModelIndexList hits = view->model()->match(
+        view->model()->index(0, 0), Qt::DisplayRole, text, 1,
+        Qt::MatchRecursive | Qt::MatchExactly);
+    return hits.isEmpty() ? QModelIndex() : hits.first();
+}
+
+int tableValue(const fp::SelectedResourcesWidget* widget, int row)
+{
+    return widget->findChild<QTableWidget*>()->item(row, 0)->text().toInt();
+}
+
+}  // namespace
+
+TEST(SelectedResources, TallyCountsAtomsByTypeAndRoundsClbUp)
+{
+    // The arithmetic on its own, with no widget: dsp/bram atoms are one tile each, clb atoms
+    // pack many to a tile and round up. Shared with Partition's required columns, so a
+    // change here would move both.
+    const fp::ResourceTally empty = fp::tallyResources({}, 14);
+    EXPECT_EQ(empty.clbTiles, 0);
+    EXPECT_EQ(empty.atoms(), 0);
+
+    const fp::ResourceTally tally = fp::tallyResources(
+        {"i.n0_$lut", "i.n1_$lut", "i.n2_sdffre", "i.QL_DSPV2_MULT", "i.TDP_ECC36K"}, 2);
+    EXPECT_EQ(tally.clbAtoms, 3);
+    EXPECT_EQ(tally.clbTiles, 2) << "3 clb atoms at 2 per tile is 2 tiles, not 1";
+    EXPECT_EQ(tally.dsp, 1);
+    EXPECT_EQ(tally.bram, 1);
+    EXPECT_EQ(tally.atoms(), 5);
+
+    // A zero or negative hint must not divide by zero -- it means "one atom per tile".
+    EXPECT_EQ(fp::tallyResources({"i.n0_$lut"}, 0).clbTiles, 1);
+}
+
+TEST(SelectedResources, SelectingInstancesTalliesWhatTheyCost)
+{
+    fp::Partition::setAtomsPerTile(14);
+    fp::SynthResourceHierarchyWidget tree(
+        fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
+    tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
+    tree.setAtomNames(layoutTestAtoms());
+
+    auto* view = tree.findChild<QTreeView*>();
+    auto* table = tree.findChild<fp::SelectedResourcesWidget*>();
+    ASSERT_NE(view, nullptr);
+    ASSERT_NE(table, nullptr);
+
+    // Ctrl/Shift have to extend the selection; the tree was single-select before this.
+    EXPECT_EQ(view->selectionMode(), QAbstractItemView::ExtendedSelection);
+
+    EXPECT_EQ(tableValue(table, 0), 0) << "nothing selected must read zero, not stale numbers";
+
+    view->selectionModel()->select(rowNamed(view, "a"),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    EXPECT_EQ(tableValue(table, 0), 2);   // 28 clb atoms at 14 per tile
+    EXPECT_EQ(tableValue(table, 1), 0);
+    EXPECT_EQ(tableValue(table, 2), 0);
+
+    view->selectionModel()->select(rowNamed(view, "c"),
+                                   QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    EXPECT_EQ(tableValue(table, 0), 2);
+    EXPECT_EQ(tableValue(table, 2), 2) << "a second selected instance adds its bram";
+
+    view->selectionModel()->clearSelection();
+    EXPECT_EQ(tableValue(table, 0), 0);
+    EXPECT_EQ(tableValue(table, 2), 0);
+}
+
+TEST(SelectedResources, AParentAndItsChildAreNotCountedTwice)
+{
+    // atomsets.json entries are subtree-inclusive, so summing the selected instances'
+    // tallies would charge dut.b.sub's 3 DSPs twice when both rows are selected. The union
+    // of their atom sets is what gets tallied, which cannot double count.
+    fp::Partition::setAtomsPerTile(14);
+    fp::SynthResourceHierarchyWidget tree(
+        fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
+    tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
+    tree.setAtomNames(layoutTestAtoms());
+
+    auto* view = tree.findChild<QTreeView*>();
+    auto* table = tree.findChild<fp::SelectedResourcesWidget*>();
+
+    view->selectionModel()->select(rowNamed(view, "b"),
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    ASSERT_EQ(tableValue(table, 1), 3) << "a parent covers its sub-instance's dsp";
+    const int clb = tableValue(table, 0);
+
+    view->selectionModel()->select(rowNamed(view, "sub"),
+                                   QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    EXPECT_EQ(tableValue(table, 1), 3) << "selecting the child as well must change nothing";
+    EXPECT_EQ(tableValue(table, 0), clb);
+}
+
+TEST(SelectedResources, ThePartitionTreeDoesNotGetTheTable)
+{
+    // The right-hand tree shows what one partition already holds, and the partitions table
+    // reports that partition's cost. A second answer to the same question in the same panel
+    // is a second thing to keep in step.
+    fp::SynthResourceHierarchyWidget partitionTree(
+        fp::SynthResourceHierarchyWidget::Flag::ShowOnlyCheckedItems |
+        fp::SynthResourceHierarchyWidget::Flag::HidePartitionsColumn);
+
+    EXPECT_EQ(partitionTree.findChild<fp::SelectedResourcesWidget*>(), nullptr);
+    EXPECT_NE(partitionTree.findChild<QTreeView*>()->selectionMode(),
+              QAbstractItemView::ExtendedSelection);
 }
 
 // [aurora2#1725] Splitter sizing. The three panes share one window, so width one pane keeps

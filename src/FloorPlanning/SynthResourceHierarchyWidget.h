@@ -21,6 +21,7 @@ class QCheckBox;
 namespace fp {
 
 class CheckableButton;
+class SelectedResourcesWidget;
 
 class SynthResourceHierarchyWidget : public QWidget {
     Q_OBJECT
@@ -39,7 +40,12 @@ public:
     enum Flag {
         None                 = 0,
         HidePartitionsColumn = 1 << 0,
-        ShowOnlyCheckedItems = 1 << 1
+        ShowOnlyCheckedItems = 1 << 1,
+        // [aurora2#1725] Puts a "Selected RTL Resources" table under the tree and lets rows
+        // be multi-selected (Ctrl/Shift) to feed it. Off for the partition-netlist tree,
+        // which shows what one partition already holds -- the partitions table answers that
+        // question for it, and answering it twice in one panel invites the two to disagree.
+        ShowSelectedResources = 1 << 2
     };
 
     explicit SynthResourceHierarchyWidget(int flags = Flag::None, QWidget* parent = nullptr);
@@ -119,6 +125,21 @@ private:
     // [aurora2#1725] Atoms covered by an RTL path -- its own atomsets.json entry when it
     // has one, else the union of the descendant entries that do (see the .cpp).
     std::set<std::string> atomNamesFor(const std::string& path) const;
+
+    // [aurora2#1725] The "Selected RTL Resources" table, when Flag::ShowSelectedResources
+    // is set; null otherwise, which is what every use of it tests for.
+    SelectedResourcesWidget* m_selectedResourcesWidget{nullptr};
+
+    // Re-tallies the selected rows into that table. Called on every selection change, and
+    // again whenever the atom names arrive or the tree is rebuilt, since either changes the
+    // answer for a selection that has not moved.
+    void updateSelectedResources();
+
+    // The RTL path an item stands for, walked up through its parents. buildChildPath()'s
+    // rules, applied top down, so a bus bit joins to its parent without a dot.
+    std::string pathForItem(const QStandardItem* item) const;
+
+    bool showsSelectedResources() const { return m_flags & Flag::ShowSelectedResources; }
 
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;

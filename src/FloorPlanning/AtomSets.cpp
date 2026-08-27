@@ -1,5 +1,7 @@
 #include "AtomSets.h"
 
+#include "HierarhyElement.h"
+
 #include <nlohmann_json/json.hpp>
 
 #include <fstream>
@@ -79,6 +81,24 @@ std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames)
         counts[path] = own;
     }
     return counts;
+}
+
+ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile)
+{
+    ResourceTally tally;
+    for (const std::string& atom : atomNames) {
+        const QString type = classifyAtomType(atom);
+        if (type == "dsp") {
+            ++tally.dsp;
+        } else if (type == "bram") {
+            ++tally.bram;
+        } else {
+            ++tally.clbAtoms;
+        }
+    }
+    const int perTile = (atomsPerTile > 0) ? atomsPerTile : 1;
+    tally.clbTiles = (tally.clbAtoms + perTile - 1) / perTile;
+    return tally;
 }
 
 }  // namespace fp

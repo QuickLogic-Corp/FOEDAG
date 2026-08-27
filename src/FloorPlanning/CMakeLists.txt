@@ -34,6 +34,7 @@ set (SRC_LIST
   PartitionsListWidget.cpp
   NewUniqueNameDialog.cpp
   IssuesListWidget.cpp
+  SelectedResourcesWidget.cpp
   CheckableButton.cpp
   # widgets
   DeviceGridDescriptor.cpp
@@ -56,6 +57,7 @@ set (HDR_LIST
   PartitionsListWidget.h
   NewUniqueNameDialog.h
   IssuesListWidget.h
+  SelectedResourcesWidget.h
   CheckableButton.h
   # widgets
   DeviceGridDescriptor.h

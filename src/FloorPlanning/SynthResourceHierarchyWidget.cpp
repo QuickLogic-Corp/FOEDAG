@@ -3,6 +3,7 @@
 #include "AtomSets.h"
 #include "HierarhyElement.h"
 #include "CheckableButton.h"
+#include "SelectedResourcesWidget.h"
 
 #include <QStringListModel>
 #include <QVBoxLayout>
@@ -303,6 +304,24 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
 
     m_view->setModel(m_model);
 
+    // [aurora2#1725] "Selected RTL Resources", under the tree it reports on.
+    //
+    // Selection drives it, not the checkboxes: checking an instance assigns it to the
+    // selected partition and changes the floorplan, whereas asking what a handful of
+    // instances would cost should change nothing at all. That makes selection free to mean
+    // this, since the tree had no other use for it -- multi-selection is enabled here for
+    // the first time, so Ctrl and Shift extend it the way they do in any list.
+    if (showsSelectedResources()) {
+        m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
+
+        m_selectedResourcesWidget = new SelectedResourcesWidget;
+        layout->addWidget(m_selectedResourcesWidget);
+
+        connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
+                [this]() { updateSelectedResources(); });
+    }
+
     connect(m_model, &QStandardItemModel::itemChanged, this, [this](QStandardItem* item) {
         onItemChanged(item, /*reportChanges*/true);
     });
@@ -423,6 +442,11 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     }
 
     setAtomColumnsVisible(m_atomColumnsVisible);   // header sections were just rebuilt
+
+    // The rebuild dropped whatever was selected. A model reset does not go through
+    // selectionChanged(), so the table has to be told itself, or it keeps showing the old
+    // tree's numbers.
+    updateSelectedResources();
 }
 
 void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
@@ -735,6 +759,52 @@ void SynthResourceHierarchyWidget::setAtomNames(std::map<std::string, std::vecto
 {
     m_atomNames = std::move(atomNames);
     m_hasAtomNames = true;
+    // Every tally is derived from these, so a selection made before they arrived was
+    // answered with zeroes and has to be answered again.
+    updateSelectedResources();
+}
+
+// [aurora2#1725] Tally the selected rows into the "Selected RTL Resources" table.
+//
+// The union of the selected instances' atom sets, not the sum of their tallies: an
+// atomsets.json entry is subtree-inclusive, so selecting an instance and something inside it
+// names some atoms twice and they must be paid for once. A std::set does that for free.
+void SynthResourceHierarchyWidget::updateSelectedResources()
+{
+    if (!m_selectedResourcesWidget) {
+        return;
+    }
+
+    std::set<std::string> atoms;
+    int instances = 0;
+    for (const QModelIndex& index : m_view->selectionModel()->selectedRows(Column::Netlist)) {
+        const QStandardItem* item = m_model->itemFromIndex(index);
+        // The atom rows under a leaf are not instances -- they are what an instance is made
+        // of, already counted by the instance above them.
+        if (!item || isVprDisplayRow(item)) {
+            continue;
+        }
+        ++instances;
+        const std::set<std::string> covered = atomNamesFor(pathForItem(item));
+        atoms.insert(covered.begin(), covered.end());
+    }
+
+    m_selectedResourcesWidget->setTally(tallyResources(atoms, Partition::atomsPerTile()),
+                                        instances);
+}
+
+std::string SynthResourceHierarchyWidget::pathForItem(const QStandardItem* item) const
+{
+    std::vector<const QStandardItem*> ancestry;
+    for (const QStandardItem* step = item; step != nullptr; step = step->parent()) {
+        ancestry.push_back(step);
+    }
+
+    std::string path;
+    for (auto it = ancestry.rbegin(); it != ancestry.rend(); ++it) {
+        path = buildChildPath(path, *it);
+    }
+    return path;
 }
 
 std::set<std::string> SynthResourceHierarchyWidget::atomNamesFor(const std::string& path) const

@@ -46,7 +46,11 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     m_busyOverlayWidget = new FOEDAG::RoundProgressWidget(indicatorSize, this);
     const int m = FP_UI_MARGIN;
 
-    m_synthResourcesWidget = new SynthResourceHierarchyWidget;
+    // [aurora2#1725] The left tree carries the "Selected RTL Resources" table; the partition
+    // tree on the right does not -- what one partition costs is already its row in the
+    // partitions table.
+    m_synthResourcesWidget =
+        new SynthResourceHierarchyWidget(SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
     m_synthResourcesWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
     m_deviceWidget = new DeviceGridWidget;
