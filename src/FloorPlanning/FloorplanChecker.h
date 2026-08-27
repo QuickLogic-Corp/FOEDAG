@@ -18,8 +18,11 @@ namespace fp {
 // and calls the same DeviceGrid::checkIssues(), so a rule added to one is present in both.
 // What this class owns is the assembly, which the panel otherwise does across three widgets.
 //
-// Reports; never blocks. The advisories are estimates -- the packer is the authority -- so a
-// batch compile is told what looks wrong and left to proceed.
+// Classifies; the caller decides. Errors mean the floorplan cannot be made sense of as
+// written -- an empty partition, regions overlapping inside one, a region too small for what
+// it constrains -- and GenerateIOFloorPlanConstraints() stops the compile on them, as the
+// panel refuses to save such a .qdc. Warnings stay advisory: the packer is the authority on
+// how tight is too tight, so those are reported and the flow proceeds.
 class FloorplanChecker {
 public:
     // projectPath holds the flow's artifacts; qdcPath is the file the flow is

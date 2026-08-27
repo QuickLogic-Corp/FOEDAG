@@ -766,6 +766,115 @@ TEST(PartitionResources, NoPlacementMeansNoMeasuredTiles)
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
+// [aurora2#1725] DeviceGrid::checkIssues() severity. Shared by the panel, which refuses to
+// save a .qdc that has errors, and by the batch checker, which fails the compile on them --
+// so which bucket a check lands in decides whether the user is stopped or merely told.
+
+namespace {
+
+// One partition holding `atoms`, constrained to the region spanned by the two tile indexes.
+fp::PartitionPtr constrain(fp::DeviceGrid& device,
+                           const fp::Tile::Index& bottomLeftIndex,
+                           const fp::Tile::Index& topRightIndex,
+                           const std::set<std::string>& atoms)
+{
+    fp::RegionPtr region = std::make_shared<fp::Region>(
+        findBottomLeftTilePoint(device, bottomLeftIndex).value(),
+        findTopRightTilePoint(device, topRightIndex).value());
+    region->setTiles(device.findTiles(region->rect()));
+
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p");
+    partition->addElement(fp::HierarhyElement{"dut.i_a", /*isLeaf*/ true, atoms});
+    partition->addRegion(region);
+    device.addPartition(partition);
+    return partition;
+}
+
+std::set<std::string> atoms(const std::string& prefix, int count)
+{
+    std::set<std::string> names;
+    for (int i = 0; i < count; ++i) {
+        names.insert(prefix + std::to_string(i));
+    }
+    return names;
+}
+
+bool mentions(const std::unordered_map<std::string, std::string>& issues,
+              const std::string& fragment)
+{
+    for (const auto& [what, tip]: issues) {
+        if (what.find(fragment) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST(FloorplanIssues, AClbShortfallIsAnErrorNotAWarning)
+{
+    // A region that cannot hold what its partition constrains has no reading under which the
+    // flow works, so it must stop the user rather than let them run it and find out. It was
+    // a warning until the clb estimate proved to run optimistic -- short by the estimate is
+    // short in the direction that fails.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+    fp::Partition::setAtomsPerTile(14);
+
+    fp::DeviceGrid device(genTestDescriptor());
+    // clb(2,2):clb(2,4) is 3 clb tiles; 100 atoms at 14 per tile needs 8.
+    fp::PartitionPtr partition = constrain(device, {2, 2}, {2, 4}, atoms("dut.i_a.lut", 100));
+    ASSERT_EQ(partition->clbAvailableCount(), 3);
+    ASSERT_EQ(partition->clbRequiredCount(), 8);
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(mentions(issues->errors, "needs 8 clb tiles but only 3 available"));
+    EXPECT_FALSE(mentions(issues->warnings, "clb tiles but only"));
+}
+
+TEST(FloorplanIssues, ADspShortfallIsAnErrorToo)
+{
+    // dsp/bram carry none of the clb estimate's uncertainty -- one atom is one whole tile --
+    // so a shortfall there is arithmetic, not a guess.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+    fp::Partition::setAtomsPerTile(14);
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::PartitionPtr partition =
+        constrain(device, {7, 2}, {7, 5}, atoms("dut.i_a.QL_DSPV2_MULT_", 9));
+    const int available = partition->dspAvailableCount();
+    ASSERT_GT(available, 0);
+    ASSERT_GT(partition->dspRequiredCount(), available);
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(mentions(issues->errors,
+                         "needs 9 dsp tiles but only " + std::to_string(available) +
+                             " available"));
+    EXPECT_FALSE(mentions(issues->warnings, "dsp tiles but only"));
+}
+
+TEST(FloorplanIssues, EnoughClbTilesButNoSlackStaysAWarning)
+{
+    // The complement of the two above, and the reason they are separate checks: a region
+    // that MEETS the estimate with little room to spare is a judgement call about packing
+    // density, which only the packer can settle, so it must not block anything.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+    fp::Partition::setAtomsPerTile(14);
+
+    fp::DeviceGrid device(genTestDescriptor());
+    // 3 clb tiles for 29 atoms -> 3 required, exactly met, nothing spare.
+    fp::PartitionPtr partition = constrain(device, {2, 2}, {2, 4}, atoms("dut.i_a.lut", 29));
+    ASSERT_EQ(partition->clbAvailableCount(), 3);
+    ASSERT_EQ(partition->clbRequiredCount(), 3);
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(issues->errors.empty());
+    EXPECT_TRUE(mentions(issues->warnings, "little packing slack"));
+}
+
 // [aurora2#1725] QdcSerializer round-trip safety. This file persists the user's floorplan,
 // so a defect here loses work rather than merely reporting the wrong number.
 

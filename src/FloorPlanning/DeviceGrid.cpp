@@ -298,10 +298,10 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
-        // [aurora2#1725] required vs. available resources. WARNINGS, not errors: only the
-        // packer can settle whether a region works, so none of this may stop the user saving
-        // the .qdc and running the flow to find out. Unlike the presence checks above -- a
-        // partition with no region cannot mean anything at all -- these are advisory.
+        // [aurora2#1725] required vs. available resources. ERRORS, like the presence checks
+        // above: a region too small to hold what its partition constrains leaves the packer
+        // nowhere to put the surplus, so this blocks saving the .qdc in the panel and is
+        // reported as an error by the batch check rather than left for the flow to discover.
         //
         // The clb figure is an ESTIMATE and it is not a safe minimum. It divides the atom
         // count by atomsets.json's atoms_per_tile hint, while real density measured on
@@ -309,8 +309,11 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         // estimates 1360 clb and packs into 799, yet dut.instPerm20009 estimates 20 clb and
         // the packer needed 22. Carry chains want consecutive slots and the packer caps
         // cluster input-pin use (measured max 0.68 on this device), so a small pin-heavy
-        // instance packs far less densely than the whole design. dsp/bram carry no such
-        // uncertainty -- one atom occupies one whole tile.
+        // instance packs far less densely than the whole design. The tip still says the
+        // number is approximate -- but short by an estimate that runs optimistic is short in
+        // the direction that fails, and the remedy does not depend on the exact figure: a
+        // bigger region, or fewer elements. dsp/bram carry no such uncertainty -- one atom
+        // occupies one whole tile.
         auto checkResource = [&](const std::string& label, int required, int available) {
             if (required <= available) {
                 return;
@@ -318,13 +321,14 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
             const std::string tip = (label == "clb")
                 ? "Estimated from this partition's clb atoms at "
                   + std::to_string(Partition::atomsPerTile())
-                  + " atoms per tile. Real density varies with the logic, so treat this as a "
-                    "rough figure in either direction -- only the packer can decide."
+                  + " atoms per tile. Real density varies with the logic, so the shortfall is "
+                    "approximate -- but the region has to cover more clb tiles, or some "
+                    "elements belong in another partition."
                 : "One " + label + " atom occupies one " + label + " tile, so the region has to "
                   "cover more of them, or some elements belong in another partition.";
-            m_issues->warnings.insert({"Partition '" + partition->name() + "' needs " +
-                                       std::to_string(required) + " " + label + " tiles but only " +
-                                       std::to_string(available) + " available", tip});
+            m_issues->errors.insert({"Partition '" + partition->name() + "' needs " +
+                                     std::to_string(required) + " " + label + " tiles but only " +
+                                     std::to_string(available) + " available", tip});
         };
         checkResource("clb", partition->clbRequiredCount(), partition->clbAvailableCount());
         checkResource("dsp", partition->dspRequiredCount(), partition->dspAvailableCount());

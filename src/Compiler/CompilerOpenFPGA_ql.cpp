@@ -8094,8 +8094,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // a batch compile never constructs the panel, so none of it was ever said out loud. The
   // flow ran and the packer quietly dealt with whatever it was given.
   //
-  // Reports only. These are estimates and the packer is the authority, so a batch run is
-  // told what looks wrong and left to proceed.
+  // Errors stop the compile here, matching the panel, which refuses to save a .qdc that has
+  // any: a partition with no region, regions overlapping inside one partition, or a region
+  // too small to hold what it constrains are all things the flow cannot make sense of, and
+  // failing at the point the .qdc is read names the offending partition far more usefully
+  // than whatever the packer does with it later. Warnings are advisory and let it proceed.
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::shared_ptr<VprArchitectureFileProfider> archProvider =
         std::make_shared<VprArchitectureFileProfider>(this);
@@ -8121,10 +8124,15 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       if (issues.isEmpty()) {
         Message("Floor plan check: no issues found in " +
                 floor_planning_constraint_filepath.filename().string());
+      } else if (issues.errors.empty()) {
+        Message("Floor plan check: " + std::to_string(issues.warnings.size()) +
+                " warning(s). Continuing -- these are estimates, the packer decides.");
       } else {
-        Message("Floor plan check: " + std::to_string(issues.errors.size()) + " error(s), " +
-                std::to_string(issues.warnings.size()) + " warning(s). Continuing -- these "
-                "are estimates, the packer decides.");
+        ErrorMessage("Floor plan check failed: " + std::to_string(issues.errors.size()) +
+                     " error(s), " + std::to_string(issues.warnings.size()) + " warning(s) in " +
+                     floor_planning_constraint_filepath.filename().string() +
+                     ". Fix the constrained regions and re-run.");
+        return false;
       }
     }
   }
