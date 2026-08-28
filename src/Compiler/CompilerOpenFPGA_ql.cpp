@@ -2374,7 +2374,7 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
 }
 
 bool CompilerOpenFPGA_ql::RunElaboration() {
-  // [aurora2#1725 stage P0] Runs a second, standalone Yosys process for instance
+  // [aurora2#1725 stage P0] Runs a standalone Yosys process for instance
   // discovery -- see BuildElaborationScript().
   const std::string topModule = ProjManager()->DesignTopModule();
 
@@ -2407,9 +2407,8 @@ bool CompilerOpenFPGA_ql::RunElaboration() {
       std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.log");
   std::string command = yosys_executable_path.string() + " -s " + script_path.string() +
                          " -l " + topModule + "_elab.log";
-  // [aurora2#1725 stage P0] quiet: `-l <top>_elab.log` above already records this run.
-  // Instance discovery is a diagnostic side-channel, so only the failure below is
-  // reported aloud -- see <top>_elab.log for the transcript.
+  // [aurora2#1725 stage P0] quiet: logs from this stage are written to <top>_elab.log,
+  // only errors are logged to aurora.
   int status = ExecuteAndMonitorSystemCommand(command, /*logFile*/ std::string{},
                                               /*appendLog*/ false, /*quiet*/ true);
   if (status) {
@@ -2492,27 +2491,18 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
     return true;
   }
 
-  // [aurora2#1725] Deliberately unannounced. This is not a compile stage the user asked
-  // for -- it is bookkeeping that enables floorplanning -- and a banner per compile is
-  // exactly the kind of noise master did not have. Its transcript is <top>_elab.log and
-  // its result is <project>_floorplanning_instances.json; the only thing said out loud is
-  // a failure.
+  // [aurora2#1725] No progress message here on success: this step runs in the
+  // background to prepare data for floorplanning, not something the user asked to run.
+  // Its output goes to <top>_elab.log and <project>_floorplanning_instances.json; only
+  // a failure is reported to aurora.log.
   ResetFloorplanningStageLog();
 
-  // [aurora2#1725 stage P0b] Best-effort, like every other stage this feature adds.
-  //
-  // Elaboration runs Yosys on the RTL directly, independently of the synthesis front end --
-  // deliberately, because it has to see the hierarchy before synthesis dissolves it. But
-  // that means the Yosys parser's limits apply even on paths that would not otherwise hit
-  // them: Synplify reads VHDL natively, yet this elaboration cannot, so a VHDL + Synplify
-  // project failed here and never reached synthesis at all. Measured on
-  // tests/testcases/fpu_single -- a pre-existing case in include_testcases__synplify with
-  // no floorplanning in it -- which stopped synthesising entirely.
-  //
-  // Instance discovery ENABLES floorplanning; it is not a precondition for compiling. When
-  // it cannot run, say so and carry on: instances.json is simply absent, the FloorPlanning
-  // panel has nothing to offer for this project, and the region stages downstream skip
-  // exactly as they already do when their own inputs are missing.
+  // [aurora2#1725 stage P0b] Best-effort: elaboration runs Yosys directly on the RTL,
+  // independent of the synthesis front end, so Yosys's parser limits apply even where
+  // synthesis itself would not hit them -- e.g. Synplify reads VHDL natively, but this
+  // Yosys pass cannot, so a VHDL + Synplify project would fail here. Instance discovery
+  // only enables floorplanning, it is not required to compile, so a failure here just
+  // skips floorplanning-by-RTL-instance rather than the build.
   if (!RunElaboration() || !RunElabInstances()) {
     Message(
         "Instance discovery is unavailable for this project, so floorplanning by RTL "
