@@ -1427,11 +1427,9 @@ TEST(FloorPlanningLayout, EveryToolbarControlCanFoldIntoTheExtensionMenu)
     // The device toolbar only stops flooring the pane if what does not fit can go somewhere.
     // QToolBar's extension menu shows ACTIONS; a control added through addWidget() cannot go
     // in it, because the widget is already parented to the toolbar and can only be in one
-    // place. Measured on the first attempt at this, which did use addWidget(): at a 150px
-    // pane 4 of 21 items were visible and the popup could offer none of the missing ones --
-    // the controls were simply gone. So every control here has to be a plain QAction, and
-    // the only widget on the toolbar is the blank stretch, which has nothing to offer a menu
-    // and is not meant to appear in one.
+    // place -- it just vanishes when the toolbar runs out of room. So every control here has
+    // to be a plain QAction, and the only widget on the toolbar is the blank stretch, which
+    // has nothing to offer a menu and is not meant to appear in one.
     fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
     prepare(panel, 1366);
 

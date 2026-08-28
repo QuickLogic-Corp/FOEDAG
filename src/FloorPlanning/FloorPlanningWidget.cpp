@@ -126,17 +126,16 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     //
     // [aurora2#1725] A QToolBar of QActions, where this was a QWidget wrapping a QHBoxLayout
     // of QPushButtons. A layout's minimum width is the sum of everything in it, and that sum
-    // -- measured at 628px -- became the device pane's floor inside the splitter: it is what
-    // made the hierarchy pane undraggable on a 1366-wide screen and the whole panel too wide
-    // for anything smaller. A toolbar moves what does not fit behind the standard extension
-    // button instead, so the pane can be dragged as narrow as the user likes.
+    // became the device pane's floor inside the splitter, making the hierarchy pane
+    // undraggable and the whole panel too wide for a smaller screen. A toolbar moves what
+    // does not fit behind the standard extension button instead, so the pane can be dragged
+    // as narrow as the user likes.
     //
     // QActions rather than the buttons added through QToolBar::addWidget(): a widget can only
     // live in one place at a time, so the extension menu cannot show one, and a button that
-    // stopped fitting simply vanished -- at a 150px pane, 4 of 21 controls were visible and
-    // the popup could offer none of the rest. Actions move into the popup properly. They also
-    // carry a text, unused by the toolbar itself (icons only, as before) but shown as the
-    // label in that popup.
+    // stopped fitting simply vanished with the popup unable to offer it back. Actions move
+    // into the popup properly. They also carry a text, unused by the toolbar itself (icons
+    // only, as before) but shown as the label in that popup.
     QToolBar* toolBar = new QToolBar;
     toolBar->setMovable(false);
     toolBar->setFloatable(false);

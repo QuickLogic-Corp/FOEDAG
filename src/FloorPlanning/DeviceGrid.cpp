@@ -8,10 +8,9 @@ namespace fp {
 namespace {
 
 // [aurora2#1725] How much room above the estimated clb requirement counts as comfortable.
-// Set from the one case measured end to end: dut.instPerm20009 estimated 20 clb tiles and
-// the packer needed 22, i.e. the estimate was 10% low, and 22 left nothing spare. 25% keeps
-// that case flagged while not nagging about regions with real room. A heuristic on top of a
-// heuristic -- the packer remains the only authority.
+// The clb estimate runs optimistic, so a region that only just meets it can still fail to
+// pack; 25% keeps that case flagged while not nagging about regions with real room. A
+// heuristic on top of a heuristic -- the packer remains the only authority.
 constexpr int kClbHeadroomPercent = 25;
 
 }  // namespace
@@ -304,16 +303,13 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         // reported as an error by the batch check rather than left for the flow to discover.
         //
         // The clb figure is an ESTIMATE and it is not a safe minimum. It divides the atom
-        // count by atomsets.json's atoms_per_tile hint, while real density measured on
-        // fft256 ranges from 12.2 to 23.8 atoms per clb: the whole unconstrained "dut"
-        // estimates 1360 clb and packs into 799, yet dut.instPerm20009 estimates 20 clb and
-        // the packer needed 22. Carry chains want consecutive slots and the packer caps
-        // cluster input-pin use (measured max 0.68 on this device), so a small pin-heavy
-        // instance packs far less densely than the whole design. The tip still says the
-        // number is approximate -- but short by an estimate that runs optimistic is short in
-        // the direction that fails, and the remedy does not depend on the exact figure: a
-        // bigger region, or fewer elements. dsp/bram carry no such uncertainty -- one atom
-        // occupies one whole tile.
+        // count by atomsets.json's atoms_per_tile hint, but real packing density varies with
+        // the logic: carry chains want consecutive slots, and the packer caps cluster
+        // input-pin use, so a small pin-heavy instance packs far less densely than a whole
+        // design's average. The tip still says the number is approximate -- but short by an
+        // estimate that runs optimistic is short in the direction that fails, and the remedy
+        // does not depend on the exact figure: a bigger region, or fewer elements. dsp/bram
+        // carry no such uncertainty -- one atom occupies one whole tile.
         auto checkResource = [&](const std::string& label, int required, int available) {
             if (required <= available) {
                 return;
@@ -336,8 +332,7 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
 
         // [aurora2#1725] Enough clb tiles by the estimate, but only just -- which is where
         // packing actually breaks, precisely because the estimate can sit below what the
-        // packer needs. On fft256, dut.instPerm20009 estimated 20 and filled all 22 clb
-        // tiles it was given: 22 packed with nothing to spare, 20 failed.
+        // packer needs, and a region filled to the last tile leaves it no room to be wrong.
         //
         // An ERROR, like the outright shortfall above. It was a warning on the grounds that
         // the region is not actually short and only the packer could settle it; but the
@@ -407,9 +402,7 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
     // logic -- the cells sitting directly in it, not in any sub-instance -- assigned to
     // nothing, free for the packer to place anywhere. Nothing downstream catches it: stage P7
     // grades the instances that were constrained, and an unconstrained one is in no partition
-    // to grade. Measured on fft256, where p1 held 12 sub-instances of dut.instPerm20009 and
-    // p2 held the 13th: 111 of that instance's 271 atoms went unconstrained, and two of its
-    // clusters were placed outside the region, one of them 8 rows away.
+    // to grade.
     //
     // Reported per instance rather than per partition -- with the sub-instances split across
     // p1 and p2 the same gap would otherwise be announced twice -- and only reported: which

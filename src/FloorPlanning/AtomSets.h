@@ -24,8 +24,7 @@ using AtomNameMap = std::map<std::string, std::vector<std::string>, NaturalLess>
 // "TDP_ECC36K_BRAM_...", ...). Names are the netlist's own, not friendlier labels: they are
 // what the Atom List column shows and what a user greps the .blif for.
 //
-// Subtree-inclusive exactly like the atom lists, and consistent with them -- measured on
-// fft256, all 411 entries have sum(resources) == count == atoms.size(), and a parent's
+// Subtree-inclusive exactly like the atom lists, and consistent with them: a parent's
 // counts equal the sum over its children.
 using AtomResourceMap = std::map<std::string, std::map<std::string, int>, NaturalLess>;
 

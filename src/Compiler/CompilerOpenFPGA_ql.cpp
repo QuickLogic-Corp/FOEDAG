@@ -8394,11 +8394,9 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // NOT best-effort where set_region is concerned. instances.json is what tells an
   // instance path apart from an exact atom name, and without it every instance silently
   // stays literal -- a name_pattern that matches nothing, because a bare instance path is
-  // never itself a VPR atom name. Measured on fpu_single under Synplify: set_region
-  // i_mul_24 reached VPR as name_pattern="i_mul_24", and all 564 of that instance's atoms
-  // placed unconstrained while the flow reported success. Silently emitting a constraint
-  // that asks VPR for nothing is the exact defect this feature exists to remove, so the
-  // set_region loop below refuses rather than degrades.
+  // never itself a VPR atom name. Silently emitting a constraint that asks VPR for nothing
+  // is the exact defect this feature exists to remove, so the set_region loop below
+  // refuses rather than degrades.
   //
   // A project with no set_region is unaffected: it never consults the model.
   fp::RtlInstanceModel rtlModel;
@@ -8484,9 +8482,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
         for (const std::string& pattern: patterns) {
           // [aurora2#1725 stage P5] Mode A (wildcard) is mandatory for a whole RTL
           // instance: mode B (enumerating atom names) is not implementable here --
-          // Yosys cell names and VPR atom names are different namespaces with no
-          // overlap (measured on i_mul_24: 535 Yosys cells vs 627 VPR atoms, zero
-          // shared). A bare instance path is never itself a VPR atom name -- real atoms
+          // Yosys cell names and VPR atom names are different, non-overlapping
+          // namespaces. A bare instance path is never itself a VPR atom name -- real atoms
           // are always "<path>.<signal>" -- so without the "." + "*" suffix this would
           // reach VPR as a literal name_pattern and silently match nothing (see
           // generate_floorplanning.py's add_atom_pattern). But not every token here is
@@ -8497,9 +8494,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
           // like "cluster[0]" is never itself a recorded instance -- only
           // "cluster[0].clb", the module instantiated inside it, is -- but a bare
           // "cluster[0]" is still a real whole-subtree RTL selection and still needs
-          // the wildcard suffix. Measured on shiftreg.sv (tests/testcases/
-          // shiftreg_floorplanning_wildcard/single_instance): instances.json lists only
-          // "cluster[0].clb", never "cluster[0]".
+          // the wildcard suffix.
           const bool alreadyGlob = pattern.find('*') != std::string::npos;
           const bool isWholeInstance = !alreadyGlob && rtlModel.isInstanceOrAncestor(pattern);
           elements.push_back(isWholeInstance ? pattern + ".*" : pattern);
@@ -11582,15 +11577,13 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       std::filesystem::path("aurora_rehier.tcl");
 
   // [aurora2#1725] Wrapped in `tee -q -o`, which is what keeps the synthesis log the size
-  // it is on master. Rebuilding the hierarchy runs `submod` once per level of it, and
-  // submod narrates every cell it moves: measured on
-  // tests/testcases/floorplanning_regions/whole_instance, this one script contributed
-  // ~1500 of the synthesis log's ~9400 lines, all of it about a netlist that packing,
-  // placement, routing and bitstream never read. `-q` drops it from both the console and
-  // <top>_synth.log (yosys' -l); `-o` keeps every line, in the artifact that names the
-  // stage that produced it. Truncating rather than appending, so the file describes this
-  // run -- and so the two placeholders here cannot depend on which order the device
-  // template happens to invoke them in.
+  // it is on master. Rebuilding the hierarchy runs `submod` once per level of it, and submod
+  // narrates every cell it moves -- about a netlist that packing, placement, routing and
+  // bitstream never read. `-q` drops it from both the console and <top>_synth.log (yosys'
+  // -l); `-o` keeps every line, in the artifact that names the stage that produced it.
+  // Truncating rather than appending, so the file describes this run -- and so the two
+  // placeholders here cannot depend on which order the device template happens to invoke
+  // them in.
   yosysScript->apply("${CALL_TCL_REHIER_SCRIPT}",
                      "tee -q -o " + FloorplanningPrefix() + "_rehier.log" +
                      " tcl " + aurora_rehier_script_path.string());
@@ -11625,22 +11618,20 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // those two fixed arguments (if appended after them, which this substitution can't
   // do -- it precedes them in the template line) or corrupts out_path/blif_path
   // parsing (if appended here, before them, since the template's "atomsets.json"
-  // would then land mid-argv and be misread as a 14th instance -- measured on
-  // fpu_single, confirmed both ways). Fixing this for real needs either editing the
-  // device_data template (separate submodule) to add an instance-list placeholder in
-  // the right position, or reworking floorplanning_atomsets.tcl to take the list some
-  // other way (e.g. a file) instead of positional argv.
+  // would then land mid-argv and be misread as an instance name). Fixing this for real
+  // needs either editing the device_data template (separate submodule) to add an
+  // instance-list placeholder in the right position, or reworking
+  // floorplanning_atomsets.tcl to take the list some other way (e.g. a file) instead of
+  // positional argv.
   //
   // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances flag
   // (see RunValidateInstances()) already compensates -- it overrides the graded
   // universe with instances.json's full list, so a deleted (zero-atom) instance
-  // absent from atomsets.json is still correctly graded "deleted". Confirmed on
-  // fpu_single: i_serial_mul graded deleted correctly even without this.
+  // absent from atomsets.json is still correctly graded "deleted".
   // [aurora2#1725] Wrapped in `tee -q -o` for the same reason as the rehier script above:
   // atom extraction asks yosys to enumerate the netlist, and `select -list` answers with
-  // one line per atom -- ~2700 lines of the synthesis log on whole_instance, a design with
-  // 1176 atoms in five instances. The answer belongs in atomsets.json, which is exactly
-  // where the script puts it; the enumeration itself belongs nowhere the user has to read.
+  // one line per atom. The answer belongs in atomsets.json, which is exactly where the
+  // script puts it; the enumeration itself belongs nowhere the user has to read.
   yosysScript->apply("${CALL_TCL_ATOMSETS_SCRIPT}",
                      "tee -q -o " + FloorplanningPrefix() + "_atomsets.log" +
                      " tcl " + aurora_atomsets_script_path.string());
