@@ -2544,9 +2544,6 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
   m_designDirty = false;
   return true;
 }
-// [aurora2#1725] Naming for every artifact the floorplanning flow generates. Defined once
-// so the convention cannot drift between the stages that write these files and the ones
-// that read them back.
 std::string CompilerOpenFPGA_ql::FloorplanningPrefix() {
   return fp::floorplanningPrefix(ProjManager()->projectName());
 }
@@ -2556,9 +2553,6 @@ std::filesystem::path CompilerOpenFPGA_ql::FloorplanningArtifact(const std::stri
                                    ProjManager()->projectName(), suffix);
 }
 
-// [aurora2#1725] atomsets.json, at whichever of its two possible names the device template
-// produced -- see fp::floorplanningArtifactOrBare(). Every stage that consumes atoms goes
-// through here, so none of them can end up looking at a different file than the panel does.
 std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
   return fp::floorplanningArtifactOrBare(std::filesystem::path{ProjManager()->projectPath()},
                                          ProjManager()->projectName(), "atomsets.json");
