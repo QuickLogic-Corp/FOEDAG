@@ -84,4 +84,9 @@ target_link_libraries(unittest PRIVATE
   foedagcore
   Qt6::Test)
 
+# Fixture manifests are read from the source tree as real files on disk, so
+# the tests exercise the same parsing path the catalog walk uses.
+target_compile_definitions(unittest PRIVATE
+  FOEDAG_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/../../tests")
+
 add_test(NAME unittest COMMAND unittest)

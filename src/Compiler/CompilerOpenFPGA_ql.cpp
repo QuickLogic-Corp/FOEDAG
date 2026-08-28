@@ -56,6 +56,7 @@
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
 #include "Utils/StringUtils.h"
@@ -126,6 +127,19 @@ void CompilerOpenFPGA_ql::Version(std::ostream* out) {
 
 CompilerOpenFPGA_ql::~CompilerOpenFPGA_ql() {
   CleanTempFiles();
+}
+
+// True when `p` equals `base` or lies underneath it. Component-wise (via
+// fs::relative), not string-prefix: "/x/IP_Catalog_old" must not pass for a
+// base of "/x/IP_Catalog".
+static bool isSameOrUnderPath(const std::filesystem::path& p,
+                              const std::filesystem::path& base) {
+  std::error_code ec;
+  const std::filesystem::path rel = std::filesystem::relative(
+      std::filesystem::weakly_canonical(p, ec),
+      std::filesystem::weakly_canonical(base, ec), ec);
+  if (ec || rel.empty()) return false;
+  return rel.begin()->string() != "..";
 }
 
 void CompilerOpenFPGA_ql::Help(std::ostream* out) {
@@ -276,6 +290,13 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
       << "   pnr_netlist_lang <blif, edif, verilog, vhdl> : Chooses vpr input "
          "netlist format"
       << std::endl;
+  (*out) << "   create_design <name> ?-rpm_ip? -stub <stub.v> ?-version "
+            "v1_0? ?-catalog <dir>? : With -rpm_ip, the project authors "
+            "a relative-placement-macro catalog IP named after the project: "
+            "each successful place re-packages it into the catalog (default "
+            "<project>/IP_Catalog); the stub is the user-written port-only "
+            "(* blackbox *) module of the IP"
+         << std::endl;
   (*out) << "   packing ?clean?            : Packing" << std::endl;
   // (*out) << "   global_placement ?clean?   : Analytical placer" << std::endl;
   (*out) << "   place ?clean?              : Detailed placer" << std::endl;
@@ -673,6 +694,324 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("set_channel_width", set_channel_width, this, 0);
 
+  // Re-register ip_add_to_design (base version: Compiler.cpp) with a QL
+  // extension: an argument ending in .eblif/.blif names an annotated
+  // relative-placement IP netlist, which is registered to be linked into the
+  // design at the end of synthesis (synth_quicklogic -rel_ip_blif) and to
+  // drive relative-macro constraint generation before the VPR stages. See
+  // docs/development/relative_macro_placement/ in aurora2. Any other argument
+  // is a catalog IP instance name, handled exactly as the base command does.
+  auto ip_add_to_design = [](void* clientData, Tcl_Interp* interp, int argc,
+                             const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    if (argc < 2) {
+      // Match the base command: error only when the GUI sync layer is
+      // present, silent no-op otherwise.
+      if (compiler->GuiTclSync()) {
+        compiler->ErrorMessage("IP name missed.");
+        return TCL_ERROR;
+      }
+      return TCL_OK;
+    }
+    for (int i = 1; i < argc; i++) {
+      const std::string arg = argv[i];
+      std::filesystem::path path = FileUtils::GetFullPath(arg);
+      const std::string ext = path.extension().string();
+      if (ext == ".eblif" || ext == ".blif") {
+        if (!FileUtils::FileExists(path)) {
+          compiler->ErrorMessage("Annotated IP netlist does not exist: " +
+                                 arg);
+          return TCL_ERROR;
+        }
+        compiler->AddRelIpBlif(path);
+        continue;
+      }
+      // Catalog IP instance: delegate to the base mechanism (GUI-sync layer
+      // adds the instance's src/ files to the design fileset).
+      if (compiler->GuiTclSync()) {
+        std::stringstream out;
+        if (!compiler->GuiTclSync()->TclAddIpToDesign(arg, out)) {
+          compiler->ErrorMessage(out.str());
+          return TCL_ERROR;
+        }
+        // Relative-placement catalog IPs: the generator places the annotated
+        // netlist in the instance's rel_macro/ dir (outside src/, so it is
+        // never added as a design source). Register it for the synthesis
+        // link step. Non-RPM IPs have no rel_macro/ dir and are unaffected.
+        if (IPGenerator* ipGen = compiler->GetIPGenerator()) {
+          if (IPInstance* inst = ipGen->GetIPInstance(arg)) {
+            std::filesystem::path relMacroDir =
+                ipGen->GetBuildDir(inst) / "rel_macro";
+            if (std::filesystem::is_directory(relMacroDir)) {
+              // The instance's generated stub (src/<instance>.v, per the
+              // rpm_common packaging contract). Registered alongside the
+              // netlist for the Synplify synthesis flow, whose yosys pass
+              // reads Synplify's netlist instead of the design sources and
+              // must read the blackbox stub explicitly. Registering the
+              // generated copy (not the project-fileset copy) keeps the
+              // path independent of the fileset layout; the two are
+              // identical by construction.
+              std::filesystem::path stubPath =
+                  ipGen->GetBuildDir(inst) / "src" / (arg + ".v");
+              if (!std::filesystem::exists(stubPath)) stubPath.clear();
+              for (const auto& entry :
+                   std::filesystem::directory_iterator(relMacroDir)) {
+                const std::string entryExt = entry.path().extension().string();
+                if (entryExt == ".eblif" || entryExt == ".blif") {
+                  compiler->AddRelIpBlif(entry.path(), stubPath);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return TCL_OK;
+  };
+  interp->registerCmd("ip_add_to_design", ip_add_to_design, this, nullptr);
+
+  // Re-register create_design (base: Compiler.cpp) with the RPM-authoring
+  // declaration: `create_design <name> -rpm_ip -stub <stub.v>
+  // ?-version v1_0? ?-catalog <dir>?` declares that this project's product
+  // is an RPM catalog IP named after the project. -rpm_ip is a flag
+  // orthogonal to -type: the -type axis keeps meaning source kind +
+  // synthesis tool. Authoring works from any flow that produces the
+  // post-synthesis BLIF and a placement (-type rtl and synplify); the
+  // netlist-input types (gate-level/post-map) are refused as unvalidated.
+  // Without the flag the base behavior is reproduced for all supported
+  // forms; unlike the base (which silently ignores unknown arguments),
+  // unknown options are rejected with the usage. Every
+  // authoring validation runs BEFORE the base CreateDesign call, so a
+  // refusal never leaves a half-created project. See
+  // docs/development/relative_macro_placement/ in aurora2.
+  auto create_design = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    const std::string usage =
+        "Usage: create_design <name> ?-type <rtl|gate-level|post-map|"
+        "synplify>? ?-rpm_ip? ?-stub <stub.v>? ?-version v1_0? "
+        "?-catalog <dir>? (-rpm_ip: this project authors an RPM catalog IP "
+        "named after it; -stub/-version/-catalog require -rpm_ip)";
+    std::string name = "noname";
+    std::string type{"rtl"};
+    std::string stub;
+    std::string version = "v1_0";
+    std::string catalog;
+    bool haveStub = false;
+    bool haveVersion = false;
+    bool haveCatalog = false;
+    if (argc >= 2) {
+      name = argv[1];
+    }
+    bool rpmIp = false;
+    for (int i = 2; i < argc; i++) {
+      const std::string arg = argv[i];
+      if (arg == "-rpm_ip") {
+        rpmIp = true;
+        continue;
+      }
+      if (arg == "-type" || arg == "-stub" || arg == "-version" ||
+          arg == "-catalog") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("Missing value for " + arg + "\n" + usage);
+          return TCL_ERROR;
+        }
+        const std::string value = argv[++i];
+        if (arg == "-type") {
+          type = value;
+        } else if (arg == "-stub") {
+          stub = value;
+          haveStub = true;
+        } else if (arg == "-version") {
+          version = value;
+          haveVersion = true;
+        } else {
+          catalog = value;
+          haveCatalog = true;
+        }
+      } else {
+        compiler->ErrorMessage("Unsupported option " + arg + "\n" + usage);
+        return TCL_ERROR;
+      }
+    }
+
+    if (!rpmIp && (haveStub || haveVersion || haveCatalog)) {
+      compiler->ErrorMessage(
+          "-stub/-version/-catalog are only valid with -rpm_ip\n" + usage);
+      return TCL_ERROR;
+    }
+    // Authoring is synthesis-tool-agnostic: it consumes the post-synthesis
+    // BLIF plus the place-stage authoring outputs, all of which the rtl
+    // (yosys) and synplify flows both produce. Gate-level/post-map projects
+    // start from an already-mapped netlist and are unvalidated as authoring
+    // inputs; keep refusing those.
+    if (rpmIp && type != "rtl" && type != "synplify") {
+      compiler->ErrorMessage(
+          "-rpm_ip cannot be combined with -type " + type +
+          "; authoring is validated for the rtl (yosys) and synplify "
+          "flows only");
+      return TCL_ERROR;
+    }
+
+    RpmAuthorProject record;
+    if (rpmIp) {
+      // The project name IS the IP name (and REL_MACRO_TYPE derives from
+      // it), so it must be a plain Verilog identifier.
+      static const std::regex kIdent("[A-Za-z_][A-Za-z0-9_$]*");
+      static const std::regex kVersion("v[0-9]+_[0-9]+");
+      if (!std::regex_match(name, kIdent)) {
+        compiler->ErrorMessage(
+            "-rpm_ip: project name '" + name +
+            "' is not a valid Verilog module identifier (it becomes the "
+            "IP name)");
+        return TCL_ERROR;
+      }
+      if (!std::regex_match(version, kVersion)) {
+        compiler->ErrorMessage("-version '" + version +
+                               "' does not follow the catalog convention "
+                               "v<major>_<minor> (e.g. v1_0)");
+        return TCL_ERROR;
+      }
+      if (!haveStub) {
+        compiler->ErrorMessage(
+            "-rpm_ip requires -stub <stub.v>: the user-written "
+            "port-only (* blackbox *) synthesis stub of the IP\n" +
+            usage);
+        return TCL_ERROR;
+      }
+      // Absolute paths: the packaging hook fires from the place stage,
+      // whose working directory is the project dir, not this one.
+      record.stub = FileUtils::GetFullPath(stub);
+      if (!std::filesystem::exists(record.stub)) {
+        compiler->ErrorMessage("-stub file does not exist: " + stub);
+        return TCL_ERROR;
+      }
+      // Structural check only, applied here so the flow fails before any
+      // stage runs: exactly one module declaration (its name is renamed to
+      // the instance name at ipgenerate time). Directive checks
+      // ((* blackbox *), syn_black_box) deliberately do NOT run at
+      // authoring — the authoring run never uses the stub, it only ships
+      // it. Each consuming flow checks the directive it depends on:
+      // rpm_common refuses a stub without (* blackbox *) at ipgenerate
+      // (every flow's link step is a yosys pass), and the -type synplify
+      // synthesis refuses one without syn_black_box.
+      {
+        std::ifstream in(record.stub);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const std::string text = buffer.str();
+        static const std::regex kModuleDecl(
+            "^[ \\t]*module[ \\t]+[A-Za-z_][A-Za-z0-9_$]*",
+            std::regex::multiline);
+        const auto count = std::distance(
+            std::sregex_iterator(text.begin(), text.end(), kModuleDecl),
+            std::sregex_iterator());
+        if (count != 1) {
+          compiler->ErrorMessage(
+              "-stub " + stub + ": expected exactly one module declaration, "
+              "found " + std::to_string(count));
+          return TCL_ERROR;
+        }
+      }
+      record.catalog =
+          haveCatalog
+              ? std::filesystem::path(FileUtils::GetFullPath(catalog))
+              : std::filesystem::absolute(name) / "IP_Catalog";
+      record.catalog = record.catalog.lexically_normal();
+      // NOTE: no analytical-placement check here — QLSettingsManager needs
+      // a loaded design's settings and crashes before one exists. The
+      // packaging hook enforces the traditional-placer requirement.
+      // Fail-fast name-collision check, WITHOUT loading catalogs: a full
+      // catalog load spawns the generators with project context this
+      // command predates (no design exists yet). Consult (a) definitions
+      // already loaded this session and (b) a filesystem probe of the
+      // installed catalog (<root>/<vendor>/<lib>/<name>/<version> holding a
+      // *_gen.py). The DERIVED target catalog is whitelisted, mirroring the
+      // packaging-time prefix rule; the packaging hook re-checks
+      // authoritatively against the fully loaded catalogs.
+      const std::string catalogIpName = name + "_" + version;
+      std::filesystem::path collidingPath;
+      if (IPDefinition* existing =
+              compiler->GetIPGenerator()->Catalog()->Definition(
+                  catalogIpName)) {
+        if (!isSameOrUnderPath(existing->FilePath(), record.catalog)) {
+          collidingPath = existing->FilePath().parent_path();
+        }
+      }
+      if (collidingPath.empty()) {
+        const std::filesystem::path root =
+            compiler->GetIPGenerator()->DefaultIPCatalogPath();
+        std::error_code ec;
+        for (auto vendor = std::filesystem::directory_iterator(root, ec);
+             !ec && vendor != std::filesystem::directory_iterator();
+             vendor.increment(ec)) {
+          std::error_code ec2;
+          if (!vendor->is_directory(ec2)) continue;
+          for (auto lib =
+                   std::filesystem::directory_iterator(vendor->path(), ec2);
+               !ec2 && lib != std::filesystem::directory_iterator();
+               lib.increment(ec2)) {
+            std::error_code ec3;
+            const std::filesystem::path candidate =
+                lib->path() / name / version;
+            if (!std::filesystem::is_directory(candidate, ec3)) continue;
+            if (isSameOrUnderPath(candidate, record.catalog)) continue;
+            for (auto entry =
+                     std::filesystem::directory_iterator(candidate, ec3);
+                 !ec3 && entry != std::filesystem::directory_iterator();
+                 entry.increment(ec3)) {
+              const std::string fname = entry->path().filename().string();
+              if (fname.size() > 7 &&
+                  fname.compare(fname.size() - 7, 7, "_gen.py") == 0) {
+                collidingPath = candidate;
+                break;
+              }
+            }
+            if (!collidingPath.empty()) break;
+          }
+          if (!collidingPath.empty()) break;
+        }
+      }
+      if (!collidingPath.empty()) {
+        compiler->ErrorMessage(
+            "-rpm_ip: IP name '" + catalogIpName +
+            "' already exists in the catalog (from " +
+            collidingPath.string() +
+            "); IP names must be unique — choose a different project "
+            "name or -version");
+        return TCL_ERROR;
+      }
+      record.active = true;
+      record.name = name;
+      record.version = version;
+    }
+
+    // Base behavior, reproduced (Compiler.cpp create_design). An -rpm_ip
+    // project is a plain RTL/Yosys project downstream.
+    compiler->GetOutput().clear();
+    bool ok = compiler->CreateDesign(name, type);
+    if (!compiler->m_output.empty())
+      Tcl_AppendResult(interp, compiler->m_output.c_str(), nullptr);
+    if (!FileUtils::FileExists(name)) {
+      compiler->Message("Create design directory: " + name);
+      bool created = std::filesystem::create_directory(name);
+      if (!created) {
+        ok = created;
+        compiler->ErrorMessage("Cannot create design directory: " + name);
+      }
+    }
+    // Populate the record only after the base call: the CreateDesign
+    // override resets per-design RPM state. Stamp it with the project so
+    // consumers can expire it on a project switch (RpmAuthorProjectActive).
+    if (ok && rpmIp) {
+      record.project =
+          std::filesystem::path(compiler->ProjManager()->projectPath());
+      compiler->RpmAuthor(record);
+    }
+    return ok ? TCL_OK : TCL_ERROR;
+  };
+  interp->registerCmd("create_design", create_design, this, 0);
+
   auto message_severity = [](void* clientData, Tcl_Interp* interp, int argc,
                              const char* argv[]) -> int {
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
@@ -980,9 +1319,27 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   auto list_devices = [](void* clientData, Tcl_Interp* interp, int argc,
                           const char* argv[]) -> int {
 
-  std::vector <QLDeviceType>device_list = QLDeviceManager::getInstance(true)->device_list;
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance(true);
+
+  std::vector <QLDeviceType>device_list = device_manager->device_list;
+
+  // devices can now come from more than one device data root (the installation plus any
+  // directory a kit was installed into), so report where each one actually came from -
+  // otherwise two same-named devices are indistinguishable in this listing.
+  std::filesystem::path installation_root_dir_path = GlobalSession->Context()->DataPath();
+  std::error_code ec;
+  std::filesystem::path installation_root_dir_path_c =
+      std::filesystem::canonical(installation_root_dir_path, ec);
+  if(ec) {
+    installation_root_dir_path_c = installation_root_dir_path;
+  }
 
   for (QLDeviceType device: device_list) {
+
+    // the extra columns are appended, so anything reading the original 7 is unaffected.
+    std::string device_root_origin =
+        (device.device_root_path == installation_root_dir_path_c) ? "built-in" : "external";
+
     for (QLDeviceVariant device_variant: device.device_variants) {
       for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
         std::cout << device_variant.family << ","
@@ -991,14 +1348,107 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                   << device_variant.devicename << ","
                   << device_variant.voltage_threshold << ","
                   << device_variant.p_v_t_corner << ","
-                  << device_variant_layout.name << std::endl;
+                  << device_variant_layout.name << ","
+                  << device_root_origin << ","
+                  << device.device_root_path.string() << std::endl;
       }
     }
   }
-  
+
   return TCL_OK;
   };
   interp->registerCmd("list_devices", list_devices, this, 0);
+
+  // install_device <kit.tar.gz> -target <dir> [force]
+  //
+  // installs a device kit produced by 'generate_device_kit' into a directory of the user's
+  // choosing, OUTSIDE the Aurora installation, and remembers that directory so the device is
+  // available in later sessions without any environment setup.
+  //
+  // 'force' overrides two separate things and both are reported: replacing a device already
+  // installed at the target, and installing despite the kit needing a newer Aurora.
+  auto install_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    // separate positional args from the '-target <dir>' flag and the trailing 'force'
+    std::vector<std::string> positional;
+    std::string target_dir_path;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = argv[i];
+      if (tok == "-target" || tok == "--target") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("-target requires a directory");
+          return TCL_ERROR;
+        }
+        target_dir_path = argv[++i];
+      } else if (compiler->ToLower(tok).compare("force") == 0 ||
+                 tok == "-force" || tok == "--force") {
+        force = true;
+      } else {
+        positional.push_back(tok);
+      }
+    }
+
+    if (positional.size() != 1 || target_dir_path.empty()) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    install_device <device_kit.tar.gz> -target <install_dir_path> [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->installDevice(positional[0], target_dir_path,
+                                                              force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("install_device", install_device, this, 0);
+
+  // uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]
+  //
+  // removes a device installed with install_device and stops searching its directory once no
+  // devices remain there. this DELETES from a directory the user chose, so it always prints
+  // what it is about to remove, refuses without 'force', and offers 'dry-run'.
+  auto uninstall_device = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+
+    std::vector<std::string> positional;
+    bool dry_run = false;
+    bool force = false;
+
+    for (int i = 1; i < argc; ++i) {
+      std::string tok = compiler->ToLower(std::string(argv[i]));
+      if (tok == "dry-run" || tok == "dry_run" || tok == "-dry-run" || tok == "--dry-run") {
+        dry_run = true;
+      } else if (tok == "force" || tok == "-force" || tok == "--force") {
+        force = true;
+      } else {
+        positional.push_back(argv[i]);
+      }
+    }
+
+    if (positional.size() != 4) {
+      compiler->ErrorMessage(
+          "Please enter command in the format:\n"
+          "    uninstall_device <family> <foundry> <node> <devicename> [dry-run] [force]");
+      return TCL_ERROR;
+    }
+
+    int status = QLDeviceManager::getInstance()->uninstallDevice(
+        positional[0], positional[1], positional[2], positional[3], dry_run, force);
+    if(status == 0) {
+      return TCL_OK;
+    }
+    return TCL_ERROR;
+  };
+  interp->registerCmd("uninstall_device", uninstall_device, this, 0);
+
+
 
   // note: we invoke these steps using the base class compiler.
   //       this is so that, the base class status is reflected correctly as well.
@@ -3299,7 +3749,17 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
-    if (fs::exists(fp_constraint_filepath_absolute)) {
+    PruneRelIpBlifs();
+    if (!m_relIpBlifs.empty()) {
+      // Relative-placement IPs registered: merge the relative-macro
+      // constraints (derived from the annotated netlist) with the IO
+      // constraints into a separate file. The default flow's
+      // <project>_constraints.xml is left untouched.
+      if (!GenerateRelMacroConstraints(netlistFile)) {
+        return std::make_tuple(std::string(""), std::string(""));
+      }
+      vpr_options += std::string(" --read_vpr_constraints " + ProjManager()->projectName() + "_rpm_constraints.xml");
+    } else if (fs::exists(fp_constraint_filepath_absolute)) {
       vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
     }
   }
@@ -3694,7 +4154,17 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
-    if (fs::exists(fp_constraint_filepath_absolute)) {
+    PruneRelIpBlifs();
+    if (!m_relIpBlifs.empty()) {
+      // Relative-placement IPs registered: merge the relative-macro
+      // constraints (derived from the annotated netlist) with the IO
+      // constraints into a separate file. The default flow's
+      // <project>_constraints.xml is left untouched.
+      if (!GenerateRelMacroConstraints(netlistFile)) {
+        return nullptr;
+      }
+      command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_rpm_constraints.xml"});
+    } else if (fs::exists(fp_constraint_filepath_absolute)) {
       command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
@@ -4891,6 +5361,17 @@ bool CompilerOpenFPGA_ql::Placement() {
     m_state = State::Placed;
     RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning as above
     RunConstraintCompliance();
+    // RPM-authoring project: (re)package the IP on this success path too —
+    // the inputs are consistent by the very hash-diff that allowed the
+    // skip, packaging is idempotent (write-if-changed in the driver), and
+    // a previously failed packaging is retried by simply re-running place.
+    // (The pcf-up-to-date early return inside the #if UPSTREAM_UNUSED block
+    // above must gain this hook too if that block is ever re-enabled.)
+    if (RpmAuthorProjectActive() && !PackageRpmAuthorProject()) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                   ": placement succeeded; RPM packaging failed");
+      return false;
+    }
     return true;
   }
 
@@ -4929,6 +5410,14 @@ bool CompilerOpenFPGA_ql::Placement() {
   // [aurora2#1725 stage P7] post-placement compliance -- soft constraint, see
   // RunConstraintCompliance()'s own comment for why this never fails the build.
   RunConstraintCompliance();
+
+  // RPM-authoring project: (re)package the IP from this fresh placement.
+  if (RpmAuthorProjectActive() && !PackageRpmAuthorProject()) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 ": placement succeeded; RPM packaging failed");
+    return false;
+  }
+
    std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /
@@ -8218,6 +8707,325 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
 }
 
+bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlistFile) {
+
+  // Relative-placement macro constraints are derived from the REL_* attributes
+  // that synth_quicklogic -rel_ip_blif stamped into the post-synthesis BLIF,
+  // so a non-BLIF PnR netlist cannot carry them.
+  if (netlistFile.size() < 5 ||
+      netlistFile.compare(netlistFile.size() - 5, 5, ".blif") != 0) {
+    ErrorMessage("Relative-placement IPs require a BLIF PnR netlist, got: " +
+                 netlistFile);
+    return false;
+  }
+
+  // Locate the installed script. DataPath varies with the install layout
+  // (<install>/share/aurora in the aurora tree), so probe the plausible
+  // roots: <install>/scripts (aurora layout) and DataPath()/../scripts.
+  std::filesystem::path generate_constraints_script_path;
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  const std::filesystem::path script_rel_path =
+      std::filesystem::path("scripts") /
+      std::filesystem::path("rel_macro_placement") /
+      std::filesystem::path("blif_rel_macro_constraints.py");
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    std::filesystem::path candidate =
+        (root / script_rel_path).lexically_normal();
+    if (fs::exists(candidate)) {
+      generate_constraints_script_path = candidate;
+      break;
+    }
+  }
+  if (generate_constraints_script_path.empty()) {
+    ErrorMessage(
+        "Cannot locate scripts/rel_macro_placement/"
+        "blif_rel_macro_constraints.py in the installation. "
+        "Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  std::filesystem::path project_path = ProjManager()->projectPath();
+  std::filesystem::path netlist_filepath = project_path / netlistFile;
+  std::filesystem::path io_constraints_filepath =
+      project_path / (ProjManager()->projectName() + "_constraints.xml");
+  std::filesystem::path output_filepath =
+      project_path / (ProjManager()->projectName() + "_rpm_constraints.xml");
+
+  if (!fs::exists(netlist_filepath)) {
+    ErrorMessage("Cannot generate relative-macro constraints: " +
+                 netlist_filepath.string() +
+                 " does not exist (run synthesis first)");
+    return false;
+  }
+
+  #ifdef _WIN32
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(generate_constraints_script_path.string());
+  args.push_back("--blif");
+  args.push_back(netlist_filepath.string());
+  // Preserve the IO floorplan constraints by merging into them; without an IO
+  // constraints file the RPM constraints stand alone.
+  if (fs::exists(io_constraints_filepath)) {
+    args.push_back("--merge-into");
+    args.push_back(io_constraints_filepath.string());
+  }
+  args.push_back("-o");
+  args.push_back(output_filepath.string());
+
+  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
+
+  if (status != 0) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  return true;
+}
+
+void CompilerOpenFPGA_ql::PruneRelIpBlifs() {
+  // Registered netlists belong to one project. A session can switch
+  // projects through several paths (GUI open_project in particular never
+  // passes through CreateDesign), so instead of hooking every path, the
+  // registrations are stamped with their project and expired lazily by
+  // every consumer: a leaked netlist can then never reach another project's
+  // synthesis (-rel_ip_blif) or constraint generation.
+  const std::filesystem::path current =
+      (ProjManager() != nullptr && ProjManager()->HasDesign())
+          ? std::filesystem::path(ProjManager()->projectPath())
+          : std::filesystem::path{};
+  if (current != m_relIpBlifsProject) {
+    m_relIpBlifs.clear();
+    m_relIpStubs.clear();
+    m_relIpBlifsProject = current;
+  }
+}
+
+bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
+                                       const std::string& type) {
+  // Eager clear on top of the lazy PruneRelIpBlifs(): a new design must not
+  // inherit the previous design's registered relative-placement IP netlists
+  // even transiently (RelIpBlifs() is a public accessor). The authoring
+  // record is per design too; the re-registered create_design repopulates
+  // it AFTER this returns for -rpm_ip projects.
+  m_relIpBlifs.clear();
+  m_relIpStubs.clear();
+  m_relIpBlifsProject.clear();
+  m_rpmAuthorProject = {};
+  return Compiler::CreateDesign(name, type);
+}
+
+bool CompilerOpenFPGA_ql::RpmAuthorProjectActive() {
+  if (!m_rpmAuthorProject.active) return false;
+  if (ProjManager() == nullptr || !ProjManager()->HasDesign()) return false;
+  if (std::filesystem::path(ProjManager()->projectPath()) !=
+      m_rpmAuthorProject.project) {
+    m_rpmAuthorProject = {};
+    return false;
+  }
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {
+  const RpmAuthorProject& rec = m_rpmAuthorProject;
+
+  const std::filesystem::path project_path = ProjManager()->projectPath();
+  const std::string project_name = ProjManager()->projectName();
+  const std::filesystem::path netlist_filepath =
+      project_path / (project_name + "_post_synth.blif");
+  // The authoring inputs — the flat placement with primitive site paths and
+  // the echo files — were produced by the place-stage invocation this call
+  // rides on (getPlacementCommand() appends --echo_file on /
+  // --write_flat_place for authoring projects): a real run just wrote them,
+  // and a task-cache skip proved them consistent by the same hash-diff that
+  // allowed the skip. A hand-deleted file fails loudly in the driver.
+  const std::filesystem::path fplace_filepath =
+      project_path / (project_name + "_rpm_author.fplace");
+  const std::filesystem::path macros_echo_filepath =
+      project_path / "place_macros.echo";
+
+  // A tuning run must be unconstrained: a design that itself consumes
+  // relative-placement IPs replays their shape, it does not author one.
+  PruneRelIpBlifs();
+  if (!m_relIpBlifs.empty()) {
+    std::string blifs;
+    for (const auto& p : m_relIpBlifs) blifs += "\n  " + p.string();
+    ErrorMessage(
+        "RPM authoring requires an unconstrained tuning run, but this "
+        "design consumes relative-placement IP netlist(s) registered via "
+        "ip_add_to_design:" +
+        blifs + "\nAuthor the IP as a standalone design without RPM IPs.");
+    return false;
+  }
+
+  // Authoring from an analytical-placement run is unvalidated; the RPM
+  // flow requires the traditional placer. Enforced here rather than at
+  // create_design, which predates the design whose settings this reads.
+  if (QLSettingsManager::getStringValue("general", "options",
+                                        "analytical_place") == "checked") {
+    ErrorMessage(
+        "RPM authoring requires the traditional placer; disable analytical "
+        "placement for the tuning run.");
+    return false;
+  }
+
+  // Locate the installed packaging driver, same probing as
+  // GenerateRelMacroConstraints above.
+  std::filesystem::path driver_script_path;
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  const std::filesystem::path script_rel_path =
+      std::filesystem::path("scripts") /
+      std::filesystem::path("rel_macro_placement") /
+      std::filesystem::path("package_rpm_ip.py");
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    std::filesystem::path candidate =
+        (root / script_rel_path).lexically_normal();
+    if (fs::exists(candidate)) {
+      driver_script_path = candidate;
+      break;
+    }
+  }
+  if (driver_script_path.empty()) {
+    ErrorMessage(
+        "Cannot locate scripts/rel_macro_placement/package_rpm_ip.py in the "
+        "installation. RPM IP packaging failed!");
+    return false;
+  }
+
+  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if (!QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice)) {
+    ErrorMessage(
+        "RPM authoring: no valid target device; the annotated netlist is "
+        "filed per device family (set the device first)");
+    return false;
+  }
+  const std::string family =
+      StringUtils::toLower(targetDevice.device_variant.family);
+
+  const std::filesystem::path& catalog_dir = rec.catalog;  // absolute
+
+  // IP names are unique across all catalogs (a cross-root duplicate is a
+  // load error). create_design -rpm_ip already refused a colliding
+  // name; re-check here since catalogs may have gained IPs mid-session. A
+  // definition already loaded from THIS catalog is the legitimate
+  // re-package case (new family, overwrite) and passes.
+  GetIPGenerator()->LoadDefaultCatalogs();
+  const std::string catalog_ip_name = rec.name + "_" + rec.version;
+  if (IPDefinition* existing =
+          GetIPGenerator()->Catalog()->Definition(catalog_ip_name)) {
+    if (!isSameOrUnderPath(existing->FilePath(), catalog_dir)) {
+      ErrorMessage("RPM authoring: IP name '" + catalog_ip_name +
+                   "' already exists in the catalog (from " +
+                   existing->FilePath().parent_path().string() +
+                   "); IP names must be unique — choose a different project "
+                   "name or -version");
+      return false;
+    }
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else   // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif  // _WIN32
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " RPM IP packaging failed!");
+    return false;
+  }
+
+  std::vector<std::string> args;
+  args.push_back(driver_script_path.string());
+  args.push_back("--blif");
+  args.push_back(netlist_filepath.string());
+  args.push_back("--flat-placement");
+  args.push_back(fplace_filepath.string());
+  args.push_back("--place-macros-echo");
+  args.push_back(macros_echo_filepath.string());
+  args.push_back("--stub");
+  args.push_back(rec.stub.string());
+  args.push_back("--name");
+  args.push_back(rec.name);
+  args.push_back("--version");
+  args.push_back(rec.version);
+  // One identity: REL_MACRO_TYPE derives from the IP (= project) name.
+  args.push_back("--macro-type");
+  args.push_back(ToUpper(rec.name));
+  args.push_back("--family");
+  args.push_back(family);
+  args.push_back("--catalog-dir");
+  args.push_back(catalog_dir.string());
+  // The driver copies rpm_common.py into the user catalog so it is
+  // self-contained; hand it the installed catalog's copy. Missing both here
+  // and in the target catalog is a broken installation — error now, with a
+  // real path, rather than letting the driver suggest a --rpm-common flag
+  // this command does not expose.
+  const std::filesystem::path rpm_common_path =
+      GetIPGenerator()->DefaultIPCatalogPath() / "quicklogic" / "lib" /
+      "rpm_common.py";
+  if (fs::exists(rpm_common_path)) {
+    args.push_back("--rpm-common");
+    args.push_back(rpm_common_path.string());
+  } else if (!fs::exists(catalog_dir / "quicklogic" / "lib" /
+                         "rpm_common.py")) {
+    ErrorMessage("RPM authoring: the installed catalog's packaging library "
+                 "is missing (" +
+                 rpm_common_path.string() +
+                 ") and the target catalog does not carry one yet; the "
+                 "installation is incomplete");
+    return false;
+  }
+  // When the tuning run was region-constrained, the driver's report reminds
+  // the author that only the relative shape travels with the IP.
+  const std::filesystem::path io_constraints_filepath =
+      project_path / (project_name + "_constraints.xml");
+  if (fs::exists(io_constraints_filepath)) {
+    args.push_back("--tuning-constraints");
+    args.push_back(io_constraints_filepath.string());
+  }
+  // No --force: the stub is fixed per project at create time, so a
+  // port-list mismatch against an already-packaged IP means packaging over
+  // a different IP's leftovers — correct to refuse. The driver keeps the
+  // flag for manual use.
+
+  int status = FileUtils::ExecuteSystemCommand(python_exec.string(), args,
+                                               m_out, /*timeout_ms*/ -1)
+                   .realCode;
+  if (status != 0) {
+    ErrorMessage("Design " + project_name + " RPM IP packaging failed!");
+    return false;
+  }
+
+  // (Re)load the user catalog so the same script can configure_ip the new IP
+  // immediately. Called directly (we are already on a worker thread); the
+  // builder updates an already-loaded definition in place.
+  if (!BuildLiteXIPCatalog(catalog_dir)) {
+    ErrorMessage("RPM authoring: packaged successfully, but loading the "
+                 "user catalog failed: " +
+                 catalog_dir.string());
+    return false;
+  }
+  Message("RPM authoring: IP '" + rec.name + "' (" + rec.version +
+          ") packaged into " + catalog_dir.string());
+  return true;
+}
+
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
   bool status = true;
 #if UPSTREAM_UNUSED
@@ -10648,7 +11456,66 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
+    // Relative-placement IPs: Synplify keeps the IP a black box but emits
+    // no module shell for it in the .vm, so yosys must read the blackbox
+    // stub or synth_ql's `hierarchy -check` fails on the unresolved module.
+    // Read AFTER the .vm with -overwrite: should a Synplify version ever
+    // emit an empty (non-blackbox) shell, the attributed stub still wins —
+    // a shell winning instead would make `flatten` dissolve the instance
+    // and the link step fail far downstream with a misleading error.
+    // Gated on registration, so the default flow's script stays
+    // byte-identical.
+    PruneRelIpBlifs();
+    {
+      const auto& relStubs = RelIpStubs();
+      for (size_t i = 0; i < m_relIpBlifs.size(); ++i) {
+        if (relStubs[i].empty()) {
+          ErrorMessage(
+              "ip_add_to_design " + m_relIpBlifs[i].string() +
+              ": a directly-registered annotated netlist carries no "
+              "synthesis stub, which the Synplify flow requires (its yosys "
+              "pass reads Synplify's netlist, not the design sources). Use "
+              "the catalog IP form, or synthesize with yosys.");
+          return {};
+        }
+        // Synplify keeps the IP a black box only when the stub declares it
+        // (`syn_black_box`); without the directive current Synplify happens
+        // to black-box the empty module by inference, but that is implicit,
+        // warning-level behavior — refuse rather than depend on it. Checked
+        // here and not at authoring, because only this flow needs it.
+        {
+          std::ifstream in(relStubs[i]);
+          std::stringstream buffer;
+          buffer << in.rdbuf();
+          // Match the directive in one of the forms Synplify honors — a
+          // `/* synthesis ... */` or `// synthesis ...` comment, or a
+          // `(* syn_black_box *)` attribute — not the bare substring, so a
+          // comment merely mentioning syn_black_box cannot pass the check.
+          static const std::regex kSynBlackBox(
+              "(/\\*\\s*synthesis\\b[^*]*\\bsyn_black_box\\b)"
+              "|(//\\s*synthesis\\b[^\\n]*\\bsyn_black_box\\b)"
+              "|(\\(\\*[^)]*\\bsyn_black_box\\b)");
+          if (!std::regex_search(buffer.str(), kSynBlackBox)) {
+            ErrorMessage(
+                relStubs[i].string() +
+                ": the IP's synthesis stub does not carry Synplify's "
+                "black-box directive (`) /* synthesis syn_black_box */;` "
+                "on the module header), which the -type synplify flow "
+                "requires. Add the directive to the authored stub and "
+                "re-run ipgenerate, or synthesize with yosys.");
+            return {};
+          }
+        }
+        designFiles += "read_verilog -overwrite " + relStubs[i].string() + "\n";
+        yosysScript->addFile(relStubs[i]);
+      }
+    }
     yosysScript->apply("${READ_DESIGN_FILES}", designFiles);
+    // The .vm is the hand-off from the Synplify command to this yosys
+    // command; track it so a re-synthesized .vm invalidates the yosys task
+    // even when the script text is unchanged.
+    yosysScript->addFile(std::filesystem::path(ProjManager()->projectPath()) /
+                         vm_file_path);
     for (const std::string& file: ProjManager()->CollectDesignFiles()) {
       yosysScript->addFile(std::filesystem::path{file});
     }
@@ -10916,8 +11783,32 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     // tack on a '/' separator if it is missing to be safe:
     yosys_modules_dir_path_string += "/";
   }
-  yosys_options += " -lib_path " + 
+  yosys_options += " -lib_path " +
                    yosys_modules_dir_path_string;
+
+  // Relative-placement IPs: link each annotated netlist at the end of
+  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration — with
+  // stale registrations from another project pruned first — so the default
+  // flow's synthesis script stays byte-identical. The netlist is also
+  // tracked as a task input: it reaches yosys only through this option
+  // string, so without addFile a re-authored netlist would never invalidate
+  // the synthesis task.
+  PruneRelIpBlifs();
+  if (!m_relIpBlifs.empty() &&
+      m_projManager->projectType() == PostMapSynplify) {
+    // A post-map project's sources are already a mapped netlist; nothing
+    // has validated that the RPM stub/link machinery composes with that
+    // input, so refuse rather than risk a silently unconstrained build.
+    ErrorMessage(
+        "relative-placement IPs are not supported in post-map projects; "
+        "consume the IP from an RTL project (yosys or -type synplify "
+        "synthesis)");
+    return {};
+  }
+  for (const auto& rel_ip_blif : m_relIpBlifs) {
+    yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
+    yosysScript->addFile(rel_ip_blif);
+  }
 
   // TODO: trim yosys_options at the front
   yosysScript->apply("${YOSYS_OPTIONS}", yosys_options);
@@ -11077,7 +11968,20 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   else {
     command->append("--place");
   }
-  
+
+  // RPM authoring support: an rpm_ip project's placement run must emit the
+  // authoring inputs the packaging hook consumes — the flat placement (with
+  // primitive site paths) and the echo files. Skipped when the user already
+  // passed either option through custom_vpr_options_str above.
+  if (RpmAuthorProjectActive()) {
+    if (command->string().find("--echo_file") == std::string::npos) {
+      command->append("--echo_file on");
+    }
+    if (command->string().find("--write_flat_place") == std::string::npos) {
+      command->append("--write_flat_place " + ProjManager()->projectName() +
+                      "_rpm_author.fplace");
+    }
+  }
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
   //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));

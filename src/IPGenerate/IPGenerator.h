@@ -42,15 +42,92 @@ class IPInstance;
 
 class IPGenerator {
  public:
+  // Availability of one catalog IP against a device.
+  //
+  // Every field is filled in for every IP. Because nothing may be hidden
+  // without a stated reason, `reason` is never empty - not even for a plainly
+  // available IP.
+  struct IPStatus {
+    bool available{true};   // may be configured
+    bool listed{true};      // appears in the default `ip_catalog` listing
+    bool preview{false};    // configure_ip warns about it, then proceeds
+    bool unverified{false}; // fabric requirement could not be read; see below
+    std::string state;      // "production" | "preview" | "unavailable"
+    std::string reason;     // never empty; reads as a predicate on the IP name
+  };
+
+  // The device facts the availability rule needs. Hoisted into a value so a
+  // listing evaluates one IP after another without re-reading and re-parsing
+  // the device config.json once per IP.
+  struct DeviceFacts {
+    bool valid{false};       // a device is actually selected
+    std::string name;        // device_variant.devicename
+    std::string dspVersion;  // QLDeviceManager::deviceDSPVersion()
+  };
+  // Reads the device currently selected in QLDeviceManager. When no device is
+  // selected the version field is left empty rather than defaulted, so the
+  // "1_0" fallback for devices without a DSP_TYPE can never stand in for a
+  // device that is not there.
+  static DeviceFacts CurrentDeviceFacts();
+
+  // Single source of truth for whether a catalog IP can be used, shared by the
+  // ip_catalog listing, the ip_catalog <name> query and configure_ip so the
+  // three surfaces cannot drift.
+  //
+  // Gating is entirely data driven: it comes from the IP's optional
+  // ip_manifest.json, never from the IP's name. See the fail-open contract on
+  // IPAvailability (IPCatalog.h) for the rules this implements - in
+  // particular, an IP whose requirement could not be read comes back
+  // available and listed but with `unverified` set, not silently ungated.
+  // `catalog` is consulted only to check that a suggested alternative exists.
+  static IPStatus EvaluateAvailability(const IPDefinition* def,
+                                       IPCatalog* catalog,
+                                       const DeviceFacts& device);
+  // As above, against the device currently selected. Convenience for the
+  // single-IP callers; a loop should hoist CurrentDeviceFacts() instead.
+  static IPStatus EvaluateAvailability(const IPDefinition* def,
+                                       IPCatalog* catalog);
+
+  // Warning text for a preview IP, shared by the console, the flow log and the
+  // comment stamped into the generated wrapper so the three cannot drift.
+  static std::string PreviewNotice(const IPDefinition* def);
+  // Warning text for an IP whose fabric requirement could not be read.
+  static std::string UnverifiedRequirementNotice(const IPDefinition* def);
+
+  // Prepends `line` as a comment to a generated wrapper source, looked up as
+  // <srcDir>/<baseName>.v and .sv. Returns false when nothing matched; the
+  // generators name the file "<module>_<version>", and getting that wrong made
+  // this an undetectable no-op, so the miss is now both returned and warned
+  // about. Public so a test can exercise it against a real file.
+  static bool StampWrapperComment(Compiler* compiler,
+                                  const std::filesystem::path& srcDir,
+                                  const std::string& baseName,
+                                  const std::string& line);
+
   IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
-  
+
   void setIpOutputLocation(const std::string& moduleName, const std::string& version, const std::filesystem::path& ipOutputLocation);
   void shareContext();
   const std::map<std::string, std::string>& environment() const { return m_environment; }
   
   std::filesystem::path EnvsPath() const;
   std::filesystem::path IPCatalogPath() const;
+  // The installed catalog root the tool ships (dev/IP_Catalog in the aurora
+  // layout) — the one definition of that path, shared by the Tcl lazy load
+  // and the GUI catalog tree.
+  std::filesystem::path DefaultIPCatalogPath() const;
+  // The project-local user catalog (<project>/IP_Catalog), searched in
+  // addition to the installed one. Empty when no project is open. An
+  // -rpm_ip authoring project packages its IP here by default.
+  std::filesystem::path ProjectUserCatalogPath() const;
+  // Lazily load the catalog roots the tool knows about (installed first,
+  // then project-local; a name found in both roots is a load error), each at
+  // most once per session — BuildLiteXIPCatalog records the scanned roots
+  // and only this loader consults the record. Called by
+  // ip_catalog/configure_ip; explicit add_litex_ip_catalog calls always
+  // rescan and never suppress these defaults.
+  void LoadDefaultCatalogs();
 
   IPCatalog* Catalog() { return m_catalog; }
   Compiler* GetCompiler() { return m_compiler; }

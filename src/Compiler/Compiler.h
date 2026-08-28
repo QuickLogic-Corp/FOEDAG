@@ -22,6 +22,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define COMPILER_H
 
 #include <filesystem>
+#include <set>
 #include <iostream>
 #include <map>
 #include <string>
@@ -151,6 +152,9 @@ class Compiler {
   virtual void Help(std::ostream* out);
   virtual void Version(std::ostream* out);
   virtual void Message(const std::string& message) const;
+  // Same stream as Message(), but prefixed WARNING: instead of INFO:. Callers
+  // used to write Message("WARNING: ...") and get "INFO: WARNING: ..." out.
+  virtual void WarningMessage(const std::string& message) const;
   virtual void ErrorMessage(const std::string& message,
                             bool append = true) const;
   virtual std::vector<std::string> GetCleanFiles(
@@ -184,6 +188,13 @@ class Compiler {
                            bool namesOnly = false);
   bool HasIPInstances();
   bool HasIPDefinitions();
+  // Catalog roots already scanned this session (weakly_canonical strings).
+  // BuildLiteXIPCatalog records every root it scans and never skips one; the
+  // record is consulted ONLY by IPGenerator::LoadDefaultCatalogs, so explicit
+  // add_litex_ip_catalog calls and GUI refreshes always rescan.
+  const std::set<std::string>& LoadedIpCatalogRoots() const {
+    return m_loadedIpCatalogRoots;
+  }
 
   // VPR, Yosys generic opt
   void ChannelWidth(uint32_t width) { m_channel_width = width; }
@@ -303,8 +314,11 @@ class Compiler {
   virtual bool VerifyTargetDevice() const;
   bool HasTargetDevice();
 
-  bool CreateDesign(const std::string& name,
-                    const std::string& type = std::string{});
+  // Virtual so a derived compiler can reset per-design state (e.g. the QL
+  // compiler clears its registered relative-placement IP netlists, which
+  // must not leak from one design of a session into the next).
+  virtual bool CreateDesign(const std::string& name,
+                            const std::string& type = std::string{});
 
   /* Compiler class utilities */
   bool RunBatch();
@@ -410,6 +424,9 @@ class Compiler {
   std::map<std::string, MsgSeverity> m_severityMap;
 
   std::map<std::string, std::string> m_environmentVariableMap;
+
+  // See LoadedIpCatalogRoots().
+  std::set<std::string> m_loadedIpCatalogRoots;
 
   NetlistType m_netlistType = NetlistType::Blif;
 

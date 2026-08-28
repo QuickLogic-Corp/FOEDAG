@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 // clang-format off
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -187,6 +188,41 @@ class CompilerOpenFPGA_ql : public Compiler {
   // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0).
   virtual bool EnsureElaborated();
 
+  /// Register an annotated relative-placement IP netlist (via the
+  /// `ip_add_to_design` Tcl command, either as an explicit .eblif/.blif path
+  /// or auto-discovered from a catalog IP instance's rel_macro/ dir).
+  /// Duplicates are ignored. Registrations are per project — see
+  /// PruneRelIpBlifs(). See docs/development/relative_macro_placement/ in
+  /// aurora2.
+  ///
+  /// `stub` is the IP's generated blackbox stub source (catalog IPs only;
+  /// empty for the direct-netlist form, which carries no stub). It is only
+  /// consumed by the Synplify synthesis flow, whose yosys pass reads the
+  /// Synplify netlist instead of the design sources and therefore must read
+  /// the stub explicitly. m_relIpStubs stays index-aligned with
+  /// m_relIpBlifs.
+  void AddRelIpBlif(const std::filesystem::path& path,
+                    const std::filesystem::path& stub = {}) {
+    PruneRelIpBlifs();
+    if (std::find(m_relIpBlifs.begin(), m_relIpBlifs.end(), path) ==
+        m_relIpBlifs.end()) {
+      m_relIpBlifs.push_back(path);
+      m_relIpStubs.push_back(stub);
+    }
+  }
+  const std::vector<std::filesystem::path>& RelIpBlifs() const {
+    return m_relIpBlifs;
+  }
+  const std::vector<std::filesystem::path>& RelIpStubs() const {
+    return m_relIpStubs;
+  }
+  /// Registered netlists belong to the project they were registered under;
+  /// clear them when the session's project changed since. Called on
+  /// registration and by every consumer of m_relIpBlifs, so netlists cannot
+  /// leak into another project's synthesis through ANY project-switch path —
+  /// GUI open_project in particular never passes through CreateDesign.
+  void PruneRelIpBlifs();
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -209,6 +245,55 @@ class CompilerOpenFPGA_ql : public Compiler {
   [[nodiscard]] bool RunBitstreamEncode(uint32_t stages);
   bool GeneratePinConstraints(std::string& filepath_fpga_fix_pins_place_str);
   bool GenerateIOFloorPlanConstraints(bool forceOverwrite = false);
+  /// Derive relative-macro constraints from the annotated post-synthesis
+  /// netlist and merge them with the IO floorplan constraints into
+  /// <project>_rpm_constraints.xml. Only called when annotated IP netlists
+  /// are registered; the default flow's <project>_constraints.xml is never
+  /// touched.
+  bool GenerateRelMacroConstraints(const std::string& netlistFile);
+  /// RPM-authoring project record, populated by the QL-extended
+  /// `create_design <name> -rpm_ip -stub <f> ?-version v1_0?
+  /// ?-catalog <dir>?` (a flag orthogonal to -type, which keeps meaning
+  /// source kind + synthesis tool) and reset whenever a design is created. While
+  /// active: the place stage emits the authoring inputs (--echo_file on,
+  /// --write_flat_place) and re-packages the IP on every success path of
+  /// Placement() except `place clean` (PackageRpmAuthorProject). The IP
+  /// name IS the project name; REL_MACRO_TYPE derives from it. Session-only
+  /// state, stamped with its project: a project switch expires it
+  /// (RpmAuthorProjectActive), and re-running create_design re-establishes
+  /// it — batch scripts always do. See docs/development/relative_macro_placement/
+  /// in aurora2 (AUTHORING_PROJECT_TYPE_PLAN.md).
+  struct RpmAuthorProject {
+    bool active = false;
+    std::string name;               // == project name
+    std::filesystem::path stub;     // absolute, validated at create
+    std::string version;            // v<major>_<minor>
+    std::filesystem::path catalog;  // absolute target catalog root
+    std::filesystem::path project;  // the project this record belongs to
+  };
+  const RpmAuthorProject& RpmAuthor() const { return m_rpmAuthorProject; }
+  void RpmAuthor(const RpmAuthorProject& record) {
+    m_rpmAuthorProject = record;
+  }
+  /// True when the authoring record belongs to the CURRENTLY open project.
+  /// The record is stamped with its project and expired lazily here — a
+  /// session that switches projects without create_design (GUI
+  /// open_project) must not author the old IP from the new project's
+  /// artifacts. Same leak class and same lazy-expiry pattern as
+  /// PruneRelIpBlifs().
+  bool RpmAuthorProjectActive();
+  /// Annotate + package the authoring project's IP from the current
+  /// placement artifacts by driving
+  /// scripts/rel_macro_placement/package_rpm_ip.py, then (re)load the
+  /// target catalog. Called from Placement()'s success paths; a failure
+  /// fails the stage ("placement succeeded; RPM packaging failed").
+  bool PackageRpmAuthorProject();
+  /// Clears per-design RPM state: netlists registered by an earlier design
+  /// of the session (ip_add_to_design) must not leak -rel_ip_blif options
+  /// into the next design's synthesis, and the authoring record is per
+  /// design.
+  bool CreateDesign(const std::string& name,
+                    const std::string& type = std::string{}) override;
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
@@ -252,6 +337,18 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_aurora_template_script_yosys_path;
   std::filesystem::path m_aurora_template_script_synplify_path;
   std::filesystem::path m_aurora_template_script_openfpga_path;
+  // Annotated relative-placement IP netlists (registered via
+  // ip_add_to_design). Empty in the default flow; every consumer is gated on
+  // this so that projects without relative-placement IPs behave identically
+  // to before. Valid only for the project recorded in m_relIpBlifsProject
+  // (see PruneRelIpBlifs).
+  std::vector<std::filesystem::path> m_relIpBlifs;
+  // Index-aligned with m_relIpBlifs: the IP's blackbox stub source, empty
+  // for the direct-netlist registration form. See AddRelIpBlif().
+  std::vector<std::filesystem::path> m_relIpStubs;
+  std::filesystem::path m_relIpBlifsProject;
+  // See RpmAuthor().
+  RpmAuthorProject m_rpmAuthorProject;
   /*!
    * \brief m_architectureFile
    * We required from user explicitly specify architecture file.
