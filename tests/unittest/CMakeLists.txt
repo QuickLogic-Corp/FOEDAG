@@ -44,7 +44,6 @@ set (CPP_LIST
     PinAssignment/TestLoader.cpp
     PinAssignment/TestPortsLoader.cpp
     Compiler/CompilerDefines_test.cpp
-    Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     PinAssignment/PortsModel_test.cpp
