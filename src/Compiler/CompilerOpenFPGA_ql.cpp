@@ -2521,10 +2521,12 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
 
   // [aurora2#1725 stage P0b] Best-effort: elaboration runs Yosys directly on the RTL,
   // independent of the synthesis front end, so Yosys's parser limits apply even where
-  // synthesis itself would not hit them -- e.g. Synplify reads VHDL natively, but this
-  // Yosys pass cannot, so a VHDL + Synplify project would fail here. Instance discovery
-  // only enables floorplanning, it is not required to compile, so a failure here just
-  // skips floorplanning-by-RTL-instance rather than the build.
+  // synthesis itself would not hit them -- e.g. Synplify reads VHDL natively, but plain
+  // Yosys cannot, so a VHDL project without Verific available fails here even under
+  // Synplify (RunElaboration() forces Verific on for VHDL when TabbyCAD is built in, so
+  // this only bites a non-TabbyCAD build). Instance discovery only enables floorplanning,
+  // it is not required to compile, so a failure here just skips floorplanning-by-RTL-instance
+  // rather than the build.
   if (!RunElaboration() || !RunElabInstances()) {
     Message(
         "Instance discovery is unavailable for this project, so floorplanning by RTL "
@@ -2533,13 +2535,9 @@ bool CompilerOpenFPGA_ql::EnsureElaborated() {
     // done: whatever blocked it may be fixed by the time the design is next compiled.
     return true;
   }
-  // [aurora2#1725 stage P7] There is no pre-synthesis tier to produce here -- resource
-  // figures are post-synthesis only. What still has to happen is the other half of what the
-  // tier-1 call did: design_resources.json describes the netlist of the PREVIOUS revision,
-  // and the RTL has just changed. Left in place it would keep feeding the panel counts for
-  // a netlist that no longer exists, which is the failure the tier field exists to prevent.
-  // Removed rather than replaced: "no figures yet" is the truthful state until synthesis
-  // produces atom sets. The append-only resource_estimation.log is deliberately untouched.
+  // [aurora2#1725 stage P7] The RTL just changed, so design_resources.json now describes a
+  // stale netlist. Removed, not regenerated -- resource figures are post-synthesis only, and
+  // "no figures yet" is the truthful state until synthesis produces atom sets.
   std::error_code resources_ec;
   std::filesystem::remove(FloorplanningArtifact("design_resources.json"), resources_ec);
 
