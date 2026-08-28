@@ -2847,6 +2847,16 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // vpr_options += " --allow_dangling_combinational_nodes on";
+
+      // CRR v2.4 shifted the routing-channel origin by one tile on both axes.
+      if( QLDeviceManager::getInstance()->deviceCRRVersion(device_target) == "2.4" ) {
+        if(vpr_options.find("rr_graph_x_offset") == std::string::npos) {
+          vpr_options += " --rr_graph_x_offset 1";
+        }
+        if(vpr_options.find("rr_graph_y_offset") == std::string::npos) {
+          vpr_options += " --rr_graph_y_offset 1";
+        }
+      }
     }
   }
 
@@ -3253,6 +3263,16 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // command->append("--allow_dangling_combinational_nodes on");
+
+      // CRR v2.4 shifted the routing-channel origin by one tile on both axes.
+      if( QLDeviceManager::getInstance()->deviceCRRVersion(device_target) == "2.4" ) {
+        if(command->string().find("rr_graph_x_offset") == std::string::npos) {
+          command->append("--rr_graph_x_offset 1");
+        }
+        if(command->string().find("rr_graph_y_offset") == std::string::npos) {
+          command->append("--rr_graph_y_offset 1");
+        }
+      }
     }
   }
 
