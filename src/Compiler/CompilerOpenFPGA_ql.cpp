@@ -2558,13 +2558,9 @@ std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
                                          ProjManager()->projectName(), "atomsets.json");
 }
 
-// [aurora2#1725] Where the helper stages talk. Each one is a diagnostic side-channel --
-// it produces a file the FloorPlanning panel or a testcase validator reads, and nothing
-// downstream in the compile depends on what it says -- so its chatter belongs here, one
-// file per project truncated at the start of each run, rather than in the console and
-// aurora.log on every compile of every design, including ones with no floorplan at all.
-// Not redirected: ErrorMessage() on a stage that failed, and the stage-P7 floorplan
-// verdicts, which are the answer the user actually asked for.
+// [aurora2#1725] Where the helper stages' diagnostic chatter goes instead of the console
+// and aurora.log, one file per project truncated at the start of each run. Not redirected:
+// ErrorMessage() on a failed stage, and the stage-P7 verdicts the user actually asked for.
 std::filesystem::path CompilerOpenFPGA_ql::FloorplanningStageLog() {
   return FloorplanningArtifact("stages.log");
 }
@@ -2582,13 +2578,10 @@ int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
   return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).realCode;
 }
 
-// [aurora2#1725] The price of running the in-session tcl scripts under `tee -q`: a hard
-// Yosys error inside one of them goes to that script's artifact log and nowhere else --
-// log_error() writes through the same redirection everything else does, so <top>_synth.log
-// would just stop after synth_ql with no reason given. Quiet on success is the point;
-// quiet on failure is a debugging trap. So when synthesis fails, say what these logs
-// blamed it on, if anything. Nothing is printed when they hold no error, which is every
-// run where the failure was synthesis' own.
+// [aurora2#1725] Running the in-session tcl scripts under `tee -q` means a hard Yosys error
+// inside one goes only to that script's artifact log, so <top>_synth.log would just stop
+// after synth_ql with no reason given. Quiet on success is the point; quiet on failure is a
+// debugging trap. So on a synthesis failure, say what these logs blamed it on, if anything.
 void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
   for (const char* suffix : {"atomsets.log", "rehier.log"}) {
     std::filesystem::path path = FloorplanningArtifact(suffix);
