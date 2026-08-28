@@ -8512,7 +8512,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
           // shared). A bare instance path is never itself a VPR atom name -- real atoms
           // are always "<path>.<signal>" -- so without the "." + "*" suffix this would
           // reach VPR as a literal name_pattern and silently match nothing (see
-          // floorplanning_generate.py's add_atom_pattern). But not every token here is
+          // generate_floorplanning.py's add_atom_pattern). But not every token here is
           // an instance: e.g. "out[0]"/"$false"/"$undef" are exact leaf atom/net names
           // and must stay literal. instances.json is what tells the two apart.
           //
@@ -8576,7 +8576,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
-  // [aurora2#1725 REQ-004] Check the floorplan before handing it to floorplanning_generate.py.
+  // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
   //
   // The panel does this continuously -- under-provisioned regions, overlaps, constraints
   // naming an instance synthesis deleted, a parent whose own logic no partition takes -- but
@@ -8632,7 +8632,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_generate.py");
+      std::filesystem::path("generate_floorplanning.py");
       
       
   std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
@@ -11938,7 +11938,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // - there is no pre-generated .place file AND
   // - there is no pcf file in the project.
 
-  // Bypassing the pcf2place due to generating the pcf constraints using the floorplanning_generate.py script
+  // Bypassing the pcf2place due to generating the pcf constraints using the generate_floorplanning.py script
   // std::string filepath_fpga_fix_pins_place_str;
   // if (!GeneratePinConstraints(filepath_fpga_fix_pins_place_str)) return nullptr;
 
