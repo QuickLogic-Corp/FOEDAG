@@ -282,9 +282,9 @@ class QLDeviceManager : public QObject {
                             std::string* out_parse_error = nullptr);
 
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
-  // DSP version supported by the device, derived from the "DSP_TYPE" entry in
-  // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
-  // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPV1.0) when not specified.
+  // DSP version supported by the device, from "DSP_VERSION" in config.json, or
+  // "DSP_TYPE" on packages predating that rename. Returns "<major>_<minor>"
+  // (e.g. "v4.0" -> "4_0", "DSPV2" -> "2_0"). Defaults to "1_0" when neither is set.
   std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
