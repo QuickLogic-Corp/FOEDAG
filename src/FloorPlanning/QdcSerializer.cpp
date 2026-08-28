@@ -31,22 +31,14 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         }
 
         // [aurora2#1725 stage P1] RTL names only -- never element.vprNames, and never a
-        // pattern derived from the tree's shape. Writing resolved VPR atom names here is
-        // what produced the defect this feature exists to fix: a .qdc holding 39 enumerated
-        // atom names for an instance that has 523 in the netlist, silently under-constraining
-        // it by 13x and going stale on every resynthesis -- an enumerated list can never be
-        // complete, and the names are in a different namespace from the atoms VPR actually
-        // places (A.P3).
+        // pattern derived from the tree's shape. Writing resolved VPR atom names is what
+        // produced the defect this feature fixes: an enumerated .qdc can never be complete,
+        // and those names are in a different namespace from the atoms VPR places (A.P3).
         //
-        // A whole-instance selection is written as the plain RTL path the tree shows --
-        // "dut.instPerm20009", not "dut.instPerm20009.*". The trailing ".*" this used to
-        // append to every non-leaf element was a post-synthesis-facing pattern that REQ-003
-        // reserves for _constraints.xml generation, and it also misdescribed the user's own
-        // selection, appearing on any row with children whether or not the user had drawn a
-        // glob. Dropping it loses nothing: a leaf instance and a literal atom name are both
-        // written bare and always were, so instances.json has always been what tells a whole
-        // instance from an exact atom name, and GenerateIOFloorPlanConstraints() appends the
-        // ".*" itself for the tokens it recognises as instances.
+        // A whole-instance selection is written as the plain RTL path -- "dut.instPerm20009",
+        // not "dut.instPerm20009.*". REQ-003 reserves that ".*" wildcard for
+        // _constraints.xml generation; GenerateIOFloorPlanConstraints() appends it itself for
+        // the tokens it recognises as instances, so writing it here loses nothing.
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
