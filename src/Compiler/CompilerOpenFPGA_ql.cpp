@@ -2374,6 +2374,8 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
 }
 
 bool CompilerOpenFPGA_ql::RunElaboration() {
+  // [aurora2#1725 stage P0] Runs a second, standalone Yosys process for instance
+  // discovery -- see BuildElaborationScript().
   const std::string topModule = ProjManager()->DesignTopModule();
 
   m_useVerific =
@@ -2405,14 +2407,9 @@ bool CompilerOpenFPGA_ql::RunElaboration() {
       std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.log");
   std::string command = yosys_executable_path.string() + " -s " + script_path.string() +
                          " -l " + topModule + "_elab.log";
-  // [aurora2#1725 stage P0] quiet: this is a second, extra Yosys run that exists only to
-  // produce <top>_elab.json, and `-l <top>_elab.log` above already keeps a full record of
-  // it. Echoing that record to the console as well made aurora.log carry a whole
-  // elaboration transcript per compile that master never had (measured on
-  // tests/testcases/floorplanning_regions/whole_instance: ~350 lines for a 7-file design,
-  // and it scales with the RTL). Instance discovery is a diagnostic side-channel, so it
-  // reports itself in its own artifact -- see <top>_elab.log for the transcript and
-  // <top>_elab.ys for the script that produced it. Only the failure below is said out loud.
+  // [aurora2#1725 stage P0] quiet: `-l <top>_elab.log` above already records this run.
+  // Instance discovery is a diagnostic side-channel, so only the failure below is
+  // reported aloud -- see <top>_elab.log for the transcript.
   int status = ExecuteAndMonitorSystemCommand(command, /*logFile*/ std::string{},
                                               /*appendLog*/ false, /*quiet*/ true);
   if (status) {
