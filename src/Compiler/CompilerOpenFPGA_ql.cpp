@@ -2364,15 +2364,10 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
   }
 
   script += "hierarchy -top " + topModule + "\n";
-  // write_json refuses a design that still has behavioral "process" nodes -- measured:
-  // any always-block module read through the plain read_verilog frontend (m_useVerific
-  // false) hits "ERROR: ... contains processes, which are not supported by JSON backend
-  // (run `proc` first)." Verific-imported designs elaborate straight to structural
-  // RTLIL and would not need this, but running it unconditionally is harmless there and
-  // keeps this one script working for both frontends. proc only restructures behavioral
-  // code into structural primitives ($mux/$dff/...) inside each module -- it does not
-  // touch cross-module boundaries, rename/merge instances, or drop the src/hdlname
-  // attributes floorplanning_elab_instances.py depends on, so this stays elaboration, not synthesis.
+  // write_json below errors out on unprocessed always-blocks (only happens when not
+  // using Verific). proc fixes that, without flattening the design or touching the
+  // instance names floorplanning_elab_instances.py needs -- so this step is still just
+  // elaboration, not synthesis.
   script += "proc\n";
   script += "write_json " + topModule + "_elab.json\n";
   return script;
@@ -2381,23 +2376,6 @@ std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topMo
 bool CompilerOpenFPGA_ql::RunElaboration() {
   const std::string topModule = ProjManager()->DesignTopModule();
 
-  // Elaboration doesn't care which tool will eventually synthesize; it always reads
-  // the RTL directly (pipeline.md: "P0/P0b unaffected -- elaborates the RTL directly,
-  // never touches the front end"). Re-derive m_useVerific here rather than depending on
-  // getSynthesisCommands() having already set it -- EnsureElaborated() runs before it.
-  //
-  // Note what is NOT copied from getSynthesisCommands()'s version of this test: the
-  // Synplify exclusion. There it is right -- reading the RTL with Verific instead of
-  // handing it to Synplify would defeat the point of choosing Synplify. Here it was
-  // simply wrong, and contradicted the comment above it: which parser elaborates the RTL
-  // for instance DISCOVERY is independent of which tool synthesizes afterwards.
-  //
-  // The cost of that copy was that a Synplify project never got instances.json. For
-  // Verilog it degraded quietly; for VHDL there is no fallback parser at all, so
-  // discovery could not run and the emitter, unable to tell an instance name from an
-  // atom name, wrote set_region's bare argument as an exact match that matched nothing
-  // -- all 564 atoms of fpu_single's i_mul_24 placed unconstrained while the flow
-  // reported success.
   m_useVerific =
       QLSettingsManager::getStringValue("general", "options", "verific") == "checked";
 
