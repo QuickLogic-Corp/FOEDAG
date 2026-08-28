@@ -2464,11 +2464,12 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
   }
 
   std::filesystem::path elab_instances_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_elab_instances.py");
+      InstalledScript(std::filesystem::path("floorplanning_elab_instances.py"));
+  if (elab_instances_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_elab_instances.py in the "
+                 "installation. Instance-tree derivation failed!");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2571,6 +2572,23 @@ std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
                                          ProjManager()->projectName(), "atomsets.json");
 }
 
+// [aurora2#1725] See the header for why the depth cannot be hardcoded. The aurora
+// layout (<install>/device_data) is probed first because that is what every packaged
+// build and every 'make install' tree looks like; the share/<program> layout is the
+// fallback DataPath() itself only reaches when device_data is absent.
+std::filesystem::path CompilerOpenFPGA_ql::InstalledScript(
+    const std::filesystem::path& rel_path) {
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  for (const auto& root : {data_path / "..", data_path / ".." / ".."}) {
+    std::filesystem::path candidate =
+        (root / std::filesystem::path("scripts") / rel_path).lexically_normal();
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return {};
+}
+
 // [aurora2#1725] Where the helper stages' diagnostic chatter goes instead of the console
 // and aurora.log, one file per project truncated at the start of each run. Not redirected:
 // ErrorMessage() on a failed stage, and the stage-P7 verdicts the user actually asked for.
@@ -2627,11 +2645,12 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   }
 
   std::filesystem::path namemap_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_netlist_namemap.py");
+      InstalledScript(std::filesystem::path("floorplanning_netlist_namemap.py"));
+  if (namemap_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_netlist_namemap.py in the "
+                 "installation. Name-map generation failed!");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2670,11 +2689,12 @@ bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   }
 
   std::filesystem::path p2b_audit_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_p2b_audit.py");
+      InstalledScript(std::filesystem::path("floorplanning_p2b_audit.py"));
+  if (p2b_audit_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_p2b_audit.py in the "
+                 "installation. Name-map audit failed!");
+    return false;
+  }
 
   // Inputs are named explicitly rather than left to the script to guess from --project:
   // the artifact prefix is this class's convention, and one place should own it.
@@ -2731,11 +2751,12 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   }
 
   std::filesystem::path validate_instances_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_validate_instances.py");
+      InstalledScript(std::filesystem::path("floorplanning_validate_instances.py"));
+  if (validate_instances_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_validate_instances.py in the "
+                 "installation. Instance validation failed!");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2824,11 +2845,12 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   }
 
   std::filesystem::path design_resources_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_design_resources.py");
+      InstalledScript(std::filesystem::path("floorplanning_design_resources.py"));
+  if (design_resources_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_design_resources.py in the "
+                 "installation. Design-resource extraction failed!");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -2900,11 +2922,12 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   }
 
   std::filesystem::path constraint_compliance_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_constraint_compliance.py");
+      InstalledScript(std::filesystem::path("floorplanning_constraint_compliance.py"));
+  if (constraint_compliance_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_constraint_compliance.py in the "
+                 "installation. Constraint-compliance check failed!");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -9155,11 +9178,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
 
   std::filesystem::path generate_floorplanning_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("generate_floorplanning.py");
+      InstalledScript(std::filesystem::path("generate_floorplanning.py"));
+  if (generate_floorplanning_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/generate_floorplanning.py in the "
+                 "installation. Floorplanning constraint generation failed!");
+    return false;
+  }
       
       
   std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
@@ -12119,19 +12143,33 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // substitutes from an unordered_map, so a placeholder embedded inside another
   // placeholder's value is not reliably re-resolved.
   std::filesystem::path aurora_rehier_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("aurora_rehier.tcl");
+      InstalledScript(std::filesystem::path("aurora_rehier.tcl"));
+  if (aurora_rehier_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/aurora_rehier.tcl in the installation; "
+                 "floorplanning stage P2 rehierarchisation will fail.");
+    // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a
+    // bare `tcl` would be a yosys syntax error rather than a missing-file one.
+    aurora_rehier_script_path =
+        (GetSession()->Context()->DataPath() /
+         std::filesystem::path("..") /
+         std::filesystem::path("scripts") /
+         std::filesystem::path("aurora_rehier.tcl")).lexically_normal();
+  }
   yosysScript->addFile(aurora_rehier_script_path);
 
   std::filesystem::path aurora_atomsets_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("floorplanning_atomsets.tcl");
+      InstalledScript(std::filesystem::path("floorplanning_atomsets.tcl"));
+  if (aurora_atomsets_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_atomsets.tcl in the installation; "
+                 "floorplanning stage P3 atom-set extraction will fail.");
+    // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a
+    // bare `tcl` would be a yosys syntax error rather than a missing-file one.
+    aurora_atomsets_script_path =
+        (GetSession()->Context()->DataPath() /
+         std::filesystem::path("..") /
+         std::filesystem::path("scripts") /
+         std::filesystem::path("floorplanning_atomsets.tcl")).lexically_normal();
+  }
   yosysScript->addFile(aurora_atomsets_script_path);
 
   // [aurora2#1725 stage P3] NOT wired to pass the instance list from instances.json

@@ -410,6 +410,14 @@ private:
   // atomsets.json, resolved to the name the device template actually wrote.
   std::filesystem::path FloorplanningAtomsets();
 
+  // [aurora2#1725] Absolute path to a script shipped under <install>/scripts, or an
+  // empty path when it is not installed. DataPath() is NOT at a fixed depth below the
+  // install root -- Foedag_ql.cpp takes <install>/device_data when that exists (one
+  // level) and only falls back to <install>/share/aurora (two) -- so the hardcoded
+  // "../.." this replaces resolved outside the installation in every packaged build,
+  // leaving python3 to report a bare "No such file or directory".
+  std::filesystem::path InstalledScript(const std::filesystem::path& rel_path);
+
   // [aurora2#1725] "<project>_floorplanning_stages.log" -- where the helper stages this
   // feature adds write what they have to say. They are diagnostics, not compile stages the
   // user asked for, so their chatter belongs in an artifact rather than in the console and
