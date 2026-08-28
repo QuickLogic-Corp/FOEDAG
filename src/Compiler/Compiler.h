@@ -164,19 +164,8 @@ class Compiler {
   std::string GetMessagePrefix() const;
   void SetUseVerific(bool on) { m_useVerific = on; }
 
-  // [aurora2#1725 stage P0] instance discovery -- design files changed since the last
-  // elaboration, so EnsureElaborated() must regenerate <top>_elab.json / instances.json
-  // before anything reads them. Called from the add_design_file / set_top_module /
-  // create_design / open_project Tcl handlers below, which run identically in GUI and
-  // headless/batch mode -- so this fires regardless of how the project was driven.
   void MarkDesignDirty() { m_designDirty = true; }
 
-  // [aurora2#1725 stage P0] instance discovery -- elaboration only, RTL sources ->
-  // <top>_elab.json -> instances.json. No-op in the base FOEDAG compiler (returns
-  // true); CompilerOpenFPGA_ql is the flow that knows how to run it. Public (not one
-  // of the protected Compile-stage virtuals above) because the open_project Tcl handler
-  // calls it directly, not only Synthesize().
-  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0).
   virtual bool EnsureElaborated() { return true; }
 
   void SetIPGenerator(IPGenerator* generator);
@@ -367,9 +356,6 @@ class Compiler {
   Constraints* m_constraints = nullptr;
   std::string m_output;
   bool m_useVerific = false;
-  // [aurora2#1725 stage P0] instance discovery -- true until EnsureElaborated() next
-  // succeeds. Starts true so a fresh session always elaborates once. Set by
-  // MarkDesignDirty(), called from the design-mutation Tcl handlers.
   bool m_designDirty = true;
   // on calling 'add_file' from TCL, should we copy them into the project dir?
   // default is set to false, so they will be copied only when user want to do this.

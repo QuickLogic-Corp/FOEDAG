@@ -2178,14 +2178,6 @@ bool CompilerOpenFPGA_ql::Analyze() {
   return true;
 }
 
-// [aurora2#1725 stage P0] instance discovery -- see BuildElaborationScript() below and
-// docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0).
-//
-// Mirrors the verific/read_verilog file list construction in getSynthesisCommands()
-// (m_useVerific branch), but stops after `hierarchy -top` + `write_json` -- no
-// `flatten -scopename`, no synth_ql -- so instances synthesis later deletes or merges
-// across boundaries are still visible in the emitted JSON. Never pass -noattr: that
-// would strip the src/hdlname attributes floorplanning_elab_instances.py depends on.
 std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topModule) {
   std::string script;
 
@@ -3045,8 +3037,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   // stages after it would then append to the previous run's file.
   ResetFloorplanningStageLog();
 
-  // [aurora2#1725 stage P0] instance discovery -- lazily (re-)derive instances.json
-  // before synthesis dissolves the RTL hierarchy. See EnsureElaborated().
   if (!EnsureElaborated()) return false;
 
   const std::unordered_map<int, CommandWrapperPtr> commandsMap = getSynthesisCommands();

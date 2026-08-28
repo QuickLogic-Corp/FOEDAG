@@ -429,13 +429,6 @@ static int openRunProjectImpl(void* clientData, Tcl_Interp* interp, int argc,
   }
   auto mainWindowImpl = qobject_cast<FOEDAG::MainWindow*>(mainWindow);
   mainWindowImpl->openProject(QString::fromStdString(expandedFile), false, run);
-  // [aurora2#1725 stage P0] instance discovery -- opening a project loads a saved
-  // project file in one shot, so unlike set_top_module/add_design_file (which stream
-  // in over separate Tcl calls, in either order), both DesignFiles() and
-  // DesignTopModule() are already fully populated by the time openProject() returns.
-  // That makes it safe to elaborate eagerly right here. Best-effort -- a failure is
-  // already reported via ErrorMessage() and must not block the project from opening,
-  // which is why the result isn't checked here.
   compiler->MarkDesignDirty();
   compiler->EnsureElaborated();
   if (run) {
@@ -534,8 +527,6 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     }
     compiler->GetOutput().clear();
     bool ok = compiler->CreateDesign(name, type);
-    // [aurora2#1725 stage P0] instance discovery -- a new design invalidates any
-    // previously derived instances.json.
     compiler->MarkDesignDirty();
     if (!compiler->m_output.empty())
       Tcl_AppendResult(interp, compiler->m_output.c_str(), nullptr);
@@ -579,12 +570,6 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       compiler->ErrorMessage(out.str());
       return TCL_ERROR;
     }
-    // [aurora2#1725 stage P0] instance discovery -- a new top module invalidates any
-    // previously derived instances.json. Not eagerly elaborated here: real Tcl flows
-    // call set_top_module *before* add_design_file (see e.g. and2.tcl, dsp2.tcl), so
-    // at this point there are no design files yet and elaboration would be a no-op.
-    // EnsureElaborated() runs lazily from Synthesize() and eagerly from the open_project
-    // handler instead, once files are actually present.
     compiler->MarkDesignDirty();
     return TCL_OK;
   };
@@ -620,8 +605,6 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           "type.");
       return TCL_ERROR;
     }
-    // [aurora2#1725 stage P0] instance discovery -- new/changed design files invalidate
-    // any previously derived instances.json.
     compiler->MarkDesignDirty();
     return compiler->add_files(compiler, interp, argc, argv, Design);
   };
