@@ -3966,20 +3966,36 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
-    if( device_target_config_json.contains("DSP_TYPE") ) {
-      const auto& dsp_type = device_target_config_json["DSP_TYPE"];
-      if( dsp_type.is_string() ) {
-        // Skip the leading "DSPV" prefix and capture the version:
-        // group 1 = major, group 2 = optional minor (after a '.' or '_').
-        // e.g. "DSPV2" -> 2 / (default), "DSPV1.1" -> 1 / 1, "DSPV1_1" -> 1 / 1.
-        static const std::regex dsp_re(R"(^\D*(\d+)(?:[._](\d+))?)");
-        const std::string type = dsp_type.get<std::string>();
-        std::smatch m;
-        if( std::regex_search(type, m, dsp_re) ) {
-          major = m[1].str();
-          minor = m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION;
-        }
+    // The device-data source repo renamed "DSP_TYPE" to "DSP_VERSION" (2026-08-20) and
+    // packages pick it up as they re-sync, so both spellings are in the fleet at once.
+    // Read either, newer name first. Without this a package on the new spelling matches
+    // neither branch and silently reports DSPV1, which is what the IP catalog then
+    // filters on (see IPGenerator).
+    for( const char* key : {"DSP_VERSION", "DSP_TYPE"} ) {
+
+      if( !device_target_config_json.contains(key) ) {
+        continue;
       }
+
+      const auto& dsp_version = device_target_config_json[key];
+      if( !dsp_version.is_string() ) {
+        continue;
+      }
+
+      // Skip any leading non-digits ("DSPV", "v") and capture the version:
+      // group 1 = major, group 2 = optional minor (after a '.' or '_').
+      // e.g. "DSPV2" -> 2 / (default), "DSPV1.1" -> 1 / 1, "v4.0" -> 4 / 0.
+      static const std::regex dsp_re(R"(^\D*(\d+)(?:[._](\d+))?)");
+      const std::string value = dsp_version.get<std::string>();
+      std::smatch m;
+      if( std::regex_search(value, m, dsp_re) ) {
+        major = m[1].str();
+        minor = m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION;
+        break;
+      }
+      // A value that does not parse falls through to the other spelling rather than
+      // being taken as authoritative. If neither parses the DSPV1 default stands:
+      // this function returns a string and has no error channel.
     }
   }
 
