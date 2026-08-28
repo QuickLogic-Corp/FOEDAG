@@ -2596,17 +2596,18 @@ void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
   }
 }
 
-// [aurora2#1725 stage P2b] name maps -- OPTIONAL, off unless general.options.namemap is
-// "checked", which today only the floorplanning_regions testcases do: this stage exists to
-// measure whether P2b is redundant, hard-failing the build on a real finding (see below), so
-// it stays off everywhere else. [6] namemap_hier.csv, which the stage was specified around,
-// is produced nowhere; [5] namemap.csv is what this actually generates, from the debug JSON
-// stage P4 already consumes.
-bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
-  if (QLSettingsManager::getStringValue("general", "options", "namemap") != "checked") {
-    return true;
-  }
+// [aurora2#1725 stage P2b] Flip to 0 to skip this stage entirely. Forced on (1) for now to
+// gather P2b-redundancy evidence across the whole test suite before removing the stage;
+// flip back off, or delete RunNetlistNamemap() outright, once CI confirms P2b is safe to
+// remove. [6] namemap_hier.csv, which the stage was specified around, is produced nowhere;
+// [5] namemap.csv is what this actually generates, from the debug JSON stage P4 already
+// consumes.
+#define AURORA_P2B_AUDIT_ENABLED 1
 
+bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
+#if !AURORA_P2B_AUDIT_ENABLED
+  return true;
+#endif
   const std::string topModule = ProjManager()->DesignTopModule();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
   std::filesystem::path debug_json_path = projectPath / (topModule + "_post_synth_debug.json");
