@@ -2596,14 +2596,12 @@ void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
   }
 }
 
-// [aurora2#1725 stage P2b] Flip to 0 to skip this stage entirely. Forced on (1) for now to
-// gather P2b-redundancy evidence across the whole test suite before removing the stage;
-// flip back off, or delete RunNetlistNamemap() outright, once CI confirms P2b is safe to
-// remove. [6] namemap_hier.csv, which the stage was specified around, is produced nowhere;
-// [5] namemap.csv is what this actually generates, from the debug JSON stage P4 already
-// consumes.
-#define AURORA_P2B_AUDIT_ENABLED 1
-
+// [aurora2#1725 stage P2b] AURORA_P2B_AUDIT_ENABLED (CMakeLists.txt) gates this stage
+// entirely, defaulting to on for now to gather P2b-redundancy evidence across the whole
+// test suite before removing it; flip the default, or delete RunNetlistNamemap() outright,
+// once CI confirms P2b is safe to remove. [6] namemap_hier.csv, which the stage was
+// specified around, is produced nowhere; [5] namemap.csv is what this actually generates,
+// from the debug JSON stage P4 already consumes.
 bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
 #if !AURORA_P2B_AUDIT_ENABLED
   return true;
