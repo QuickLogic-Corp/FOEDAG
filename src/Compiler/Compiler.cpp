@@ -2696,7 +2696,7 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                                              bool appendLog, bool quiet) {
   auto start = Time::now();
   PERF_LOG("Command: " + command);
-  if (!quiet) (*m_out) << "Command: " << command << std::endl;
+  (*m_out) << "Command: " << command << std::endl;
   auto path = std::filesystem::current_path();                  // getting path
   std::filesystem::current_path(m_projManager->projectPath());  // setting path
   m_environmentVariableMap["PWD"] = m_projManager->projectPath(); // fix "PWD environment variable doesn't match current directory; pwd = ..." warning
