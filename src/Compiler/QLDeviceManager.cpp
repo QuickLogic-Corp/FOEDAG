@@ -3986,6 +3986,37 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   return major + "_" + minor;
 }
 
+std::string QLDeviceManager::deviceCRRVersion(QLDeviceTarget device_target) {
+
+  // The returned form is "<major>.<minor>" (e.g. "2.0", "2.3", "2.4"), so
+  // callers can compare against a plain literal without caring whether the
+  // device data wrote "v2.4", "2.4" or "V2_4".
+  static const std::string DEFAULT_MINOR_VERSION = "0";
+
+  // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
+
+    if( device_target_config_json.contains("CRR_VERSION") ) {
+      const auto& crr_version = device_target_config_json["CRR_VERSION"];
+      if( crr_version.is_string() ) {
+        // Skip any leading "v"/"V" prefix and capture the version:
+        // group 1 = major, group 2 = optional minor (after a '.' or '_').
+        // e.g. "v2.4" -> 2 / 4, "v2" -> 2 / (default), "2_4" -> 2 / 4.
+        static const std::regex crr_re(R"(^\D*(\d+)(?:[._](\d+))?)");
+        const std::string version = crr_version.get<std::string>();
+        std::smatch m;
+        if( std::regex_search(version, m, crr_re) ) {
+          return m[1].str() + "." +
+                 (m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION);
+        }
+      }
+    }
+  }
+
+  return std::string();
+}
+
 // Load the device's `config.json` into the supplied json object.
 // Returns true on success, false if the file does not exist or parsing fails.
 // config.json is always plaintext device data; it is never encrypted.

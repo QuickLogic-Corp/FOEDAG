@@ -246,6 +246,11 @@ class QLDeviceManager : public QObject {
   // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
   // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPV1.0) when not specified.
   std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
+  // CRR (custom routing resource) version of the device, from the
+  // "CRR_VERSION" entry in config.json. Returns "<major>.<minor>"
+  // (e.g. "v2.4" -> "2.4", "v2" -> "2.0"), or an empty string when the device
+  // does not declare one.
+  std::string deviceCRRVersion(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
