@@ -170,8 +170,14 @@ void Compiler::Help(std::ostream* out) {
   (*out) << "   add_litex_ip_catalog <directory> : Browses directory for LiteX "
             "IP generators, adds the IP(s) to the IP Catalog"
          << std::endl;
-  (*out) << "   ip_catalog ?<ip_name>?     : Lists all available IPs, and "
-            "their parameters if <ip_name> is given "
+  (*out) << "   ip_catalog ?<ip_name>? ?-all? ?-format text|json? : Lists the "
+            "IPs available on the current device, and their parameters if "
+            "<ip_name> is given"
+         << std::endl;
+  (*out) << "                              : -all also lists the IPs the "
+            "device cannot take, each with its state "
+            "([production]/[preview]/[unavailable]) and the reason; "
+            "-format json reports the same as a JSON array"
          << std::endl;
   (*out) << "   ip_configure <IP_NAME> -mod_name <name> -out_location <path> "
             "-version <ver_name> -P<param>=\"<value>\"..."
@@ -263,7 +269,13 @@ void Compiler::SetIPGenerator(IPGenerator* generator)
 std::string Compiler::GetMessagePrefix() const {
   std::string prefix{};
 
-  auto task = GetTaskManager()->currentTask();
+  // The task manager is an opt-in collaborator (setTaskManager); a Compiler
+  // used outside the GUI task flow has none, and messages from it are simply
+  // unprefixed rather than a crash.
+  auto* taskManager = GetTaskManager();
+  if (!taskManager) return prefix;
+
+  auto task = taskManager->currentTask();
   // Leave prefix empty if no abbreviation was given
   if (task && task->abbreviation() != "") {
     prefix = task->abbreviation().toStdString() + ": ";
@@ -274,6 +286,11 @@ std::string Compiler::GetMessagePrefix() const {
 
 void Compiler::Message(const std::string& message) const {
   if (m_out) (*m_out) << "INFO: " << GetMessagePrefix() << message << std::endl;
+}
+
+void Compiler::WarningMessage(const std::string& message) const {
+  if (m_out)
+    (*m_out) << "WARNING: " << GetMessagePrefix() << message << std::endl;
 }
 
 void Compiler::ErrorMessage(const std::string& message, bool append) const {
@@ -366,6 +383,14 @@ bool Compiler::BuildLiteXIPCatalog(std::filesystem::path litexPath,
                                    bool namesOnly) {
   if (m_simulator == nullptr) {
     m_simulator = new Simulator(m_interp, this, m_out, m_tclInterpreterHandler);
+  }
+  // Record the root for the lazy default/project-local load (which loads each
+  // known root at most once — see IPGenerator::LoadDefaultCatalogs). Recorded
+  // only when the directory exists, so a root created later (e.g. a user
+  // catalog authored mid-session) is still picked up.
+  if (FileUtils::FileExists(litexPath)) {
+    m_loadedIpCatalogRoots.insert(
+        std::filesystem::weakly_canonical(litexPath).string());
   }
   IPCatalogBuilder builder(this);
   bool result = builder.buildLiteXCatalog(GetIPGenerator()->Catalog(),

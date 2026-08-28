@@ -3966,55 +3966,207 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
-    if( device_target_config_json.contains("DSP_TYPE") ) {
-      const auto& dsp_type = device_target_config_json["DSP_TYPE"];
-      if( dsp_type.is_string() ) {
-        // Skip the leading "DSPV" prefix and capture the version:
-        // group 1 = major, group 2 = optional minor (after a '.' or '_').
-        // e.g. "DSPV2" -> 2 / (default), "DSPV1.1" -> 1 / 1, "DSPV1_1" -> 1 / 1.
-        static const std::regex dsp_re(R"(^\D*(\d+)(?:[._](\d+))?)");
-        const std::string type = dsp_type.get<std::string>();
-        std::smatch m;
-        if( std::regex_search(type, m, dsp_re) ) {
-          major = m[1].str();
-          minor = m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION;
-        }
+    // The device-data source repo renamed "DSP_TYPE" to "DSP_VERSION" (2026-08-20) and
+    // packages pick it up as they re-sync, so both spellings are in the fleet at once.
+    // Read either, newer name first. Without this a package on the new spelling matches
+    // neither branch and silently reports DSPV1, which is what the IP catalog then
+    // filters on (see IPGenerator).
+    for( const char* key : {"DSP_VERSION", "DSP_TYPE"} ) {
+
+      if( !device_target_config_json.contains(key) ) {
+        continue;
       }
+
+      const auto& dsp_version = device_target_config_json[key];
+      if( !dsp_version.is_string() ) {
+        continue;
+      }
+
+      // Skip any leading non-digits ("DSPV", "v") and capture the version:
+      // group 1 = major, group 2 = optional minor (after a '.' or '_').
+      // e.g. "DSPV2" -> 2 / (default), "DSPV1.1" -> 1 / 1, "v4.0" -> 4 / 0.
+      static const std::regex dsp_re(R"(^\D*(\d+)(?:[._](\d+))?)");
+      const std::string value = dsp_version.get<std::string>();
+      std::smatch m;
+      if( std::regex_search(value, m, dsp_re) ) {
+        major = m[1].str();
+        minor = m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION;
+        break;
+      }
+      // A value that does not parse falls through to the other spelling rather than
+      // being taken as authoritative. If neither parses the DSPV1 default stands:
+      // this function returns a string and has no error channel.
     }
   }
 
   return major + "_" + minor;
 }
 
-std::set<std::string> QLDeviceManager::deviceFPUTypes(QLDeviceTarget device_target) {
+// Spelling cleanup shared by both layout-setting normalisers: trim, drop an
+// optional "FPGA_" prefix and upper-case. Only the SPELLING is shared here;
+// the alias maps are not - see below.
+static std::string canonicalizeLayoutToken(const std::string& value) {
 
-  // The FPU IP family is gated by a capability set (not a version, unlike DSP).
-  // config.json carries "FPU_TYPE" as a JSON array of tokens, e.g.
-  //   "FPU_TYPE": ["FPUADDSUB", "FPUMULT", "FPUMAC"]
-  // Absent / empty / non-array => empty set (opt-in: the FPU IP stays hidden).
-  std::set<std::string> types;
+  std::string token = value;
+
+  const std::size_t first = token.find_first_not_of(" \t\r\n");
+  const std::size_t last = token.find_last_not_of(" \t\r\n");
+  if(first == std::string::npos) {
+    return std::string();
+  }
+  token = token.substr(first, last - first + 1);
+
+  // ascii upper-case: these are config identifiers, not user text, so stay
+  // independent of the process locale.
+  for(char& c : token) {
+    if(c >= 'a' && c <= 'z') {
+      c = static_cast<char>(c - 'a' + 'A');
+    }
+  }
+
+  if(token.rfind("FPGA_", 0) == 0) {
+    token = token.substr(5);
+  }
+
+  return token;
+}
+
+// Normalise "DEVICE_TYPE". Only CUSTOM and FIXED are legal.
+//
+// This deliberately does NOT apply normalizeLayoutMode()'s alias map, and the
+// two must never be merged into one helper: that map contains FIXED -> CUSTOM,
+// so reusing it here would turn a device that must never be re-shaped into a
+// re-shapable one and silently delete the FIXED guard. That is exactly the bug
+// add_layout.py has upstream - it normalises DEVICE_TYPE through the
+// LAYOUT_MODE map, so a FIXED package with no DEVICE_TYPE_SETTINGS collapses to
+// CUSTOM, finds no settings, falls back to LAYOUT_MODE=AUTO and auto-sizes hard
+// silicon without a word. Aurora is the only guard against that.
+// Returns false when the value is not a recognised device type.
+static bool normalizeDeviceType(const std::string& value, std::string& out_device_type) {
+
+  const std::string token = canonicalizeLayoutToken(value);
+
+  if(token == "CUSTOM" || token == "FIXED") {
+    out_device_type = token;
+    return true;
+  }
+
+  return false;
+}
+
+// Normalise "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" to AUTO / CUSTOM / RESOURCES.
+//
+// The two legacy spellings older packages carry are aliased: FIXED meant "an
+// explicitly specified array", which is CUSTOM, and SCALED meant "scale to a
+// resource budget", which is RESOURCES. This alias map is valid for LAYOUT_MODE
+// ONLY - see normalizeDeviceType().
+// Returns false when the value is not a recognised layout mode.
+static bool normalizeLayoutMode(const std::string& value, std::string& out_layout_mode) {
+
+  std::string token = canonicalizeLayoutToken(value);
+
+  if(token == "FIXED") {
+    token = "CUSTOM";
+  }
+  else if(token == "SCALED") {
+    token = "RESOURCES";
+  }
+
+  if(token == "AUTO" || token == "CUSTOM" || token == "RESOURCES") {
+    out_layout_mode = token;
+    return true;
+  }
+
+  return false;
+}
+
+QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
+
+  QLDeviceLayoutSettings layout_settings;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // reported in the caller's error messages even when the file is missing.
+  layout_settings.config_json_path = deviceTypeDirPath(device_target) / std::string("config.json");
 
   json device_target_config_json;
-  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
-    if( device_target_config_json.contains("FPU_TYPE") ) {
-      const auto& fpu_type = device_target_config_json["FPU_TYPE"];
-      if( fpu_type.is_array() ) {
-        for( const auto& entry : fpu_type ) {
-          if( entry.is_string() ) {
-            types.insert(entry.get<std::string>());
-          }
-        }
+  std::string config_parse_error;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json, &config_parse_error)) {
+    if(!config_parse_error.empty()) {
+      // the file is there but unreadable. this must NOT degrade to "absent":
+      // absent means "pre-contract package, take the layout-name path", and a
+      // corrupt config on a FIXED device would take that path straight past the
+      // gate that is the only thing protecting hard silicon.
+      layout_settings.config_parse_failed = true;
+      layout_settings.config_parse_error = config_parse_error;
+      return layout_settings;
+    }
+    // no config.json: a package predating the layout-mode contract. the caller
+    // falls back to the layout-name path so an already released kit keeps
+    // working without a re-sync.
+    return layout_settings;
+  }
+  if(!device_target_config_json.is_object()) {
+    // valid JSON that is not a mapping is a corrupt device config, not an absent
+    // one - contains() would just answer false for every key and we would fall
+    // through as if the file were not there.
+    layout_settings.config_parse_failed = true;
+    layout_settings.config_parse_error = "top-level JSON is not an object";
+    return layout_settings;
+  }
+  layout_settings.config_found = true;
+
+  if( device_target_config_json.contains("DEVICE_TYPE") ) {
+    const auto& device_type = device_target_config_json["DEVICE_TYPE"];
+    if( device_type.is_string() &&
+        normalizeDeviceType(device_type.get<std::string>(), layout_settings.device_type) ) {
+      layout_settings.device_type_present = true;
+    }
+    else {
+      layout_settings.invalid = true;
+      layout_settings.invalid_key = "DEVICE_TYPE";
+      layout_settings.invalid_value = device_type.is_string() ? device_type.get<std::string>()
+                                                             : device_type.dump();
+      return layout_settings;
+    }
+  }
+
+  if( device_target_config_json.contains("DEVICE_TYPE_SETTINGS") ) {
+    const auto& device_type_settings = device_target_config_json["DEVICE_TYPE_SETTINGS"];
+    if( !device_type_settings.is_object() ) {
+      layout_settings.invalid = true;
+      layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS";
+      layout_settings.invalid_value = device_type_settings.dump();
+      return layout_settings;
+    }
+    layout_settings.device_type_settings_present = true;
+
+    if( device_type_settings.contains("LAYOUT_MODE") ) {
+      const auto& layout_mode = device_type_settings["LAYOUT_MODE"];
+      if( layout_mode.is_string() &&
+          normalizeLayoutMode(layout_mode.get<std::string>(), layout_settings.layout_mode) ) {
+        layout_settings.layout_mode_present = true;
+      }
+      else {
+        layout_settings.invalid = true;
+        layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS.LAYOUT_MODE";
+        layout_settings.invalid_value = layout_mode.is_string() ? layout_mode.get<std::string>()
+                                                               : layout_mode.dump();
+        return layout_settings;
       }
     }
   }
 
-  return types;
+  return layout_settings;
 }
 
 // Load the device's `config.json` into the supplied json object.
 // Returns true on success, false if the file does not exist or parsing fails.
 // config.json is always plaintext device data; it is never encrypted.
-bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json) {
+bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json,
+                                           std::string* out_parse_error) {
 
   if( !isDeviceTargetValid(device_target) ) {
     device_target = this->device_target;
@@ -4033,6 +4185,12 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
     return true;
   }
   catch(const std::exception& e) {
+    // report the parse failure to the caller when it asked, so it can tell a
+    // corrupt config.json apart from an absent one. std::cout alone never
+    // reaches the compiler's error stream.
+    if(out_parse_error != nullptr) {
+      *out_parse_error = e.what();
+    }
     std::cout << "loadDeviceConfigJSON: failed to parse "
               << config_json_path.string() << ": " << e.what() << std::endl;
     return false;

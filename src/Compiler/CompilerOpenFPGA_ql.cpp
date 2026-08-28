@@ -56,6 +56,7 @@
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
 #include "Utils/StringUtils.h"
@@ -123,6 +124,19 @@ void CompilerOpenFPGA_ql::Version(std::ostream* out) {
 
 CompilerOpenFPGA_ql::~CompilerOpenFPGA_ql() {
   CleanTempFiles();
+}
+
+// True when `p` equals `base` or lies underneath it. Component-wise (via
+// fs::relative), not string-prefix: "/x/IP_Catalog_old" must not pass for a
+// base of "/x/IP_Catalog".
+static bool isSameOrUnderPath(const std::filesystem::path& p,
+                              const std::filesystem::path& base) {
+  std::error_code ec;
+  const std::filesystem::path rel = std::filesystem::relative(
+      std::filesystem::weakly_canonical(p, ec),
+      std::filesystem::weakly_canonical(base, ec), ec);
+  if (ec || rel.empty()) return false;
+  return rel.begin()->string() != "..";
 }
 
 void CompilerOpenFPGA_ql::Help(std::ostream* out) {
@@ -273,6 +287,13 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
       << "   pnr_netlist_lang <blif, edif, verilog, vhdl> : Chooses vpr input "
          "netlist format"
       << std::endl;
+  (*out) << "   create_design <name> ?-rpm_ip? -stub <stub.v> ?-version "
+            "v1_0? ?-catalog <dir>? : With -rpm_ip, the project authors "
+            "a relative-placement-macro catalog IP named after the project: "
+            "each successful place re-packages it into the catalog (default "
+            "<project>/IP_Catalog); the stub is the user-written port-only "
+            "(* blackbox *) module of the IP"
+         << std::endl;
   (*out) << "   packing ?clean?            : Packing" << std::endl;
   // (*out) << "   global_placement ?clean?   : Analytical placer" << std::endl;
   (*out) << "   place ?clean?              : Detailed placer" << std::endl;
@@ -669,6 +690,337 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_OK;
   };
   interp->registerCmd("set_channel_width", set_channel_width, this, 0);
+
+  // Re-register ip_add_to_design (base version: Compiler.cpp) with a QL
+  // extension: an argument ending in .eblif/.blif names an annotated
+  // relative-placement IP netlist, which is registered to be linked into the
+  // design at the end of synthesis (synth_quicklogic -rel_ip_blif) and to
+  // drive relative-macro constraint generation before the VPR stages. See
+  // docs/development/relative_macro_placement/ in aurora2. Any other argument
+  // is a catalog IP instance name, handled exactly as the base command does.
+  auto ip_add_to_design = [](void* clientData, Tcl_Interp* interp, int argc,
+                             const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    if (argc < 2) {
+      // Match the base command: error only when the GUI sync layer is
+      // present, silent no-op otherwise.
+      if (compiler->GuiTclSync()) {
+        compiler->ErrorMessage("IP name missed.");
+        return TCL_ERROR;
+      }
+      return TCL_OK;
+    }
+    for (int i = 1; i < argc; i++) {
+      const std::string arg = argv[i];
+      std::filesystem::path path = FileUtils::GetFullPath(arg);
+      const std::string ext = path.extension().string();
+      if (ext == ".eblif" || ext == ".blif") {
+        if (!FileUtils::FileExists(path)) {
+          compiler->ErrorMessage("Annotated IP netlist does not exist: " +
+                                 arg);
+          return TCL_ERROR;
+        }
+        compiler->AddRelIpBlif(path);
+        continue;
+      }
+      // Catalog IP instance: delegate to the base mechanism (GUI-sync layer
+      // adds the instance's src/ files to the design fileset).
+      if (compiler->GuiTclSync()) {
+        std::stringstream out;
+        if (!compiler->GuiTclSync()->TclAddIpToDesign(arg, out)) {
+          compiler->ErrorMessage(out.str());
+          return TCL_ERROR;
+        }
+        // Relative-placement catalog IPs: the generator places the annotated
+        // netlist in the instance's rel_macro/ dir (outside src/, so it is
+        // never added as a design source). Register it for the synthesis
+        // link step. Non-RPM IPs have no rel_macro/ dir and are unaffected.
+        if (IPGenerator* ipGen = compiler->GetIPGenerator()) {
+          if (IPInstance* inst = ipGen->GetIPInstance(arg)) {
+            std::filesystem::path relMacroDir =
+                ipGen->GetBuildDir(inst) / "rel_macro";
+            if (std::filesystem::is_directory(relMacroDir)) {
+              // The instance's generated stub (src/<instance>.v, per the
+              // rpm_common packaging contract). Registered alongside the
+              // netlist for the Synplify synthesis flow, whose yosys pass
+              // reads Synplify's netlist instead of the design sources and
+              // must read the blackbox stub explicitly. Registering the
+              // generated copy (not the project-fileset copy) keeps the
+              // path independent of the fileset layout; the two are
+              // identical by construction.
+              std::filesystem::path stubPath =
+                  ipGen->GetBuildDir(inst) / "src" / (arg + ".v");
+              if (!std::filesystem::exists(stubPath)) stubPath.clear();
+              for (const auto& entry :
+                   std::filesystem::directory_iterator(relMacroDir)) {
+                const std::string entryExt = entry.path().extension().string();
+                if (entryExt == ".eblif" || entryExt == ".blif") {
+                  compiler->AddRelIpBlif(entry.path(), stubPath);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    return TCL_OK;
+  };
+  interp->registerCmd("ip_add_to_design", ip_add_to_design, this, nullptr);
+
+  // Re-register create_design (base: Compiler.cpp) with the RPM-authoring
+  // declaration: `create_design <name> -rpm_ip -stub <stub.v>
+  // ?-version v1_0? ?-catalog <dir>?` declares that this project's product
+  // is an RPM catalog IP named after the project. -rpm_ip is a flag
+  // orthogonal to -type: the -type axis keeps meaning source kind +
+  // synthesis tool. Authoring works from any flow that produces the
+  // post-synthesis BLIF and a placement (-type rtl and synplify); the
+  // netlist-input types (gate-level/post-map) are refused as unvalidated.
+  // Without the flag the base behavior is reproduced for all supported
+  // forms; unlike the base (which silently ignores unknown arguments),
+  // unknown options are rejected with the usage. Every
+  // authoring validation runs BEFORE the base CreateDesign call, so a
+  // refusal never leaves a half-created project. See
+  // docs/development/relative_macro_placement/ in aurora2.
+  auto create_design = [](void* clientData, Tcl_Interp* interp, int argc,
+                          const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    const std::string usage =
+        "Usage: create_design <name> ?-type <rtl|gate-level|post-map|"
+        "synplify>? ?-rpm_ip? ?-stub <stub.v>? ?-version v1_0? "
+        "?-catalog <dir>? (-rpm_ip: this project authors an RPM catalog IP "
+        "named after it; -stub/-version/-catalog require -rpm_ip)";
+    std::string name = "noname";
+    std::string type{"rtl"};
+    std::string stub;
+    std::string version = "v1_0";
+    std::string catalog;
+    bool haveStub = false;
+    bool haveVersion = false;
+    bool haveCatalog = false;
+    if (argc >= 2) {
+      name = argv[1];
+    }
+    bool rpmIp = false;
+    for (int i = 2; i < argc; i++) {
+      const std::string arg = argv[i];
+      if (arg == "-rpm_ip") {
+        rpmIp = true;
+        continue;
+      }
+      if (arg == "-type" || arg == "-stub" || arg == "-version" ||
+          arg == "-catalog") {
+        if (i + 1 >= argc) {
+          compiler->ErrorMessage("Missing value for " + arg + "\n" + usage);
+          return TCL_ERROR;
+        }
+        const std::string value = argv[++i];
+        if (arg == "-type") {
+          type = value;
+        } else if (arg == "-stub") {
+          stub = value;
+          haveStub = true;
+        } else if (arg == "-version") {
+          version = value;
+          haveVersion = true;
+        } else {
+          catalog = value;
+          haveCatalog = true;
+        }
+      } else {
+        compiler->ErrorMessage("Unsupported option " + arg + "\n" + usage);
+        return TCL_ERROR;
+      }
+    }
+
+    if (!rpmIp && (haveStub || haveVersion || haveCatalog)) {
+      compiler->ErrorMessage(
+          "-stub/-version/-catalog are only valid with -rpm_ip\n" + usage);
+      return TCL_ERROR;
+    }
+    // Authoring is synthesis-tool-agnostic: it consumes the post-synthesis
+    // BLIF plus the place-stage authoring outputs, all of which the rtl
+    // (yosys) and synplify flows both produce. Gate-level/post-map projects
+    // start from an already-mapped netlist and are unvalidated as authoring
+    // inputs; keep refusing those.
+    if (rpmIp && type != "rtl" && type != "synplify") {
+      compiler->ErrorMessage(
+          "-rpm_ip cannot be combined with -type " + type +
+          "; authoring is validated for the rtl (yosys) and synplify "
+          "flows only");
+      return TCL_ERROR;
+    }
+
+    RpmAuthorProject record;
+    if (rpmIp) {
+      // The project name IS the IP name (and REL_MACRO_TYPE derives from
+      // it), so it must be a plain Verilog identifier.
+      static const std::regex kIdent("[A-Za-z_][A-Za-z0-9_$]*");
+      static const std::regex kVersion("v[0-9]+_[0-9]+");
+      if (!std::regex_match(name, kIdent)) {
+        compiler->ErrorMessage(
+            "-rpm_ip: project name '" + name +
+            "' is not a valid Verilog module identifier (it becomes the "
+            "IP name)");
+        return TCL_ERROR;
+      }
+      if (!std::regex_match(version, kVersion)) {
+        compiler->ErrorMessage("-version '" + version +
+                               "' does not follow the catalog convention "
+                               "v<major>_<minor> (e.g. v1_0)");
+        return TCL_ERROR;
+      }
+      if (!haveStub) {
+        compiler->ErrorMessage(
+            "-rpm_ip requires -stub <stub.v>: the user-written "
+            "port-only (* blackbox *) synthesis stub of the IP\n" +
+            usage);
+        return TCL_ERROR;
+      }
+      // Absolute paths: the packaging hook fires from the place stage,
+      // whose working directory is the project dir, not this one.
+      record.stub = FileUtils::GetFullPath(stub);
+      if (!std::filesystem::exists(record.stub)) {
+        compiler->ErrorMessage("-stub file does not exist: " + stub);
+        return TCL_ERROR;
+      }
+      // Structural check only, applied here so the flow fails before any
+      // stage runs: exactly one module declaration (its name is renamed to
+      // the instance name at ipgenerate time). Directive checks
+      // ((* blackbox *), syn_black_box) deliberately do NOT run at
+      // authoring — the authoring run never uses the stub, it only ships
+      // it. Each consuming flow checks the directive it depends on:
+      // rpm_common refuses a stub without (* blackbox *) at ipgenerate
+      // (every flow's link step is a yosys pass), and the -type synplify
+      // synthesis refuses one without syn_black_box.
+      {
+        std::ifstream in(record.stub);
+        std::stringstream buffer;
+        buffer << in.rdbuf();
+        const std::string text = buffer.str();
+        // Counted line by line rather than with std::regex::multiline: that flag is
+        // C++17 but the libstdc++ in the CI toolchain does not provide it, and the
+        // build fails to compile. Anchoring '^' to each line is equivalent, since it
+        // can match at most once per line either way.
+        static const std::regex kModuleDecl(
+            "^[ \\t]*module[ \\t]+[A-Za-z_][A-Za-z0-9_$]*");
+        long count = 0;
+        {
+          std::istringstream lines(text);
+          std::string line;
+          while (std::getline(lines, line)) {
+            if (!line.empty() && line.back() == '\r') {
+              line.pop_back();
+            }
+            if (std::regex_search(line, kModuleDecl)) {
+              ++count;
+            }
+          }
+        }
+        if (count != 1) {
+          compiler->ErrorMessage(
+              "-stub " + stub + ": expected exactly one module declaration, "
+              "found " + std::to_string(count));
+          return TCL_ERROR;
+        }
+      }
+      record.catalog =
+          haveCatalog
+              ? std::filesystem::path(FileUtils::GetFullPath(catalog))
+              : std::filesystem::absolute(name) / "IP_Catalog";
+      record.catalog = record.catalog.lexically_normal();
+      // NOTE: no analytical-placement check here — QLSettingsManager needs
+      // a loaded design's settings and crashes before one exists. The
+      // packaging hook enforces the traditional-placer requirement.
+      // Fail-fast name-collision check, WITHOUT loading catalogs: a full
+      // catalog load spawns the generators with project context this
+      // command predates (no design exists yet). Consult (a) definitions
+      // already loaded this session and (b) a filesystem probe of the
+      // installed catalog (<root>/<vendor>/<lib>/<name>/<version> holding a
+      // *_gen.py). The DERIVED target catalog is whitelisted, mirroring the
+      // packaging-time prefix rule; the packaging hook re-checks
+      // authoritatively against the fully loaded catalogs.
+      const std::string catalogIpName = name + "_" + version;
+      std::filesystem::path collidingPath;
+      if (IPDefinition* existing =
+              compiler->GetIPGenerator()->Catalog()->Definition(
+                  catalogIpName)) {
+        if (!isSameOrUnderPath(existing->FilePath(), record.catalog)) {
+          collidingPath = existing->FilePath().parent_path();
+        }
+      }
+      if (collidingPath.empty()) {
+        const std::filesystem::path root =
+            compiler->GetIPGenerator()->DefaultIPCatalogPath();
+        std::error_code ec;
+        for (auto vendor = std::filesystem::directory_iterator(root, ec);
+             !ec && vendor != std::filesystem::directory_iterator();
+             vendor.increment(ec)) {
+          std::error_code ec2;
+          if (!vendor->is_directory(ec2)) continue;
+          for (auto lib =
+                   std::filesystem::directory_iterator(vendor->path(), ec2);
+               !ec2 && lib != std::filesystem::directory_iterator();
+               lib.increment(ec2)) {
+            std::error_code ec3;
+            const std::filesystem::path candidate =
+                lib->path() / name / version;
+            if (!std::filesystem::is_directory(candidate, ec3)) continue;
+            if (isSameOrUnderPath(candidate, record.catalog)) continue;
+            for (auto entry =
+                     std::filesystem::directory_iterator(candidate, ec3);
+                 !ec3 && entry != std::filesystem::directory_iterator();
+                 entry.increment(ec3)) {
+              const std::string fname = entry->path().filename().string();
+              if (fname.size() > 7 &&
+                  fname.compare(fname.size() - 7, 7, "_gen.py") == 0) {
+                collidingPath = candidate;
+                break;
+              }
+            }
+            if (!collidingPath.empty()) break;
+          }
+          if (!collidingPath.empty()) break;
+        }
+      }
+      if (!collidingPath.empty()) {
+        compiler->ErrorMessage(
+            "-rpm_ip: IP name '" + catalogIpName +
+            "' already exists in the catalog (from " +
+            collidingPath.string() +
+            "); IP names must be unique — choose a different project "
+            "name or -version");
+        return TCL_ERROR;
+      }
+      record.active = true;
+      record.name = name;
+      record.version = version;
+    }
+
+    // Base behavior, reproduced (Compiler.cpp create_design). An -rpm_ip
+    // project is a plain RTL/Yosys project downstream.
+    compiler->GetOutput().clear();
+    bool ok = compiler->CreateDesign(name, type);
+    if (!compiler->m_output.empty())
+      Tcl_AppendResult(interp, compiler->m_output.c_str(), nullptr);
+    if (!FileUtils::FileExists(name)) {
+      compiler->Message("Create design directory: " + name);
+      bool created = std::filesystem::create_directory(name);
+      if (!created) {
+        ok = created;
+        compiler->ErrorMessage("Cannot create design directory: " + name);
+      }
+    }
+    // Populate the record only after the base call: the CreateDesign
+    // override resets per-design RPM state. Stamp it with the project so
+    // consumers can expire it on a project switch (RpmAuthorProjectActive).
+    if (ok && rpmIp) {
+      record.project =
+          std::filesystem::path(compiler->ProjManager()->projectPath());
+      compiler->RpmAuthor(record);
+    }
+    return ok ? TCL_OK : TCL_ERROR;
+  };
+  interp->registerCmd("create_design", create_design, this, 0);
 
   auto message_severity = [](void* clientData, Tcl_Interp* interp, int argc,
                              const char* argv[]) -> int {
@@ -2552,7 +2904,17 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
-    if (fs::exists(fp_constraint_filepath_absolute)) {
+    PruneRelIpBlifs();
+    if (!m_relIpBlifs.empty()) {
+      // Relative-placement IPs registered: merge the relative-macro
+      // constraints (derived from the annotated netlist) with the IO
+      // constraints into a separate file. The default flow's
+      // <project>_constraints.xml is left untouched.
+      if (!GenerateRelMacroConstraints(netlistFile)) {
+        return std::make_tuple(std::string(""), std::string(""));
+      }
+      vpr_options += std::string(" --read_vpr_constraints " + ProjManager()->projectName() + "_rpm_constraints.xml");
+    } else if (fs::exists(fp_constraint_filepath_absolute)) {
       vpr_options += std::string(" --read_vpr_constraints " +  ProjManager()->projectName() + "_constraints.xml");
     }
   }
@@ -2947,7 +3309,17 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   if (GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
-    if (fs::exists(fp_constraint_filepath_absolute)) {
+    PruneRelIpBlifs();
+    if (!m_relIpBlifs.empty()) {
+      // Relative-placement IPs registered: merge the relative-macro
+      // constraints (derived from the annotated netlist) with the IO
+      // constraints into a separate file. The default flow's
+      // <project>_constraints.xml is left untouched.
+      if (!GenerateRelMacroConstraints(netlistFile)) {
+        return nullptr;
+      }
+      command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_rpm_constraints.xml"});
+    } else if (fs::exists(fp_constraint_filepath_absolute)) {
       command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_constraints.xml"});
     }
   }
@@ -3004,6 +3376,308 @@ std::string CompilerOpenFPGA_ql::BaseStaScript(std::string libFileName,
   ofssta.close();
   return openStaFile;
 }
+
+
+// True when the openfpga template passes --sb_maps as an option of its own.
+// Matched per token so '--sb_maps_dir' does not count, and comment lines are skipped
+// so a mention in prose does not suppress a flag the run still needs.
+static bool templatePassesSbMaps(const std::string& script) {
+  std::istringstream lines(script);
+  std::string line;
+  while(std::getline(lines, line)) {
+    const size_t first = line.find_first_not_of(" \t");
+    if(first == std::string::npos || line[first] == '#') {
+      continue;
+    }
+    for(char& c : line) { if(c == '\t') c = ' '; }
+    for(const std::string& token : StringUtils::tokenize(line, " ")) {
+      if(token == "--sb_maps") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+
+// Escape a literal so it can be used as a std::regex pattern.
+// FileUtils::findAndReplaceInFile compiles its search string as a regex, and the
+// patterns below are device and layout names read off disk. Unescaped, a '.' in a
+// package name matches any character and silently rewrites neighbouring text, and a
+// '+', '(' or '[' throws std::regex_error out of the middle of a half-copied clone.
+static std::string regexEscapeLiteral(const std::string& literal) {
+  static const std::string special = R"(\^$.|?*+()[]{})";
+  std::string escaped;
+  escaped.reserve(literal.size());
+  for(char c : literal) {
+    if(special.find(c) != std::string::npos) {
+      escaped.push_back('\\');
+    }
+    escaped.push_back(c);
+  }
+  return escaped;
+}
+
+
+// Drop a "--flag <value>" pair from a whitespace-separated option string.
+// Token-exact, so a value that happens to contain the flag text is not mangled.
+static std::string removeVprOption(const std::string& options, const std::string& flag) {
+  const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  std::vector<std::string> kept;
+  kept.reserve(tokens.size());
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] == flag) {
+      ++i;  // skip the flag's value too
+      continue;
+    }
+    kept.push_back(tokens[i]);
+  }
+  return StringUtils::join(kept, " ");
+}
+
+
+// Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'. The 'x' is
+// load-bearing: plain concatenation makes 12x10 read as 'AUTOFPGA1210', equally 1x210
+// and 121x0. Every construction site goes through here so they cannot drift apart.
+static std::string generatedLayoutName(const std::string& prefix, int width, int height) {
+
+  return prefix + std::string("FPGA") +
+         std::to_string(width) + std::string("x") + std::to_string(height);
+}
+
+
+// Directory name (== devicename) of the device package generated from a re-shaped
+// layout.
+//
+// Substitute when the source layout name is embedded in the source devicename -
+// 'TURNKEY-FPGA_AUTO' with layout 'FPGA_AUTO' becomes 'TURNKEY-AUTOFPGA16x14',
+// which is what pre-2026.3 kits have always produced. Otherwise append, because
+// a device is identified by its package DIRECTORY LEAF and a current package
+// names that leaf after the part rather than after its layout:
+// 'EVAL2-CCFF-CUSTOM' with layout 'FPGA0808' becomes
+// 'EVAL2-CCFF-CUSTOM-AUTOFPGA16x14'.
+// Appending is not a nicety. With substitution alone the derived name would come
+// back unchanged, the clone target would resolve to the shipped package
+// directory, and the caller deletes that directory before copying into it.
+static std::string generatedDeviceName(const std::string& source_devicename,
+                                       const std::string& source_layout_name,
+                                       const std::string& generated_layout_name) {
+
+  if(!source_layout_name.empty() &&
+     source_devicename.find(source_layout_name) != std::string::npos) {
+    return StringUtils::replaceAll(source_devicename, source_layout_name, generated_layout_name);
+  }
+
+  return source_devicename + std::string("-") + generated_layout_name;
+}
+
+
+// <project>/../custom_layout.yml, with relative components removed.
+// Resolved on demand rather than once up front: a package that takes the
+// layout-name path never consults this file, and canonicalization is a way to
+// fail that that path did not previously have.
+static bool resolveCustomLayoutYMLPath(const std::filesystem::path& project_path,
+                                       std::filesystem::path& out_filepath) {
+
+  std::filesystem::path filepath = project_path / ".." / "custom_layout.yml";
+  try {
+    // canonicalize to remove relative paths.
+    filepath = std::filesystem::weakly_canonical(filepath);
+  }
+  catch (const std::filesystem::filesystem_error& e) {
+    //std::cerr << "Error: " << e.what() << std::endl;
+    return false;
+  }
+
+  out_filepath = filepath;
+  return true;
+}
+
+
+// Read the user's flat 'custom_layout.yml' (ARRAY_X / ARRAY_Y / BRAM_COLS /
+// DSP_COLS, one 'KEY: VALUE' per line) into a json object.
+// The file stays flat and user-facing: it is what users write and what the
+// device-data test harness generates, so its shape is not ours to change. We
+// read it here and re-emit it as the CUSTOM section of a device config overlay,
+// because '--custom_layout' is retired and '--device_config' is the only config
+// interface add_layout.py keeps.
+//
+// Validation is strict deliberately. add_layout.py resolves every key it does
+// not find against its own module default ('ARRAY_X' = '08', 'ARRAY_Y' = '06'),
+// so a key let through misspelled does not fail the run - it quietly builds a
+// 12x10 fabric instead of the one that was asked for, with no diagnostic
+// anywhere. An unknown key, a repeated key, a missing dimension or a value that
+// is not a whole number is therefore an error naming the key and the line.
+static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_filepath,
+                                json& out_custom_layout_json,
+                                std::string& out_error) {
+
+  // The keys the CUSTOM section of the device config contract defines, with the
+  // smallest value each accepts. ARRAY_X/ARRAY_Y size the fabric, so they must
+  // be present; the column counts may legitimately be zero and may be omitted.
+  struct CustomLayoutKey {
+    const char* name;
+    long minimum;
+    bool required;
+  };
+  static const CustomLayoutKey custom_layout_keys[] = {
+    { "ARRAY_X",   1, true  },
+    { "ARRAY_Y",   1, true  },
+    { "BRAM_COLS", 0, false },
+    { "DSP_COLS",  0, false },
+  };
+  const std::size_t custom_layout_key_count =
+      sizeof(custom_layout_keys) / sizeof(custom_layout_keys[0]);
+
+  std::string accepted_keys;
+  for(std::size_t i = 0; i < custom_layout_key_count; i++) {
+    if(i > 0) {
+      accepted_keys += ", ";
+    }
+    accepted_keys += custom_layout_keys[i].name;
+  }
+
+  std::ifstream ifs(custom_layout_yml_filepath.string());
+  if(!ifs.is_open()) {
+    out_error = "cannot be opened for reading";
+    return false;
+  }
+
+  out_custom_layout_json = json::object();
+
+  std::string line;
+  int line_number = 0;
+  while(std::getline(ifs, line)) {
+    line_number++;
+
+    // A UTF-8 BOM would otherwise become part of the first key and turn a
+    // perfectly good file into an unrecognised-key error - editors on Windows
+    // write one without being asked.
+    if(line_number == 1 && line.rfind("\xEF\xBB\xBF", 0) == 0) {
+      line = line.substr(3);
+    }
+
+    // strip a comment and a trailing CR (the file may come from Windows).
+    const std::size_t comment_pos = line.find('#');
+    if(comment_pos != std::string::npos) {
+      line = line.substr(0, comment_pos);
+    }
+    if(!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+
+    if(line.find_first_not_of(" \t") == std::string::npos) {
+      continue;
+    }
+
+    // A document marker is legal YAML and PyYAML accepted it, so keep accepting
+    // it - rejecting it would narrow a shape users may already have on disk.
+    std::string document_marker = line;
+    StringUtils::trim(document_marker);
+    if(document_marker == "---" || document_marker == "...") {
+      continue;
+    }
+
+    // an indented line or a list item means a nested mapping or a sequence.
+    if(line[0] == ' ' || line[0] == '\t' || line[0] == '-') {
+      out_error = "is not a flat 'KEY: VALUE' mapping (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    const std::size_t colon_pos = line.find(':');
+    if(colon_pos == std::string::npos) {
+      out_error = "has a line that is not 'KEY: VALUE' (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    std::string key = line.substr(0, colon_pos);
+    std::string value = line.substr(colon_pos + 1);
+    StringUtils::trim(key);
+    StringUtils::trim(value);
+    if(value.size() >= 2 &&
+       ((value.front() == '\'' && value.back() == '\'') ||
+        (value.front() == '"' && value.back() == '"'))) {
+      value = value.substr(1, value.size() - 2);
+    }
+
+    if(key.empty()) {
+      out_error = "has a line with no key (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+    if(value.empty()) {
+      // A nested file ('CUSTOM:' with indented children) lands here, on the
+      // parent line, before the indent check above can ever see the children -
+      // so name the real cause rather than blaming the empty value.
+      out_error = "has key '" + key + "' with no value (line " + std::to_string(line_number) +
+                  "); the file must be a flat 'KEY: VALUE' mapping, not a nested one";
+      return false;
+    }
+
+    const CustomLayoutKey* known_key = nullptr;
+    for(std::size_t i = 0; i < custom_layout_key_count; i++) {
+      if(key == custom_layout_keys[i].name) {
+        known_key = &custom_layout_keys[i];
+        break;
+      }
+    }
+    if(known_key == nullptr) {
+      out_error = "has unknown key '" + key + "' (line " + std::to_string(line_number) +
+                  "); expected one of " + accepted_keys;
+      return false;
+    }
+
+    if(out_custom_layout_json.contains(key)) {
+      // last-wins would make the effective geometry depend on line order, and
+      // silently drop the value the user probably meant.
+      out_error = "sets '" + key + "' more than once (line " + std::to_string(line_number) + ")";
+      return false;
+    }
+
+    // Strictly a decimal integer. '-8', '8.5', 'null' and '[4, 8]' must not
+    // reach the script, which either aborts in int() or mis-sizes the fabric.
+    bool digits_only = !value.empty();
+    for(char c : value) {
+      if(c < '0' || c > '9') {
+        digits_only = false;
+        break;
+      }
+    }
+    if(!digits_only) {
+      out_error = "has a non-integer value '" + value + "' for '" + key + "' (line " +
+                  std::to_string(line_number) + ")";
+      return false;
+    }
+    // bounded so the conversion below cannot overflow; no fabric dimension comes
+    // anywhere near nine digits.
+    if(value.size() > 9) {
+      out_error = "has an out-of-range value '" + value + "' for '" + key + "' (line " +
+                  std::to_string(line_number) + ")";
+      return false;
+    }
+    const long numeric_value = std::stol(value);
+    if(numeric_value < known_key->minimum) {
+      out_error = "has '" + key + "' = " + value + ", below the minimum of " +
+                  std::to_string(known_key->minimum) + " (line " +
+                  std::to_string(line_number) + ")";
+      return false;
+    }
+
+    // kept as a string: that is how the config contract spells the CUSTOM
+    // section ("ARRAY_X": "8"), and add_layout.py converts it itself.
+    out_custom_layout_json[key] = value;
+  }
+
+  for(std::size_t i = 0; i < custom_layout_key_count; i++) {
+    if(custom_layout_keys[i].required &&
+       !out_custom_layout_json.contains(custom_layout_keys[i].name)) {
+      out_error = std::string("is missing the required key '") + custom_layout_keys[i].name + "'";
+      return false;
+    }
+  }
+
+  return true;
+}
+
 
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
@@ -3139,10 +3813,238 @@ bool CompilerOpenFPGA_ql::Packing() {
   PostTaskFileRemover placeFileRemover(ProjManager()->projectPath() / std::filesystem::path(ProjManager()->projectName() + "_post_synth.place"));
 
 
+  // LAYOUT GENERATION MODE RESOLUTION ++
+  // The mode comes from the device package - 'DEVICE_TYPE' and
+  // 'DEVICE_TYPE_SETTINGS.LAYOUT_MODE' in its config.json - not from the name picked
+  // in the layout selector. Resolved once here into the two booleans the rest of this
+  // function already works off.
+  //
+  // The order of the three arms is load-bearing and the code cannot show it:
+  //  1. 'DEVICE_TYPE' first. FIXED means silicon, so nothing may re-shape it: not a
+  //     LAYOUT_MODE, not a user custom_layout.yml. Read the override first and a user
+  //     resizes hard silicon by dropping a file beside the project. There is no
+  //     backstop downstream - see normalizeDeviceType() for why.
+  //  2. On a CUSTOM device the project-level custom_layout.yml wins over LAYOUT_MODE.
+  //  3. No 'DEVICE_TYPE' at all keys off the layout name, as before this contract, so
+  //     released kits keep working without a re-sync.
+  m_autoLayoutGenerationMode = false;
   m_customLayoutGenerationMode = false;
-  if(current_device_target.device_variant_layout.name == "FPGA_CUSTOM") {
-    m_customLayoutGenerationMode = true;
+
+  // The layout this package ships and the device it belongs to. The generated-device
+  // logic below is driven off these rather than 'FPGA_AUTO'/'FPGA_CUSTOM' literals, so
+  // a package naming its layout after the fabric ('FPGA0808') gets the same
+  // substitutions. On a legacy package these two ARE those literals.
+  const std::string& source_layout_name = current_device_target.device_variant_layout.name;
+  const std::string& source_devicename = current_device_target.device_variant.devicename;
+
+  // '--device_config' for add_layout.py: the package config.json, or the overlay
+  // synthesised from the user's custom_layout.yml.
+  // EMPTY means the mode came from the layout name (arm 3), and it stays empty
+  // there deliberately: the add_layout.py shipped inside a pre-2026.3 package has
+  // no '--device_config' in its argparse surface, so passing it would abort the
+  // run with 'unrecognized arguments'. A package carrying 'DEVICE_TYPE' also
+  // ships the current script, so the flag and the key always travel together.
+  std::filesystem::path add_layout_device_config_path;
+
+  // <project>/../custom_layout.yml - the user's per-run size override. Resolved
+  // by resolveCustomLayoutYMLPath() only on the arms that actually consult it,
+  // so a package taking the layout-name path is not exposed to a canonicalization
+  // failure it never met before.
+  std::filesystem::path custom_layout_yml_filepath;
+
+  {
+    QLDeviceLayoutSettings layout_settings =
+        QLDeviceManager::getInstance()->deviceLayoutSettings(current_device_target);
+
+    if(layout_settings.config_parse_failed) {
+      // A config.json that exists but does not parse must never be treated as
+      // one that is absent: absent selects the layout-name path, and on a FIXED
+      // device that path walks straight past the gate below.
+      ErrorMessage("Device '" + source_devicename + "': cannot parse " +
+                   layout_settings.config_json_path.string() + ": " +
+                   layout_settings.config_parse_error + "\n");
+      return false;
+    }
+
+    if(layout_settings.invalid) {
+      ErrorMessage("Device '" + source_devicename + "': unsupported value '" +
+                   layout_settings.invalid_value + "' for '" + layout_settings.invalid_key +
+                   "' in " + layout_settings.config_json_path.string() + "\n");
+      return false;
+    }
+
+    if(layout_settings.device_type == "FIXED") {
+      // 1. hard silicon.
+      //
+      // Nothing asked to re-shape it in the ordinary case, and that case is the
+      // ordinary one: every customer part is 'FIXED' and carries no layout
+      // settings at all, so this arm leaves both booleans false and the flow
+      // continues against the fabric the package ships. That is what a fixed
+      // device does today via the layout-name arm, and it must keep doing it -
+      // failing here would fail every customer run.
+      //
+      // What is refused is a re-shape actually being ASKED for, and there are
+      // exactly two ways to ask: 'DEVICE_TYPE_SETTINGS' in the device config, and
+      // a custom_layout.yml beside the project. Both are inputs add_layout.py
+      // would act on. Each is inspected only in order to reject it by name;
+      // neither is ever read as authoritative or allowed to select a mode on this
+      // arm. That ordering - inspect DEVICE_TYPE before honouring anything - is
+      // the whole guarantee, and it is the only one there is.
+      if(layout_settings.device_type_settings_present) {
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                     layout_settings.config_json_path.string() +
+                     " and cannot be re-shaped, but that file also carries "
+                     "'DEVICE_TYPE_SETTINGS'" +
+                     (layout_settings.layout_mode_present
+                          ? std::string(" ('LAYOUT_MODE': '") + layout_settings.layout_mode + "')"
+                          : std::string()) +
+                     ". Remove the layout settings from the device config.\n");
+        return false;
+      }
+      if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                     custom_layout_yml_filepath)) {
+        ErrorMessage("Could not resolve '" + std::string(ProjManager()->projectPath()) +
+                     "/../custom_layout.yml': the project path could not be canonicalized.\n");
+        return false;
+      }
+      // FIXME(aurora2#2291): a device generated from an override is stamped FIXED, so
+      // re-running on it with that same custom_layout.yml still present lands here. Give
+      // a generated package provenance in its config.json and exempt it, rather than
+      // relaxing this guard, which real silicon depends on.
+      if(FileUtils::FileExists(custom_layout_yml_filepath)) {
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                     layout_settings.config_json_path.string() +
+                     " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
+                     ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
+        return false;
+      }
+      // nothing asked for a re-shape: a fixed device runs the normal flow.
+    }
+    else if(layout_settings.device_type_present) {
+      // 2. 'DEVICE_TYPE': 'CUSTOM' - this fabric may be re-shaped.
+      if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                     custom_layout_yml_filepath)) {
+        ErrorMessage("Could not resolve '" + std::string(ProjManager()->projectPath()) +
+                     "/../custom_layout.yml': the project path could not be canonicalized.\n");
+        return false;
+      }
+      if(FileUtils::FileExists(custom_layout_yml_filepath)) {
+        // The user's flat yml wins over the package's 'LAYOUT_MODE'. We re-emit
+        // it as a device config overlay instead of passing it through
+        // '--custom_layout', which add_layout.py has retired, so the file itself
+        // keeps the flat shape users and the device-data test harness write.
+        // The overlay is built ON TOP of the package config: the script reads the
+        // geometry it needs to size a fabric ('BRAM_SIZE', 'DSP_SIZE',
+        // 'IO_CAPACITY', 'MARGIN') from the same file, so a bare three-key
+        // overlay would send it back to its built-in defaults and quietly build
+        // the wrong fabric on a device that is not 1x6/1x3.
+        json custom_layout_json;
+        std::string custom_layout_error;
+        if(!readCustomLayoutYML(custom_layout_yml_filepath, custom_layout_json, custom_layout_error)) {
+          ErrorMessage("Device '" + source_devicename + "': custom layout spec " +
+                       custom_layout_yml_filepath.string() + " " + custom_layout_error + "\n");
+          return false;
+        }
+
+        json layout_override_json;
+        std::string layout_override_parse_error;
+        if(!QLDeviceManager::getInstance()->loadDeviceConfigJSON(current_device_target,
+                                                                layout_override_json,
+                                                                &layout_override_parse_error) ||
+           !layout_override_json.is_object()) {
+          // The script reads 'BRAM_SIZE', 'DSP_SIZE', 'IO_CAPACITY' and 'MARGIN' from
+          // the very file it is handed, so an overlay synthesised from nothing would
+          // silently fall back to its built-in 1x6 / 1x3 / 20 / 1.2 geometry.
+          ErrorMessage("Device '" + source_devicename + "': cannot read device config " +
+                       layout_settings.config_json_path.string() +
+                       " needed to build the layout override" +
+                       (layout_override_parse_error.empty()
+                            ? std::string()
+                            : std::string(": ") + layout_override_parse_error) + "\n");
+          return false;
+        }
+        layout_override_json["DEVICE_TYPE"] = "CUSTOM";
+        if(!layout_override_json["DEVICE_TYPE_SETTINGS"].is_object()) {
+          layout_override_json["DEVICE_TYPE_SETTINGS"] = json::object();
+        }
+        layout_override_json["DEVICE_TYPE_SETTINGS"]["LAYOUT_MODE"] = "CUSTOM";
+        layout_override_json["DEVICE_TYPE_SETTINGS"]["CUSTOM"] = custom_layout_json;
+
+        std::filesystem::path layout_override_json_filepath =
+            std::filesystem::path(ProjManager()->projectPath()) / ".layout_override.json";
+        std::ofstream layout_override_ofstream(layout_override_json_filepath.string());
+        if(!layout_override_ofstream.is_open()) {
+          ErrorMessage("Device '" + source_devicename + "': cannot write layout override file " +
+                       layout_override_json_filepath.string() + "\n");
+          return false;
+        }
+        layout_override_ofstream << layout_override_json.dump(2) << std::endl;
+        layout_override_ofstream.close();
+
+        m_customLayoutGenerationMode = true;
+        add_layout_device_config_path = layout_override_json_filepath;
+      }
+      else if(layout_settings.layout_mode_present) {
+        if(layout_settings.layout_mode == "AUTO") {
+          // pack first, then size from the packing run's vpr_stdout.log.
+          m_autoLayoutGenerationMode = true;
+        }
+        else {
+          // 'CUSTOM' and 'RESOURCES' share this boolean because their flow
+          // control is identical: skip packing, invoke the script, let it size
+          // from the device config. 'RESOURCES' is deliberately NOT routed to
+          // 'AUTO' - it has no use for a VPR log, and demanding one would only
+          // fail the run.
+          m_customLayoutGenerationMode = true;
+        }
+        add_layout_device_config_path = layout_settings.config_json_path;
+      }
+      else {
+        // 'DEVICE_TYPE': 'CUSTOM' with no 'LAYOUT_MODE'. add_layout.py would
+        // default this to 'AUTO'; we will not. How to shape a device is not
+        // something to guess at.
+        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'CUSTOM' but no "
+                     "'DEVICE_TYPE_SETTINGS.LAYOUT_MODE' in " +
+                     layout_settings.config_json_path.string() +
+                     ". Expected one of 'AUTO', 'CUSTOM', 'RESOURCES'.\n");
+        return false;
+      }
+    }
+    else if(layout_settings.device_type_settings_present) {
+      // Layout settings with nothing saying whether this fabric may be re-shaped: a
+      // half-migrated package. Falling through to the layout-name path would leave the
+      // settings inert with no diagnostic.
+      ErrorMessage("Device '" + source_devicename + "' carries 'DEVICE_TYPE_SETTINGS' but no "
+                   "'DEVICE_TYPE' in " + layout_settings.config_json_path.string() +
+                   ". Add 'DEVICE_TYPE': 'CUSTOM' or 'FIXED', or remove the layout settings.\n");
+      return false;
+    }
+    else {
+      // 3. no 'DEVICE_TYPE': pre-contract package, key off the layout name.
+      if(source_layout_name == "FPGA_CUSTOM") {
+        m_customLayoutGenerationMode = true;
+      }
+      else if(source_layout_name == "FPGA_AUTO") {
+        m_autoLayoutGenerationMode = true;
+      }
+      // any other layout name: no layout generation, as before.
+    }
+
+    if(!add_layout_device_config_path.empty()) {
+      Message("Layout generation configured by: " + add_layout_device_config_path.string() + "\n");
+    }
   }
+
+  // Everything below that renames a layout or a device keys off these two names.
+  // An empty one is not merely a no-op: the file rewrites go through std::regex,
+  // and an empty pattern matches at every position. Refuse rather than corrupt.
+  if((m_autoLayoutGenerationMode || m_customLayoutGenerationMode) &&
+     (source_layout_name.empty() || source_devicename.empty())) {
+    ErrorMessage("Device '" + source_devicename + "': layout generation was requested but the "
+                 "selected device target carries no layout name or no device name.\n");
+    return false;
+  }
+  // LAYOUT GENERATION MODE RESOLUTION --
 
   int status = 0;
   if(m_customLayoutGenerationMode == true) 
@@ -3157,16 +4059,11 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   // FPGA_AUTO device logic ++
   // ref: https://github.com/QL-Proprietary/aurora2/pull/1303
-  m_autoLayoutGenerationMode = false;
-  
+
   // Note: At this point:
   // m_architectureFile is already populated in the vpr base command
   // m_SBMapsFile is already populated in the vpr base command
   // m_SBTemplatesDir is already populated in the vpr base command
-  
-  if(current_device_target.device_variant_layout.name == "FPGA_AUTO") {
-    m_autoLayoutGenerationMode = true;
-  }
 
   if(m_autoLayoutGenerationMode || m_customLayoutGenerationMode) {
 
@@ -3179,10 +4076,10 @@ bool CompilerOpenFPGA_ql::Packing() {
 
     // Regardless of the status (whether the design fits into the base auto layout or not)
     // we generate a device package.
-    // Even if the design fits, the layout being called 'FPGA_AUTO' necessary to trigger the
-    // auto layout generation mode, prevents it from being used in the normal flow.
-    // So, we generate a device package (which will be identical to the FPGA_AUTO) with the
-    // devicename and layoutname changed according to the generated layout from the script.
+    // A device that resolved to a generation mode is a template for shaping a
+    // fabric, not something the rest of the flow can target directly, so even
+    // when the design fits we emit a device package with the devicename and
+    // layoutname taken from the generated layout.
 
     // m_architectureFile -> decrypted vpr.xml of current device target.
     std::filesystem::path generated_vpr_xml_path = 
@@ -3196,12 +4093,33 @@ bool CompilerOpenFPGA_ql::Packing() {
     int generated_layout_height = 0;
     m_autoLayoutGeneratedLayoutName = "";
 
-    if ( (m_autoLayoutGenerationMode && (status != 0)) ||
-         (m_customLayoutGenerationMode) ) {
+    // In AUTO mode we go through the script even when the design FITS, as long as
+    // a device config is available. The alternative - copying the arch file and
+    // doing a literal layout-name replacement - no-ops on a package whose layout
+    // is not called 'FPGA_AUTO', and it skips the SB map when the package ships
+    // none, so a design that fits would end up with different artefacts from one
+    // that triggered a resize. Without a device config the script cannot be
+    // invoked at all (see add_layout_device_config_path), so the copy path below
+    // stays for that case.
+    const bool generate_layout_via_script =
+        m_customLayoutGenerationMode ||
+        (m_autoLayoutGenerationMode && ((status != 0) || !add_layout_device_config_path.empty()));
+
+    if (generate_layout_via_script) {
 
       if(m_autoLayoutGenerationMode) {
-        Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
-        Message("Try to generate a device that can accomodate current design...\n");
+        if(status != 0) {
+          Message("Design " + ProjManager()->projectName() + " will not fit into the current device layout.\n");
+          Message("Try to generate a device that can accomodate current design...\n");
+        }
+        else {
+          // The script keeps the device's own dimensions on this path - it reads
+          // them back out of the architecture file - and regenerates the layout
+          // and the SB map from it. Same wording as the copy path below, because
+          // the outcome is the same device, just produced properly.
+          Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
+          Message("Generating Device equivalent to the current device...\n");
+        }
       }
       if(m_customLayoutGenerationMode) {
         Message("Generate a device that can accomodate current layout specification...\n");
@@ -3216,47 +4134,20 @@ bool CompilerOpenFPGA_ql::Packing() {
             std::filesystem::path(ProjManager()->projectPath()) / "vpr_stdout.log";
       }
 
-      std::filesystem::path custom_layout_yml_filepath;
-      if(m_customLayoutGenerationMode) {
-        custom_layout_yml_filepath = 
-            std::filesystem::path(ProjManager()->projectPath()) / ".." / "custom_layout.yml";
-        // canonicalize to remove relative paths.
-        try {
-          custom_layout_yml_filepath = std::filesystem::weakly_canonical(custom_layout_yml_filepath);
-        }
-        catch (const std::filesystem::filesystem_error& e) {
-          ErrorMessage("Error Canonicalizing Directory Paths\n");
-          //std::cerr << "Error: " << e.what() << std::endl;
+      // On the legacy arm the size can only come from the user's yml, so a missing file
+      // is an error. On a config-driven arm the yml is optional and the resolver has
+      // already turned it into the overlay add_layout_device_config_path points at.
+      if(m_customLayoutGenerationMode && add_layout_device_config_path.empty()) {
+        if(!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                       custom_layout_yml_filepath)) {
+          ErrorMessage("Could not resolve '" + std::string(ProjManager()->projectPath()) +
+                       "/../custom_layout.yml': the project path could not be canonicalized.\n");
           return false;
         }
         if(!FileUtils::FileExists(custom_layout_yml_filepath)) {
           ErrorMessage("[Error] custom layout spec yml not found at expected path: " + custom_layout_yml_filepath.string() + "\n");
           ErrorMessage("Please ensure to create a 'custom_layout.yml' file in the project path.");
           return false;
-        }
-      }
-
-      // overhead settings and other settings, read from file 'add_layout_params.json' if it exists:
-      std::filesystem::path add_layout_params_json_filepath = 
-          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) / "aurora" / "add_layout_params.json";
-
-      json add_layout_params_json = json::object();
-      int overhead_percentage = 0;
-      if(FileUtils::FileExists(add_layout_params_json_filepath)) {
-        std::ifstream add_layout_params_json_ifstream(add_layout_params_json_filepath.string());
-        try {
-          add_layout_params_json = json::parse(add_layout_params_json_ifstream);
-        }
-        catch (const json::exception& e) {
-          ErrorMessage("Failed to parse '" + add_layout_params_json_filepath.string() +
-                       "': " + e.what());
-          return false;
-        }
-        if(!add_layout_params_json.empty()) {
-          if(add_layout_params_json.contains("overhead_percentage")){
-            overhead_percentage = add_layout_params_json["overhead_percentage"].get<int>();
-            // std::cout << "overhead_percentage: " << overhead_percentage << std::endl;
-          }
         }
       }
 
@@ -3273,14 +4164,22 @@ bool CompilerOpenFPGA_ql::Packing() {
         command_auto_device +=
           std::string(" --vpr_stdout_log ") + vpr_stdout_log_filepath.string();
       }
-      if(m_customLayoutGenerationMode) {
+      if(!add_layout_device_config_path.empty()) {
+        // The whole configuration - device type, layout mode, geometry, margin -
+        // comes from this one file. Left to itself the script looks for a
+        // config.json by walking up from --arch_file, and --arch_file is a
+        // decrypted vpr.xml in the project directory, so that walk never reaches
+        // the device package and the script falls back to its built-in geometry
+        // defaults without warning - correct for a 1x6/1x3 device and wrong for
+        // every other one.
+        command_auto_device +=
+          std::string(" --device_config ") + add_layout_device_config_path.string();
+      }
+      else if(m_customLayoutGenerationMode) {
+        // Legacy arm only: this package's add_layout.py predates
+        // '--device_config' and has no other way of being told the size.
         command_auto_device +=
           std::string(" --custom_layout ") + custom_layout_yml_filepath.string();
-      }
-
-      if(overhead_percentage > 0) {
-        command_auto_device += 
-            std::string(" --overhead_percentage ") + std::to_string(overhead_percentage);
       }
 
       std::filesystem::path logfile_auto_device = 
@@ -3328,24 +4227,18 @@ bool CompilerOpenFPGA_ql::Packing() {
         return false;
       }
 
+      // a unique name, so the generated layout is distinguishable from the one the
+      // device package ships.
       if(m_autoLayoutGenerationMode) {
-        // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
-        // if the layout name of the device is 'FPGA_AUTO'
-        m_autoLayoutGeneratedLayoutName = 
-                std::string("AUTOFPGA") + 
-                std::to_string(generated_layout_width) + 
-                std::to_string(generated_layout_height);
+        m_autoLayoutGeneratedLayoutName =
+                generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
       }
       if(m_customLayoutGenerationMode) {
-      // set a unique layout name, as the Aurora logic to detect automatic layout generation mode is
-      // if the layout name of the device is 'FPGA_AUTO'
-      m_autoLayoutGeneratedLayoutName = 
-              std::string("CUSTOMFPGA") + 
-              std::to_string(generated_layout_width) + 
-              std::to_string(generated_layout_height);
+        m_autoLayoutGeneratedLayoutName =
+                generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height);
       }
 
-      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, add_layout_script_generated_layout_name, m_autoLayoutGeneratedLayoutName);
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(add_layout_script_generated_layout_name), m_autoLayoutGeneratedLayoutName);
     }
     else if(m_autoLayoutGenerationMode && (status == 0)) {
       Message("Design " + ProjManager()->projectName() + " will fit into the current device layout.\n");
@@ -3353,10 +4246,8 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       generated_layout_width = current_device_target.device_variant_layout.width;
       generated_layout_height = current_device_target.device_variant_layout.height;
-      m_autoLayoutGeneratedLayoutName = 
-              std::string("AUTOFPGA") + 
-              std::to_string(generated_layout_width) + 
-              std::to_string(generated_layout_height);
+      m_autoLayoutGeneratedLayoutName =
+              generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
 
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
@@ -3368,8 +4259,11 @@ bool CompilerOpenFPGA_ql::Packing() {
         FileUtils::overwriteFile(m_SBMapsFile, generated_sb_maps_yml_path);
       }
 
-      // update the layout_name in the vpr.xml, we know that it would be called 'FPGA_AUTO' in this case.
-      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
+      // update the layout_name in the vpr.xml. this branch only runs when no
+      // device config was available, which means a pre-contract package, whose
+      // layout really is named 'FPGA_AUTO' - but take the name from the device
+      // target anyway so nothing here depends on that literal.
+      FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
     }
 
 
@@ -3523,15 +4417,10 @@ bool CompilerOpenFPGA_ql::Packing() {
     // '.../TURNKEY-FPGA_AUTO/.../vpr.xml' and the sdc/net file paths, which must
     // keep pointing at the original device directory. A blunt ReplaceAll on the
     // bare layout name rewrote those paths to a non-existent
-    // 'TURNKEY-AUTOFPGA<w><h>' directory (in plaintext mode the arch path is the
+    // 'TURNKEY-AUTOFPGA<w>x<h>' directory (in plaintext mode the arch path is the
     // on-disk device file), so the architecture-file swap below could no longer
     // match old_m_architectureFile and VPR failed to open the arch file.
-    if(m_autoLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "--device FPGA_AUTO", "--device " + m_autoLayoutGeneratedLayoutName);
-    }
-    if(m_customLayoutGenerationMode) {
-      command_rerun = ReplaceAll(command_rerun, "--device FPGA_CUSTOM", "--device " + m_autoLayoutGeneratedLayoutName);
-    }
+    command_rerun = ReplaceAll(command_rerun, "--device " + source_layout_name, "--device " + m_autoLayoutGeneratedLayoutName);
     command_rerun = ReplaceAll(command_rerun, old_m_architectureFile.string(), m_architectureFile.string());
     // generator devices (AUTO/CUSTOM) may not ship a static SB_MAPS.yml, so the
     // original command has no --sb_maps to swap and m_SBMapsFile is empty.
@@ -3561,33 +4450,36 @@ bool CompilerOpenFPGA_ql::Packing() {
 #if GENERATE_NEW_DEVICE_FPGA_AUTO
     // DEVICE CREATION LOGIC ++
     // At this point, (if) the packing is completed with the generated device vpr xml, and we can create a usable device
-    // 1 copy <device>: as a copy of the FPGA_AUTO device parallel to the device (device_data location)
-    //   where devicename: replace FPGA_AUTO with the generated layout name
+    // 1 copy <device>: as a copy of the source device parallel to the device (device_data location)
+    //   where devicename: derived from the generated layout name
     // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
     // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
     // -OR-
     // 3 SB_MAPS.yml/CSV : copy the generated SB_MAPS.yml, and the CSVs need not change.
-    // 4 cryptdb: replace FPGA_AUTO with the generated layout name
-    // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
+    // 4 cryptdb: rename after the generated devicename
+    // 5 settings.json, retarget devicename and layout name onto the generated device
+    // 5b config.json: mark the generated device non-reshapable
     // 6 example logs: if currently running design within examples, clean up logs
     // 7 remove other files: add_layout.py, add_layout_params.json if existing
     if(status == 0) {
       // packing succeeded with the generated vpr xml, package the device
 
-      // 1 copy the FPGA_AUTO device directory recursively to create new device.
-      //   and replace devicename using the generated layoutname.
-      std::string target_device_copy_devicename;
-      if(m_autoLayoutGenerationMode) {
-        target_device_copy_devicename = 
-          StringUtils::replaceAll(current_device_target.device_variant.devicename,
-                                  std::string("FPGA_AUTO"),
-                                  m_autoLayoutGeneratedLayoutName);
-      }
-      if(m_customLayoutGenerationMode) {
-        target_device_copy_devicename = 
-          StringUtils::replaceAll(current_device_target.device_variant.devicename,
-                                  std::string("FPGA_CUSTOM"),
-                                  m_autoLayoutGeneratedLayoutName);
+      // 1 copy the source device directory recursively to create new device.
+      //   and derive the new devicename from the generated layoutname.
+      std::string target_device_copy_devicename =
+          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName);
+
+      // Backstop. If the derived name did not change, the "new" device directory
+      // IS the source device directory, and the code just below deletes an
+      // existing target with RmDirRecursively() before copying into it - i.e. it
+      // would delete the installed device package and then copy from a directory
+      // that no longer exists. Never let that fall through.
+      if(target_device_copy_devicename == source_devicename) {
+        ErrorMessage("Cannot generate a device for '" + source_devicename + "' (layout '" +
+                     source_layout_name + "'): the generated device name is identical to the "
+                     "source device name, and generating it would overwrite the installed "
+                     "device package.\n");
+        return false;
       }
 
       std::filesystem::path source_device_copy_dirpath = 
@@ -3669,26 +4561,22 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
       FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
 
-      // 4 cryptdb: replace FPGA_AUTO with the generated layout name
+      // 4 cryptdb: rename it after the generated device
       std::filesystem::path source_device_cryptdb_filepath =
           (QLDeviceManager::getInstance()->deviceTypeDirPath()) /
           (QLDeviceManager::getInstance()->convertToDeviceTypeString() + "_Supp.db");
       std::string source_device_cryptdb_filename = 
           source_device_cryptdb_filepath.filename().string();
 
-      std::string target_device_copy_cryptdb_filename;
-      if(m_autoLayoutGenerationMode) {
-        target_device_copy_cryptdb_filename = 
-            StringUtils::replaceAll(source_device_cryptdb_filename,
-                                    std::string("FPGA_AUTO"),
-                                    m_autoLayoutGeneratedLayoutName);
-      }
-      if(m_customLayoutGenerationMode) {
-        target_device_copy_cryptdb_filename = 
-            StringUtils::replaceAll(source_device_cryptdb_filename,
-                                    std::string("FPGA_CUSTOM"),
-                                    m_autoLayoutGeneratedLayoutName);
-      }
+      // The key database is looked up as '<family>_<foundry>_<node>_<devicename>_Supp.db',
+      // so it has to follow the DEVICENAME and not the layout name: on a package
+      // whose directory leaf is not named after its layout, substituting the
+      // layout name leaves the file called after the source device and the
+      // generated device then has no key database at all.
+      std::string target_device_copy_cryptdb_filename =
+          StringUtils::replaceAll(source_device_cryptdb_filename,
+                                  source_devicename,
+                                  target_device_copy_devicename);
 
       std::filesystem::path target_device_copy_cryptdb_filepath_original = 
           target_device_copy_dirpath / source_device_cryptdb_filename;
@@ -3707,7 +4595,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
 
-      // 5 settings.json, replace FPGA_AUTO with generated layout name for all examples
+      // 5 settings.json, retarget devicename and layout name onto the generated device
       {
         std::regex filename_pattern(".+\\.json");
 
@@ -3720,16 +4608,55 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
         }
 
-        if(m_autoLayoutGenerationMode) {
-          // replace "FPGA_AUTO" with generated layout name in all the files
-          for(auto filepath: filepath_list) {
-            FileUtils::findAndReplaceInFile(filepath, "FPGA_AUTO", m_autoLayoutGeneratedLayoutName);
-          }
+        // TWO axes, and both are needed. A device is identified by the pair
+        // (devicename, layout), and the layout side is enumerated from the clone's own
+        // vpr.xml - so a clone whose settings still name the SOURCE devicename resolves
+        // back to the source package, which has no such layout, and the examples shipped
+        // inside the generated device fail to open. Devicename first: the layout pass
+        // would otherwise leave appended-name occurrences behind.
+        for(auto filepath: filepath_list) {
+          FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_devicename), target_device_copy_devicename);
+          FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
         }
-        if(m_customLayoutGenerationMode) {
-          // replace "FPGA_CUSTOM" with generated layout name in all the files
-          for(auto filepath: filepath_list) {
-            FileUtils::findAndReplaceInFile(filepath, "FPGA_CUSTOM", m_autoLayoutGeneratedLayoutName);
+      }
+
+      // 5b the generated device is a fixed-size copy: its fabric has already been
+      // shaped and its add_layout.py is removed below, so it must not resolve to
+      // a generation mode again on the next run. Rewrite its own config.json the
+      // way the silicon release task writes a non-reshapable part - 'DEVICE_TYPE':
+      // 'FIXED' with the layout settings dropped - and leave the rest of the file
+      // (BRAM_SIZE, DSP_SIZE, IO_CAPACITY, DSP_TYPE, ...) alone.
+      // A pre-contract package carries neither key, so nothing is written for it.
+      {
+        std::filesystem::path target_device_config_json_filepath =
+            target_device_copy_dirpath / "config.json";
+
+        if(FileUtils::FileExists(target_device_config_json_filepath)) {
+          std::ifstream target_device_config_json_ifstream(target_device_config_json_filepath.string());
+          json target_device_config_json;
+          try {
+            target_device_config_json = json::parse(target_device_config_json_ifstream);
+          }
+          catch (const json::exception& e) {
+            ErrorMessage("Failed to parse '" + target_device_config_json_filepath.string() +
+                         "': " + e.what());
+            return false;
+          }
+          target_device_config_json_ifstream.close();
+
+          if(target_device_config_json.is_object() &&
+             (target_device_config_json.contains("DEVICE_TYPE") ||
+              target_device_config_json.contains("DEVICE_TYPE_SETTINGS"))) {
+            target_device_config_json["DEVICE_TYPE"] = "FIXED";
+            target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
+
+            std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
+            if(!target_device_config_json_ofstream.is_open()) {
+              ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
+              return false;
+            }
+            target_device_config_json_ofstream << target_device_config_json.dump(2) << std::endl;
+            target_device_config_json_ofstream.close();
           }
         }
       }
@@ -4137,6 +5064,17 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement skipped, not required");
     Message("##################################################");
     m_state = State::Placed;
+    // RPM-authoring project: (re)package the IP on this success path too —
+    // the inputs are consistent by the very hash-diff that allowed the
+    // skip, packaging is idempotent (write-if-changed in the driver), and
+    // a previously failed packaging is retried by simply re-running place.
+    // (The pcf-up-to-date early return inside the #if UPSTREAM_UNUSED block
+    // above must gain this hook too if that block is ever re-enabled.)
+    if (RpmAuthorProjectActive() && !PackageRpmAuthorProject()) {
+      ErrorMessage("Design " + ProjManager()->projectName() +
+                   ": placement succeeded; RPM packaging failed");
+      return false;
+    }
     return true;
   }
 
@@ -4168,6 +5106,14 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
+
+  // RPM-authoring project: (re)package the IP from this fresh placement.
+  if (RpmAuthorProjectActive() && !PackageRpmAuthorProject()) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 ": placement succeeded; RPM packaging failed");
+    return false;
+  }
+
    std::filesystem::path place2pcf_script_path =
     GetSession()->Context()->DataPath() /
     std::filesystem::path("..") /
@@ -6098,6 +7044,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     return std::string("");
   }
 
+  // A device's openfpga template may pass --sb_maps itself; OpenFPGA then aborts with
+  // "Argument --sb_maps specified multiple times". The template wins: it names the SB map
+  // its own add_layout step just produced. Decided on the raw template, because both
+  // expansions below already carry our own copy of the flag.
+  const bool template_supplies_sb_maps = templatePassesSbMaps(script);
+
   vpr_analysis_command +=
 #ifdef _WIN32
 // under WIN32, running the analysis stage along causes issues, hence we call the
@@ -6107,6 +7059,13 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 #endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
+
+  // Our --sb_maps can arrive through EITHER placeholder: ${VPR_ANALYSIS_COMMAND} expands
+  // to base_vpr_command, which concatenates vpr_options. Strip it from both, so the
+  // template's copy is the only one however that template is written.
+  if(template_supplies_sb_maps) {
+    vpr_analysis_command = removeVprOption(vpr_analysis_command, "--sb_maps");
+  }
 
   result = ReplaceAll(result, "${VPR_ANALYSIS_COMMAND}", vpr_analysis_command);
 
@@ -6121,6 +7080,10 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 #endif // #ifdef _WIN32
                           std::string(" ") + 
                           std::string("--analysis");
+  if(template_supplies_sb_maps) {
+    base_vpr_options = removeVprOption(base_vpr_options, "--sb_maps");
+  }
+
   result = ReplaceAll(result, "${VPR_STANDARD_OPTS}", base_vpr_options);
   result = ReplaceAll(result, "${VPR_OPTS}", std::string(""));
 
@@ -7339,6 +8302,325 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   else { //Success
     return true;
   }
+}
+
+bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlistFile) {
+
+  // Relative-placement macro constraints are derived from the REL_* attributes
+  // that synth_quicklogic -rel_ip_blif stamped into the post-synthesis BLIF,
+  // so a non-BLIF PnR netlist cannot carry them.
+  if (netlistFile.size() < 5 ||
+      netlistFile.compare(netlistFile.size() - 5, 5, ".blif") != 0) {
+    ErrorMessage("Relative-placement IPs require a BLIF PnR netlist, got: " +
+                 netlistFile);
+    return false;
+  }
+
+  // Locate the installed script. DataPath varies with the install layout
+  // (<install>/share/aurora in the aurora tree), so probe the plausible
+  // roots: <install>/scripts (aurora layout) and DataPath()/../scripts.
+  std::filesystem::path generate_constraints_script_path;
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  const std::filesystem::path script_rel_path =
+      std::filesystem::path("scripts") /
+      std::filesystem::path("rel_macro_placement") /
+      std::filesystem::path("blif_rel_macro_constraints.py");
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    std::filesystem::path candidate =
+        (root / script_rel_path).lexically_normal();
+    if (fs::exists(candidate)) {
+      generate_constraints_script_path = candidate;
+      break;
+    }
+  }
+  if (generate_constraints_script_path.empty()) {
+    ErrorMessage(
+        "Cannot locate scripts/rel_macro_placement/"
+        "blif_rel_macro_constraints.py in the installation. "
+        "Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  std::filesystem::path project_path = ProjManager()->projectPath();
+  std::filesystem::path netlist_filepath = project_path / netlistFile;
+  std::filesystem::path io_constraints_filepath =
+      project_path / (ProjManager()->projectName() + "_constraints.xml");
+  std::filesystem::path output_filepath =
+      project_path / (ProjManager()->projectName() + "_rpm_constraints.xml");
+
+  if (!fs::exists(netlist_filepath)) {
+    ErrorMessage("Cannot generate relative-macro constraints: " +
+                 netlist_filepath.string() +
+                 " does not exist (run synthesis first)");
+    return false;
+  }
+
+  #ifdef _WIN32
+    std::filesystem::path python_exec{"python.exe"};
+  #else // _WIN32
+    std::filesystem::path python_exec{"python3"};
+  #endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  const std::string command = python_exec.string();
+  std::vector<std::string> args;
+  args.push_back(generate_constraints_script_path.string());
+  args.push_back("--blif");
+  args.push_back(netlist_filepath.string());
+  // Preserve the IO floorplan constraints by merging into them; without an IO
+  // constraints file the RPM constraints stand alone.
+  if (fs::exists(io_constraints_filepath)) {
+    args.push_back("--merge-into");
+    args.push_back(io_constraints_filepath.string());
+  }
+  args.push_back("-o");
+  args.push_back(output_filepath.string());
+
+  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
+
+  if (status != 0) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " Relative-Macro Constraint Generation Failed!");
+    return false;
+  }
+
+  return true;
+}
+
+void CompilerOpenFPGA_ql::PruneRelIpBlifs() {
+  // Registered netlists belong to one project. A session can switch
+  // projects through several paths (GUI open_project in particular never
+  // passes through CreateDesign), so instead of hooking every path, the
+  // registrations are stamped with their project and expired lazily by
+  // every consumer: a leaked netlist can then never reach another project's
+  // synthesis (-rel_ip_blif) or constraint generation.
+  const std::filesystem::path current =
+      (ProjManager() != nullptr && ProjManager()->HasDesign())
+          ? std::filesystem::path(ProjManager()->projectPath())
+          : std::filesystem::path{};
+  if (current != m_relIpBlifsProject) {
+    m_relIpBlifs.clear();
+    m_relIpStubs.clear();
+    m_relIpBlifsProject = current;
+  }
+}
+
+bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
+                                       const std::string& type) {
+  // Eager clear on top of the lazy PruneRelIpBlifs(): a new design must not
+  // inherit the previous design's registered relative-placement IP netlists
+  // even transiently (RelIpBlifs() is a public accessor). The authoring
+  // record is per design too; the re-registered create_design repopulates
+  // it AFTER this returns for -rpm_ip projects.
+  m_relIpBlifs.clear();
+  m_relIpStubs.clear();
+  m_relIpBlifsProject.clear();
+  m_rpmAuthorProject = {};
+  return Compiler::CreateDesign(name, type);
+}
+
+bool CompilerOpenFPGA_ql::RpmAuthorProjectActive() {
+  if (!m_rpmAuthorProject.active) return false;
+  if (ProjManager() == nullptr || !ProjManager()->HasDesign()) return false;
+  if (std::filesystem::path(ProjManager()->projectPath()) !=
+      m_rpmAuthorProject.project) {
+    m_rpmAuthorProject = {};
+    return false;
+  }
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {
+  const RpmAuthorProject& rec = m_rpmAuthorProject;
+
+  const std::filesystem::path project_path = ProjManager()->projectPath();
+  const std::string project_name = ProjManager()->projectName();
+  const std::filesystem::path netlist_filepath =
+      project_path / (project_name + "_post_synth.blif");
+  // The authoring inputs — the flat placement with primitive site paths and
+  // the echo files — were produced by the place-stage invocation this call
+  // rides on (getPlacementCommand() appends --echo_file on /
+  // --write_flat_place for authoring projects): a real run just wrote them,
+  // and a task-cache skip proved them consistent by the same hash-diff that
+  // allowed the skip. A hand-deleted file fails loudly in the driver.
+  const std::filesystem::path fplace_filepath =
+      project_path / (project_name + "_rpm_author.fplace");
+  const std::filesystem::path macros_echo_filepath =
+      project_path / "place_macros.echo";
+
+  // A tuning run must be unconstrained: a design that itself consumes
+  // relative-placement IPs replays their shape, it does not author one.
+  PruneRelIpBlifs();
+  if (!m_relIpBlifs.empty()) {
+    std::string blifs;
+    for (const auto& p : m_relIpBlifs) blifs += "\n  " + p.string();
+    ErrorMessage(
+        "RPM authoring requires an unconstrained tuning run, but this "
+        "design consumes relative-placement IP netlist(s) registered via "
+        "ip_add_to_design:" +
+        blifs + "\nAuthor the IP as a standalone design without RPM IPs.");
+    return false;
+  }
+
+  // Authoring from an analytical-placement run is unvalidated; the RPM
+  // flow requires the traditional placer. Enforced here rather than at
+  // create_design, which predates the design whose settings this reads.
+  if (QLSettingsManager::getStringValue("general", "options",
+                                        "analytical_place") == "checked") {
+    ErrorMessage(
+        "RPM authoring requires the traditional placer; disable analytical "
+        "placement for the tuning run.");
+    return false;
+  }
+
+  // Locate the installed packaging driver, same probing as
+  // GenerateRelMacroConstraints above.
+  std::filesystem::path driver_script_path;
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  const std::filesystem::path script_rel_path =
+      std::filesystem::path("scripts") /
+      std::filesystem::path("rel_macro_placement") /
+      std::filesystem::path("package_rpm_ip.py");
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    std::filesystem::path candidate =
+        (root / script_rel_path).lexically_normal();
+    if (fs::exists(candidate)) {
+      driver_script_path = candidate;
+      break;
+    }
+  }
+  if (driver_script_path.empty()) {
+    ErrorMessage(
+        "Cannot locate scripts/rel_macro_placement/package_rpm_ip.py in the "
+        "installation. RPM IP packaging failed!");
+    return false;
+  }
+
+  auto targetDevice = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if (!QLDeviceManager::getInstance()->isDeviceTargetValid(targetDevice)) {
+    ErrorMessage(
+        "RPM authoring: no valid target device; the annotated netlist is "
+        "filed per device family (set the device first)");
+    return false;
+  }
+  const std::string family =
+      StringUtils::toLower(targetDevice.device_variant.family);
+
+  const std::filesystem::path& catalog_dir = rec.catalog;  // absolute
+
+  // IP names are unique across all catalogs (a cross-root duplicate is a
+  // load error). create_design -rpm_ip already refused a colliding
+  // name; re-check here since catalogs may have gained IPs mid-session. A
+  // definition already loaded from THIS catalog is the legitimate
+  // re-package case (new family, overwrite) and passes.
+  GetIPGenerator()->LoadDefaultCatalogs();
+  const std::string catalog_ip_name = rec.name + "_" + rec.version;
+  if (IPDefinition* existing =
+          GetIPGenerator()->Catalog()->Definition(catalog_ip_name)) {
+    if (!isSameOrUnderPath(existing->FilePath(), catalog_dir)) {
+      ErrorMessage("RPM authoring: IP name '" + catalog_ip_name +
+                   "' already exists in the catalog (from " +
+                   existing->FilePath().parent_path().string() +
+                   "); IP names must be unique — choose a different project "
+                   "name or -version");
+      return false;
+    }
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else   // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif  // _WIN32
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " RPM IP packaging failed!");
+    return false;
+  }
+
+  std::vector<std::string> args;
+  args.push_back(driver_script_path.string());
+  args.push_back("--blif");
+  args.push_back(netlist_filepath.string());
+  args.push_back("--flat-placement");
+  args.push_back(fplace_filepath.string());
+  args.push_back("--place-macros-echo");
+  args.push_back(macros_echo_filepath.string());
+  args.push_back("--stub");
+  args.push_back(rec.stub.string());
+  args.push_back("--name");
+  args.push_back(rec.name);
+  args.push_back("--version");
+  args.push_back(rec.version);
+  // One identity: REL_MACRO_TYPE derives from the IP (= project) name.
+  args.push_back("--macro-type");
+  args.push_back(ToUpper(rec.name));
+  args.push_back("--family");
+  args.push_back(family);
+  args.push_back("--catalog-dir");
+  args.push_back(catalog_dir.string());
+  // The driver copies rpm_common.py into the user catalog so it is
+  // self-contained; hand it the installed catalog's copy. Missing both here
+  // and in the target catalog is a broken installation — error now, with a
+  // real path, rather than letting the driver suggest a --rpm-common flag
+  // this command does not expose.
+  const std::filesystem::path rpm_common_path =
+      GetIPGenerator()->DefaultIPCatalogPath() / "quicklogic" / "lib" /
+      "rpm_common.py";
+  if (fs::exists(rpm_common_path)) {
+    args.push_back("--rpm-common");
+    args.push_back(rpm_common_path.string());
+  } else if (!fs::exists(catalog_dir / "quicklogic" / "lib" /
+                         "rpm_common.py")) {
+    ErrorMessage("RPM authoring: the installed catalog's packaging library "
+                 "is missing (" +
+                 rpm_common_path.string() +
+                 ") and the target catalog does not carry one yet; the "
+                 "installation is incomplete");
+    return false;
+  }
+  // When the tuning run was region-constrained, the driver's report reminds
+  // the author that only the relative shape travels with the IP.
+  const std::filesystem::path io_constraints_filepath =
+      project_path / (project_name + "_constraints.xml");
+  if (fs::exists(io_constraints_filepath)) {
+    args.push_back("--tuning-constraints");
+    args.push_back(io_constraints_filepath.string());
+  }
+  // No --force: the stub is fixed per project at create time, so a
+  // port-list mismatch against an already-packaged IP means packaging over
+  // a different IP's leftovers — correct to refuse. The driver keeps the
+  // flag for manual use.
+
+  int status = FileUtils::ExecuteSystemCommand(python_exec.string(), args,
+                                               m_out, /*timeout_ms*/ -1)
+                   .realCode;
+  if (status != 0) {
+    ErrorMessage("Design " + project_name + " RPM IP packaging failed!");
+    return false;
+  }
+
+  // (Re)load the user catalog so the same script can configure_ip the new IP
+  // immediately. Called directly (we are already on a worker thread); the
+  // builder updates an already-loaded definition in place.
+  if (!BuildLiteXIPCatalog(catalog_dir)) {
+    ErrorMessage("RPM authoring: packaged successfully, but loading the "
+                 "user catalog failed: " +
+                 catalog_dir.string());
+    return false;
+  }
+  Message("RPM authoring: IP '" + rec.name + "' (" + rec.version +
+          ") packaged into " + catalog_dir.string());
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::LoadDeviceData(const std::string& deviceName) {
@@ -9771,7 +11053,66 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     filesScript = ReplaceAll(filesScript, "${READ_VERILOG_OPTIONS}", options);
     filesScript = ReplaceAll(filesScript, "${VERILOG_FILES}", vm_file_path);
     std::string designFiles = filesScript + "\n";
+    // Relative-placement IPs: Synplify keeps the IP a black box but emits
+    // no module shell for it in the .vm, so yosys must read the blackbox
+    // stub or synth_ql's `hierarchy -check` fails on the unresolved module.
+    // Read AFTER the .vm with -overwrite: should a Synplify version ever
+    // emit an empty (non-blackbox) shell, the attributed stub still wins —
+    // a shell winning instead would make `flatten` dissolve the instance
+    // and the link step fail far downstream with a misleading error.
+    // Gated on registration, so the default flow's script stays
+    // byte-identical.
+    PruneRelIpBlifs();
+    {
+      const auto& relStubs = RelIpStubs();
+      for (size_t i = 0; i < m_relIpBlifs.size(); ++i) {
+        if (relStubs[i].empty()) {
+          ErrorMessage(
+              "ip_add_to_design " + m_relIpBlifs[i].string() +
+              ": a directly-registered annotated netlist carries no "
+              "synthesis stub, which the Synplify flow requires (its yosys "
+              "pass reads Synplify's netlist, not the design sources). Use "
+              "the catalog IP form, or synthesize with yosys.");
+          return {};
+        }
+        // Synplify keeps the IP a black box only when the stub declares it
+        // (`syn_black_box`); without the directive current Synplify happens
+        // to black-box the empty module by inference, but that is implicit,
+        // warning-level behavior — refuse rather than depend on it. Checked
+        // here and not at authoring, because only this flow needs it.
+        {
+          std::ifstream in(relStubs[i]);
+          std::stringstream buffer;
+          buffer << in.rdbuf();
+          // Match the directive in one of the forms Synplify honors — a
+          // `/* synthesis ... */` or `// synthesis ...` comment, or a
+          // `(* syn_black_box *)` attribute — not the bare substring, so a
+          // comment merely mentioning syn_black_box cannot pass the check.
+          static const std::regex kSynBlackBox(
+              "(/\\*\\s*synthesis\\b[^*]*\\bsyn_black_box\\b)"
+              "|(//\\s*synthesis\\b[^\\n]*\\bsyn_black_box\\b)"
+              "|(\\(\\*[^)]*\\bsyn_black_box\\b)");
+          if (!std::regex_search(buffer.str(), kSynBlackBox)) {
+            ErrorMessage(
+                relStubs[i].string() +
+                ": the IP's synthesis stub does not carry Synplify's "
+                "black-box directive (`) /* synthesis syn_black_box */;` "
+                "on the module header), which the -type synplify flow "
+                "requires. Add the directive to the authored stub and "
+                "re-run ipgenerate, or synthesize with yosys.");
+            return {};
+          }
+        }
+        designFiles += "read_verilog -overwrite " + relStubs[i].string() + "\n";
+        yosysScript->addFile(relStubs[i]);
+      }
+    }
     yosysScript->apply("${READ_DESIGN_FILES}", designFiles);
+    // The .vm is the hand-off from the Synplify command to this yosys
+    // command; track it so a re-synthesized .vm invalidates the yosys task
+    // even when the script text is unchanged.
+    yosysScript->addFile(std::filesystem::path(ProjManager()->projectPath()) /
+                         vm_file_path);
     for (const std::string& file: ProjManager()->CollectDesignFiles()) {
       yosysScript->addFile(std::filesystem::path{file});
     }
@@ -9952,8 +11293,32 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     // tack on a '/' separator if it is missing to be safe:
     yosys_modules_dir_path_string += "/";
   }
-  yosys_options += " -lib_path " + 
+  yosys_options += " -lib_path " +
                    yosys_modules_dir_path_string;
+
+  // Relative-placement IPs: link each annotated netlist at the end of
+  // synthesis (synth_quicklogic -rel_ip_blif). Gated on registration — with
+  // stale registrations from another project pruned first — so the default
+  // flow's synthesis script stays byte-identical. The netlist is also
+  // tracked as a task input: it reaches yosys only through this option
+  // string, so without addFile a re-authored netlist would never invalidate
+  // the synthesis task.
+  PruneRelIpBlifs();
+  if (!m_relIpBlifs.empty() &&
+      m_projManager->projectType() == PostMapSynplify) {
+    // A post-map project's sources are already a mapped netlist; nothing
+    // has validated that the RPM stub/link machinery composes with that
+    // input, so refuse rather than risk a silently unconstrained build.
+    ErrorMessage(
+        "relative-placement IPs are not supported in post-map projects; "
+        "consume the IP from an RTL project (yosys or -type synplify "
+        "synthesis)");
+    return {};
+  }
+  for (const auto& rel_ip_blif : m_relIpBlifs) {
+    yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
+    yosysScript->addFile(rel_ip_blif);
+  }
 
   // TODO: trim yosys_options at the front
   yosysScript->apply("${YOSYS_OPTIONS}", yosys_options);
@@ -10113,7 +11478,20 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   else {
     command->append("--place");
   }
-  
+
+  // RPM authoring support: an rpm_ip project's placement run must emit the
+  // authoring inputs the packaging hook consumes — the flat placement (with
+  // primitive site paths) and the echo files. Skipped when the user already
+  // passed either option through custom_vpr_options_str above.
+  if (RpmAuthorProjectActive()) {
+    if (command->string().find("--echo_file") == std::string::npos) {
+      command->append("--echo_file on");
+    }
+    if (command->string().find("--write_flat_place") == std::string::npos) {
+      command->append("--write_flat_place " + ProjManager()->projectName() +
+                      "_rpm_author.fplace");
+    }
+  }
 
   // if (!filepath_fpga_fix_pins_place_str.empty()) {
   //   command->appendPath("--fix_clusters", std::filesystem::path(filepath_fpga_fix_pins_place_str));
