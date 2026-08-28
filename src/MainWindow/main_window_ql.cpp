@@ -2340,13 +2340,12 @@ bool MainWindow::loadFloorPlanningData(QString& error)
 
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
   // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
-  // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must
-  // be set before loadNetList() below, which builds the trees
-  // and populates every partition: Partition::addElement() reads it as it goes.
+  // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be
+  // set before loadNetList() below, which builds the trees and populates every partition:
+  // Partition::addElement() reads it as it goes. Absent for a project that has never been
+  // compiled, and for devices whose template has no P2/P3 blocks -- both leave the panel
+  // exactly as it was before this stage existed, so a missing file is not an error.
   //
-  // Absent for a project that has never been compiled, and for devices whose template
-  // has no P2/P3 blocks -- both leave the panel exactly as it was before this stage
-  // existed, so a missing file is not an error.
   // Cleared up front rather than only on success: Partition holds these statically, so a
   // project with no design_resources.json -- or an unreadable one -- would otherwise keep
   // sizing its partitions from whichever project was open last.

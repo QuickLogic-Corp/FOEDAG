@@ -152,23 +152,19 @@ std::string buildChildPath(const std::string& prefix, const QStandardItem* item)
 
 // [aurora2#1725] Holds the tree's expand/collapse state across an operation that would
 // otherwise change it. Selecting a partition is not a request to reshape the tree: what the
-// user opened stays open, what they closed stays closed. Two things used to violate that --
-// selectPartition() expanded every element it checked (and nothing ever undid it, so each
-// selection left more of the tree open), and showOnlyCheckedItems()/showAllItems() call
-// expandAll() when the expand/collapse button is on, which the partition view triggers on
-// every selection change.
+// user opened stays open, what they closed stays closed -- but selectPartition() used to
+// expand every element it checked with nothing ever undoing it, and
+// showOnlyCheckedItems()/showAllItems() call expandAll() whenever the expand/collapse button
+// is on, which the partition view triggers on every selection change. Restoring afterwards
+// rather than suppressing each call preserves the state whatever those helpers do
+// internally, including a full expandAll(). Persistent indexes are safe here because these
+// operations only change check states.
 //
-// Restoring afterwards rather than suppressing each call: the state is then preserved
-// whatever those helpers do internally, including a full expandAll(). Persistent indexes are
-// safe here because these operations only change check states -- rows are added in build(),
-// which legitimately sets the initial state and does not use this.
-//
-// It stands down entirely while the expand/collapse button is on. In that mode the user has
-// asked for the whole tree open, so there is no per-node choice of theirs to protect -- and
-// restoring anyway is what made the partition view contradict its own button: the button
-// starts checked there (ShowOnlyCheckedItems), selectPartition() captured the state while
-// the rows were still hidden and collapsed, showOnlyCheckedItems() then expanded them, and
-// this destructor promptly collapsed them again.
+// Stands down entirely while the expand/collapse button is on: in that mode the user has
+// asked for the whole tree open, so there is no per-node choice of theirs to protect, and
+// restoring anyway made the partition view fight its own button -- capturing the state while
+// rows were still collapsed, only for showOnlyCheckedItems() to expand them and this
+// destructor to promptly collapse them again.
 class ExpansionKeeper {
 public:
     ExpansionKeeper(QTreeView* view, QAbstractItemModel* model, bool expandAllActive)
@@ -990,17 +986,15 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
 {
     if (m_verdicts.empty()) return;
 
-    // [aurora2#1725 stage P4] Render what validation.json says about each instance.
-    //
-    // Until this ran, the panel showed every instance as equally usable and merely HID a
-    // leaf that had no atoms -- so an instance synthesis had optimised away was
-    // indistinguishable from a mistyped hierarchy path, and a 'partial' one (emitted, but
-    // with an atom set that may be incomplete) looked perfectly healthy. Both now say so.
+    // [aurora2#1725 stage P4] Render what validation.json says about each instance. Until
+    // this ran, the panel showed every instance as equally usable and merely HID a leaf that
+    // had no atoms, so an instance synthesis had optimised away was indistinguishable from a
+    // mistyped hierarchy path, and a 'partial' one (an atom set that may be incomplete)
+    // looked perfectly healthy. Both now say so.
     //
     // 'deleted' loses its checkbox rather than being disabled outright: the row stays
     // selectable and copyable, but cannot be put in a partition, because it has no atoms to
-    // constrain. Dropping the check state also keeps it out of the parent's tristate maths
-    // (computeParentState() and the allChildrenChecked() test both skip non-checkable rows),
+    // constrain. Dropping the check state also keeps it out of the parent's tristate maths,
     // so one dead sub-instance no longer stops a parent from collapsing to a single element.
     std::function<void(QStandardItem*, const std::string&)> gradeRecursive =
         [&gradeRecursive, this](QStandardItem* item, const std::string& prefix)

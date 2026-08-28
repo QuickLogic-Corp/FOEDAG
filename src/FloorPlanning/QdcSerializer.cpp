@@ -31,27 +31,22 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         }
 
         // [aurora2#1725 stage P1] RTL names only -- never element.vprNames, and never a
-        // pattern derived from the tree's shape.
-        //
-        // Writing resolved VPR atom names here is what produced the defect this feature
-        // exists to fix: a .qdc holding 39 enumerated atom names for an instance that has
-        // 523 in the netlist, silently under-constraining it by 13x and going stale on every
-        // resynthesis. An enumerated list cannot be complete, and the names are in a
-        // different namespace from the atoms VPR actually places (A.P3).
+        // pattern derived from the tree's shape. Writing resolved VPR atom names here is
+        // what produced the defect this feature exists to fix: a .qdc holding 39 enumerated
+        // atom names for an instance that has 523 in the netlist, silently under-constraining
+        // it by 13x and going stale on every resynthesis -- an enumerated list can never be
+        // complete, and the names are in a different namespace from the atoms VPR actually
+        // places (A.P3).
         //
         // A whole-instance selection is written as the plain RTL path the tree shows --
         // "dut.instPerm20009", not "dut.instPerm20009.*". The trailing ".*" this used to
-        // append to every non-leaf element was a post-synthesis-facing pattern manufactured
-        // at .qdc write time, which is exactly what REQ-003 reserves for _constraints.xml
-        // generation. It also misdescribed the user's own selection: the suffix appeared on
-        // any row that had children, so a .qdc read back as a glob nobody had typed.
-        //
-        // Dropping it loses nothing, because the suffix was never what gave a token its
-        // meaning. A leaf instance ("dut.tri.el0.sub2") and a literal atom name ("out[0]",
-        // "$false") are both written bare and always were, so instances.json has always been
-        // what tells a whole instance from an exact atom name -- and
-        // GenerateIOFloorPlanConstraints() asks it about every token either way, appending
-        // ".*" itself for the ones it recognises as instances.
+        // append to every non-leaf element was a post-synthesis-facing pattern that REQ-003
+        // reserves for _constraints.xml generation, and it also misdescribed the user's own
+        // selection, appearing on any row with children whether or not the user had drawn a
+        // glob. Dropping it loses nothing: a leaf instance and a literal atom name are both
+        // written bare and always were, so instances.json has always been what tells a whole
+        // instance from an exact atom name, and GenerateIOFloorPlanConstraints() appends the
+        // ".*" itself for the tokens it recognises as instances.
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
@@ -197,13 +192,12 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                 partitionName = cmdTokens[3];
             }
 
-            // [aurora2#1725] Parse every region BEFORE anything reaches the device.
-            //
-            // The partition used to be added first and each region restored as it parsed, so
-            // one bad coordinate left a partition holding elements and no region -- and
-            // serialize() skips only partitions with no ELEMENTS, so the next save rewrote it
-            // without the region and the user's placement constraint was gone for good. A
-            // typo in a hand-edited .qdc silently destroyed the constraint it was in.
+            // [aurora2#1725] Parse every region BEFORE anything reaches the device. The
+            // partition used to be added first and each region restored as it parsed, so one
+            // bad coordinate left a partition holding elements and no region; serialize()
+            // skips only partitions with no ELEMENTS, so the next save rewrote it without the
+            // region and a typo in a hand-edited .qdc silently destroyed the constraint it
+            // was in.
             //
             // A line we cannot fully parse is kept in m_reservedContent instead, which save()
             // writes back, so the file survives the round trip untouched and the user can fix

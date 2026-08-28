@@ -2566,19 +2566,13 @@ std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
                                          ProjManager()->projectName(), "atomsets.json");
 }
 
-// [aurora2#1725] Where the helper stages talk.
-//
-// Every stage this feature adds is a diagnostic side-channel: it produces a file that the
-// FloorPlanning panel or a testcase validator reads, and nothing downstream in the compile
-// depends on what it says on the way there. Sent to m_out, that chatter landed in the
-// console and in aurora.log on every compile of every design -- including designs with no
-// floorplan at all -- which master never did. So it goes here instead, one file per
-// project, truncated at the start of each run so it describes that run and not the history
-// of the session.
-//
-// What is deliberately NOT redirected: ErrorMessage() on a stage that failed, and the
-// stage-P7 floorplan verdicts, which only appear when the project actually has a .qdc and
-// are the answer the user asked for.
+// [aurora2#1725] Where the helper stages talk. Each one is a diagnostic side-channel --
+// it produces a file the FloorPlanning panel or a testcase validator reads, and nothing
+// downstream in the compile depends on what it says -- so its chatter belongs here, one
+// file per project truncated at the start of each run, rather than in the console and
+// aurora.log on every compile of every design, including ones with no floorplan at all.
+// Not redirected: ErrorMessage() on a stage that failed, and the stage-P7 floorplan
+// verdicts, which are the answer the user actually asked for.
 std::filesystem::path CompilerOpenFPGA_ql::FloorplanningStageLog() {
   return FloorplanningArtifact("stages.log");
 }
@@ -8396,9 +8390,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // stays literal -- a name_pattern that matches nothing, because a bare instance path is
   // never itself a VPR atom name. Silently emitting a constraint that asks VPR for nothing
   // is the exact defect this feature exists to remove, so the set_region loop below
-  // refuses rather than degrades.
-  //
-  // A project with no set_region is unaffected: it never consults the model.
+  // refuses rather than degrades. A project with no set_region never consults the model,
+  // so it is unaffected.
   fp::RtlInstanceModel rtlModel;
   const std::filesystem::path instancesJsonPath =
       FloorplanningArtifact("instances.json");
@@ -8549,18 +8542,14 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
   // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
-  //
   // The panel does this continuously -- under-provisioned regions, overlaps, constraints
   // naming an instance synthesis deleted, a parent whose own logic no partition takes -- but
-  // a batch compile never constructs the panel, so none of it was ever said out loud. The
+  // a batch compile never constructs the panel, so none of it was ever said out loud; the
   // flow ran and the packer quietly dealt with whatever it was given.
   //
-  // Errors stop the compile here, matching the panel, which refuses to save a .qdc that has
-  // any: a partition with no region, regions overlapping inside one partition, a region too
-  // small to hold what it constrains, or one within the packing margin of it, are all things
-  // the flow cannot make sense of, and failing at the point the .qdc is read names the
-  // offending partition far more usefully than whatever the packer does with it later.
-  // Warnings are advisory and let it proceed.
+  // Errors stop the compile here, matching the panel's own refusal to save such a .qdc:
+  // failing at the point it is read names the offending partition far more usefully than
+  // whatever the packer does with it later. Warnings are advisory and let it proceed.
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::shared_ptr<VprArchitectureFileProfider> archProvider =
         std::make_shared<VprArchitectureFileProfider>(this);
@@ -11557,17 +11546,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // ---------------------------------------------------------------- synth_sdc_file --
 
   // -- rehier_script ----------------------------------------------------------------
-  // [aurora2#1725 stage P2] synthesis. Supplies the device template's
-  // ${CALL_TCL_REHIER_SCRIPT} so it can emit [4] <top>_post_synth_hier.v.
-  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P2).
-  //
-  // Path to the review-only hierarchy-rebuild script, for the device template's
-  // ${CALL_TCL_REHIER_SCRIPT} line. Mirrors the aurora_yosys_import.tcl resolution
-  // above, but is unconditional: unlike the import script it does not depend on a
-  // synth SDC file being present.
+  // [aurora2#1725 stage P2] Path to the review-only hierarchy-rebuild script, for the
+  // device template's ${CALL_TCL_REHIER_SCRIPT} line, which emits [4]
+  // <top>_post_synth_hier.v. See pipeline.md (A.P2). Mirrors the aurora_yosys_import.tcl
+  // resolution above, but is unconditional: unlike the import script it does not depend
+  // on a synth SDC file being present.
   //
   // The script runs after synth_ql has already written the BLIF and Verilog the flow
-  // consumes, so it cannot affect QoR. Its output is never read by packing, placement,
+  // consumes, so it cannot affect QoR; its output is never read by packing, placement,
   // routing or bitstream generation.
   std::filesystem::path aurora_rehier_script_path =
       GetSession()->Context()->DataPath() /
@@ -11593,12 +11579,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // -- atomsets_script --------------------------------------------------------------
   // [aurora2#1725 stage P3] atom-set extraction. Supplies the device template's
   // ${CALL_TCL_ATOMSETS_SCRIPT} so it can emit atomsets.json -- the exact set of netlist
-  // atoms belonging to each RTL instance, which stages P4/P5/P7 all consume.
-  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P3).
-  //
-  // Runs in the same yosys session as synth_ql, after the BLIF is written, so the design
-  // is still in memory and the atom names are the ones yosys holds rather than names
-  // re-derived by regexing an output file.
+  // atoms belonging to each RTL instance, which stages P4/P5/P7 all consume. See
+  // pipeline.md (A.P3). Runs in the same yosys session as synth_ql, after the BLIF is
+  // written, so the design is still in memory and the atom names are the ones yosys
+  // holds rather than names re-derived by regexing an output file.
   std::filesystem::path aurora_atomsets_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
@@ -11608,26 +11592,20 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
   // [aurora2#1725 stage P3] NOT wired to pass the instance list from instances.json
   // (P0b), despite that being the documented intent (floorplanning_atomsets.tcl's own
-  // header: "Pass the list from stage P0b's instances.json to also report instances
-  // that produced ZERO atoms"). Blocked structurally: the device template's own line
-  // already appends fixed positional arguments after this substitution --
-  // aurora_template_script.ys: "${CALL_TCL_ATOMSETS_SCRIPT} atomsets.json --blif
-  // ${OUTPUT_BLIF}" -- with no placeholder for an instance list, and
-  // floorplanning_atomsets.tcl parses argv positionally (out_path first, then optional
-  // --blif, then instances). Any instance list this code appends either duplicates
-  // those two fixed arguments (if appended after them, which this substitution can't
-  // do -- it precedes them in the template line) or corrupts out_path/blif_path
-  // parsing (if appended here, before them, since the template's "atomsets.json"
-  // would then land mid-argv and be misread as an instance name). Fixing this for real
-  // needs either editing the device_data template (separate submodule) to add an
-  // instance-list placeholder in the right position, or reworking
-  // floorplanning_atomsets.tcl to take the list some other way (e.g. a file) instead of
-  // positional argv.
+  // header). Blocked structurally: the device template's own line already appends fixed
+  // positional arguments after this substitution -- aurora_template_script.ys:
+  // "${CALL_TCL_ATOMSETS_SCRIPT} atomsets.json --blif ${OUTPUT_BLIF}" -- with no
+  // placeholder for an instance list, and floorplanning_atomsets.tcl parses argv
+  // positionally, so any list this code appends would either duplicate those two fixed
+  // arguments or corrupt their parsing. Fixing this for real needs either a template
+  // placeholder for the instance list (separate submodule) or reworking
+  // floorplanning_atomsets.tcl to take the list some other way (e.g. a file).
   //
-  // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances flag
-  // (see RunValidateInstances()) already compensates -- it overrides the graded
-  // universe with instances.json's full list, so a deleted (zero-atom) instance
-  // absent from atomsets.json is still correctly graded "deleted".
+  // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances
+  // flag (see RunValidateInstances()) already overrides the graded universe with
+  // instances.json's full list, so a deleted (zero-atom) instance absent from
+  // atomsets.json is still correctly graded "deleted".
+
   // [aurora2#1725] Wrapped in `tee -q -o` for the same reason as the rehier script above:
   // atom extraction asks yosys to enumerate the netlist, and `select -list` answers with
   // one line per atom. The answer belongs in atomsets.json, which is exactly where the

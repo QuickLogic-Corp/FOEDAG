@@ -358,24 +358,18 @@ void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, Partiti
 }
 
 // [aurora2#1725] Measure what the table's five columns actually need, so all of them are
-// visible the first time the panel is shown.
+// visible the first time the panel is shown. Nothing else tells the splitter how wide this
+// pane wants to be: QAbstractScrollArea's size hint is a generic 256x192 that knows nothing
+// about columns, so without this the pane is handed whatever is left over and the rightmost
+// columns fall outside it.
 //
-// Nothing else tells the splitter how wide this pane wants to be: QAbstractScrollArea's size
-// hint is a generic 256x192 that knows nothing about columns, so without this the pane is
-// handed whatever is left over and the rightmost columns fall outside it. Widening the window
-// made them reappear, which is the bug as it was originally reported: the numbers were there
-// the whole time, just out of view.
-//
-// It is the pane's PREFERRED width, not a minimum. It used to be a hard
+// It is the pane's PREFERRED width, not a minimum -- it used to be a hard
 // m_tableWidget->setMinimumWidth(), which fixed the columns but also made this the one pane
-// in the splitter that could not be dragged narrower -- 306px of the window that the
-// hierarchy pane could never borrow. Now the pane asks for the width and gives it up when
-// dragged; the table falls back to its horizontal scrollbar, which is the ordinary way a
-// table too narrow for its columns behaves.
-//
-// Only the ResizeToContents columns are measured. Name is Stretch, so its width follows the
-// pane, and feeding that back in would ratchet the figure up every time the user widened the
-// window and never let it shrink again; it gets a text-derived width instead.
+// in the splitter that could not be dragged narrower. Now the pane asks for the width and
+// gives it up when dragged; the table falls back to its horizontal scrollbar. Only the
+// ResizeToContents columns are measured: Name is Stretch, so its width follows the pane, and
+// feeding that back in would ratchet the figure up every time the user widened the window
+// and never let it shrink again.
 void PartitionsListWidget::updateTablePreferredWidth()
 {
     const QHeaderView* header = m_tableWidget->horizontalHeader();

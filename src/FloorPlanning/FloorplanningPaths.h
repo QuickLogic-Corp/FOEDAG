@@ -31,13 +31,11 @@ inline std::filesystem::path floorplanningArtifact(const std::filesystem::path& 
 //     ${CALL_TCL_ATOMSETS_SCRIPT} atomsets.json --blif ${OUTPUT_BLIF}
 //
 // -- written by yosys into its cwd, the project directory. A template still passing the bare
-// name therefore produces "<project>/atomsets.json", not the convention. Prefer the
-// convention, fall back to the bare file, so the panel and the batch stages always read
-// whichever one the device actually produced instead of disagreeing about it.
-//
-// A device template can adopt the convention with no code change here: ${FLOORPLANNING_PREFIX}
-// is already substituted, so "${FLOORPLANNING_PREFIX}_atomsets.json" is enough. Once every
-// template does, this fallback can go.
+// name produces "<project>/atomsets.json", not the convention, so prefer the convention and
+// fall back to the bare file: the panel and the batch stages then always read whichever one
+// the device actually produced. A template can adopt the convention with no code change
+// here -- "${FLOORPLANNING_PREFIX}_atomsets.json" is enough -- and once every template does,
+// this fallback can go.
 inline std::filesystem::path floorplanningArtifactOrBare(const std::filesystem::path& projectPath,
                                                         const std::string& projectName,
                                                         const std::string& suffix) {

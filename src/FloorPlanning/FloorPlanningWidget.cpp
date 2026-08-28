@@ -132,10 +132,9 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     // as narrow as the user likes.
     //
     // QActions rather than the buttons added through QToolBar::addWidget(): a widget can only
-    // live in one place at a time, so the extension menu cannot show one, and a button that
-    // stopped fitting simply vanished with the popup unable to offer it back. Actions move
-    // into the popup properly. They also carry a text, unused by the toolbar itself (icons
-    // only, as before) but shown as the label in that popup.
+    // live in one place at a time, so a button that stopped fitting simply vanished, with
+    // the popup unable to offer it back. Actions move into the popup properly, carrying a
+    // text (unused by the toolbar itself, icons only) shown as the label there.
     QToolBar* toolBar = new QToolBar;
     toolBar->setMovable(false);
     toolBar->setFloatable(false);

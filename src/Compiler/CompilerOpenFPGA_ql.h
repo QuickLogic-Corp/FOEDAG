@@ -430,17 +430,14 @@ private:
 
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
-  // scripts/floorplanning_design_resources.py. Best-effort, exactly like RunValidateInstances()
-  // above: a missing input skips the stage rather than failing a compile that has already
-  // succeeded.
+  // scripts/floorplanning_design_resources.py. Best-effort like RunValidateInstances()
+  // above: a missing input skips the stage rather than failing an already-succeeded compile.
   //
   // maxTier caps what a given call may produce -- P0b elaboration passes 1, P3 synthesis 2,
   // P6 placement 3 -- and the tier actually written is the highest the inputs on disk
-  // support, never above the cap. The cap is what makes re-elaboration after an RTL edit
+  // support, never above the cap. That is what makes re-elaboration after an RTL edit
   // rewrite the file as tier 1 instead of leaving a stale tier-2 one describing a netlist
-  // the sources no longer produce.
-  // See docs/specs/region-based-placement-synthesis-integration/pipeline_appendix.md
-  // (A.13.5).
+  // the sources no longer produce. See pipeline_appendix.md (A.13.5).
   bool RunDesignResources(int maxTier);
 
   // [aurora2#1725 stage P7] see the definition in CompilerOpenFPGA_ql.cpp for why this

@@ -9,20 +9,17 @@
 
 namespace fp {
 
-// [aurora2#1725 stage P0b/P1] The RTL instance tree the FloorPlanning panel shows.
-//
-// Sourced from instances.json, which stage P0b derives from an *elaborated* netlist -- not
-// from anything post-synthesis, and not from a VPR subprocess. That distinction is the point
-// of the stage: synthesis dissolves the hierarchy and can delete instances outright. On
-// fpu_single, i_serial_mul exists in the RTL but is constant-folded away and appears in no
-// post-synthesis artifact, so a tree derived from a synthesised netlist could never show it,
-// and the user could never constrain or even see it.
+// [aurora2#1725 stage P0b/P1] The RTL instance tree the FloorPlanning panel shows. Sourced
+// from instances.json, which stage P0b derives from an *elaborated* netlist -- not from
+// anything post-synthesis, and not from a VPR subprocess. That distinction is the point:
+// synthesis dissolves the hierarchy and can delete instances outright (e.g. one that gets
+// constant-folded away), so a tree derived from a synthesised netlist could never show them,
+// and the user could never constrain or even see them.
 //
 // Verdicts from stage P4 (validation.json) are merged in when available, so the panel can
 // render an instance's state -- greyed out when synthesis deleted it, flagged when its atom
 // set is only partially trustworthy -- rather than showing every instance as equally usable.
-//
-// See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P0, A.P4).
+// See pipeline.md (A.P0, A.P4).
 struct RtlInstance {
     std::string path;          // "i_mul_24", or "i_a.i_b" when nested
     std::string component;     // unmangled component name, e.g. "mul_24"

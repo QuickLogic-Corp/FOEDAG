@@ -14,22 +14,19 @@ class QTableWidget;
 namespace fp {
 
 // [aurora2#1725] "Selected RTL Resources": what the instances selected in the RTL hierarchy
-// tree would cost, in the same units a partition's row reports.
+// tree would cost, in the same units a partition's row reports. Sits under that tree and
+// answers "how big does this have to be?" without the user having to create a partition,
+// check the instances into it and read the number back off the partitions table. Driven by
+// selection, not the checkboxes: checking an instance assigns it to a partition and changes
+// the floorplan, whereas selecting is just pointing at something.
 //
-// Sits under that tree and answers the question a user asks before drawing a region -- "how
-// big does this have to be?" -- without them having to create a partition, check the
-// instances into it and read the number back off the partitions table. Selection, not the
-// checkboxes: checking an instance assigns it to a partition, which is a change to the
-// floorplan; selecting is just pointing at something.
-//
-// Two tabs, because the answer has two units and neither substitutes for the other:
+// Two tabs, because the answer has two units and neither substitutes for the other. Tiles
+// opens first, since sizing a region is what the panel is for:
 //
 //   Tiles  what the floorplan is drawn in -- CLB/DSP/BRAM. The CLB figure is an estimate
 //          (atoms over a packing density), and it is the only estimate in this widget.
 //   Atoms  what the netlist actually holds -- $lut, sdffre, adder_carry, TDP_ECC36K_...,
 //          named as synthesis named them, and exact.
-//
-// Tiles opens first: sizing a region is what the panel is for.
 class SelectedResourcesWidget final : public QWidget {
     Q_OBJECT
 public:
