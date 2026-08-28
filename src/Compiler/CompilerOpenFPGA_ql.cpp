@@ -11526,76 +11526,94 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   }
   // ---------------------------------------------------------------- synth_sdc_file --
 
-  // -- rehier_script ----------------------------------------------------------------
-  // [aurora2#1725 stage P2] Path to the review-only hierarchy-rebuild script, for the
-  // device template's ${CALL_TCL_REHIER_SCRIPT} line, which emits [4]
-  // <top>_post_synth_hier.v. See pipeline.md (A.P2). Mirrors the aurora_yosys_import.tcl
-  // resolution above, but is unconditional: unlike the import script it does not depend
-  // on a synth SDC file being present.
-  //
-  // The script runs after synth_ql has already written the BLIF and Verilog the flow
-  // consumes, so it cannot affect QoR; its output is never read by packing, placement,
-  // routing or bitstream generation.
+  // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
+  // [aurora2#1725] Two generic insertion points around the synth_ql call -- one before
+  // it, one after -- instead of one named placeholder per stage. Adding a floorplanning
+  // step to the flow only needs a change here, not an edit to all 24 device templates.
+  // Built from already-resolved values rather than nested ${...} tokens: render()
+  // substitutes from an unordered_map, so a placeholder embedded inside another
+  // placeholder's value is not reliably re-resolved.
   std::filesystem::path aurora_rehier_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
       std::filesystem::path("aurora_rehier.tcl");
-
-  // [aurora2#1725] Wrapped in `tee -q -o`, which is what keeps the synthesis log the size
-  // it is on master. Rebuilding the hierarchy runs `submod` once per level of it, and submod
-  // narrates every cell it moves -- about a netlist that packing, placement, routing and
-  // bitstream never read. `-q` drops it from both the console and <top>_synth.log (yosys'
-  // -l); `-o` keeps every line, in the artifact that names the stage that produced it.
-  // Truncating rather than appending, so the file describes this run -- and so the two
-  // placeholders here cannot depend on which order the device template happens to invoke
-  // them in.
-  yosysScript->apply("${CALL_TCL_REHIER_SCRIPT}",
-                     "tee -q -o " + FloorplanningPrefix() + "_rehier.log" +
-                     " tcl " + aurora_rehier_script_path.string());
   yosysScript->addFile(aurora_rehier_script_path);
-  // -- rehier_script ----------------------------------------------------------------
 
-  // -- atomsets_script --------------------------------------------------------------
-  // [aurora2#1725 stage P3] atom-set extraction. Supplies the device template's
-  // ${CALL_TCL_ATOMSETS_SCRIPT} so it can emit atomsets.json -- the exact set of netlist
-  // atoms belonging to each RTL instance, which stages P4/P5/P7 all consume. See
-  // pipeline.md (A.P3). Runs in the same yosys session as synth_ql, after the BLIF is
-  // written, so the design is still in memory and the atom names are the ones yosys
-  // holds rather than names re-derived by regexing an output file.
   std::filesystem::path aurora_atomsets_script_path =
       GetSession()->Context()->DataPath() /
       std::filesystem::path("..") /
       std::filesystem::path("..") /
       std::filesystem::path("scripts") /
       std::filesystem::path("floorplanning_atomsets.tcl");
+  yosysScript->addFile(aurora_atomsets_script_path);
 
   // [aurora2#1725 stage P3] NOT wired to pass the instance list from instances.json
   // (P0b), despite that being the documented intent (floorplanning_atomsets.tcl's own
-  // header). Blocked structurally: the device template's own line already appends fixed
-  // positional arguments after this substitution -- aurora_template_script.ys:
-  // "${CALL_TCL_ATOMSETS_SCRIPT} atomsets.json --blif ${OUTPUT_BLIF}" -- with no
-  // placeholder for an instance list, and floorplanning_atomsets.tcl parses argv
-  // positionally, so any list this code appends would either duplicate those two fixed
-  // arguments or corrupt their parsing. Fixing this for real needs either a template
-  // placeholder for the instance list (separate submodule) or reworking
-  // floorplanning_atomsets.tcl to take the list some other way (e.g. a file).
+  // header). floorplanning_atomsets.tcl parses argv positionally and the call below
+  // already supplies its two fixed positional arguments, so any list this code appended
+  // would either duplicate them or corrupt their parsing. Fixing this for real needs
+  // either a third positional argument here or reworking floorplanning_atomsets.tcl to
+  // take the list some other way (e.g. a file).
   //
   // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances
   // flag (see RunValidateInstances()) already overrides the graded universe with
   // instances.json's full list, so a deleted (zero-atom) instance absent from
   // atomsets.json is still correctly graded "deleted".
 
-  // [aurora2#1725] Wrapped in `tee -q -o` for the same reason as the rehier script above:
-  // atom extraction asks yosys to enumerate the netlist, and `select -list` answers with
-  // one line per atom. The answer belongs in atomsets.json, which is exactly where the
-  // script puts it; the enumeration itself belongs nowhere the user has to read.
-  yosysScript->apply("${CALL_TCL_ATOMSETS_SCRIPT}",
-                     "tee -q -o " + FloorplanningPrefix() + "_atomsets.log" +
-                     " tcl " + aurora_atomsets_script_path.string());
-  yosysScript->addFile(aurora_atomsets_script_path);
-  // -- atomsets_script --------------------------------------------------------------
+  const std::string top_module_name = ProjManager()->DesignTopModule();
+  std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
+
+  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}",
+      "# [aurora2#1725 stage P2] Tag every object with its enclosing RTL scope before\n"
+      "# synth_ql's own flatten runs, so the post-synth debug JSON below can attribute a\n"
+      "# cell whose flattened name lost its i_<inst>. prefix. Pre-flattening makes\n"
+      "# synth_ql's own flatten a no-op, so the netlist stays a single flat module and\n"
+      "# QoR is unchanged.\n"
+      "flatten -scopename");
+
+  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}",
+      "# [aurora2#1725 stage P2] Name-traceability debug JSON: the input for stage P3\n"
+      "# atom extraction and stage P4 checks 2/2b/4. Runs after synth_ql, which has\n"
+      "# already written the BLIF and Verilog the flow consumes, so this cannot affect\n"
+      "# QoR.\n"
+      "#\n"
+      "# `-selected` is REQUIRED, not an optimisation: a bare `write_json` aborts with\n"
+      "#   ERROR: Module lut6_2 contains processes, which are not supported by JSON backend\n"
+      "# because cells_sim.v library modules read via `read_verilog -lib` still carry\n"
+      "# processes. Restricting to the top module also keeps the file proportional to\n"
+      "# the design (tens-to-hundreds of KB, not tens of MB).\n"
+      "#\n"
+      "# Do NOT add -noattr: it strips the src / hdlname / scopename attributes that\n"
+      "# are the entire point of this output.\n"
+      "select " + top_module_name + "\n" +
+      "write_json -selected " + top_module_name + "_post_synth_debug.json\n" +
+      "select -clear\n"
+      "\n"
+      "# [aurora2#1725 stage P3] Atom-set extraction: the exact set of netlist atoms\n"
+      "# belonging to each RTL instance, consumed by stages P4/P5/P7. Membership is the\n"
+      "# union of the i_<inst>. name prefix and the scopename attribute that\n"
+      "# `flatten -scopename` above added -- prefix alone silently drops the cells whose\n"
+      "# name lost it. --blif binds the result to the netlist it describes, so a stale\n"
+      "# set is detectable.\n"
+      "#\n"
+      "# Wrapped in `tee -q -o`: `select -list` narrates one line per atom, which\n"
+      "# belongs in atomsets.json rather than the console or <top>_synth.log.\n"
+      "tee -q -o " + FloorplanningPrefix() + "_atomsets.log" +
+      " tcl " + aurora_atomsets_script_path.string() +
+      " atomsets.json --blif " + output_blif_filepath.string() + "\n"
+      "\n"
+      "# [aurora2#1725 stage P2] Review-only hierarchical netlist: regroups the\n"
+      "# flattened cells back into nested modules for human inspection. NEVER read by\n"
+      "# packing / placement / routing / bitstream. Wrapped in `tee -q -o`, which is\n"
+      "# what keeps the synthesis log the size it is on master -- rebuilding the\n"
+      "# hierarchy runs `submod` once per level of it, and submod narrates every cell\n"
+      "# it moves.\n"
+      "tee -q -o " + FloorplanningPrefix() + "_rehier.log" +
+      " tcl " + aurora_rehier_script_path.string() +
+      " " + top_module_name + "_post_synth_hier.v");
+  // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
 
   // -- floorplanning_prefix ---------------------------------------------------------
   // [aurora2#1725] Every artifact the floorplanning flow generates is named
@@ -11605,7 +11623,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   yosysScript->apply("${FLOORPLANNING_PREFIX}", FloorplanningPrefix());
   // -- floorplanning_prefix ---------------------------------------------------------
 
-  std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
   yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
   yosysScript->addFile(output_blif_filepath);
 
