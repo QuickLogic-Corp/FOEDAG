@@ -269,11 +269,8 @@ TEST(FloorPlanning, saveLoadPartition)
 }
 
 // [aurora2#1725 stage P1] REQ-002: the .qdc carries RTL names, never post-synthesis ones.
-//
-// This is a regression guard, not a formality. Serializing resolved VPR atom names is what
-// produced the defect the feature exists to fix: a .qdc holding 39 enumerated atoms for an
-// instance with 523 in the netlist, under-constraining it by 13x and going stale on every
-// resynthesis. Expansion belongs at emission time (REQ-003).
+// A regression guard, not a formality -- see QdcSerializer.cpp's own comment for the defect
+// this prevents. Expansion belongs at emission time (REQ-003).
 TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
 {
     fp::Partition::resetIdGenerator();
@@ -1041,10 +1038,9 @@ TEST(QdcSerializer, ATrailingCommentDoesNotStealThePartitionName)
 
 TEST(QdcSerializer, AnUnparsableRegionIsPreservedRatherThanDiscardedOnSave)
 {
-    // The partition used to be added to the device before its regions were parsed, so a bad
-    // coordinate left it holding elements and no region. serialize() skips only partitions
-    // with no ELEMENTS, so the next save rewrote it without the region and the constraint
-    // was gone -- a typo in a hand-edited .qdc silently destroyed what it was written in.
+    // See QdcSerializer.cpp's own comment on parsing every region before the partition is
+    // created: this is the case that regression -- an unparsable coordinate must not destroy
+    // the constraint it appears in.
     const auto qdc = writeQdc("fp_qdc_badregion", "set_region i_a clb(abc,2) p1\n");
 
     fp::DeviceGrid device(genTestDescriptor());
@@ -1424,12 +1420,10 @@ TEST(FloorPlanningLayout, NoPaneHoldsWidthTheOthersCannotBorrow)
 
 TEST(FloorPlanningLayout, EveryToolbarControlCanFoldIntoTheExtensionMenu)
 {
-    // The device toolbar only stops flooring the pane if what does not fit can go somewhere.
-    // QToolBar's extension menu shows ACTIONS; a control added through addWidget() cannot go
-    // in it, because the widget is already parented to the toolbar and can only be in one
-    // place -- it just vanishes when the toolbar runs out of room. So every control here has
-    // to be a plain QAction, and the only widget on the toolbar is the blank stretch, which
-    // has nothing to offer a menu and is not meant to appear in one.
+    // See FloorPlanningWidget.cpp's own comment on why every control here must be a plain
+    // QAction: a widget added through addWidget() cannot appear in the extension menu, so it
+    // would simply vanish when the toolbar runs out of room. The blank stretch is the one
+    // exception, and it is never meant to appear in the menu.
     fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
     prepare(panel, 1366);
 
@@ -1454,10 +1448,8 @@ TEST(FloorPlanningLayout, EveryToolbarControlCanFoldIntoTheExtensionMenu)
 
 TEST(FloorPlanningLayout, PanesOpenInAOneTwoOneSplit)
 {
-    // Removing the minimums also removed what had been holding the opening proportions up --
-    // they were the minimums, not the setSizes({1,2,1}) that looked like a ratio and never
-    // was one. Without applyInitialSplitterSizes() the device pane opens at a fifth of the
-    // window with the hierarchy pane twice its width.
+    // See FloorPlanningWidget.cpp's own comment on applyInitialSplitterSizes(): without it,
+    // the proportions the old pane minimums used to hold up by accident are gone.
     fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
     prepare(panel, 1366);
 
