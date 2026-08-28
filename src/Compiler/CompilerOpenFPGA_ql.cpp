@@ -2597,14 +2597,11 @@ void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
 }
 
 // [aurora2#1725 stage P2b] name maps -- OPTIONAL, off unless general.options.namemap is
-// "checked". An absent key reads as empty, so a project that has never heard of the option
-// simply does not run this.
-//
-// The stage was specified around [6] namemap_hier.csv, which nothing produces -- not this
-// repo, not the traceability handoff -- so check 3 has never run on any design. [5]
-// namemap.csv we can generate today, from the debug JSON stage P4 already consumes, with no
-// new synthesis output and no template change. Made switchable rather than always-on so its
-// value can be measured before deciding whether P2b earns its place at all.
+// "checked", which today only the floorplanning_regions testcases do: this stage exists to
+// measure whether P2b is redundant, hard-failing the build on a real finding (see below), so
+// it stays off everywhere else. [6] namemap_hier.csv, which the stage was specified around,
+// is produced nowhere; [5] namemap.csv is what this actually generates, from the debug JSON
+// stage P4 already consumes.
 bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
   if (QLSettingsManager::getStringValue("general", "options", "namemap") != "checked") {
     return true;
