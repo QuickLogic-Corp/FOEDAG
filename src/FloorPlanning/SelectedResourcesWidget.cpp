@@ -126,9 +126,9 @@ void SelectedResourcesWidget::setAtomRows(const std::map<std::string, int>& atom
     m_atoms->setTextElideMode(Qt::ElideRight);
 }
 
-void SelectedResourcesWidget::setTally(const ResourceTally& tally,
-                                       const std::map<std::string, int>& atomResources,
-                                       int instances)
+void SelectedResourcesWidget::setSelectedResources(const ResourceTally& tally,
+                                                   const std::map<std::string, int>& atomResources,
+                                                   int instances)
 {
     m_lbSelection->setText(instances == 0
         ? tr("Nothing selected")
@@ -149,7 +149,7 @@ void SelectedResourcesWidget::setTally(const ResourceTally& tally,
 
 void SelectedResourcesWidget::clear()
 {
-    setTally(ResourceTally{}, {}, 0);
+    setSelectedResources(ResourceTally{}, {}, 0);
 }
 
 }  // namespace fp

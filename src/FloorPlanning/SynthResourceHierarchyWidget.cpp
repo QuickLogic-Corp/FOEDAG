@@ -8,6 +8,7 @@
 #include <QStringListModel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QSplitter>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QCheckBox>
@@ -295,7 +296,6 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     }
 
     layout->addWidget(m_lbView);
-    layout->addWidget(m_view);
     m_lbView->setVisible(false); // optionally activated by method
 
     m_view->setModel(m_model);
@@ -312,10 +312,20 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
 
         m_selectedResourcesWidget = new SelectedResourcesWidget;
-        layout->addWidget(m_selectedResourcesWidget);
+
+        // A splitter, not a fixed VBox slot, so the user can drag the shared border to
+        // trade tree height for resources-panel height instead of the tree simply taking
+        // whatever space is left.
+        m_splitter = new QSplitter(Qt::Vertical, this);
+        m_splitter->setChildrenCollapsible(false); // don't let either pane disappear
+        m_splitter->addWidget(m_view);
+        m_splitter->addWidget(m_selectedResourcesWidget);
+        layout->addWidget(m_splitter);
 
         connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
                 [this]() { updateSelectedResources(); });
+    } else {
+        layout->addWidget(m_view);
     }
 
     connect(m_model, &QStandardItemModel::itemChanged, this, [this](QStandardItem* item) {
@@ -796,9 +806,10 @@ void SynthResourceHierarchyWidget::updateSelectedResources()
 
     // Tiles from the atom set, cell types from the counts: two routes to the same selection,
     // both of which drop what a parent and its child name in common.
-    m_selectedResourcesWidget->setTally(tallyResources(atoms, Partition::atomsPerTile()),
-                                        tallyAtomResources(m_atomResources, paths),
-                                        instances);
+    m_selectedResourcesWidget->setSelectedResources(
+        tallyResources(atoms, Partition::atomsPerTile()),
+        tallyAtomResources(m_atomResources, paths),
+        instances);
 }
 
 std::string SynthResourceHierarchyWidget::pathForItem(const QStandardItem* item) const

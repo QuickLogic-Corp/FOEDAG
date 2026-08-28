@@ -18,6 +18,7 @@
 
 class QLineEdit;
 class QCheckBox;
+class QSplitter;
 
 namespace fp {
 
@@ -136,6 +137,11 @@ private:
     // [aurora2#1725] The "Selected RTL Resources" table, when Flag::ShowSelectedResources
     // is set; null otherwise, which is what every use of it tests for.
     SelectedResourcesWidget* m_selectedResourcesWidget{nullptr};
+
+    // Holds m_view and m_selectedResourcesWidget when the latter exists, so their shared
+    // border is draggable instead of the tree's height being whatever a VBox leaves it.
+    // Null when there is no resources table to split against.
+    QSplitter* m_splitter{nullptr};
 
     // Re-tallies the selected rows into that table. Called on every selection change, and
     // again whenever the atom names arrive or the tree is rebuilt, since either changes the

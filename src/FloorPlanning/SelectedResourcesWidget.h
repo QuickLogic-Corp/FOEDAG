@@ -35,8 +35,9 @@ public:
     // `instances` is how many tree rows the tally covers -- shown alongside it, because "0
     // CLB" means something different for an empty selection than for a selected instance
     // that synthesis emptied.
-    void setTally(const ResourceTally& tally, const std::map<std::string, int>& atomResources,
-                  int instances);
+    void setSelectedResources(const ResourceTally& tally,
+                              const std::map<std::string, int>& atomResources,
+                              int instances);
 
     // Nothing selected: zeroes, not a stale answer from the previous selection.
     void clear();
