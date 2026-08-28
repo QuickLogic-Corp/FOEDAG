@@ -20,8 +20,8 @@ namespace fp {
 // selection, not the checkboxes: checking an instance assigns it to a partition and changes
 // the floorplan, whereas selecting is just pointing at something.
 //
-// Two tabs, because the answer has two units and neither substitutes for the other. Tiles
-// opens first, since sizing a region is what the panel is for:
+// Two tabs, because the answer has two units and neither substitutes for the other. Atoms
+// opens first, since it is the exact figure; Tiles is the estimate:
 //
 //   Tiles  what the floorplan is drawn in -- CLB/DSP/BRAM. The CLB figure is an estimate
 //          (atoms over a packing density), and it is the only estimate in this widget.

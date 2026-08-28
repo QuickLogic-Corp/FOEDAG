@@ -1298,9 +1298,9 @@ TEST(SelectedResources, TheAtomsTabNamesCellsAsSynthesisNamedThem)
     auto* view = tree.findChild<QTreeView*>();
     auto* widget = tree.findChild<fp::SelectedResourcesWidget*>();
 
-    // Tiles is what opens: sizing a region is what the panel is for.
-    EXPECT_EQ(tree.findChild<QTabWidget*>()->currentIndex(), 0);
-    EXPECT_EQ(tree.findChild<QTabWidget*>()->tabText(0), "Tiles");
+    // Atoms is what opens: it is the exact figure, not the CLB estimate.
+    EXPECT_EQ(tree.findChild<QTabWidget*>()->currentIndex(), 1);
+    EXPECT_EQ(tree.findChild<QTabWidget*>()->tabText(1), "Atoms");
     EXPECT_TRUE(atomRows(widget).empty()) << "nothing selected, so no atom rows";
 
     view->selectionModel()->select(rowNamed(view, "b"),

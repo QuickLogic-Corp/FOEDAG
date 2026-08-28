@@ -77,7 +77,7 @@ SelectedResourcesWidget::SelectedResourcesWidget(QWidget* parent)
 
     m_tabs->addTab(m_tiles, tr("Tiles"));
     m_tabs->addTab(m_atoms, tr("Atoms"));
-    m_tabs->setCurrentWidget(m_tiles);   // sizing a region is what the panel is for
+    m_tabs->setCurrentWidget(m_atoms);   // exact synthesized types, not the CLB estimate
 
     // Sized rather than left to the layout: a QTableWidget's own hint is a generic 256x192
     // that would take a quarter of the pane and spend most of it on blank rows.
