@@ -2380,6 +2380,28 @@ bool CompilerOpenFPGA_ql::RunElaboration() {
 
   m_useVerific =
       QLSettingsManager::getStringValue("general", "options", "verific") == "checked";
+#if(AURORA_USE_TABBYCAD == 1)
+  // [aurora2#1725 stage P0] The general "verific" setting only controls SYNTHESIS's own
+  // parser choice, and is off by default for a Synplify project since Synplify reads VHDL
+  // natively and never needed it. But stock Yosys cannot read VHDL at all, so without this,
+  // a Synplify + VHDL project could never elaborate and instances.json was never produced.
+  // Elaboration is independent of the synthesis tool (see above), so force Verific on here
+  // whenever the design has VHDL, regardless of that setting or which tool synthesizes it.
+  for (const auto& lang_file : ProjManager()->DesignFiles()) {
+    switch (lang_file.first.language) {
+      case Design::Language::VHDL_1987:
+      case Design::Language::VHDL_1993:
+      case Design::Language::VHDL_2000:
+      case Design::Language::VHDL_2008:
+      case Design::Language::VHDL_2019:
+        m_useVerific = true;
+        break;
+      default:
+        break;
+    }
+    if (m_useVerific) break;
+  }
+#endif // #if(AURORA_USE_TABBYCAD == 1)
 
   std::string script = BuildElaborationScript(topModule);
   if (script.empty()) {
