@@ -11270,6 +11270,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
   
+  // Promote boundary registers into the IO tile flip-flops. Reset-carrying
+  // registers become io_sdffr/io_sdffnr, which only exist on a GPIO v3.0
+  // architecture, so this stays opt-in.
+  if( QLSettingsManager::getStringValue("yosys", "general", "ioff") == "checked" ) {
+
+    yosys_options += " -ioff";
+  }
+
   #ifdef __linux__
   if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
     yosys_options += std::string(" -de") + 
