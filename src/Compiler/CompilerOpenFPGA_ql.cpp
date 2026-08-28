@@ -897,12 +897,25 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
         std::stringstream buffer;
         buffer << in.rdbuf();
         const std::string text = buffer.str();
+        // Counted line by line rather than with std::regex::multiline: that flag is
+        // C++17 but the libstdc++ in the CI toolchain does not provide it, and the
+        // build fails to compile. Anchoring '^' to each line is equivalent, since it
+        // can match at most once per line either way.
         static const std::regex kModuleDecl(
-            "^[ \\t]*module[ \\t]+[A-Za-z_][A-Za-z0-9_$]*",
-            std::regex::multiline);
-        const auto count = std::distance(
-            std::sregex_iterator(text.begin(), text.end(), kModuleDecl),
-            std::sregex_iterator());
+            "^[ \\t]*module[ \\t]+[A-Za-z_][A-Za-z0-9_$]*");
+        long count = 0;
+        {
+          std::istringstream lines(text);
+          std::string line;
+          while (std::getline(lines, line)) {
+            if (!line.empty() && line.back() == '\r') {
+              line.pop_back();
+            }
+            if (std::regex_search(line, kModuleDecl)) {
+              ++count;
+            }
+          }
+        }
         if (count != 1) {
           compiler->ErrorMessage(
               "-stub " + stub + ": expected exactly one module declaration, "
