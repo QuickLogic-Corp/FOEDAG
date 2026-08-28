@@ -5995,8 +5995,29 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
 
   // [optional] repack design contraint file
-  m_OpenFpgaRepackConstraintsFile = 
-      QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile();
+  //
+  // Precedence:
+  //   1. the file generated for this design, which already folds in the pcf's
+  //      'set_clock' commands and/or a user supplied file plus tool defaults,
+  //   2. a file named explicitly by 'bitstream_config_files -repack <file>' --
+  //      only reachable when nothing was generated, i.e. the design has no
+  //      clocks. Overwriting this member unconditionally (as this did) silently
+  //      discarded the user's file after acknowledging it in the log,
+  //   3. the normal project / tcl-dir / device lookup.
+  // The file generated for this design, at the path GenerateIOFloorPlanConstraints
+  // wrote it to. Set directly rather than discovered: no directory convention is
+  // involved, so this can never be confused with a file the user supplied, and a
+  // stale copy cannot be picked up by a search.
+  std::filesystem::path generated_repack_constraints =
+      std::filesystem::path(ProjManager()->projectPath()) /
+      (ProjManager()->projectName() + "_repack_design_constraint.xml");
+  if (FileUtils::FileExists(generated_repack_constraints)) {
+    m_OpenFpgaRepackConstraintsFile = generated_repack_constraints;
+  }
+  else if (m_OpenFpgaRepackConstraintsFile.empty()) {
+    m_OpenFpgaRepackConstraintsFile =
+        QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile();
+  }
   if(m_OpenFpgaRepackConstraintsFile.empty()) {
 
     Message("Proceeding without user provided repack design contraint file.");
@@ -6270,9 +6291,11 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
                       m_OpenFpgaRepackConstraintsFile.string());
   }
   else {
-    // Note that ${REPACK_DESIGN_CONSTRAINT_XML} is deliberately left
-    // unsubstituted here, so a device template that uses that variable emits a
-    // malformed 'repack --design_constraints ${REPACK_DESIGN_CONSTRAINT_XML}'.
+    // ${REPACK_DESIGN_CONSTRAINT_XML} is deliberately left unsubstituted here,
+    // so a device template written in that form emits a malformed
+    // 'repack --design_constraints ${REPACK_DESIGN_CONSTRAINT_XML}'. Templates
+    // written as ${OPENFPGA_REPACK_CONSTRAINTS_COMMAND} degrade to a bare
+    // 'repack' instead. Both dialects are in use across device_data.
     Message("<warning> REPACK_DESIGN_CONSTRAINT_XML is not found in the device.\n");
     Message("<warning> No repack design constraint file was resolved: design clocks"
             " will not be bound to the fabric global clock pins, and bitstream"
@@ -7349,15 +7372,23 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // lookup: the normal lookup checks the project directory first, which is where
   // we write, so it would feed a previous run's output back in as its own
   // template and let stale clock bindings accumulate.
+  // The generated file goes into the project's generated area under a name of its
+  // own, and its path is handed to openfpga directly (see FinishOpenFPGAScript).
+  // Nothing about it is discovered by directory convention, which is what keeps
+  // it from ever colliding with -- or being mistaken for -- a file the user
+  // supplied, and keeps it out of the design's source directory.
   std::filesystem::path repack_constraints_out =
       std::filesystem::path(ProjManager()->projectPath()) /
-      std::string("repack_design_constraint.xml");
+      (ProjManager()->projectName() + "_repack_design_constraint.xml");
 
   // Always drop a previous run's generated file first. It lives in the directory
   // the lookup consults before the tcl script directory, so leaving it behind
   // would shadow a design supplied file, and would survive into a run that
   // produces no constraints at all. Only on the path that actually runs the
   // script -- the !forceOverwrite early return above keeps the previous output.
+  // Drop a previous run's output so a run that generates nothing (a design with
+  // no clocks) cannot inherit it. The name is ours alone, so this can never
+  // delete a file the user supplied.
   std::error_code repack_remove_ec;
   fs::remove(repack_constraints_out, repack_remove_ec);
 
@@ -7380,12 +7411,24 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     }
   }
 
-  std::filesystem::path user_repack_constraints;
-  std::filesystem::path tcl_script_dir_path = QLSettingsManager::getTCLScriptDirPath();
-  if (!tcl_script_dir_path.empty()) {
-    user_repack_constraints = tcl_script_dir_path / std::string("repack_design_constraint.xml");
-    if (!FileUtils::FileExists(user_repack_constraints)) {
-      user_repack_constraints.clear();
+  // A repack design constraint file supplied with the design, either named
+  // explicitly by 'bitstream_config_files -repack' or found next to the tcl
+  // script by convention. The explicit form wins.
+  // A repack design constraint file supplied with the design: named explicitly by
+  // 'bitstream_config_files -repack', or found next to the tcl script by
+  // convention. The explicit form wins.
+  std::filesystem::path user_repack_constraints = m_OpenFpgaRepackConstraintsFile;
+  if (!user_repack_constraints.empty() &&
+      !FileUtils::FileExists(user_repack_constraints)) {
+    user_repack_constraints.clear();
+  }
+  if (user_repack_constraints.empty()) {
+    std::filesystem::path tcl_dir = QLSettingsManager::getTCLScriptDirPath();
+    if (!tcl_dir.empty()) {
+      user_repack_constraints = tcl_dir / std::string("repack_design_constraint.xml");
+      if (!FileUtils::FileExists(user_repack_constraints)) {
+        user_repack_constraints.clear();
+      }
     }
   }
 
@@ -7401,9 +7444,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
   else if (user_repack_constraints.empty()) {
     // No device copy and nothing supplied with the design. Nothing will bind the
-    // design clocks to the fabric global clock pins, and the openfpga script's
-    // ${REPACK_DESIGN_CONSTRAINT_XML} is left unsubstituted when no file is
-    // resolved, so the repack command itself is malformed.
+    // design clocks to the fabric global clock pins. Device templates written as
+    // '${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}' degrade to a bare 'repack'; the
+    // ones written as 'repack --design_constraints ${REPACK_DESIGN_CONSTRAINT_XML}'
+    // leave that variable unsubstituted and emit a malformed command.
     Message("<warning> No repack design constraint file was found for this device,"
             " and none was supplied with the design.");
     Message("<warning> Design clocks will not be bound to the fabric global clock"
