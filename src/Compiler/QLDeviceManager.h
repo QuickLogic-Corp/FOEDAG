@@ -286,6 +286,18 @@ class QLDeviceManager : public QObject {
   // "DSP_TYPE" on packages predating that rename. Returns "<major>_<minor>"
   // (e.g. "v4.0" -> "4_0", "DSPV2" -> "2_0"). Defaults to "1_0" when neither is set.
   std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
+  // CRR (custom routing resource) version of the device, from the
+  // "CRR_VERSION" entry in config.json. Returns "<major>.<minor>"
+  // (e.g. "v2.4" -> "2.4", "v2" -> "2.0"), or an empty string when the device
+  // does not declare one.
+  std::string deviceCRRVersion(QLDeviceTarget device_target = QLDeviceTarget());
+
+  // Raw device-data version -> "<major>.<minor>": "v2.4" -> "2.4", "v2" -> "2.0",
+  // no digits -> empty. Pure, so the parsing is testable without a device on disk.
+  static std::string normalizeVersionString(const std::string& value);
+
+  // "<major>.<minor>" -> numeric parts. False, outputs untouched, on anything else.
+  static bool parseVersionString(const std::string& version, int& major, int& minor);
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
   // reported as not-present (a pre-2026.3 package), an unrecognised value as

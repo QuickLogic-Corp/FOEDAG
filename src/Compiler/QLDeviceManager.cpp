@@ -3962,7 +3962,6 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   std::string major = DEFAULT_MAJOR_VERSION;
   std::string minor = DEFAULT_MINOR_VERSION;
 
-  // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
@@ -4000,6 +3999,68 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   }
 
   return major + "_" + minor;
+}
+
+std::string QLDeviceManager::normalizeVersionString(const std::string& value) {
+
+  static const std::string DEFAULT_MINOR_VERSION = "0";
+
+  // leading non-digits ("v", "DSPV") skipped; group 1 = major, group 2 = optional
+  // minor after a '.' or '_'. "v2.4" -> 2/4, "v2" -> 2/default, "2_4" -> 2/4.
+  static const std::regex version_re(R"(^\D*(\d+)(?:[._](\d+))?)");
+
+  std::smatch m;
+  if( std::regex_search(value, m, version_re) ) {
+    return m[1].str() + "." +
+           (m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION);
+  }
+
+  return std::string();
+}
+
+bool QLDeviceManager::parseVersionString(const std::string& version, int& major, int& minor) {
+
+  // Strict: this consumes normalizeVersionString() output, so anything else is a
+  // caller error, not something to salvage.
+  static const std::regex parts_re(R"(^(\d+)\.(\d+)$)");
+
+  std::smatch m;
+  if( !std::regex_match(version, m, parts_re) ) {
+    return false;
+  }
+
+  // Digits only, so the sole failure left is overflow. Parsed into locals first so
+  // a throw on the minor cannot leave the caller with a half-written major.
+  int parsed_major = 0;
+  int parsed_minor = 0;
+  try {
+    parsed_major = std::stoi(m[1].str());
+    parsed_minor = std::stoi(m[2].str());
+  }
+  catch(const std::exception&) {
+    return false;
+  }
+
+  major = parsed_major;
+  minor = parsed_minor;
+
+  return true;
+}
+
+std::string QLDeviceManager::deviceCRRVersion(QLDeviceTarget device_target) {
+
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
+
+    if( device_target_config_json.contains("CRR_VERSION") ) {
+      const auto& crr_version = device_target_config_json["CRR_VERSION"];
+      if( crr_version.is_string() ) {
+        return normalizeVersionString(crr_version.get<std::string>());
+      }
+    }
+  }
+
+  return std::string();
 }
 
 // Spelling cleanup shared by both layout-setting normalisers: trim, drop an

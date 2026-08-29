@@ -2489,6 +2489,102 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
+namespace {
+
+// CRR v2.4 shifted the routing-channel origin by one tile on both axes; without a
+// matching offset VPR builds the wrong rr_graph and bitstream generation fails.
+// Interim: the offset belongs in the device's own config.json, not in a version
+// mapping here. Tracked in ql-device-data#90.
+constexpr int CRR_OFFSET_FIRST_MAJOR = 2;   // offsets apply from CRR v2.4 onwards
+constexpr int CRR_OFFSET_FIRST_MINOR = 4;
+constexpr int CRR_VALIDATED_MAJOR = 2;      // newest CRR the mapping was checked against
+constexpr int CRR_VALIDATED_MINOR = 4;
+constexpr int CRR_RR_GRAPH_OFFSET = 1;
+
+// true when (major, minor) is at or after (ref_major, ref_minor).
+bool versionAtLeast(int major, int minor, int ref_major, int ref_minor) {
+  return (major > ref_major) || (major == ref_major && minor >= ref_minor);
+}
+
+// Value of 'flag' in 'options', for "--flag value" and "--flag=value".
+// Tokenised, not regex-matched: compares whole tokens and needs no escaping.
+bool vprOptionValue(const std::string& options, const std::string& flag, std::string& value) {
+  const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] == flag) {
+      // trailing flag with no value: present but valueless, don't read past the end
+      value = (i + 1 < tokens.size()) ? tokens[i + 1] : std::string();
+      return true;
+    }
+    if(tokens[i].rfind(flag + "=", 0) == 0) {
+      value = tokens[i].substr(flag.size() + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
+    QLDeviceTarget device_target, const std::string& existing_options) {
+
+  std::vector<std::string> options;
+
+  const std::string version = QLDeviceManager::getInstance()->deviceCRRVersion(device_target);
+
+  int major = 0;
+  int minor = 0;
+  if( !QLDeviceManager::parseVersionString(version, major, minor) ) {
+    // Only reached on the dynamic-CRR path: an rr_graph is being built from device
+    // data that does not say which CRR produced it, i.e. an incomplete package.
+    WarningMessage("Device uses custom routing resources but declares no readable "
+                   "CRR_VERSION in config.json; building the rr_graph with no "
+                   "channel offset. Results will be wrong if this device needs one.");
+    return options;
+  }
+
+  if( !versionAtLeast(major, minor, CRR_OFFSET_FIRST_MAJOR, CRR_OFFSET_FIRST_MINOR) ) {
+    // Pre-2.4 CRR data was generated with the origin unshifted.
+    return options;
+  }
+
+  // Newer CRR than this mapping knows: still offset, since falling back to 0 is the
+  // failure being guarded against - but do not let it pass silently.
+  if( !versionAtLeast(CRR_VALIDATED_MAJOR, CRR_VALIDATED_MINOR, major, minor) ) {
+    WarningMessage("Device declares CRR v" + version + ", which is newer than v" +
+                   std::to_string(CRR_VALIDATED_MAJOR) + "." +
+                   std::to_string(CRR_VALIDATED_MINOR) +
+                   ", the newest these rr_graph offsets were validated against. "
+                   "Applying the v" + std::to_string(CRR_VALIDATED_MAJOR) + "." +
+                   std::to_string(CRR_VALIDATED_MINOR) +
+                   " offsets; confirm they are still correct for this device.");
+  }
+
+  const std::string expected = std::to_string(CRR_RR_GRAPH_OFFSET);
+
+  for( const std::string& flag : {std::string("--rr_graph_x_offset"),
+                                  std::string("--rr_graph_y_offset")} ) {
+
+    std::string existing;
+    if( vprOptionValue(existing_options, flag, existing) ) {
+      // Already set by the project settings: keep the user's value, but flag a
+      // disagreement - a stale project JSON is how a wrong offset survives.
+      if( existing != expected ) {
+        WarningMessage("Project settings pass " + flag + " " + existing +
+                       ", but device CRR v" + version + " expects " + expected +
+                       ". Keeping the project value; results will be wrong if that "
+                       "is unintended.");
+      }
+      continue;
+    }
+
+    options.push_back(flag + " " + expected);
+  }
+
+  return options;
+}
+
 std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
@@ -2860,6 +2956,10 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // vpr_options += " --allow_dangling_combinational_nodes on";
+
+      for(const std::string& option : rrGraphOffsetOptions(device_target, vpr_options)) {
+        vpr_options += " " + option;
+      }
     }
   }
 
@@ -3266,6 +3366,10 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // command->append("--allow_dangling_combinational_nodes on");
+
+      for(const std::string& option : rrGraphOffsetOptions(device_target, command->string())) {
+        command->append(option);
+      }
     }
   }
 
