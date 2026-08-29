@@ -291,6 +291,17 @@ class QLDeviceManager : public QObject {
   // (e.g. "v2.4" -> "2.4", "v2" -> "2.0"), or an empty string when the device
   // does not declare one.
   std::string deviceCRRVersion(QLDeviceTarget device_target = QLDeviceTarget());
+
+  // Normalise a raw device-data version value into "<major>.<minor>": leading
+  // non-digits are skipped ("v2.4" -> "2.4"), a missing minor becomes "0"
+  // ("v2" -> "2.0"), and a value carrying no digits yields an empty string.
+  // Pure helper, exposed so the parsing can be tested without a device on disk.
+  static std::string normalizeVersionString(const std::string& value);
+
+  // Split a normalised "<major>.<minor>" version into its numeric parts.
+  // Returns false, leaving the outputs untouched, when the string is empty or
+  // does not carry both parts.
+  static bool parseVersionString(const std::string& version, int& major, int& minor);
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
   // reported as not-present (a pre-2026.3 package), an unrecognised value as
