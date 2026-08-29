@@ -25,9 +25,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 using namespace FOEDAG;
 
 TEST(QLDeviceManager, NormalizeVersionStringSpellings) {
-  // spellings device data has used for its version fields. deviceDSPVersion()
-  // still carries its own copy of this parsing, so the last case guards the
-  // shared helper against a leading-letters value rather than DSP behaviour.
+  // spellings device data has used. deviceDSPVersion() still has its own copy of
+  // this parsing, so the last case covers leading letters, not DSP behaviour.
   EXPECT_EQ(QLDeviceManager::normalizeVersionString("v2.4"), "2.4");
   EXPECT_EQ(QLDeviceManager::normalizeVersionString("V2.4"), "2.4");
   EXPECT_EQ(QLDeviceManager::normalizeVersionString("2.4"), "2.4");
@@ -64,7 +63,7 @@ TEST(QLDeviceManager, ParseVersionStringRejectsAnythingElse) {
   int major = -1;
   int minor = -1;
 
-  // an unset CRR_VERSION reaches this as an empty string, and must not parse
+  // an unset CRR_VERSION arrives as an empty string
   EXPECT_FALSE(QLDeviceManager::parseVersionString("", major, minor));
   // deviceCRRVersion() always supplies a minor, so a bare major is a caller error
   EXPECT_FALSE(QLDeviceManager::parseVersionString("2", major, minor));
@@ -72,7 +71,7 @@ TEST(QLDeviceManager, ParseVersionStringRejectsAnythingElse) {
   EXPECT_FALSE(QLDeviceManager::parseVersionString("2.4.1", major, minor));
   EXPECT_FALSE(QLDeviceManager::parseVersionString("2.x", major, minor));
 
-  // a rejected parse must leave the caller's values untouched
+  // a rejected parse leaves the caller's values untouched
   EXPECT_EQ(major, -1);
   EXPECT_EQ(minor, -1);
 }
@@ -87,7 +86,7 @@ TEST(QLDeviceManager, ParseVersionStringRejectsOverflow) {
   EXPECT_EQ(major, -1);
   EXPECT_EQ(minor, -1);
 
-  // minor overflows: the outputs must still be left alone, not half-written
+  // minor overflows: outputs still left alone, not half-written
   EXPECT_FALSE(
       QLDeviceManager::parseVersionString("2.99999999999999999999", major, minor));
   EXPECT_EQ(major, -1);

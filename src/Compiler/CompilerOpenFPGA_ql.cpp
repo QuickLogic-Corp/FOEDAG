@@ -2491,15 +2491,10 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
 
 namespace {
 
-// CRR v2.4 shifted the routing-channel origin by one tile on both axes, so VPR has
-// to build the rr_graph with a matching offset - without it the geometry is wrong,
-// and the failure surfaces later as a bitstream generation error.
-//
-// Deriving the offset from CRR_VERSION is deliberately an interim measure: the
-// value describes how a device's own routing data was generated, so it belongs in
-// that device's config.json rather than being mapped from a version here.
-// Tracked in QL-Proprietary/ql-device-data#90 - please extend that work rather
-// than adding another version to the mapping below.
+// CRR v2.4 shifted the routing-channel origin by one tile on both axes; without a
+// matching offset VPR builds the wrong rr_graph and bitstream generation fails.
+// Interim: the offset belongs in the device's own config.json, not in a version
+// mapping here. Tracked in ql-device-data#90.
 constexpr int CRR_OFFSET_FIRST_MAJOR = 2;   // offsets apply from CRR v2.4 onwards
 constexpr int CRR_OFFSET_FIRST_MINOR = 4;
 constexpr int CRR_VALIDATED_MAJOR = 2;      // newest CRR the mapping was checked against
@@ -2511,17 +2506,13 @@ bool versionAtLeast(int major, int minor, int ref_major, int ref_minor) {
   return (major > ref_major) || (major == ref_major && minor >= ref_minor);
 }
 
-// Value of 'flag' in 'options', accepting both "--flag value" and "--flag=value".
-// Tokenised rather than matched with a regex so the flag is compared whole - a
-// flag name appearing inside some other argument (a path, say) is not mistaken
-// for one - and so the flag needs no regex escaping. Same approach as
-// removeVprOption() below.
+// Value of 'flag' in 'options', for "--flag value" and "--flag=value".
+// Tokenised, not regex-matched: compares whole tokens and needs no escaping.
 bool vprOptionValue(const std::string& options, const std::string& flag, std::string& value) {
   const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
   for(size_t i = 0; i < tokens.size(); ++i) {
     if(tokens[i] == flag) {
-      // a trailing flag with no value is malformed; report it as present but
-      // valueless rather than reading past the end.
+      // trailing flag with no value: present but valueless, don't read past the end
       value = (i + 1 < tokens.size()) ? tokens[i + 1] : std::string();
       return true;
     }
@@ -2545,10 +2536,8 @@ std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
   int major = 0;
   int minor = 0;
   if( !QLDeviceManager::parseVersionString(version, major, minor) ) {
-    // Only reached on the dynamic-CRR path, so the device data is being used to
-    // build an rr_graph but does not say which CRR generated it. Every shipped
-    // device declaring SB_MAPS also declares CRR_VERSION, so this means the
-    // package is incomplete - say so rather than quietly building with no offset.
+    // Only reached on the dynamic-CRR path: an rr_graph is being built from device
+    // data that does not say which CRR produced it, i.e. an incomplete package.
     WarningMessage("Device uses custom routing resources but declares no readable "
                    "CRR_VERSION in config.json; building the rr_graph with no "
                    "channel offset. Results will be wrong if this device needs one.");
@@ -2560,9 +2549,8 @@ std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
     return options;
   }
 
-  // A newer CRR than this mapping knows about still gets the v2.4 offsets, because
-  // silently reverting to 0 is the very failure this guards against - but say so,
-  // rather than let an unvalidated device pass quietly.
+  // Newer CRR than this mapping knows: still offset, since falling back to 0 is the
+  // failure being guarded against - but do not let it pass silently.
   if( !versionAtLeast(CRR_VALIDATED_MAJOR, CRR_VALIDATED_MINOR, major, minor) ) {
     WarningMessage("Device declares CRR v" + version + ", which is newer than v" +
                    std::to_string(CRR_VALIDATED_MAJOR) + "." +
@@ -2580,9 +2568,8 @@ std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
 
     std::string existing;
     if( vprOptionValue(existing_options, flag, existing) ) {
-      // The project settings already set this. Leave it alone - overriding a value
-      // the user put there would be worse - but a disagreement is worth flagging,
-      // since a stale project JSON is exactly how a wrong offset survives.
+      // Already set by the project settings: keep the user's value, but flag a
+      // disagreement - a stale project JSON is how a wrong offset survives.
       if( existing != expected ) {
         WarningMessage("Project settings pass " + flag + " " + existing +
                        ", but device CRR v" + version + " expects " + expected +

@@ -4003,14 +4003,10 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
 
 std::string QLDeviceManager::normalizeVersionString(const std::string& value) {
 
-  // The returned form is "<major>.<minor>" (e.g. "2.0", "2.3", "2.4"), so
-  // callers do not have to care whether the device data wrote "v2.4", "2.4"
-  // or "V2_4".
   static const std::string DEFAULT_MINOR_VERSION = "0";
 
-  // Skip any leading non-digits ("v", "V", "DSPV") and capture the version:
-  // group 1 = major, group 2 = optional minor (after a '.' or '_').
-  // e.g. "v2.4" -> 2 / 4, "v2" -> 2 / (default), "2_4" -> 2 / 4.
+  // leading non-digits ("v", "DSPV") skipped; group 1 = major, group 2 = optional
+  // minor after a '.' or '_'. "v2.4" -> 2/4, "v2" -> 2/default, "2_4" -> 2/4.
   static const std::regex version_re(R"(^\D*(\d+)(?:[._](\d+))?)");
 
   std::smatch m;
@@ -4024,8 +4020,8 @@ std::string QLDeviceManager::normalizeVersionString(const std::string& value) {
 
 bool QLDeviceManager::parseVersionString(const std::string& version, int& major, int& minor) {
 
-  // Deliberately strict: this consumes normalizeVersionString() output, so
-  // anything else is a caller error rather than something to be salvaged.
+  // Strict: this consumes normalizeVersionString() output, so anything else is a
+  // caller error, not something to salvage.
   static const std::regex parts_re(R"(^(\d+)\.(\d+)$)");
 
   std::smatch m;
@@ -4033,10 +4029,8 @@ bool QLDeviceManager::parseVersionString(const std::string& version, int& major,
     return false;
   }
 
-  // The regex admits digits only, so the sole remaining failure is an overflow
-  // on an absurdly long version - treat that as unparseable rather than throw.
-  // Parsed into locals first, so a failure on the minor cannot leave the
-  // caller with a half-written major.
+  // Digits only, so the sole failure left is overflow. Parsed into locals first so
+  // a throw on the minor cannot leave the caller with a half-written major.
   int parsed_major = 0;
   int parsed_minor = 0;
   try {
