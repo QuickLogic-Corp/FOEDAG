@@ -3962,7 +3962,6 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   std::string major = DEFAULT_MAJOR_VERSION;
   std::string minor = DEFAULT_MINOR_VERSION;
 
-  // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
@@ -4056,7 +4055,6 @@ bool QLDeviceManager::parseVersionString(const std::string& version, int& major,
 
 std::string QLDeviceManager::deviceCRRVersion(QLDeviceTarget device_target) {
 
-  // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 

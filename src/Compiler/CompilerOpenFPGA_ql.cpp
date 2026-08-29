@@ -2511,16 +2511,26 @@ bool versionAtLeast(int major, int minor, int ref_major, int ref_minor) {
   return (major > ref_major) || (major == ref_major && minor >= ref_minor);
 }
 
-// Value of 'flag' in 'options' when it is present as a whole token, so a flag
-// appearing inside some other argument (a path, say) is not mistaken for one.
+// Value of 'flag' in 'options', accepting both "--flag value" and "--flag=value".
+// Tokenised rather than matched with a regex so the flag is compared whole - a
+// flag name appearing inside some other argument (a path, say) is not mistaken
+// for one - and so the flag needs no regex escaping. Same approach as
+// removeVprOption() below.
 bool vprOptionValue(const std::string& options, const std::string& flag, std::string& value) {
-  const std::regex option_re("(?:^|\\s)" + flag + "(?:\\s+|=)(\\S+)");
-  std::smatch m;
-  if( !std::regex_search(options, m, option_re) ) {
-    return false;
+  const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] == flag) {
+      // a trailing flag with no value is malformed; report it as present but
+      // valueless rather than reading past the end.
+      value = (i + 1 < tokens.size()) ? tokens[i + 1] : std::string();
+      return true;
+    }
+    if(tokens[i].rfind(flag + "=", 0) == 0) {
+      value = tokens[i].substr(flag.size() + 1);
+      return true;
+    }
   }
-  value = m[1].str();
-  return true;
+  return false;
 }
 
 }  // namespace
@@ -2535,7 +2545,13 @@ std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
   int major = 0;
   int minor = 0;
   if( !QLDeviceManager::parseVersionString(version, major, minor) ) {
-    // Device declares no CRR version, or one we cannot read: nothing to add.
+    // Only reached on the dynamic-CRR path, so the device data is being used to
+    // build an rr_graph but does not say which CRR generated it. Every shipped
+    // device declaring SB_MAPS also declares CRR_VERSION, so this means the
+    // package is incomplete - say so rather than quietly building with no offset.
+    WarningMessage("Device uses custom routing resources but declares no readable "
+                   "CRR_VERSION in config.json; building the rr_graph with no "
+                   "channel offset. Results will be wrong if this device needs one.");
     return options;
   }
 

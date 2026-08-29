@@ -25,7 +25,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 using namespace FOEDAG;
 
 TEST(QLDeviceManager, NormalizeVersionStringSpellings) {
-  // the spellings device data has actually used for CRR_VERSION / DSP_VERSION
+  // spellings device data has used for its version fields. deviceDSPVersion()
+  // still carries its own copy of this parsing, so the last case guards the
+  // shared helper against a leading-letters value rather than DSP behaviour.
   EXPECT_EQ(QLDeviceManager::normalizeVersionString("v2.4"), "2.4");
   EXPECT_EQ(QLDeviceManager::normalizeVersionString("V2.4"), "2.4");
   EXPECT_EQ(QLDeviceManager::normalizeVersionString("2.4"), "2.4");
