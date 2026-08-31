@@ -3743,16 +3743,21 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
     }
 
     // Strictly a decimal integer - once for a dimension, once per element for a
-    // column list. '-8', '8.5', 'null' and '[4, 8]' must not reach the script,
-    // which either aborts in int() or mis-sizes the fabric, and neither must a
-    // hole in the list ('12,' or '12,,25'), which int() fails on the same way.
+    // column list, whitespace around each element allowed. '-8', '8.5', 'null'
+    // and '[4, 8]' must not reach the script, which either aborts in int() or
+    // mis-sizes the fabric, and neither must a hole in the list ('12,' or
+    // '12,,25'), which int() fails on the same way.
     std::size_t element_start = 0;
     while(element_start <= value.size()) {
       const std::size_t separator_pos =
           known_key->list_valued ? value.find(',', element_start) : std::string::npos;
-      const std::string element = (separator_pos == std::string::npos)
-                                      ? value.substr(element_start)
-                                      : value.substr(element_start, separator_pos - element_start);
+      std::string element = (separator_pos == std::string::npos)
+                                ? value.substr(element_start)
+                                : value.substr(element_start, separator_pos - element_start);
+      // the value as a whole is already trimmed, so trim each element too:
+      // '12, 25' is what a person writes, and add_layout.py's split_cols
+      // (re.split(r'[,\s]+')) already accepts it.
+      StringUtils::trim(element);
 
       if(element.empty()) {
         out_error = "has an empty entry in '" + key + "' = '" + value + "' (line " +
