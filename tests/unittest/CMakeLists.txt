@@ -44,6 +44,7 @@ set (CPP_LIST
     PinAssignment/TestLoader.cpp
     PinAssignment/TestPortsLoader.cpp
     Compiler/CompilerDefines_test.cpp
+    Compiler/QLDeviceManager_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
@@ -83,5 +84,10 @@ target_link_libraries(unittest PRIVATE
   foedag
   foedagcore
   Qt6::Test)
+
+# Fixture manifests are read from the source tree as real files on disk, so
+# the tests exercise the same parsing path the catalog walk uses.
+target_compile_definitions(unittest PRIVATE
+  FOEDAG_TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/../../tests")
 
 add_test(NAME unittest COMMAND unittest)

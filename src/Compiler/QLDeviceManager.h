@@ -71,6 +71,42 @@ class QLDeviceTarget  {
 };
 
 
+// the device package's layout-generation settings, read from its config.json:
+//   "DEVICE_TYPE": "CUSTOM"                      -- may this fabric be re-shaped at all?
+//   "DEVICE_TYPE_SETTINGS": {"LAYOUT_MODE": ...} -- how should the layout be produced?
+// two independent axes with overlapping vocabularies, normalised separately - see
+// normalizeDeviceType() / normalizeLayoutMode() in QLDeviceManager.cpp.
+class QLDeviceLayoutSettings {
+  public:
+    // config.json was found and parsed.
+    bool config_found = false;
+    // config.json exists but did not parse. Distinct from absent: absent is a
+    // pre-contract package and takes the layout-name path; corrupt must fail loudly.
+    bool config_parse_failed = false;
+    std::string config_parse_error;
+    // "DEVICE_TYPE" was present and understood. when false, 'device_type' is
+    // empty and the package predates the layout-mode contract.
+    bool device_type_present = false;
+    // "DEVICE_TYPE_SETTINGS" was present at all. Reported separately from LAYOUT_MODE,
+    // which is only one of the keys the section can carry.
+    bool device_type_settings_present = false;
+    // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" was present and understood.
+    bool layout_mode_present = false;
+    // a key carried a value we do not understand. The caller must fail rather than guess.
+    bool invalid = false;
+    // the offending key and its verbatim value, for the error message.
+    std::string invalid_key;
+    std::string invalid_value;
+    // canonical "CUSTOM" or "FIXED".
+    std::string device_type;
+    // canonical "AUTO", "CUSTOM" or "RESOURCES".
+    std::string layout_mode;
+    // the config.json this was read from, reported in errors and passed to
+    // add_layout.py as --device_config. set even when the file is absent.
+    std::filesystem::path config_json_path;
+};
+
+
 class QLDeviceManager : public QObject {
   Q_OBJECT
  public:
@@ -239,18 +275,35 @@ class QLDeviceManager : public QObject {
   // Load the device's plaintext `config.json` into `out_config_json`.
   // config.json is device data and is never encrypted.
   // Returns true on success; false if the file is absent or JSON parsing fails.
-  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json);
+  // When `out_parse_error` is supplied it distinguishes the two failures: it is
+  // set to the parser's message when the file exists but does not parse, and
+  // left untouched when the file is simply absent.
+  bool loadDeviceConfigJSON(QLDeviceTarget device_target, json& out_config_json,
+                            std::string* out_parse_error = nullptr);
 
   std::filesystem::path deviceConfigJSONPath(QLDeviceTarget device_target = QLDeviceTarget());
-  // DSP version supported by the device, derived from the "DSP_TYPE" entry in
-  // config.json. Returns "<major>_<minor>" (e.g. "DSPV2" -> "2_0",
-  // "DSPV1.1" -> "1_1"). Defaults to "1_0" (DSPV1.0) when not specified.
+  // DSP version supported by the device, from "DSP_VERSION" in config.json, or
+  // "DSP_TYPE" on packages predating that rename. Returns "<major>_<minor>"
+  // (e.g. "v4.0" -> "4_0", "DSPV2" -> "2_0"). Defaults to "1_0" when neither is set.
   std::string deviceDSPVersion(QLDeviceTarget device_target = QLDeviceTarget());
-  // Set of FPU IP capability tokens the device supports, from the "FPU_TYPE"
-  // JSON string-array in config.json (e.g. {"FPUADDSUB","FPUMULT","FPUMAC"}).
-  // Returns an empty set when the key is absent, empty, or not a string array
-  // (opt-in gating: no token => the corresponding FPU IP is unavailable).
-  std::set<std::string> deviceFPUTypes(QLDeviceTarget device_target = QLDeviceTarget());
+  // CRR (custom routing resource) version of the device, from the
+  // "CRR_VERSION" entry in config.json. Returns "<major>.<minor>"
+  // (e.g. "v2.4" -> "2.4", "v2" -> "2.0"), or an empty string when the device
+  // does not declare one.
+  std::string deviceCRRVersion(QLDeviceTarget device_target = QLDeviceTarget());
+
+  // Raw device-data version -> "<major>.<minor>": "v2.4" -> "2.4", "v2" -> "2.0",
+  // no digits -> empty. Pure, so the parsing is testable without a device on disk.
+  static std::string normalizeVersionString(const std::string& value);
+
+  // "<major>.<minor>" -> numeric parts. False, outputs untouched, on anything else.
+  static bool parseVersionString(const std::string& version, int& major, int& minor);
+  // Layout-generation settings of the device package, from "DEVICE_TYPE" and
+  // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
+  // reported as not-present (a pre-2026.3 package), an unrecognised value as
+  // invalid - never defaulted, because a wrong default here silently re-shapes
+  // a device.
+  QLDeviceLayoutSettings deviceLayoutSettings(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
@@ -271,7 +324,16 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceVPRArchitectureFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAArchitectureFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamAnnotationFile(QLDeviceTarget device_target = QLDeviceTarget());
-  std::filesystem::path deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target = QLDeviceTarget());
+  // device_only=true returns the device's own repack design constraint file,
+  // skipping the project- and TCL-directory lookups. Used when the file is
+  // wanted as a *template* to rewrite: the generated result is written into the
+  // project directory, so consulting that directory here would feed a previous
+  // run's output back in as its own template.
+  // report_missing=false suppresses the ErrorMessage when the device has no such
+  // file, for callers where it is optional.
+  std::filesystem::path deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target = QLDeviceTarget(),
+                                                                bool device_only = false,
+                                                                bool report_missing = true);
   std::filesystem::path deviceOpenFPGAFixedSimFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAFabricKeyFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamRemappingFile(QLDeviceTarget device_target = QLDeviceTarget());
