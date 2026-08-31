@@ -101,6 +101,18 @@ class QLDeviceLayoutSettings {
     std::string device_type;
     // canonical "AUTO", "CUSTOM" or "RESOURCES".
     std::string layout_mode;
+    // the fabric the package records for itself, verbatim: "DEVICE_SIZE"
+    // ("30x30" - ARRAY_X x ARRAY_Y, without the arch file's IO ring) and the
+    // resource column lists ("12,25"). Descriptive metadata, not a mode
+    // selector, so a value that does not parse is left for the reader to reject
+    // and never sets 'invalid': failing every run on a package that mis-spelled
+    // one would be far worse than whatever reads it declining to.
+    bool device_size_present = false;
+    std::string device_size;
+    bool bram_cols_present = false;
+    std::string bram_cols;
+    bool dsp_cols_present = false;
+    std::string dsp_cols;
     // the config.json this was read from, reported in errors and passed to
     // add_layout.py as --device_config. set even when the file is absent.
     std::filesystem::path config_json_path;

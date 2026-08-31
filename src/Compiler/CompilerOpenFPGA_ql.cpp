@@ -34,6 +34,7 @@
 #include <QDebug>
 #include <QDomDocument>
 #include <QFile>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QJsonArray>
 #include <QDirIterator>
@@ -3894,6 +3895,140 @@ static bool readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_
 }
 
 
+// Split a resource column list into its numbers. add_layout.py's split_cols()
+// separates on commas AND whitespace, so '12,25', '12, 25' and '12 25' all name
+// the same two columns - a comparison has to be on the numbers, never on the
+// spelling. A set, because a column list is a set of positions and not an order.
+// Returns false on anything that is not a whole number.
+static bool parseLayoutColumnList(const std::string& value, std::set<long>& out_columns) {
+
+  out_columns.clear();
+
+  std::string entry;
+  // the trailing ',' flushes the last entry without repeating the body below.
+  for(std::size_t i = 0; i <= value.size(); i++) {
+    const char c = (i < value.size()) ? value[i] : ',';
+    if((c >= '0') && (c <= '9')) {
+      entry += c;
+      // bounded so the conversion below cannot overflow; no fabric has a column
+      // index anywhere near nine digits.
+      if(entry.size() > 9) {
+        return false;
+      }
+      continue;
+    }
+    if((c != ',') && (c != ' ') && (c != '\t')) {
+      return false;
+    }
+    if(!entry.empty()) {
+      out_columns.insert(std::stol(entry));
+      entry.clear();
+    }
+  }
+
+  return true;
+}
+
+
+// One bounded whole number, for the dimension keys.
+static bool parseLayoutDimension(const std::string& value, long& out_value) {
+
+  std::set<long> numbers;
+  if(!parseLayoutColumnList(value, numbers) || (numbers.size() != 1)) {
+    return false;
+  }
+  out_value = *numbers.begin();
+  return true;
+}
+
+
+// Does the override ask for the fabric the device ALREADY HAS?
+//
+// REQ-005 refuses a re-shape that was actually requested. An override naming the
+// geometry already in the package requests nothing, and that is not a corner
+// case: the flow stamps every device it generates 'DEVICE_TYPE': 'FIXED', so on
+// the next run the very custom_layout.yml that shaped it is still beside the
+// project and lands on the gate (aurora2#2291).
+//
+// Compared in the DEVICE CONFIG's space on both sides. The yml's keys and the
+// config's keys are the same keys - add_layout.py reads 'ARRAY_X' / 'BRAM_COLS'
+// out of either and writes the architecture from them - so nothing here needs
+// the arch file's '+1' column offset or its 'width = ARRAY_X + 4' IO ring.
+//
+// EQUAL means all four values are present on both sides and match. A yml that
+// OMITS a column key is deliberately NOT equal: omitting it does not mean 'keep
+// what the device has', it resolves against add_layout.py's own module default
+// ('BRAM_COLS' = '3'), so we cannot tell whether that default is the fabric in
+// front of us - and on hard silicon the safe answer to 'cannot tell' is the
+// refusal that is already there. Same for a package that records no geometry.
+static bool customLayoutMatchesDeviceGeometry(const json& custom_layout_json,
+                                              const QLDeviceLayoutSettings& layout_settings,
+                                              std::string& out_geometry) {
+
+  if(!layout_settings.device_size_present ||
+     !layout_settings.bram_cols_present ||
+     !layout_settings.dsp_cols_present) {
+    return false;
+  }
+
+  // 'DEVICE_SIZE' is '<ARRAY_X>x<ARRAY_Y>'.
+  const QRegularExpression device_size_regex("^\\s*(\\d+)\\s*[xX]\\s*(\\d+)\\s*$");
+  const QRegularExpressionMatch device_size_match =
+      device_size_regex.match(QString::fromStdString(layout_settings.device_size));
+  if(!device_size_match.hasMatch()) {
+    return false;
+  }
+  bool array_x_ok = false;
+  bool array_y_ok = false;
+  const long device_array_x = device_size_match.captured(1).toLong(&array_x_ok);
+  const long device_array_y = device_size_match.captured(2).toLong(&array_y_ok);
+  if(!array_x_ok || !array_y_ok) {
+    return false;
+  }
+
+  const struct { const char* key; long device_value; } dimensions[] = {
+    { "ARRAY_X", device_array_x },
+    { "ARRAY_Y", device_array_y },
+  };
+  for(const auto& dimension : dimensions) {
+    if(!custom_layout_json.contains(dimension.key) ||
+       !custom_layout_json[dimension.key].is_string()) {
+      return false;
+    }
+    long requested_value = 0;
+    if(!parseLayoutDimension(custom_layout_json[dimension.key].get<std::string>(),
+                             requested_value) ||
+       (requested_value != dimension.device_value)) {
+      return false;
+    }
+  }
+
+  const struct { const char* key; const std::string* device_value; } column_keys[] = {
+    { "BRAM_COLS", &layout_settings.bram_cols },
+    { "DSP_COLS",  &layout_settings.dsp_cols  },
+  };
+  for(const auto& column_key : column_keys) {
+    if(!custom_layout_json.contains(column_key.key) ||
+       !custom_layout_json[column_key.key].is_string()) {
+      return false;
+    }
+    std::set<long> requested_columns;
+    std::set<long> device_columns;
+    if(!parseLayoutColumnList(custom_layout_json[column_key.key].get<std::string>(),
+                              requested_columns) ||
+       !parseLayoutColumnList(*column_key.device_value, device_columns) ||
+       (requested_columns != device_columns)) {
+      return false;
+    }
+  }
+
+  out_geometry = std::to_string(device_array_x) + "x" + std::to_string(device_array_y) +
+                 ", 'BRAM_COLS': '" + layout_settings.bram_cols +
+                 "', 'DSP_COLS': '" + layout_settings.dsp_cols + "'";
+  return true;
+}
+
+
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
@@ -4122,16 +4257,39 @@ bool CompilerOpenFPGA_ql::Packing() {
                      "/../custom_layout.yml': the project path could not be canonicalized.\n");
         return false;
       }
-      // FIXME(aurora2#2291): a device generated from an override is stamped FIXED, so
-      // re-running on it with that same custom_layout.yml still present lands here. Give
-      // a generated package provenance in its config.json and exempt it, rather than
-      // relaxing this guard, which real silicon depends on.
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
-        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
-                     layout_settings.config_json_path.string() +
-                     " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
-                     ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
-        return false;
+        // What REQ-005 refuses is a re-shape actually being ASKED for. A yml naming
+        // the geometry the device ALREADY HAS asks for nothing - there is no resize
+        // to refuse - and that is exactly what the flow hands itself: a generated
+        // device is stamped 'DEVICE_TYPE': 'FIXED', so on the next run the very yml
+        // that shaped it is still beside the project and lands here (aurora2#2291).
+        //
+        // So compare, and only refuse a genuine re-shape. No exemption and no
+        // provenance marker: 'DEVICE_TYPE' is plaintext in the same config.json, so
+        // anything that authenticated a "this was generated" field would be defeated
+        // by editing 'DEVICE_TYPE' instead. What matters is that the comparison
+        // cannot match by accident on real silicon, and an exact four-value match
+        // against the fabric in front of us cannot.
+        //
+        // A yml that does not parse is not a match either: we cannot tell what it
+        // asks for, so it is refused with the message below, unchanged.
+        json custom_layout_json;
+        std::string custom_layout_error;
+        std::string matched_geometry;
+        if(readCustomLayoutYML(custom_layout_yml_filepath, custom_layout_json, custom_layout_error) &&
+           customLayoutMatchesDeviceGeometry(custom_layout_json, layout_settings, matched_geometry)) {
+          Message("[WARNING] Device '" + source_devicename + "' already has the geometry " +
+                  custom_layout_yml_filepath.string() + " asks for (" + matched_geometry +
+                  "), so no re-shape was requested. The override is ignored and the device "
+                  "is used as it ships.\n");
+        }
+        else {
+          ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                       layout_settings.config_json_path.string() +
+                       " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
+                       ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
+          return false;
+        }
       }
       // nothing asked for a re-shape: a fixed device runs the normal flow.
     }

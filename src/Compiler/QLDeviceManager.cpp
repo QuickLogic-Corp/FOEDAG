@@ -4220,6 +4220,36 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
     }
   }
 
+  // the geometry the package records for itself. Read last and never fatally:
+  // these keys describe the fabric, they do not select a code path, so a package
+  // that spells one oddly must still run.
+  struct GeometryKey {
+    const char* name;
+    bool* present;
+    std::string* value;
+  };
+  const GeometryKey geometry_keys[] = {
+    { "DEVICE_SIZE", &layout_settings.device_size_present, &layout_settings.device_size },
+    { "BRAM_COLS",   &layout_settings.bram_cols_present,   &layout_settings.bram_cols   },
+    { "DSP_COLS",    &layout_settings.dsp_cols_present,    &layout_settings.dsp_cols    },
+  };
+  for( const GeometryKey& geometry_key : geometry_keys ) {
+    if( !device_target_config_json.contains(geometry_key.name) ) {
+      continue;
+    }
+    const auto& geometry_value = device_target_config_json[geometry_key.name];
+    // the contract spells these as strings ("BRAM_COLS": "12,25"), but a
+    // single-column package hand-edited to a bare 3 means the same thing.
+    if( geometry_value.is_string() ) {
+      *geometry_key.value = geometry_value.get<std::string>();
+      *geometry_key.present = true;
+    }
+    else if( geometry_value.is_number_unsigned() ) {
+      *geometry_key.value = std::to_string(geometry_value.get<unsigned long long>());
+      *geometry_key.present = true;
+    }
+  }
+
   return layout_settings;
 }
 
