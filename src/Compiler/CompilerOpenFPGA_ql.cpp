@@ -3611,7 +3611,8 @@ static bool resolveCustomLayoutYMLPath(const std::filesystem::path& project_path
 // so a key let through misspelled does not fail the run - it quietly builds a
 // 12x10 fabric instead of the one that was asked for, with no diagnostic
 // anywhere. An unknown key, a repeated key, a missing dimension or a value that
-// is not a whole number is therefore an error naming the key and the line.
+// is not a whole number - or, for the column keys, a comma-separated list of
+// whole numbers - is therefore an error naming the key and the line.
 static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_filepath,
                                 json& out_custom_layout_json,
                                 std::string& out_error) {
@@ -3619,16 +3620,20 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
   // The keys the CUSTOM section of the device config contract defines, with the
   // smallest value each accepts. ARRAY_X/ARRAY_Y size the fabric, so they must
   // be present; the column counts may legitimately be zero and may be omitted.
+  // A column key names one column per entry, so it also takes a comma-separated
+  // list: every device beyond the 8x6 seed shapes has BRAM and DSP in more than
+  // one column.
   struct CustomLayoutKey {
     const char* name;
     long minimum;
     bool required;
+    bool list_valued;
   };
   static const CustomLayoutKey custom_layout_keys[] = {
-    { "ARRAY_X",   1, true  },
-    { "ARRAY_Y",   1, true  },
-    { "BRAM_COLS", 0, false },
-    { "DSP_COLS",  0, false },
+    { "ARRAY_X",   1, true,  false },
+    { "ARRAY_Y",   1, true,  false },
+    { "BRAM_COLS", 0, false, true  },
+    { "DSP_COLS",  0, false, true  },
   };
   const std::size_t custom_layout_key_count =
       sizeof(custom_layout_keys) / sizeof(custom_layout_keys[0]);
@@ -3737,33 +3742,54 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
       return false;
     }
 
-    // Strictly a decimal integer. '-8', '8.5', 'null' and '[4, 8]' must not
-    // reach the script, which either aborts in int() or mis-sizes the fabric.
-    bool digits_only = !value.empty();
-    for(char c : value) {
-      if(c < '0' || c > '9') {
-        digits_only = false;
+    // Strictly a decimal integer - once for a dimension, once per element for a
+    // column list. '-8', '8.5', 'null' and '[4, 8]' must not reach the script,
+    // which either aborts in int() or mis-sizes the fabric, and neither must a
+    // hole in the list ('12,' or '12,,25'), which int() fails on the same way.
+    std::size_t element_start = 0;
+    while(element_start <= value.size()) {
+      const std::size_t separator_pos =
+          known_key->list_valued ? value.find(',', element_start) : std::string::npos;
+      const std::string element = (separator_pos == std::string::npos)
+                                      ? value.substr(element_start)
+                                      : value.substr(element_start, separator_pos - element_start);
+
+      if(element.empty()) {
+        out_error = "has an empty entry in '" + key + "' = '" + value + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      bool digits_only = true;
+      for(char c : element) {
+        if(c < '0' || c > '9') {
+          digits_only = false;
+          break;
+        }
+      }
+      if(!digits_only) {
+        out_error = "has a non-integer value '" + element + "' for '" + key + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      // bounded so the conversion below cannot overflow; no fabric dimension or
+      // column index comes anywhere near nine digits.
+      if(element.size() > 9) {
+        out_error = "has an out-of-range value '" + element + "' for '" + key + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      const long numeric_value = std::stol(element);
+      if(numeric_value < known_key->minimum) {
+        out_error = "has '" + key + "' = " + element + ", below the minimum of " +
+                    std::to_string(known_key->minimum) + " (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+
+      if(separator_pos == std::string::npos) {
         break;
       }
-    }
-    if(!digits_only) {
-      out_error = "has a non-integer value '" + value + "' for '" + key + "' (line " +
-                  std::to_string(line_number) + ")";
-      return false;
-    }
-    // bounded so the conversion below cannot overflow; no fabric dimension comes
-    // anywhere near nine digits.
-    if(value.size() > 9) {
-      out_error = "has an out-of-range value '" + value + "' for '" + key + "' (line " +
-                  std::to_string(line_number) + ")";
-      return false;
-    }
-    const long numeric_value = std::stol(value);
-    if(numeric_value < known_key->minimum) {
-      out_error = "has '" + key + "' = " + value + ", below the minimum of " +
-                  std::to_string(known_key->minimum) + " (line " +
-                  std::to_string(line_number) + ")";
-      return false;
+      element_start = separator_pos + 1;
     }
 
     // kept as a string: that is how the config contract spells the CUSTOM
