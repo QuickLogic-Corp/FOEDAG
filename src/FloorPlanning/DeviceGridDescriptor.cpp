@@ -31,33 +31,63 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
     }
     const QJsonObject config = doc.object();
 
-    auto stringValue = [&](const QString& key, QString& out) -> bool {
-        const QJsonValue value = config.value(key);
+    auto stringValue = [&](const QJsonObject& object, const QString& key,
+                           const QString& where, QString& out) -> bool {
+        const QJsonValue value = object.value(key);
         if (!value.isString()) {
-            m_error = QString("`%1` string key not found in config.json").arg(key);
+            m_error = QString("`%1` string key not found in %2").arg(key, where);
             return false;
         }
         out = value.toString();
         return true;
     };
 
-    QString deviceSizeStr;
+    // A resizable device (`DEVICE_TYPE: CUSTOM`) states its geometry under
+    // DEVICE_TYPE_SETTINGS.CUSTOM, and that block is what a per-layout
+    // config.json carries. The flat keys are the older spelling and still the
+    // only one on 22 of device_data's 24 devices, so they stay the fallback
+    // until every device carries a CUSTOM block. This mirrors
+    // get_core_dimensions() in generate_floorplanning.py -- the widget and the
+    // constraints it produces must be sized off the same block.
+    const QJsonObject deviceTypeSettings =
+        config.value("DEVICE_TYPE_SETTINGS").toObject();
+    const bool hasCustom = deviceTypeSettings.contains("CUSTOM");
+    const QJsonObject custom = deviceTypeSettings.value("CUSTOM").toObject();
+    const QString customWhere = "`DEVICE_TYPE_SETTINGS.CUSTOM`";
+
     QString dspSizeStr;
     QString bramSizeStr;
     QString dspColsStr;
     QString bramColsStr;
-    if (!stringValue("DEVICE_SIZE", deviceSizeStr)) return false;
-    if (!stringValue("DSP_SIZE", dspSizeStr)) return false;
-    if (!stringValue("BRAM_SIZE", bramSizeStr)) return false;
-    if (!stringValue("DSP_COLS", dspColsStr)) return false;
-    if (!stringValue("BRAM_COLS", bramColsStr)) return false;
+    std::optional<QSize> coreSize;
 
-    // DEVICE_SIZE is the core grid; the displayed grid wraps it with one IO
-    // ring on each side.
-    const std::optional<QSize> coreSize = parseSize(deviceSizeStr);
+    if (hasCustom) {
+        // Present but incomplete is malformed, not old: report the key rather
+        // than falling back to a stale DEVICE_SIZE.
+        QString arrayX;
+        QString arrayY;
+        if (!stringValue(custom, "ARRAY_X", customWhere, arrayX)) return false;
+        if (!stringValue(custom, "ARRAY_Y", customWhere, arrayY)) return false;
+        if (!stringValue(custom, "DSP_COLS", customWhere, dspColsStr)) return false;
+        if (!stringValue(custom, "BRAM_COLS", customWhere, bramColsStr)) return false;
+        coreSize = parseSize(arrayX + "x" + arrayY);
+    } else {
+        QString deviceSizeStr;
+        if (!stringValue(config, "DEVICE_SIZE", "config.json", deviceSizeStr)) return false;
+        if (!stringValue(config, "DSP_COLS", "config.json", dspColsStr)) return false;
+        if (!stringValue(config, "BRAM_COLS", "config.json", bramColsStr)) return false;
+        coreSize = parseSize(deviceSizeStr);
+    }
     if (!coreSize) {
         return false;
     }
+
+    // Tile sizes are a property of the tile, not of the layout, so they stay
+    // top-level whichever spelling supplied the core size.
+    if (!stringValue(config, "DSP_SIZE", "config.json", dspSizeStr)) return false;
+    if (!stringValue(config, "BRAM_SIZE", "config.json", bramSizeStr)) return false;
+
+    // The core grid; the displayed grid wraps it with one IO ring on each side.
     // Add the IO border on each side (low + core + high).
     m_columns = kBorder + coreSize->width() + kBorder;
     m_rows = kBorder + coreSize->height() + kBorder;

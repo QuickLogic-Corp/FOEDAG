@@ -38,7 +38,6 @@ namespace {
 // off each side:
 //   DEVICE_SIZE  = (gridW - 2*p) x (gridH - 2*p),  p = kIoOffset + kIoSize
 //   <col in cfg> = grid column - (p - 1)     (1-based core column)
-// Per layout values arrive with the LAYOUTS map of openphy-turnkey-flow#1968.
 constexpr int kIoSize = 1;
 constexpr int kIoOffset = 1;
 
