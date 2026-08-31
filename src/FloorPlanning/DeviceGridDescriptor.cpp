@@ -24,9 +24,10 @@ constexpr auto kBramSize = "BRAM_SIZE";
 constexpr auto kDspCols = "DSP_COLS";
 constexpr auto kBramCols = "BRAM_COLS";
 
-// Where a key was looked for, for the error message.
+// Where a key was looked for, for the error message. Plain prose: the message
+// format quotes the key, not the place.
 constexpr auto kInConfigJson = "config.json";
-constexpr auto kInCustomBlock = "`DEVICE_TYPE_SETTINGS.CUSTOM`";
+constexpr auto kInCustomBlock = "DEVICE_TYPE_SETTINGS.CUSTOM";
 
 }  // namespace
 
@@ -109,7 +110,7 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
         if (!stringValue(custom, kDspCols, kInCustomBlock, dspColsStr)) return false;
         if (!stringValue(custom, kBramCols, kInCustomBlock, bramColsStr)) return false;
         coreSize = parseSize(arrayX + "x" + arrayY,
-                             QString("%1`/`%2").arg(kArrayX, kArrayY));
+                             QString("%1/%2").arg(kArrayX, kArrayY));
     } else {
         QString deviceSizeStr;
         if (!stringValue(config, kDeviceSize, kInConfigJson, deviceSizeStr)) return false;
