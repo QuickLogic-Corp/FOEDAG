@@ -29,18 +29,36 @@ namespace {
 // The VPR device grid wraps the device core with an IO ring, and its thickness
 // is not fixed: 2 cells per side on every device but EVAL-2024Q1-MULTI, where
 // it is 1. It is therefore read from the vpr report's FLOORPLAN_IO_BOUNDS
-// line, never assumed. config.json is in core coordinates, derived from the
-// perimeter rather than from a ring constant:
+// line whenever that line is there, and only assumed by the fallback below.
+// config.json is in core coordinates, derived from the perimeter rather than
+// from a ring constant:
 //   DEVICE_SIZE  = (ioRight - ioLeft - 1) x (ioTop - ioBottom - 1)
 //   <col in cfg> = grid column - ioLeft        (1-based core column)
 // See aurora2 issue #2283.
 
+// --- BEGIN IO_RINGS fallback (aurora2 #2283) --------------------------------
+// No device config.json carries the four IO_* keys yet, and a vpr older than
+// hotfix-vpr-floorplan-resources prints no FLOORPLAN_IO_BOUNDS line. Until
+// both land, either gap falls back to assuming a uniform ring of this
+// thickness -- right for every device except EVAL-2024Q1-MULTI, whose ring is
+// 1. Undefine the macro to make the keys and the vpr line mandatory again; the
+// two `#ifdef FLOORPLAN_IO_RINGS` blocks below are then dead and can go.
+#define FLOORPLAN_IO_RINGS 2
+// --- END IO_RINGS fallback --------------------------------------------------
+
 // The keys DeviceGridDescriptor / generate_floorplanning need.
 const std::vector<std::string>& requiredKeys() {
+#ifdef FLOORPLAN_IO_RINGS
+  // Without the IO_* keys generate_floorplanning.py assumes the same ring, so
+  // an otherwise valid config.json is used as-is rather than sent to vpr.
+  static const std::vector<std::string> keys = {
+      "DEVICE_SIZE", "DSP_COLS", "BRAM_COLS", "DSP_SIZE", "BRAM_SIZE"};
+#else
   static const std::vector<std::string> keys = {
       "DEVICE_SIZE", "DSP_COLS",  "BRAM_COLS", "DSP_SIZE",
       "BRAM_SIZE",   "IO_BOTTOM", "IO_LEFT",   "IO_TOP",
       "IO_RIGHT"};
+#endif
   return keys;
 }
 
@@ -216,12 +234,23 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
     return {};
   }
   if (!haveIoBounds) {
+#ifdef FLOORPLAN_IO_RINGS
+    ioBottom = ioLeft = FLOORPLAN_IO_RINGS - 1;
+    ioTop = gridH - FLOORPLAN_IO_RINGS;
+    ioRight = gridW - FLOORPLAN_IO_RINGS;
+    compiler->Message(
+        "Floorplanning: vpr reported no FLOORPLAN_IO_BOUNDS (stale "
+        "hotfix-vpr-floorplan-resources?); assuming a " +
+        std::to_string(FLOORPLAN_IO_RINGS) +
+        "-cell IO ring. Wrong on a ring-1 device such as EVAL-2024Q1-MULTI.");
+#else
     // Guessing a 2-cell ring here would put every IO constraint one cell
     // inside the real perimeter on a ring-1 device, silently. Fail instead.
     error =
         "vpr resource report has no FLOORPLAN_IO_BOUNDS line (stale "
         "hotfix-vpr-floorplan-resources?); the IO perimeter cannot be guessed";
     return {};
+#endif
   }
 
   // Convert raw grid coordinates into config (core) coordinates. The core
