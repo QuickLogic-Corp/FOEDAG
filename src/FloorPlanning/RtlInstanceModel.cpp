@@ -238,6 +238,22 @@ bool RtlInstanceModel::isTop(const std::string& path) const
     return instance->isTop || (!m_top.empty() && path == m_top);
 }
 
+std::string RtlInstanceModel::topInstance() const
+{
+    // Same precedence as isTop(), expressed once: the document's own answer wins, including
+    // its answer that there is none, and only an older file falls back to "top".
+    if (m_hasTopInstance) {
+        return (!m_topInstance.empty() && find(m_topInstance) != nullptr) ? m_topInstance
+                                                                         : std::string{};
+    }
+    for (const RtlInstance& instance : m_instances) {
+        if (instance.isTop) {
+            return instance.path;
+        }
+    }
+    return (!m_top.empty() && find(m_top) != nullptr) ? m_top : std::string{};
+}
+
 bool RtlInstanceModel::isInstanceOrAncestor(const std::string& path) const
 {
     if (m_byPath.find(path) != m_byPath.end()) {

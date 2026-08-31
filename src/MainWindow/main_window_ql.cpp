@@ -2429,6 +2429,12 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   for (const fp::RtlInstance& instance : rtlModel.instances()) {
     paths.insert(instance.path);
   }
+  // [aurora2#1725 stage P1] Root the tree at the top module. Before loadNetList(), which is
+  // what builds it. Without this the top is just another top-level row sitting BESIDE
+  // "dut"/"core" -- the same design drawn one way on a flat design (where the top is the
+  // only row, so it reads as the root) and another way on a hierarchical one. Empty on an
+  // instances.json with no top entry, which leaves the tree exactly as it was.
+  m_floorPlanningWidget->setTopInstance(rtlModel.topInstance());
   m_floorPlanningWidget->loadNetList(paths);
 
   // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,

@@ -539,6 +539,134 @@ TEST(RtlInstanceModel, TopIsRecognisedInAFileWrittenBeforeTopInstanceExisted)
     EXPECT_TRUE(model.isTop("counter"));          // and the "top" field still answers
 }
 
+// [aurora2#1725 stage P1] The tree's SHAPE, which must not follow from its PATHS.
+//
+// The top module is the root and everything hangs under it, so a hierarchical design is not
+// drawn differently from a flat one. But an instance's path stays unprefixed -- "core", never
+// "top.core" -- because that string is matched against netlist atom names, partitions and the
+// .qdc, and flatten writes no top prefix into any of them.
+namespace {
+
+// Mirrors kRtlPathRole in SynthResourceHierarchyWidget.cpp. Kept in step by the assertions
+// below: if the constant there moves, the path checks fail rather than silently pass on an
+// unset role.
+constexpr int kRtlPathRoleForTest = Qt::UserRole + 104;
+
+QStandardItem* childNamed(QStandardItem* parent, const QString& text)
+{
+    for (int row = 0; row < parent->rowCount(); ++row) {
+        QStandardItem* child = parent->child(row, 0);
+        if (child && child->text() == text) return child;
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+TEST(SynthResourceHierarchyTree, TopModuleIsTheRootAndChildrenKeepUnprefixedPaths)
+{
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.build(fp::NaturalStringSet{"top", "core", "core.u_mem", "core.u_mul0"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    QStandardItem* invisible = model->invisibleRootItem();
+
+    // Exactly one root row, and it is the top module -- not the top sitting BESIDE "core".
+    ASSERT_EQ(invisible->rowCount(), 1);
+    QStandardItem* topItem = invisible->child(0, 0);
+    ASSERT_NE(topItem, nullptr);
+    EXPECT_EQ(topItem->text(), QString("top"));
+
+    // "core" hangs under it rather than beside it.
+    QStandardItem* coreItem = childNamed(topItem, "core");
+    ASSERT_NE(coreItem, nullptr) << "core must be nested under the top module";
+    EXPECT_NE(childNamed(coreItem, "u_mem"), nullptr);
+    EXPECT_NE(childNamed(coreItem, "u_mul0"), nullptr);
+
+    // The load-bearing part: nesting must NOT have renamed anything. A path rebuilt by
+    // walking the tree would read "top.core" / "top.core.u_mem", which matches no atom, no
+    // partition and no .qdc line.
+    EXPECT_EQ(topItem->data(kRtlPathRoleForTest).toString(), QString("top"));
+    EXPECT_EQ(coreItem->data(kRtlPathRoleForTest).toString(), QString("core"));
+    EXPECT_EQ(childNamed(coreItem, "u_mem")->data(kRtlPathRoleForTest).toString(),
+              QString("core.u_mem"));
+}
+
+TEST(SynthResourceHierarchyTree, FlatDesignShowsTheTopAsItsOnlyRow)
+{
+    // The case the whole feature exists for, and the reason the tree is rooted at all: a
+    // single-module design must read the same way as a hierarchical one, just with nothing
+    // beneath the root.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("flat_top");
+    widget.build(fp::NaturalStringSet{"flat_top"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    ASSERT_EQ(model->invisibleRootItem()->rowCount(), 1);
+    EXPECT_EQ(model->invisibleRootItem()->child(0, 0)->text(), QString("flat_top"));
+}
+
+TEST(SynthResourceHierarchyTree, NoTopInstanceLeavesTheTreeUnrooted)
+{
+    // An older instances.json has no top entry. Inventing a root for it would put a name in
+    // the tree that no instance backs, so the previous flat-roots shape is kept instead.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("");
+    widget.build(fp::NaturalStringSet{"dut", "dut.memSys"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    ASSERT_EQ(model->invisibleRootItem()->rowCount(), 1);
+    EXPECT_EQ(model->invisibleRootItem()->child(0, 0)->text(), QString("dut"));
+}
+
+TEST(SynthResourceHierarchyTree, ATopNotInTheElementSetDoesNotBecomeAPhantomRow)
+{
+    // Rooting at a name the element set does not contain would add a row no instance backs.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("not_present");
+    widget.build(fp::NaturalStringSet{"dut", "dut.memSys"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    ASSERT_EQ(model->invisibleRootItem()->rowCount(), 1);
+    EXPECT_EQ(model->invisibleRootItem()->child(0, 0)->text(), QString("dut"));
+}
+
+TEST(RtlInstanceModel, TopInstanceNamesTheRootThePanelRootsItsTreeAt)
+{
+    // The panel roots the hierarchy tree at this entry, so that a hierarchical design does
+    // not show the top BESIDE "dut"/"core" as just another top-level row.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_topinst";
+    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    EXPECT_EQ(model.topInstance(), "fpu_single");
+}
+
+TEST(RtlInstanceModel, TopInstanceIsEmptyWhenThereIsNoTopEntry)
+{
+    // "top_instance": null means P0b decided there is no whole-design entry. The panel must
+    // read that as "no root to hang the tree from" and leave the shape alone, rather than
+    // rooting it at an ordinary instance that merely shares the top module's name.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_notopinst";
+    const auto path = writeTempJson(dir, "instances.json", R"JSON({
+      "top": "counter",
+      "top_instance": null,
+      "instances": [
+        { "path": "counter", "component": "sub", "src": "wrapper.v:8.3-8.12" }
+      ]
+    })JSON");
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    EXPECT_TRUE(model.topInstance().empty());
+}
+
 TEST(RtlInstanceModel, AnInstanceNamedAfterTheTopModuleIsNotTreatedAsTheTop)
 {
     // Instance names and module names are separate namespaces, so a top-level cell can be

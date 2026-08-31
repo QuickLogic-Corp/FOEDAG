@@ -59,6 +59,12 @@ public:
     }
     void build(const NaturalStringSet& elements);
 
+    // [aurora2#1725] The top module's path, which build() makes the root of the tree. Must
+    // be set BEFORE build(): addPath() reads it as it creates each item. Empty means "no
+    // top entry" -- an older instances.json -- and the tree keeps its previous flat-roots
+    // shape rather than inventing a root.
+    void setTopInstance(const std::string& path) { m_topInstance = path; }
+
     // [aurora2#1725 stage P3] Populates the "Atom List" and "Type" columns: RTL path ->
     // the atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
@@ -121,6 +127,7 @@ private:
     // atomsets.json legitimately found no atoms), a leaf with no entry is a real
     // "optimised away" case and gets hidden. Distinguishing these is why this isn't
     // just an empty-map check.
+    std::string m_topInstance;
     bool m_hasAtomNames = false;
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
     AtomResourceMap m_atomResources;

@@ -34,6 +34,9 @@ public:
 
     void loadNetList(const NaturalStringSet& elements);
 
+    // [aurora2#1725] Root both trees at the top module. Must precede loadNetList().
+    void setTopInstance(const std::string& path);
+
     // [aurora2#1725 stage P3] Feeds the "Atom List"/"Type" columns: RTL path -> the
     // atom names it covers, from atomsets.json.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);

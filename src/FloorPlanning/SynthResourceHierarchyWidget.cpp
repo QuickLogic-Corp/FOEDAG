@@ -49,6 +49,14 @@ static constexpr int kBusBitRole = Qt::UserRole + 101;
 
 // [aurora2#1725 stage P7] The Why cell's popup text and window title. Held on the item so
 // the click handler needs no parallel lookup table keyed by row.
+// [aurora2#1725] The item's RTL instance path, verbatim. The tree's SHAPE no longer implies
+// it: the top module is the root, and its children keep their own unprefixed paths
+// ("core", never "top.core") because those strings have to stay byte-identical to what
+// flatten writes into the netlist atom names -- they are what gets matched against
+// partitions, atom sets and the .qdc. So the path is carried on the item rather than
+// rebuilt by walking ancestry.
+static constexpr int kRtlPathRole = Qt::UserRole + 104;
+
 static constexpr int kExplanationRole = Qt::UserRole + 102;
 static constexpr int kExplanationTitleRole = Qt::UserRole + 103;
 
@@ -145,6 +153,13 @@ void showExplanationDialog(QWidget* parent, const QString& title, const QString&
 // Bus-bit items concatenate directly; regular items are joined with ".".
 std::string buildChildPath(const std::string& prefix, const QStandardItem* item) {
     if (!item) return prefix;
+    // The item states its own path when addPath() gave it one. Authoritative, because the
+    // ancestry join below cannot express a tree whose shape differs from its paths -- which
+    // is exactly what rooting everything under the top module does.
+    const QVariant stored = item->data(kRtlPathRole);
+    if (stored.isValid() && !stored.toString().isEmpty()) {
+        return stored.toString().toStdString();
+    }
     const std::string name = item->text().toStdString();
     if (item->data(kBusBitRole).toBool())
         return prefix + name;          // "din" + "[0]"  → "din[0]"
@@ -408,6 +423,15 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     // Sits immediately right of the name, where the icon it explains is. Logical order is
     // untouched, so every Column:: index elsewhere still addresses the same cell.
     header->moveSection(header->visualIndex(Column::Why), 1);
+
+    // A root the element set does not actually contain would be a phantom row: a name in
+    // the tree that no instance backs, that nothing can be checked under, and that no
+    // partition could ever name. Better to fall back to the flat-roots shape than to invent
+    // one. Normally present -- P0b puts the top in instances.json and loadNetList() passes
+    // the whole set -- so this only bites a caller that built a subset.
+    if (!m_topInstance.empty() && elements.find(m_topInstance) == elements.end()) {
+        m_topInstance.clear();
+    }
 
     QSignalBlocker blocker(m_model); // prevent itemChanged spam
     for (const std::string& element: elements) {
@@ -748,12 +772,38 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
 
     QStandardItem* root = m_model->invisibleRootItem();
     QStandardItem* parent = root;
-    for (const QString& part : parts)
+
+    // [aurora2#1725] The top module is the ROOT: every other instance hangs beneath it, so
+    // the tree reads the same on a flat design (where the top is all there is) and on a
+    // hierarchical one (where it used to sit BESIDE "dut"/"core" as just another top-level
+    // row, which is the same design shown two different ways).
+    //
+    // Only the SHAPE changes. Paths are untouched -- "core" is still "core", never
+    // "top.core" -- because a path is matched against netlist atom names, partitions and
+    // the .qdc, and flatten never writes a top prefix into any of them. That is why each
+    // item carries kRtlPathRole and buildChildPath() reads it instead of joining ancestry.
+    const bool underTop = !m_topInstance.empty() && dottedPath != m_topInstance;
+    if (underTop) {
+        parent = findOrCreateChild(root, QString::fromStdString(m_topInstance));
+        // Set here as well as on its own addPath(): elements are visited in sorted order, so
+        // a child can create the top's item before the top's own entry is reached.
+        parent->setData(QString::fromStdString(m_topInstance), kRtlPathRole);
+    }
+
+    // The path each item stands for, accumulated from the PATH rather than from the tree,
+    // so the top's item does not contribute a component to its children.
+    QString walked;
+    for (const QString& part : parts) {
+        walked = walked.isEmpty() ? part : (walked + "." + part);
         parent = findOrCreateChild(parent, part);
+        parent->setData(walked, kRtlPathRole);
+    }
 
     if (lastIsBusBit) {
         QStandardItem* bitItem = findOrCreateChild(parent, busBit);
         bitItem->setData(true, kBusBitRole);
+        // A bus bit appends without a dot: "din" + "[0]" -> "din[0]".
+        bitItem->setData(walked + busBit, kRtlPathRole);
         // Also register the bus parent path for filtering/completion
         m_rawElements.insert(parts.join('.').toStdString());
     }
@@ -1343,8 +1393,11 @@ void SynthResourceHierarchyWidget::showFilteredItems(const std::string& pattern)
         }
 
         const bool isRoot = (item == m_model->invisibleRootItem());
-        const std::string name = item->text().toStdString();
-        const std::string itemPath = prefix.empty() ? name : (prefix + "." + name);
+        // buildChildPath(), not a join of the ancestry: the top module's item is the tree's
+        // root but contributes NO component to its children's paths ("core", not
+        // "top.core"), so a join would build names that are in no m_rawElements entry and
+        // the filter would hide every row on a hierarchical design.
+        const std::string itemPath = buildChildPath(prefix, item);
 
         bool anyChildVisible = false;
 

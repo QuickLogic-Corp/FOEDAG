@@ -473,6 +473,14 @@ void FloorPlanningWidget::loadQdc()
     updateSaveQdcButtonEnability();
 }
 
+void FloorPlanningWidget::setTopInstance(const std::string& path)
+{
+    // Both trees, or the partition tree would still show the design as a set of sibling
+    // roots while the hierarchy tree showed it rooted.
+    m_synthResourcesWidget->setTopInstance(path);
+    m_partitionResourcesWidget->setTopInstance(path);
+}
+
 void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
 {
     m_synthResourcesWidget->build(elements);

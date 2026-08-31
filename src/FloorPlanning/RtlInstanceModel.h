@@ -83,6 +83,10 @@ public:
     // Falls back to "top" only for an instances.json written before "top_instance" existed,
     // where it is the sole available answer.
     bool isTop(const std::string& path) const;
+
+    // The path of the entry that IS the top, or empty when the tree has none. The panel
+    // roots its tree at this one, so it needs the name rather than a per-path predicate.
+    std::string topInstance() const;
     const std::string& error() const { return m_error; }
 
     const std::vector<RtlInstance>& instances() const { return m_instances; }
