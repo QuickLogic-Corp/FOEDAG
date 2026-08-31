@@ -4936,6 +4936,27 @@ bool CompilerOpenFPGA_ql::Packing() {
           "vpr.xml.en";
       FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
 
+      // Step 1 copied the source corner wholesale, so its plaintext vpr.xml is still
+      // beside the vpr.xml.en just written. Device discovery globs 'vpr\.xml.*' and
+      // refuses a device carrying more VPR XMLs than OpenFPGA XMLs
+      // (QLDeviceManager.cpp:1262), so leaving both makes every generated device
+      // unselectable as a target: "Mismatched number of VPR XML(s) w.r.t OPENFPGA
+      // XML(s)". Only drop it once the encrypted arch is actually in place.
+      if(FileUtils::FileExists(target_device_vpr_xml_filepath)) {
+        std::filesystem::path stale_source_vpr_xml =
+            target_device_vpr_xml_filepath.parent_path() / "vpr.xml";
+        if(FileUtils::FileExists(stale_source_vpr_xml)) {
+          std::error_code stale_remove_ec;
+          std::filesystem::remove(stale_source_vpr_xml, stale_remove_ec);
+          if(stale_remove_ec) {
+            ErrorMessage("Could not remove the source arch left in the generated device: " +
+                         stale_source_vpr_xml.string() + " (" + stale_remove_ec.message() +
+                         "). The device would not resolve as a target.\n");
+            return false;
+          }
+        }
+      }
+
 #if GENERATE_RR_GRAPH_FPGA_AUTO
       // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
       std::filesystem::path target_device_rr_graph_filepath =
