@@ -51,6 +51,8 @@ public:
 
 private:
     QString m_error;
+    // Path of the parsed config.json, so validateFit() can name it too.
+    QString m_configPath;
     int m_columns = -1;
     int m_rows = -1;
     std::set<int> m_dspColumns;

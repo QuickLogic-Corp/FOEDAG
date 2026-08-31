@@ -22,7 +22,8 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
 
     // Every failure below names the file, and the key when there is one: this
     // string is what the user is shown when floorplanning refuses to start.
-    const QString configPath = QString::fromStdString(deviceConfigFile.string());
+    m_configPath = QString::fromStdString(deviceConfigFile.string());
+    const QString& configPath = m_configPath;
 
     bool readOk = false;
     const QByteArray content = QByteArray::fromStdString(
@@ -180,25 +181,25 @@ bool DeviceGridDescriptor::validateFit()
 
     const int nonIoRows = m_rows - 2*ioRow;
     if (nonIoRows <= 0) {
-        m_error = "number of effective clbs cannot be less than or equal to 0";
+        m_error = QString("%1: number of effective clbs cannot be less than or equal to 0").arg(m_configPath);
         return false;
     }
 
     if (m_dspSize.height() <= 0) {
-        m_error = "dsp height cannot be less than or equal to 0";
+        m_error = QString("%1: dsp height cannot be less than or equal to 0").arg(m_configPath);
         return false;
     }
     if (m_bramSize.height() <= 0) {
-        m_error = "bram height cannot be less than or equal to 0";
+        m_error = QString("%1: bram height cannot be less than or equal to 0").arg(m_configPath);
         return false;
     }
 
     if (nonIoRows % m_dspSize.height() != 0) {
-        m_error = "cannot fit required number of dsp blocks into a column";
+        m_error = QString("%1: cannot fit required number of dsp blocks into a column").arg(m_configPath);
         return false;
     }
     if (nonIoRows % m_bramSize.height() != 0) {
-        m_error = "cannot fit required number of bram blocks into a column";
+        m_error = QString("%1: cannot fit required number of bram blocks into a column").arg(m_configPath);
         return false;
     }
 
