@@ -22,6 +22,8 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
     m_instances.clear();
     m_byPath.clear();
     m_top.clear();
+    m_topInstance.clear();
+    m_hasTopInstance = false;
     m_error.clear();
 
     if (!std::filesystem::exists(path)) {
@@ -45,6 +47,14 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
     }
 
     m_top = doc.value("top", std::string{});
+    // Present since P0b began emitting a root entry; null when it deliberately did not (see
+    // isTop()). Absent entirely on an older file, which m_hasTopInstance distinguishes from
+    // an explicit null -- the two must not be treated alike, since one means "ask the
+    // fallback" and the other means "there is no top entry".
+    m_hasTopInstance = doc.contains("top_instance");
+    if (m_hasTopInstance && doc["top_instance"].is_string()) {
+        m_topInstance = doc["top_instance"].get<std::string>();
+    }
 
     for (const auto& entry : doc["instances"]) {
         if (!entry.contains("path")) {
@@ -65,6 +75,10 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
         // last_status is carried forward by P0b from the previous run, so the panel can show
         // a sensible state before validation has run again.
         instance.status = entry.value("last_status", std::string{"unknown"});
+        // [aurora2#1725 stage P0b] The root entry holding the whole design. Flagged by
+        // P0b rather than inferred here: "no dot in the path" is true of every top-level
+        // instance too, so the shape of the path cannot tell them apart.
+        instance.isTop = entry.value("is_top", false);
         m_instances.push_back(std::move(instance));
     }
 
@@ -208,6 +222,20 @@ const RtlInstance* RtlInstanceModel::find(const std::string& path) const
 {
     const auto found = m_byPath.find(path);
     return found == m_byPath.end() ? nullptr : &m_instances[found->second];
+}
+
+bool RtlInstanceModel::isTop(const std::string& path) const
+{
+    const RtlInstance* instance = find(path);
+    if (instance == nullptr) {
+        return false;
+    }
+    if (m_hasTopInstance) {
+        // The file states the answer, including stating that there is none.
+        return !m_topInstance.empty() && path == m_topInstance;
+    }
+    // Older file: is_top is absent too, so "top" is all there is to go on.
+    return instance->isTop || (!m_top.empty() && path == m_top);
 }
 
 bool RtlInstanceModel::isInstanceOrAncestor(const std::string& path) const

@@ -27,6 +27,15 @@ struct RtlInstance {
     std::string src;           // instantiation site, "fpu_single.vhd:225.2-225.10"
     std::string componentSrc;  // entity declaration, "mul_24.vhd:52.8-52.14"
 
+    // [aurora2#1725 stage P0b] The top module's own entry -- the root, holding the whole
+    // design. Its path does NOT prefix its children's ("i_mul_24", never
+    // "fpu_single.i_mul_24"): child paths have to stay byte-identical to what flatten
+    // writes into the netlist atom names. So the top is a dot-less sibling of the other
+    // roots that nests over them implicitly, and this flag -- not the shape of the path --
+    // is what identifies it. Stage P5 must expand a region on it to "*", because no atom
+    // name carries a "<top>." prefix for "<top>.*" to match.
+    bool isTop = false;
+
     // From stage P4 when validation.json was merged; "unknown" until then. An unknown
     // status must never be presented as usable -- absence of a verdict is not a pass.
     std::string status = "unknown";
@@ -62,6 +71,18 @@ public:
     bool empty() const { return m_instances.empty(); }
     std::size_t size() const { return m_instances.size(); }
     const std::string& top() const { return m_top; }
+
+    // [aurora2#1725 stage P5] True only for the top module's own entry.
+    //
+    // Answered from instances.json's document-level "top_instance", which names that entry
+    // or is null when there is none. NOT from "top": that names the top MODULE whether or
+    // not an entry for it exists, and P0b omits the entry when an ordinary instantiation
+    // already owns that path (instance and module names are separate namespaces). Reading
+    // "top" there would expand that instance's region to the whole design.
+    //
+    // Falls back to "top" only for an instances.json written before "top_instance" existed,
+    // where it is the sole available answer.
+    bool isTop(const std::string& path) const;
     const std::string& error() const { return m_error; }
 
     const std::vector<RtlInstance>& instances() const { return m_instances; }
@@ -89,6 +110,11 @@ private:
     void buildTree();
 
     std::string m_top;
+    // instances.json's "top_instance": which entry IS the top, empty when none is. The flag
+    // is separate because an ABSENT field (an older file, answer unknown -- fall back to
+    // m_top) and an explicit null (P0b decided there is no top entry) must not read alike.
+    std::string m_topInstance;
+    bool m_hasTopInstance = false;
     std::string m_error;
     std::vector<RtlInstance> m_instances;
     std::map<std::string, std::size_t> m_byPath;

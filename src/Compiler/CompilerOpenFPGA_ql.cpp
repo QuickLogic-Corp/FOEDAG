@@ -9078,6 +9078,16 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
           // "cluster[0]" is still a real whole-subtree RTL selection and still needs
           // the wildcard suffix.
           const bool alreadyGlob = pattern.find('*') != std::string::npos;
+          if (!alreadyGlob && rtlModel.isTop(pattern)) {
+            // The top module is the one instance whose atoms carry NO prefix naming it.
+            // flatten writes an instance path into every atom it pulls up, but the top is
+            // what everything was pulled up INTO -- "i_mul_24.foo" never becomes
+            // "fpu_single.i_mul_24.foo" -- so "<top>.*" would match nothing at all, which
+            // is the silent-no-match failure this whole expansion exists to prevent.
+            // Constraining the top means constraining the design, and that is "*".
+            elements.push_back("*");
+            continue;
+          }
           const bool isWholeInstance = !alreadyGlob && rtlModel.isInstanceOrAncestor(pattern);
           elements.push_back(isWholeInstance ? pattern + ".*" : pattern);
         }
@@ -12178,7 +12188,8 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // already supplies its two fixed positional arguments, so any list this code appended
   // would either duplicate them or corrupt their parsing. Fixing this for real needs
   // either a third positional argument here or reworking floorplanning_atomsets.tcl to
-  // take the list some other way (e.g. a file).
+  // take the list some other way (e.g. a file). The top module IS passed, as the named
+  // --top flag rather than positionally, which is what that rework would look like.
   //
   // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances
   // flag (see RunValidateInstances()) already overrides the graded universe with
@@ -12223,9 +12234,16 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       "#\n"
       "# Wrapped in `tee -q -o`: `select -list` narrates one line per atom, which\n"
       "# belongs in atomsets.json rather than the console or <top>_synth.log.\n"
+      "# --top gives the top module an atom set of its own -- every atom in the\n"
+      "# netlist -- matching the root instance stage P0b records in instances.json.\n"
+      "# It cannot be discovered: an instance path is 'everything before the last dot'\n"
+      "# of a cell name, and the top module's own cells have no dot at all. Without it a\n"
+      "# region drawn on the whole design sizes at zero, grades 'deleted' in P4 and\n"
+      "# emits nothing in P5.\n"
       "tee -q -o " + FloorplanningPrefix() + "_atomsets.log" +
       " tcl " + aurora_atomsets_script_path.string() +
-      " atomsets.json --blif " + output_blif_filepath.string() + "\n"
+      " atomsets.json --blif " + output_blif_filepath.string() +
+      " --top " + top_module_name + "\n"
       "\n"
       "# [aurora2#1725 stage P2] Review-only hierarchical netlist: regroups the\n"
       "# flattened cells back into nested modules for human inspection. NEVER read by\n"

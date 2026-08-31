@@ -393,7 +393,11 @@ std::filesystem::path writeTempJson(const std::filesystem::path& dir,
 
 const char* kInstancesJson = R"JSON({
   "top": "fpu_single",
+  "top_instance": "fpu_single",
   "instances": [
+    { "path": "fpu_single", "component": "fpu_single", "module_raw": "fpu_single_default(rtl)",
+      "src": "fpu_single.vhd:1.1-1.11", "component_src": "fpu_single.vhd:1.1-1.11",
+      "parameters": {}, "last_status": "unknown", "is_top": true },
     { "path": "i_mul_24", "component": "mul_24", "module_raw": "mul_24_default(rtl)",
       "src": "fpu_single.vhd:225.2-225.10", "component_src": "mul_24.vhd:52.8-52.14",
       "parameters": {}, "last_status": "unknown" },
@@ -446,7 +450,7 @@ TEST(RtlInstanceModel, LoadsInstancesAndNestsThemByDottedPath)
     fp::RtlInstanceModel model;
     ASSERT_TRUE(model.loadInstances(path)) << model.error();
     EXPECT_EQ(model.top(), "fpu_single");
-    EXPECT_EQ(model.size(), 3u);
+    EXPECT_EQ(model.size(), 4u);
 
     // i_mul_24.i_inner is a child of i_mul_24, so the parent is not a leaf.
     const fp::RtlInstance* parent = model.find("i_mul_24");
@@ -457,11 +461,105 @@ TEST(RtlInstanceModel, LoadsInstancesAndNestsThemByDottedPath)
     EXPECT_EQ(parent->component, "mul_24");
     EXPECT_EQ(parent->src, "fpu_single.vhd:225.2-225.10");
 
-    // Only the two top-level instances are roots; the nested one is not.
+    // The top module and the two top-level instances are roots; the nested one is not.
+    // The top is a dot-less SIBLING rather than their tree parent -- child paths carry no
+    // top prefix, because they have to keep matching the netlist atom names.
     const std::vector<std::string> roots = model.roots();
-    ASSERT_EQ(roots.size(), 2u);
-    EXPECT_EQ(roots[0], "i_mul_24");
-    EXPECT_EQ(roots[1], "i_serial_mul");
+    ASSERT_EQ(roots.size(), 3u);
+    EXPECT_EQ(roots[0], "fpu_single");
+    EXPECT_EQ(roots[1], "i_mul_24");
+    EXPECT_EQ(roots[2], "i_serial_mul");
+}
+
+TEST(RtlInstanceModel, TheTopModuleIsAnInstanceAndIsRecognisedAsTheTop)
+{
+    // [aurora2#1725 stage P0b/P5] Stage P5 has to expand a region on the top to "*": no
+    // atom name carries a "<top>." prefix for "<top>.*" to match, so getting this wrong
+    // emits a constraint matching nothing at all.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_top";
+    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+
+    const fp::RtlInstance* top = model.find("fpu_single");
+    ASSERT_NE(top, nullptr);
+    EXPECT_TRUE(top->isTop);
+    EXPECT_TRUE(model.isTop("fpu_single"));
+
+    // An ordinary instance is not the top, however shallow it is.
+    EXPECT_FALSE(model.find("i_mul_24")->isTop);
+    EXPECT_FALSE(model.isTop("i_mul_24"));
+    EXPECT_FALSE(model.isTop("i_mul_24.i_inner"));
+    EXPECT_FALSE(model.isTop("not_an_instance_at_all"));
+}
+
+TEST(RtlInstanceModel, SingleModuleDesignLoadsWithTheTopAsItsOnlyInstance)
+{
+    // The regression: a design whose top instantiates nothing produced "instances": [],
+    // which loadInstances() grades a hard failure, so the FloorPlanning panel refused to
+    // open at all. The top entry is the whole design and the only thing to constrain.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_flat";
+    const auto path = writeTempJson(dir, "instances.json", R"JSON({
+      "top": "counter",
+      "top_instance": "counter",
+      "instances": [
+        { "path": "counter", "component": "counter", "module_raw": "counter",
+          "src": "counter.v:1.1-9.10", "component_src": "counter.v:1.1-9.10",
+          "parameters": {}, "last_status": "unknown", "is_top": true }
+      ]
+    })JSON");
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    EXPECT_FALSE(model.empty());
+    EXPECT_EQ(model.size(), 1u);
+    EXPECT_TRUE(model.isTop("counter"));
+    ASSERT_EQ(model.roots().size(), 1u);
+    EXPECT_EQ(model.roots().front(), "counter");
+    // isInstanceOrAncestor() must agree, or stage P5 falls through to the literal branch.
+    EXPECT_TRUE(model.isInstanceOrAncestor("counter"));
+}
+
+TEST(RtlInstanceModel, TopIsRecognisedInAFileWrittenBeforeTopInstanceExisted)
+{
+    // An instances.json with neither "top_instance" nor is_top must still be read
+    // correctly, rather than silently expanding a whole-design region to "<top>.*".
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_legacytop";
+    const auto path = writeTempJson(dir, "instances.json", R"JSON({
+      "top": "counter",
+      "instances": [
+        { "path": "counter", "component": "counter", "src": "counter.v:1.1-9.10" }
+      ]
+    })JSON");
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    EXPECT_FALSE(model.find("counter")->isTop);   // the flag really is absent
+    EXPECT_TRUE(model.isTop("counter"));          // and the "top" field still answers
+}
+
+TEST(RtlInstanceModel, AnInstanceNamedAfterTheTopModuleIsNotTreatedAsTheTop)
+{
+    // Instance names and module names are separate namespaces, so a top-level cell can be
+    // named after the top module. P0b omits the whole-design entry in that case and says so
+    // with "top_instance": null. Reading "top" instead would expand THIS instance's region
+    // to "*" -- the entire design, silently, instead of the subtree the user drew.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_topclash";
+    const auto path = writeTempJson(dir, "instances.json", R"JSON({
+      "top": "counter",
+      "top_instance": null,
+      "instances": [
+        { "path": "counter", "component": "sub", "src": "wrapper.v:8.3-8.12" }
+      ]
+    })JSON");
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    EXPECT_EQ(model.top(), "counter");
+    EXPECT_FALSE(model.isTop("counter"));
+    // It is still an ordinary instance, so P5 expands it to "counter.*" as usual.
+    EXPECT_TRUE(model.isInstanceOrAncestor("counter"));
 }
 
 TEST(RtlInstanceModel, StatusIsUnknownUntilVerdictsAreMerged)
@@ -521,6 +619,9 @@ TEST(RtlInstanceModel, DeletedInstancesAreNotOfferedAsConstraintTargets)
     ASSERT_TRUE(model.mergeVerdicts(verdicts));
 
     const fp::HierarhyElements elements = model.toHierarhyElements();
+    // The top is offered like any other surviving instance -- constraining it is how a
+    // user asks for the whole design, and on a flat design it is the only option there is.
+    EXPECT_TRUE(elements.contains("fpu_single"));
     EXPECT_TRUE(elements.contains("i_mul_24"));
     EXPECT_TRUE(elements.contains("i_mul_24.i_inner"));
     EXPECT_FALSE(elements.contains("i_serial_mul"))
