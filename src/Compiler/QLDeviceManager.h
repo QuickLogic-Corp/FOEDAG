@@ -305,6 +305,10 @@ class QLDeviceManager : public QObject {
   // a device.
   QLDeviceLayoutSettings deviceLayoutSettings(QLDeviceTarget device_target = QLDeviceTarget());
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
+  // Resource counts derived from the geometry keys in config.json, for packages
+  // that ship no resources.json. Empty when config.json cannot answer for this
+  // layout - see the definition for the formulas and their limits.
+  std::vector<std::tuple<std::string, int>> deriveDeviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());

@@ -1,6 +1,7 @@
 #include "QLDeviceManager.h"
 
 #include <cstdlib>   // std::getenv
+#include <cctype>    // std::isspace
 
 #include <QObject>
 #include <QWidget>
@@ -4259,6 +4260,190 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
 }
 
 
+// Read a config.json value that device packages spell inconsistently as either a
+// JSON string or a JSON number ("IO_CAPACITY": "20" and 20 both occur).
+static bool configJSONText(const json& config_json, const std::string& key, std::string& out_text) {
+
+  if(!config_json.contains(key)) {
+    return false;
+  }
+
+  const auto& value = config_json[key];
+
+  if(value.is_string()) {
+    out_text = value.get<std::string>();
+    return true;
+  }
+  if(value.is_number_integer()) {
+    out_text = std::to_string(value.get<long long>());
+    return true;
+  }
+
+  return false;
+}
+
+
+// Parse a whole decimal number. Surrounding whitespace is allowed, trailing junk
+// is not: a half-parsed geometry would silently mis-size a device.
+static bool parseWholeNumber(const std::string& text, int& out_value) {
+
+  try {
+    size_t consumed = 0;
+    const int value = std::stoi(text, &consumed);
+    while( (consumed < text.size()) && std::isspace(static_cast<unsigned char>(text[consumed])) ) {
+      consumed++;
+    }
+    if(consumed != text.size()) {
+      return false;
+    }
+    out_value = value;
+    return true;
+  }
+  catch(const std::exception&) {
+    return false;
+  }
+}
+
+
+// Parse a "<x>x<y>" geometry - the spelling of "DEVICE_SIZE" ("78x78"),
+// "BRAM_SIZE" ("1x6") and "DSP_SIZE" ("1x3") in config.json.
+static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y) {
+
+  const size_t separator = text.find_first_of("xX");
+  if(separator == std::string::npos) {
+    return false;
+  }
+
+  return parseWholeNumber(text.substr(0, separator), out_x) &&
+         parseWholeNumber(text.substr(separator + 1), out_y);
+}
+
+
+// Count the entries of a comma-separated column list ("BRAM_COLS": "3,10,17").
+// An empty list is a device with none of that column, which is legal.
+static int countDeviceColumns(const std::string& text) {
+
+  int count = 0;
+  size_t token_start = 0;
+
+  while(token_start <= text.size()) {
+    const size_t separator = text.find(',', token_start);
+    const size_t token_length = (separator == std::string::npos) ? std::string::npos
+                                                                 : (separator - token_start);
+    if( text.substr(token_start, token_length).find_first_not_of(" \t") != std::string::npos ) {
+      count++;
+    }
+    if(separator == std::string::npos) {
+      break;
+    }
+    token_start = separator + 1;
+  }
+
+  return count;
+}
+
+
+// Derive the layout's resource counts from the geometry already in config.json.
+//
+// resources.json is produced by running vpr over the architecture, so a package
+// cut outside the Aurora tree does not have one - and the counts it holds are a
+// pure function of keys config.json already carries (issue #2257):
+//
+//   bram = <bram columns> * floor(ARRAY_Y / <bram tile height>)
+//   dsp  = <dsp columns>  * floor(ARRAY_Y / <dsp tile height>)
+//   clb  = (ARRAY_X - <bram columns> - <dsp columns>) * ARRAY_Y
+//   io   = 2 * (ARRAY_X + ARRAY_Y) * IO_CAPACITY
+//
+// Returns nothing when config.json lacks the full geometry (a package predating
+// the CRR keys) or describes an array other than this layout's: a wrong resource
+// count is worse than none.
+//
+// On a CUSTOM package with "LAYOUT_MODE": "AUTO" these are the counts of the
+// default layout that shipped. Aurora re-sizes the fabric per design in that
+// mode, so the device a given run actually uses may be larger or smaller.
+std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceInformation(QLDeviceTarget device_target) {
+
+  std::vector<std::tuple<std::string, int>> resources_vector;
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  json device_target_config_json;
+  if( !loadDeviceConfigJSON(device_target, device_target_config_json) ||
+      !device_target_config_json.is_object() ) {
+    return resources_vector;
+  }
+
+  std::string device_size_text;
+  std::string bram_size_text;
+  std::string dsp_size_text;
+  std::string bram_cols_text;
+  std::string dsp_cols_text;
+  if( !configJSONText(device_target_config_json, "DEVICE_SIZE", device_size_text) ||
+      !configJSONText(device_target_config_json, "BRAM_SIZE", bram_size_text) ||
+      !configJSONText(device_target_config_json, "DSP_SIZE", dsp_size_text) ||
+      !configJSONText(device_target_config_json, "BRAM_COLS", bram_cols_text) ||
+      !configJSONText(device_target_config_json, "DSP_COLS", dsp_cols_text) ) {
+    return resources_vector;
+  }
+
+  int array_x = 0;
+  int array_y = 0;
+  int bram_tile_width = 0;
+  int bram_tile_height = 0;
+  int dsp_tile_width = 0;
+  int dsp_tile_height = 0;
+  if( !parseDeviceGeometry(device_size_text, array_x, array_y) ||
+      !parseDeviceGeometry(bram_size_text, bram_tile_width, bram_tile_height) ||
+      !parseDeviceGeometry(dsp_size_text, dsp_tile_width, dsp_tile_height) ||
+      (array_x <= 0) || (array_y <= 0) || (bram_tile_height <= 0) || (dsp_tile_height <= 0) ) {
+    return resources_vector;
+  }
+
+  const int bram_columns = countDeviceColumns(bram_cols_text);
+  const int dsp_columns = countDeviceColumns(dsp_cols_text);
+  if( (bram_columns + dsp_columns) >= array_x ) {
+    // the column lists do not fit the array: report nothing rather than a
+    // negative clb count.
+    return resources_vector;
+  }
+
+  // "IO_CAPACITY" is a late addition to the config contract. Every device in the
+  // tree declares io tiles of capacity 20 in its vpr.xml, with the key or
+  // without, so a package predating it keeps its io count instead of showing 0.
+  const int DEFAULT_IO_CAPACITY = 20;
+  int io_capacity = DEFAULT_IO_CAPACITY;
+  std::string io_capacity_text;
+  if( configJSONText(device_target_config_json, "IO_CAPACITY", io_capacity_text) ) {
+    if( !parseWholeNumber(io_capacity_text, io_capacity) || (io_capacity < 0) ) {
+      return resources_vector;
+    }
+  }
+
+  // a vpr layout is the array plus its io and empty rings, one tile each per
+  // side. Any other size in this package is a layout config.json's single
+  // DEVICE_SIZE does not describe - a legacy multi-layout architecture, say -
+  // and only resources.json can answer for it.
+  const int LAYOUT_RING_TILES = 4;
+  if( (device_target.device_variant_layout.width != (array_x + LAYOUT_RING_TILES)) ||
+      (device_target.device_variant_layout.height != (array_y + LAYOUT_RING_TILES)) ) {
+    return resources_vector;
+  }
+
+  resources_vector.push_back(std::make_tuple(std::string("clb"),
+                                             (array_x - bram_columns - dsp_columns) * array_y));
+  resources_vector.push_back(std::make_tuple(std::string("bram"),
+                                             bram_columns * (array_y / bram_tile_height)));
+  resources_vector.push_back(std::make_tuple(std::string("dsp"),
+                                             dsp_columns * (array_y / dsp_tile_height)));
+  resources_vector.push_back(std::make_tuple(std::string("io"),
+                                             2 * (array_x + array_y) * io_capacity));
+
+  return resources_vector;
+}
+
+
 std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInformation(QLDeviceTarget device_target){
 
   // the resource information for the target device is stored in a "resources.json" in the device_type_dir_path
@@ -4301,6 +4486,12 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInforma
         resources_vector.push_back(std::make_tuple(resource_name, resource_count));
       }
     }
+  }
+
+  if(resources_vector.empty()) {
+    // no resources.json in this package, or none for this layout: derive the
+    // counts from config.json rather than reporting the device as empty.
+    resources_vector = deriveDeviceResourceInformation(device_target);
   }
 
   return resources_vector;
