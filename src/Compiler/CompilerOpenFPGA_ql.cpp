@@ -53,7 +53,6 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
-#include "Compiler/FloorplanningConfigProvider.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -8409,11 +8408,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // false return as fatal, so the flow stops rather than placing a design
   // against an unknown grid.
   const std::filesystem::path deviceConfigFile =
-      FloorplanningConfigProvider::getConfig();
-  if (deviceConfigFile.empty()) {
-    ErrorMessage(
-        "Device config.json could not be resolved; it is the only source of "
-        "floorplanning geometry. IO Floor Plan Generation Failed!");
+      QLDeviceManager::getInstance()->deviceConfigJSONPath();
+  if (!FileUtils::FileExists(deviceConfigFile)) {
+    ErrorMessage("Device config.json not found: " + deviceConfigFile.string() +
+                 "; it is the only source of floorplanning geometry. "
+                 "IO Floor Plan Generation Failed!");
     return false;
   }
   args.push_back("--device_config_file");

@@ -28,7 +28,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/Compiler.h"
 #include "Compiler/CompilerOpenFPGA_ql.h"
-#include "Compiler/FloorplanningConfigProvider.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TaskManager.h"
@@ -2277,11 +2276,15 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
-      // Resolve the device config.json right before we use it (regenerates the
-      // vpr fallback if it is missing/malfunctioning; details go to Messages).
-      const std::filesystem::path deviceConfigFile = FloorplanningConfigProvider::getConfig();
-      if (deviceConfigFile.empty()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", "Could not resolve the device floorplanning config. See the Messages panel for details.");
+      // The device's config.json is the only source of floorplanning geometry.
+      // Anything wrong with its contents is reported by DeviceGridDescriptor
+      // below, which names the key it could not read.
+      const std::filesystem::path deviceConfigFile =
+          QLDeviceManager::getInstance()->deviceConfigJSONPath();
+      if (!FileUtils::FileExists(deviceConfigFile)) {
+        QMessageBox::critical(this, "Floor Planning cannot be started.",
+                              QString("Device config.json not found: %1")
+                                  .arg(QString::fromStdString(deviceConfigFile.string())));
         cleanFloorPlanningUI();
         return;
       }
