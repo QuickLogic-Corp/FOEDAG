@@ -48,6 +48,7 @@
 #include <locale>
 #include <fstream>
 #include <cmath>
+#include <set>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -3814,6 +3815,85 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
 }
 
 
+// A resource column list as the device config spells it: ascending, comma
+// separated, no spaces - the shape every shipped config.json already carries
+// ('12,25').
+static std::string joinLayoutColumnList(const std::set<long>& columns) {
+
+  std::string joined;
+  for(long column : columns) {
+    if(!joined.empty()) {
+      joined += ",";
+    }
+    joined += std::to_string(column);
+  }
+  return joined;
+}
+
+
+// The resource columns of a generated '<fixed_layout>', read back out of the
+// architecture file that was just built, in the numbering the DEVICE CONFIG uses.
+//
+// add_layout.py writes each region at 'column + 1' (arch x=0 is the EMPTY ring),
+// so the config value is the region's 'startx' less one - the same inversion
+// add_layout.py's own read_vars_from_arch() does. Only 'bram' and 'dsp' regions
+// count: the 'io_bram_*' / 'io_dsp_*' regions repeat those columns in the IO ring.
+static bool readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_xml_filepath,
+                                               const std::string& layout_name,
+                                               std::string& out_bram_cols,
+                                               std::string& out_dsp_cols) {
+
+  QFile file(QString::fromStdString(vpr_xml_filepath.string()));
+  if(!file.open(QFile::ReadOnly)) {
+    return false;
+  }
+  QDomDocument doc;
+  if(!doc.setContent(&file)) {
+    file.close();
+    return false;
+  }
+  file.close();
+
+  // by name, not 'the first one': an architecture file may carry several fixed
+  // layouts - EVAL-2024Q1-MULTI ships ten - and only the generated one describes
+  // the fabric that was just built.
+  QDomElement fixed_layout;
+  const QDomNodeList fixed_layouts = doc.elementsByTagName("fixed_layout");
+  for(int i = 0; i < fixed_layouts.count(); i++) {
+    const QDomElement candidate = fixed_layouts.at(i).toElement();
+    if(!candidate.isNull() && (candidate.attribute("name").toStdString() == layout_name)) {
+      fixed_layout = candidate;
+      break;
+    }
+  }
+  if(fixed_layout.isNull()) {
+    return false;
+  }
+
+  std::set<long> bram_columns;
+  std::set<long> dsp_columns;
+  for(QDomElement region = fixed_layout.firstChildElement("region");
+      !region.isNull();
+      region = region.nextSiblingElement("region")) {
+
+    const std::string region_type = region.attribute("type").toStdString();
+    if((region_type != "bram") && (region_type != "dsp")) {
+      continue;
+    }
+    bool startx_ok = false;
+    const long startx = region.attribute("startx").toLong(&startx_ok);
+    if(!startx_ok || (startx < 1)) {
+      return false;
+    }
+    ((region_type == "bram") ? bram_columns : dsp_columns).insert(startx - 1);
+  }
+
+  out_bram_cols = joinLayoutColumnList(bram_columns);
+  out_dsp_cols = joinLayoutColumnList(dsp_columns);
+  return true;
+}
+
+
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
@@ -4401,6 +4481,38 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
     }
 
+    // The geometry the generated device's own config.json has to record, taken
+    // from the fabric that was just built. The clone below starts from a copy of
+    // the SEED package, so without this a device generated at 30x30 still claims
+    // the seed's 'DEVICE_SIZE' ("8x6") and the seed's resource columns - a
+    // package describing a fabric that is not the one it ships. Read here, while
+    // the plaintext architecture file still exists: it is encrypted and deleted
+    // further down.
+    std::string generated_device_size;
+    std::string generated_device_bram_cols;
+    std::string generated_device_dsp_cols;
+    bool generated_device_columns_known = false;
+
+    if((generated_layout_width > 4) && (generated_layout_height > 4)) {
+      // the arch file counts the IO ring and the device config does not:
+      // add_layout.py's 'WIDTH = ARRAY_X + 4'.
+      generated_device_size = std::to_string(generated_layout_width - 4) + "x" +
+                              std::to_string(generated_layout_height - 4);
+    }
+
+    generated_device_columns_known =
+        readGeneratedLayoutResourceColumns(generated_vpr_xml_path,
+                                           m_autoLayoutGeneratedLayoutName,
+                                           generated_device_bram_cols,
+                                           generated_device_dsp_cols);
+    if(!generated_device_columns_known) {
+      // not fatal - the fabric is built and usable either way - but the columns
+      // must then be dropped rather than inherited, see step 5b.
+      Message("[WARNING] Could not read the resource columns of layout '" +
+              m_autoLayoutGeneratedLayoutName + "' from " + generated_vpr_xml_path.string() +
+              "; the generated device's config.json will not record them.\n");
+    }
+
 
 #if GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
@@ -4759,9 +4871,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       // shaped and its add_layout.py is removed below, so it must not resolve to
       // a generation mode again on the next run. Rewrite its own config.json the
       // way the silicon release task writes a non-reshapable part - 'DEVICE_TYPE':
-      // 'FIXED' with the layout settings dropped - and leave the rest of the file
-      // (BRAM_SIZE, DSP_SIZE, IO_CAPACITY, DSP_TYPE, ...) alone.
-      // A pre-contract package carries neither key, so nothing is written for it.
+      // 'FIXED' with the layout settings dropped - and record the geometry that
+      // was actually built, which the copied-from-the-seed file otherwise still
+      // describes. The rest of the file (BRAM_SIZE, DSP_SIZE, IO_CAPACITY,
+      // DSP_TYPE, ...) is left alone.
+      // A pre-contract package carries neither DEVICE_TYPE key, so the stamping
+      // writes nothing for it; the geometry keys are descriptive and are written
+      // either way.
       {
         std::filesystem::path target_device_config_json_filepath =
             target_device_copy_dirpath / "config.json";
@@ -4779,12 +4895,42 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
           target_device_config_json_ifstream.close();
 
+          bool target_device_config_json_modified = false;
+
           if(target_device_config_json.is_object() &&
              (target_device_config_json.contains("DEVICE_TYPE") ||
               target_device_config_json.contains("DEVICE_TYPE_SETTINGS"))) {
             target_device_config_json["DEVICE_TYPE"] = "FIXED";
             target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
+            target_device_config_json_modified = true;
+          }
 
+          if(target_device_config_json.is_object()) {
+            if(!generated_device_size.empty()) {
+              target_device_config_json["DEVICE_SIZE"] = generated_device_size;
+              target_device_config_json_modified = true;
+            }
+            if(generated_device_columns_known) {
+              // written even when empty: no BRAM column is a fact about this
+              // fabric, and an absent key would read as 'unknown'.
+              target_device_config_json["BRAM_COLS"] = generated_device_bram_cols;
+              target_device_config_json["DSP_COLS"] = generated_device_dsp_cols;
+              target_device_config_json_modified = true;
+            }
+            else {
+              // absent beats inherited-and-wrong: the seed's column lists say
+              // nothing about this device, and anything reading them as its own
+              // would be reading a lie.
+              if(target_device_config_json.erase("BRAM_COLS") > 0) {
+                target_device_config_json_modified = true;
+              }
+              if(target_device_config_json.erase("DSP_COLS") > 0) {
+                target_device_config_json_modified = true;
+              }
+            }
+          }
+
+          if(target_device_config_json_modified) {
             std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
             if(!target_device_config_json_ofstream.is_open()) {
               ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
