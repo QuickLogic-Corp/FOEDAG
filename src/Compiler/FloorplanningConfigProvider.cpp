@@ -26,39 +26,26 @@ using json = nlohmann::ordered_json;
 
 namespace {
 
-// The VPR device grid wraps the device core with an IO ring, and its thickness
-// is not fixed: 2 cells per side on every device but EVAL-2024Q1-MULTI, where
-// it is 1. It is therefore read from the vpr report's FLOORPLAN_IO_BOUNDS
-// line whenever that line is there, and only assumed by the fallback below.
-// config.json is in core coordinates, derived from the perimeter rather than
-// from a ring constant:
-//   DEVICE_SIZE  = (ioRight - ioLeft - 1) x (ioTop - ioBottom - 1)
-//   <col in cfg> = grid column - ioLeft        (1-based core column)
-// See aurora2 issue #2283.
-
-// --- BEGIN IO_RINGS fallback (aurora2 #2283) --------------------------------
-// No device config.json carries the four IO_* keys yet, and a vpr older than
-// hotfix-vpr-floorplan-resources prints no FLOORPLAN_IO_BOUNDS line. Until
-// both land, either gap falls back to assuming a uniform ring of this
-// thickness -- right for every device except EVAL-2024Q1-MULTI, whose ring is
-// 1. Undefine the macro to make the keys and the vpr line mandatory again; the
-// two `#ifdef FLOORPLAN_IO_RINGS` blocks below are then dead and can go.
-#define FLOORPLAN_IO_RINGS 2
-// --- END IO_RINGS fallback --------------------------------------------------
+// Where the IO tiles sit in the VPR grid, and how thick they are.
+// `<col type="io_left" startx="1">` puts them one cell thick on every device in
+// device_data without exception, offset one cell from the edge by a band of
+// EMPTY tiles (`<col type="EMPTY" startx="0">`) on 23 of the 24. The exception,
+// EVAL-2024Q1-MULTI, declares its IO at startx="0" with only
+// `<corners type="EMPTY">` -- offset 0, not a thinner IO, which is the whole of
+// why its perimeter sits one cell further out.
+//
+// config.json is in core coordinates, so the offset and the IO band are peeled
+// off each side:
+//   DEVICE_SIZE  = (gridW - 2*p) x (gridH - 2*p),  p = kIoOffset + kIoSize
+//   <col in cfg> = grid column - (p - 1)     (1-based core column)
+// Per layout values arrive with the LAYOUTS map of openphy-turnkey-flow#1968.
+constexpr int kIoSize = 1;
+constexpr int kIoOffset = 1;
 
 // The keys DeviceGridDescriptor / generate_floorplanning need.
 const std::vector<std::string>& requiredKeys() {
-#ifdef FLOORPLAN_IO_RINGS
-  // Without the IO_* keys generate_floorplanning.py assumes the same ring, so
-  // an otherwise valid config.json is used as-is rather than sent to vpr.
   static const std::vector<std::string> keys = {
       "DEVICE_SIZE", "DSP_COLS", "BRAM_COLS", "DSP_SIZE", "BRAM_SIZE"};
-#else
-  static const std::vector<std::string> keys = {
-      "DEVICE_SIZE", "DSP_COLS",  "BRAM_COLS", "DSP_SIZE",
-      "BRAM_SIZE",   "IO_BOTTOM", "IO_LEFT",   "IO_TOP",
-      "IO_RIGHT"};
-#endif
   return keys;
 }
 
@@ -70,19 +57,6 @@ bool parseWxH(const QString& value, int& w, int& h) {
   w = parts.at(0).trimmed().toInt(&okW);
   h = parts.at(1).trimmed().toInt(&okH);
   return okW && okH;
-}
-
-// Parse "<bottom> <left> <top> <right>" into the four IO perimeter bounds.
-bool parseIoBounds(const QString& value, int& bottom, int& left, int& top,
-                   int& right) {
-  const QStringList parts = QtUtils::StringSplit(value.trimmed(), ' ');
-  if (parts.size() != 4) return false;
-  bool okB = false, okL = false, okT = false, okR = false;
-  bottom = parts.at(0).toInt(&okB);
-  left = parts.at(1).toInt(&okL);
-  top = parts.at(2).toInt(&okT);
-  right = parts.at(3).toInt(&okR);
-  return okB && okL && okT && okR;
 }
 
 // Parse "a,b,c" into integers. Empty string yields an empty list.
@@ -100,12 +74,10 @@ bool parseColumnList(const QString& value, std::vector<int>& out) {
 }
 
 // Shift raw grid columns into config (1-based core) columns and join as CSV.
-// The first core column sits one cell inside the left IO column, and config
-// numbers it 1, so the shift is exactly ioLeft whatever the ring thickness.
-std::string toConfigColumns(const std::vector<int>& gridColumns, int ioLeft) {
+std::string toConfigColumns(const std::vector<int>& gridColumns, int shift) {
   std::vector<std::string> shifted;
   for (int col : gridColumns) {
-    shifted.push_back(std::to_string(col - ioLeft));
+    shifted.push_back(std::to_string(col - shift));
   }
   return StringUtils::join(shifted, ",");
 }
@@ -205,10 +177,8 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
   // Parse the FLOORPLAN_* block (raw grid coordinates).
   int gridW = 0, gridH = 0;
   int dspW = 1, dspH = 1, bramW = 1, bramH = 1;
-  int ioBottom = 0, ioLeft = 0, ioTop = 0, ioRight = 0;
   std::vector<int> dspGridCols, bramGridCols;
   bool haveGrid = false, haveDspSize = false, haveBramSize = false;
-  bool haveIoBounds = false;
 
   const QString output = QString::fromUtf8(vpr.readAllStandardOutput());
   for (const QString& rawLine : output.split('\n')) {
@@ -223,9 +193,6 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
       haveDspSize = parseWxH(line.section(' ', 1), dspW, dspH);
     } else if (line.startsWith("FLOORPLAN_BRAM_TILE_SIZE ")) {
       haveBramSize = parseWxH(line.section(' ', 1), bramW, bramH);
-    } else if (line.startsWith("FLOORPLAN_IO_BOUNDS ")) {
-      haveIoBounds =
-          parseIoBounds(line.section(' ', 1), ioBottom, ioLeft, ioTop, ioRight);
     }
   }
 
@@ -233,33 +200,13 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
     error = "could not parse vpr resource report";
     return {};
   }
-  if (!haveIoBounds) {
-#ifdef FLOORPLAN_IO_RINGS
-    ioBottom = ioLeft = FLOORPLAN_IO_RINGS - 1;
-    ioTop = gridH - FLOORPLAN_IO_RINGS;
-    ioRight = gridW - FLOORPLAN_IO_RINGS;
-    compiler->Message(
-        "Floorplanning: vpr reported no FLOORPLAN_IO_BOUNDS (stale "
-        "hotfix-vpr-floorplan-resources?); assuming a " +
-        std::to_string(FLOORPLAN_IO_RINGS) +
-        "-cell IO ring. Wrong on a ring-1 device such as EVAL-2024Q1-MULTI.");
-#else
-    // Guessing a 2-cell ring here would put every IO constraint one cell
-    // inside the real perimeter on a ring-1 device, silently. Fail instead.
-    error =
-        "vpr resource report has no FLOORPLAN_IO_BOUNDS line (stale "
-        "hotfix-vpr-floorplan-resources?); the IO perimeter cannot be guessed";
-    return {};
-#endif
-  }
-
-  // Convert raw grid coordinates into config (core) coordinates. The core
-  // spans the cells strictly inside the perimeter, whatever the ring
-  // thickness -- no ring constant is involved.
-  const int deviceW = ioRight - ioLeft - 1;
-  const int deviceH = ioTop - ioBottom - 1;
-  if (deviceW <= 0 || deviceH <= 0 || ioBottom < 0 || ioLeft < 0 ||
-      ioRight >= gridW || ioTop >= gridH) {
+  // Peel the IO offset and the IO band off each side. The first core column
+  // sits one cell inside the left IO column and config numbers it 1, so the
+  // column shift is perimeter - 1.
+  const int perimeter = kIoOffset + kIoSize;
+  const int deviceW = gridW - 2 * perimeter;
+  const int deviceH = gridH - 2 * perimeter;
+  if (deviceW <= 0 || deviceH <= 0) {
     error = "implausible device grid size from vpr";
     return {};
   }
@@ -268,12 +215,8 @@ std::filesystem::path generateFallbackConfig(std::string& error) {
   cfg["DEVICE_SIZE"] = std::to_string(deviceW) + "x" + std::to_string(deviceH);
   cfg["DSP_SIZE"] = std::to_string(dspW) + "x" + std::to_string(dspH);
   cfg["BRAM_SIZE"] = std::to_string(bramW) + "x" + std::to_string(bramH);
-  cfg["DSP_COLS"] = toConfigColumns(dspGridCols, ioLeft);
-  cfg["BRAM_COLS"] = toConfigColumns(bramGridCols, ioLeft);
-  cfg["IO_BOTTOM"] = std::to_string(ioBottom);
-  cfg["IO_LEFT"] = std::to_string(ioLeft);
-  cfg["IO_TOP"] = std::to_string(ioTop);
-  cfg["IO_RIGHT"] = std::to_string(ioRight);
+  cfg["DSP_COLS"] = toConfigColumns(dspGridCols, perimeter - 1);
+  cfg["BRAM_COLS"] = toConfigColumns(bramGridCols, perimeter - 1);
 
   const std::filesystem::path outPath =
       projectDir / "failback_floorplanning_config.json";
