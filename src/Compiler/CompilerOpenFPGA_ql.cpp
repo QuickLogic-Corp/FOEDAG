@@ -11369,6 +11369,15 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   
   yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
+  // Aurora's floorplanning runs after synthesis (scripts/generate_floorplanning.py
+  // feeding VPR's --read_vpr_constraints), so these Yosys-level hooks have nothing
+  // to emit; substitute empty until such a feature exists. EVAL-MSC-CUSTOM ships
+  // them in its .ys, and without this every Yosys flow on it dies in yosys with
+  // "No such command: ${FLOORPLANNING_PRE_SYNTH}". Templates omitting them are
+  // unaffected: apply() on an absent placeholder is a no-op.
+  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}", std::string(""));
+  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}", std::string(""));
+
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
 #define STRINGIZE2(s) #s
