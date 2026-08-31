@@ -4,20 +4,16 @@
 
 namespace FOEDAG {
 
-// Resolves the device config used by floorplanning. Stateless: every call
-// re-validates the current device's config.json and falls back to vpr when
-// needed. Diagnostics are written to the compiler Messages log.
+// Resolves the device config used by floorplanning. Stateless.
 class FloorplanningConfigProvider {
  public:
-  // Return the config to use for floorplanning:
-  //   - the device config.json path when it has all required keys;
-  //   - otherwise a freshly generated fallback
-  //     (failback_floorplanning_config.json) produced from
-  //     `vpr --show_arch_resources`;
-  //   - an empty path if neither is usable.
+  // Path to the current device's config.json, or an empty path if it is not on
+  // disk (reported to the compiler Messages log).
   //
-  // Cheap when config.json is valid (just a key check); vpr only runs when it is
-  // missing/malfunctioning, so callers can call this right before they need it.
+  // It is the only source of floorplanning geometry; there is no fallback. Its
+  // *contents* are validated by each consumer -- DeviceGridDescriptor for the
+  // widget, generate_floorplanning.py for the constraints -- each of which
+  // reports precisely what it could not read, so this does not re-check them.
   static std::filesystem::path getEffectiveConfig();
 };
 
