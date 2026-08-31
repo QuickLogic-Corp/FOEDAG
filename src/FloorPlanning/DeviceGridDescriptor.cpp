@@ -8,6 +8,29 @@
 
 namespace fp {
 
+namespace {
+
+// config.json keys. Named once because several are read under both spellings --
+// DSP_COLS and BRAM_COLS live either at the top level or inside the CUSTOM
+// block -- and a typo in one of a matched pair is the kind of thing that reads
+// as "device has no DSP columns" rather than as an error.
+constexpr auto kDeviceTypeSettings = "DEVICE_TYPE_SETTINGS";
+constexpr auto kCustom = "CUSTOM";
+constexpr auto kArrayX = "ARRAY_X";
+constexpr auto kArrayY = "ARRAY_Y";
+constexpr auto kDeviceSize = "DEVICE_SIZE";
+constexpr auto kDspSize = "DSP_SIZE";
+constexpr auto kBramSize = "BRAM_SIZE";
+constexpr auto kDspCols = "DSP_COLS";
+constexpr auto kBramCols = "BRAM_COLS";
+
+// Where a key was looked for, for the error message.
+constexpr auto kInConfigJson = "config.json";
+constexpr auto kInCustomBlock = "`DEVICE_TYPE_SETTINGS.CUSTOM`";
+
+}  // namespace
+
+
 DeviceGridDescriptor::DeviceGridDescriptor(const std::filesystem::path& deviceConfigFile)
 {
     if (parse(deviceConfigFile)) {
@@ -66,10 +89,9 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
     // get_core_dimensions() in generate_floorplanning.py -- the widget and the
     // constraints it produces must be sized off the same block.
     const QJsonObject deviceTypeSettings =
-        config.value("DEVICE_TYPE_SETTINGS").toObject();
-    const bool hasCustom = deviceTypeSettings.contains("CUSTOM");
-    const QJsonObject custom = deviceTypeSettings.value("CUSTOM").toObject();
-    const QString customWhere = "`DEVICE_TYPE_SETTINGS.CUSTOM`";
+        config.value(kDeviceTypeSettings).toObject();
+    const bool hasCustom = deviceTypeSettings.contains(kCustom);
+    const QJsonObject custom = deviceTypeSettings.value(kCustom).toObject();
 
     QString dspSizeStr;
     QString bramSizeStr;
@@ -82,17 +104,18 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
         // than falling back to a stale DEVICE_SIZE.
         QString arrayX;
         QString arrayY;
-        if (!stringValue(custom, "ARRAY_X", customWhere, arrayX)) return false;
-        if (!stringValue(custom, "ARRAY_Y", customWhere, arrayY)) return false;
-        if (!stringValue(custom, "DSP_COLS", customWhere, dspColsStr)) return false;
-        if (!stringValue(custom, "BRAM_COLS", customWhere, bramColsStr)) return false;
-        coreSize = parseSize(arrayX + "x" + arrayY, "ARRAY_X`/`ARRAY_Y");
+        if (!stringValue(custom, kArrayX, kInCustomBlock, arrayX)) return false;
+        if (!stringValue(custom, kArrayY, kInCustomBlock, arrayY)) return false;
+        if (!stringValue(custom, kDspCols, kInCustomBlock, dspColsStr)) return false;
+        if (!stringValue(custom, kBramCols, kInCustomBlock, bramColsStr)) return false;
+        coreSize = parseSize(arrayX + "x" + arrayY,
+                             QString("%1`/`%2").arg(kArrayX, kArrayY));
     } else {
         QString deviceSizeStr;
-        if (!stringValue(config, "DEVICE_SIZE", "config.json", deviceSizeStr)) return false;
-        if (!stringValue(config, "DSP_COLS", "config.json", dspColsStr)) return false;
-        if (!stringValue(config, "BRAM_COLS", "config.json", bramColsStr)) return false;
-        coreSize = parseSize(deviceSizeStr, "DEVICE_SIZE");
+        if (!stringValue(config, kDeviceSize, kInConfigJson, deviceSizeStr)) return false;
+        if (!stringValue(config, kDspCols, kInConfigJson, dspColsStr)) return false;
+        if (!stringValue(config, kBramCols, kInConfigJson, bramColsStr)) return false;
+        coreSize = parseSize(deviceSizeStr, kDeviceSize);
     }
     if (!coreSize) {
         return false;
@@ -100,30 +123,30 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
 
     // Tile sizes are a property of the tile, not of the layout, so they stay
     // top-level whichever spelling supplied the core size.
-    if (!stringValue(config, "DSP_SIZE", "config.json", dspSizeStr)) return false;
-    if (!stringValue(config, "BRAM_SIZE", "config.json", bramSizeStr)) return false;
+    if (!stringValue(config, kDspSize, kInConfigJson, dspSizeStr)) return false;
+    if (!stringValue(config, kBramSize, kInConfigJson, bramSizeStr)) return false;
 
     // The core grid; the displayed grid wraps it with one IO ring on each side.
     // Add the IO border on each side (low + core + high).
     m_columns = kBorder + coreSize->width() + kBorder;
     m_rows = kBorder + coreSize->height() + kBorder;
 
-    const std::optional<QSize> dspSize = parseSize(dspSizeStr, "DSP_SIZE");
+    const std::optional<QSize> dspSize = parseSize(dspSizeStr, kDspSize);
     if (!dspSize) {
         return false;
     }
     m_dspSize = dspSize.value();
 
-    const std::optional<QSize> bramSize = parseSize(bramSizeStr, "BRAM_SIZE");
+    const std::optional<QSize> bramSize = parseSize(bramSizeStr, kBramSize);
     if (!bramSize) {
         return false;
     }
     m_bramSize = bramSize.value();
 
-    if (!parseColumns(dspColsStr, m_dspColumns, "DSP_COLS")) {
+    if (!parseColumns(dspColsStr, m_dspColumns, kDspCols)) {
         return false;
     }
-    if (!parseColumns(bramColsStr, m_bramColumns, "BRAM_COLS")) {
+    if (!parseColumns(bramColsStr, m_bramColumns, kBramCols)) {
         return false;
     }
 
