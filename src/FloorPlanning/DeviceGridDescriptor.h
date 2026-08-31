@@ -60,8 +60,9 @@ private:
 
     bool parse(const std::filesystem::path& deviceConfigFile);
 
-    std::optional<QSize> parseSize(const QString& sizeStr);
-    bool parseColumns(const QString& csv, std::set<int>& columns);
+    std::optional<QSize> parseSize(const QString& sizeStr, const QString& key);
+    bool parseColumns(const QString& csv, std::set<int>& columns,
+                      const QString& key);
 };
 using DeviceGridDescriptorPtr = std::shared_ptr<DeviceGridDescriptor>;
 

@@ -20,13 +20,28 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
 {
     m_error = "";
 
+    // Every failure below names the file, and the key when there is one: this
+    // string is what the user is shown when floorplanning refuses to start.
+    const QString configPath = QString::fromStdString(deviceConfigFile.string());
+
+    bool readOk = false;
     const QByteArray content = QByteArray::fromStdString(
-        FOEDAG::FileUtils::GetFileContent(deviceConfigFile));
+        FOEDAG::FileUtils::GetFileContent(deviceConfigFile, &readOk));
+    if (!readOk) {
+        m_error = QString("cannot read %1").arg(configPath);
+        return false;
+    }
 
     QJsonParseError jsonError;
     const QJsonDocument doc = QJsonDocument::fromJson(content, &jsonError);
-    if (doc.isNull() || !doc.isObject()) {
-        m_error = "config.json parse error: " + jsonError.errorString();
+    if (doc.isNull()) {
+        // Not folded in with the is-not-an-object case below: valid JSON that is
+        // not an object leaves jsonError saying "no error occurred".
+        m_error = QString("%1: %2").arg(configPath, jsonError.errorString());
+        return false;
+    }
+    if (!doc.isObject()) {
+        m_error = QString("%1: root is not a JSON object").arg(configPath);
         return false;
     }
     const QJsonObject config = doc.object();
@@ -70,13 +85,13 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
         if (!stringValue(custom, "ARRAY_Y", customWhere, arrayY)) return false;
         if (!stringValue(custom, "DSP_COLS", customWhere, dspColsStr)) return false;
         if (!stringValue(custom, "BRAM_COLS", customWhere, bramColsStr)) return false;
-        coreSize = parseSize(arrayX + "x" + arrayY);
+        coreSize = parseSize(arrayX + "x" + arrayY, "ARRAY_X`/`ARRAY_Y");
     } else {
         QString deviceSizeStr;
         if (!stringValue(config, "DEVICE_SIZE", "config.json", deviceSizeStr)) return false;
         if (!stringValue(config, "DSP_COLS", "config.json", dspColsStr)) return false;
         if (!stringValue(config, "BRAM_COLS", "config.json", bramColsStr)) return false;
-        coreSize = parseSize(deviceSizeStr);
+        coreSize = parseSize(deviceSizeStr, "DEVICE_SIZE");
     }
     if (!coreSize) {
         return false;
@@ -92,33 +107,34 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
     m_columns = kBorder + coreSize->width() + kBorder;
     m_rows = kBorder + coreSize->height() + kBorder;
 
-    const std::optional<QSize> dspSize = parseSize(dspSizeStr);
+    const std::optional<QSize> dspSize = parseSize(dspSizeStr, "DSP_SIZE");
     if (!dspSize) {
         return false;
     }
     m_dspSize = dspSize.value();
 
-    const std::optional<QSize> bramSize = parseSize(bramSizeStr);
+    const std::optional<QSize> bramSize = parseSize(bramSizeStr, "BRAM_SIZE");
     if (!bramSize) {
         return false;
     }
     m_bramSize = bramSize.value();
 
-    if (!parseColumns(dspColsStr, m_dspColumns)) {
+    if (!parseColumns(dspColsStr, m_dspColumns, "DSP_COLS")) {
         return false;
     }
-    if (!parseColumns(bramColsStr, m_bramColumns)) {
+    if (!parseColumns(bramColsStr, m_bramColumns, "BRAM_COLS")) {
         return false;
     }
 
     return true;
 }
 
-std::optional<QSize> DeviceGridDescriptor::parseSize(const QString& sizeStr)
+std::optional<QSize> DeviceGridDescriptor::parseSize(const QString& sizeStr,
+                                                     const QString& key)
 {
     const QStringList parts = sizeStr.split("x");
     if (parts.size() != 2) {
-        m_error = QString("cannot parse size from `%1`").arg(sizeStr);
+        m_error = QString("cannot parse `%1` from `%2`").arg(key, sizeStr);
         return std::nullopt;
     }
 
@@ -127,14 +143,16 @@ std::optional<QSize> DeviceGridDescriptor::parseSize(const QString& sizeStr)
     const int width = parts.at(0).trimmed().toInt(&okWidth);
     const int height = parts.at(1).trimmed().toInt(&okHeight);
     if (!okWidth || !okHeight) {
-        m_error = QString("cannot parse size from `%1`").arg(sizeStr);
+        m_error = QString("cannot parse `%1` from `%2`").arg(key, sizeStr);
         return std::nullopt;
     }
 
     return QSize(width, height);
 }
 
-bool DeviceGridDescriptor::parseColumns(const QString& csv, std::set<int>& columns)
+bool DeviceGridDescriptor::parseColumns(const QString& csv,
+                                        std::set<int>& columns,
+                                        const QString& key)
 {
     const QStringList parts = csv.split(",");
     for (const QString& rawPart : parts) {
@@ -145,7 +163,8 @@ bool DeviceGridDescriptor::parseColumns(const QString& csv, std::set<int>& colum
         bool ok = false;
         const int column = part.toInt(&ok);
         if (!ok) {
-            m_error = QString("cannot parse column index from `%1`").arg(part);
+            m_error =
+                QString("cannot parse `%1` column index from `%2`").arg(key, part);
             return false;
         }
         // DSP_COLS/BRAM_COLS are 1-based core columns; shift into grid
