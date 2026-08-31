@@ -2279,7 +2279,7 @@ void MainWindow::floorPlanningActionTriggered()
 
       // Resolve the device config.json right before we use it (regenerates the
       // vpr fallback if it is missing/malfunctioning; details go to Messages).
-      const std::filesystem::path deviceConfigFile = FloorplanningConfigProvider::getEffectiveConfig();
+      const std::filesystem::path deviceConfigFile = FloorplanningConfigProvider::getConfig();
       if (deviceConfigFile.empty()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", "Could not resolve the device floorplanning config. See the Messages panel for details.");
         cleanFloorPlanningUI();

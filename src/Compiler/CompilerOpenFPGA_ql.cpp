@@ -8404,8 +8404,20 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--clocks_file");
     args.push_back(clocksFile.string());
   }
+  // No config, no geometry: the script would have to guess the device it is
+  // constraining. Fail here instead -- both BaseVprCommand callers treat a
+  // false return as fatal, so the flow stops rather than placing a design
+  // against an unknown grid.
+  const std::filesystem::path deviceConfigFile =
+      FloorplanningConfigProvider::getConfig();
+  if (deviceConfigFile.empty()) {
+    ErrorMessage(
+        "Device config.json could not be resolved; it is the only source of "
+        "floorplanning geometry. IO Floor Plan Generation Failed!");
+    return false;
+  }
   args.push_back("--device_config_file");
-  args.push_back(FloorplanningConfigProvider::getEffectiveConfig().string());
+  args.push_back(deviceConfigFile.string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
 

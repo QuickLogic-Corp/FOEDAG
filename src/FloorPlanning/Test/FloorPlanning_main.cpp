@@ -25,14 +25,22 @@ std::set<std::string> genTestElements()
 fp::DeviceGridDescriptorPtr genTestDeviceDescriptor()
 {
   // Minimal device config.json: a 30x30 core (-> 32x32 grid) with the DSP/BRAM
-  // layout this test used to hard-code. DSP_COLS/BRAM_COLS are 1-based core
-  // columns (grid column minus the IO border).
+  // layout this test used to hard-code. A device variant is a layout, so the
+  // geometry sits in DEVICE_TYPE_SETTINGS.CUSTOM; DSP_COLS/BRAM_COLS are
+  // 1-based core columns (grid column minus the IO border).
   const std::string configJson = R"({
-    "DEVICE_SIZE": "30x30",
     "DSP_SIZE": "1x3",
     "BRAM_SIZE": "1x6",
-    "DSP_COLS": "5,18",
-    "BRAM_COLS": "11,24"
+    "DEVICE_TYPE": "CUSTOM",
+    "DEVICE_TYPE_SETTINGS": {
+        "LAYOUT_MODE": "AUTO",
+        "CUSTOM": {
+            "ARRAY_X": "30",
+            "ARRAY_Y": "30",
+            "DSP_COLS": "5,18",
+            "BRAM_COLS": "11,24"
+        }
+    }
 })";
 
   const std::filesystem::path configPath =

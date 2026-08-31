@@ -11,7 +11,7 @@ extern FOEDAG::Session* GlobalSession;
 
 namespace FOEDAG {
 
-std::filesystem::path FloorplanningConfigProvider::getEffectiveConfig() {
+std::filesystem::path FloorplanningConfigProvider::getConfig() {
   Compiler* compiler =
       (GlobalSession != nullptr) ? GlobalSession->GetCompiler() : nullptr;
 
