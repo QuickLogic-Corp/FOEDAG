@@ -201,9 +201,7 @@ bool DeviceGridDescriptor::parseColumns(const QString& csv,
 
 bool DeviceGridDescriptor::validateFit()
 {
-    int ioRow = 1;
-
-    const int nonIoRows = m_rows - 2*ioRow;
+    const int nonIoRows = m_rows - 2*kBorder;
     if (nonIoRows <= 0) {
         m_error = QString("%1: number of effective clbs cannot be less than or equal to 0").arg(m_configPath);
         return false;
