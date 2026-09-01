@@ -2,8 +2,8 @@
 #define QLDEVICELAYOUTINFO_H
 
 #include <filesystem>
+#include <set>
 #include <string>
-#include <vector>
 
 #include "QLDeviceManager.h"
 
@@ -21,8 +21,8 @@ class QLDeviceLayout {
   int height = 0;  // grid height, == arrayY + 4
   int arrayX = 0;
   int arrayY = 0;
-  std::vector<int> bramCols;  // ascending, unique; may be empty
-  std::vector<int> dspCols;   // ascending, unique; may be empty
+  std::set<int> bramCols;  // may be empty
+  std::set<int> dspCols;   // may be empty
   std::string layoutName;
   std::string layoutMode;  // "FIXED" | "CUSTOM" | "AUTO" | "RESOURCES"
   std::string source;      // "config.json" | "auto_device.log"
@@ -51,12 +51,9 @@ class QLDeviceLayoutInfo {
   bool resolved() const { return m_layout.resolved; }
   int width() const { return m_layout.width; }
   int height() const { return m_layout.height; }
-  const std::vector<int>& bramCols() const { return m_layout.bramCols; }
-  const std::vector<int>& dspCols() const { return m_layout.dspCols; }
+  const std::set<int>& bramCols() const { return m_layout.bramCols; }
+  const std::set<int>& dspCols() const { return m_layout.dspCols; }
   const QLDeviceLayout& layout() const { return m_layout; }
-
-  // "width,height,bramCols,dspCols", e.g. "104,106,3,98". Empty when unresolved.
-  std::string toCSVString() const;
 
   // <projectPath>/device_layout.json. Empty when there is no project.
   static std::filesystem::path deviceLayoutJSONPath();
@@ -78,9 +75,9 @@ class QLDeviceLayoutInfo {
   static bool parseDeviceConfig(const json& config_json, const std::string& layout_mode,
                                 QLDeviceLayout& out_layout);
   static bool parseAutoDeviceLog(const std::string& log_text, QLDeviceLayout& out_layout);
-  // Accepts both separators, mirroring split_cols() in add_layout.py. Ascending,
-  // de-duplicated; an empty list is a fabric without that column, not an error.
-  static std::vector<int> parseColumnList(const std::string& text);
+  // Accepts both separators, mirroring split_cols() in add_layout.py. An empty
+  // list is a fabric without that column, not an error.
+  static std::set<int> parseColumnList(const std::string& text);
   // True when Packing() will re-shape this fabric, so the config describes a
   // layout the run is about to discard.
   static bool layoutIsResolvedDuringPacking(const QLDeviceLayoutSettings& layout_settings,

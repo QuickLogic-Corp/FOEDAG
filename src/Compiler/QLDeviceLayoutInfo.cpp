@@ -1,8 +1,8 @@
 #include "QLDeviceLayoutInfo.h"
 
-#include <algorithm>
 #include <fstream>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <system_error>
 
@@ -80,21 +80,21 @@ bool parseDeviceSize(const std::string& text, int& out_x, int& out_y) {
   return (out_x > 0) && (out_y > 0);
 }
 
-std::string joinColumns(const std::vector<int>& columns) {
+std::string joinColumns(const std::set<int>& columns) {
   std::string joined;
-  for (size_t i = 0; i < columns.size(); i++) {
-    if (i > 0) {
+  for (auto it = columns.begin(); it != columns.end(); ++it) {
+    if (it != columns.begin()) {
       joined += ",";
     }
-    joined += std::to_string(columns[i]);
+    joined += std::to_string(*it);
   }
   return joined;
 }
 
 }  // namespace
 
-std::vector<int> QLDeviceLayoutInfo::parseColumnList(const std::string& text) {
-  std::vector<int> columns;
+std::set<int> QLDeviceLayoutInfo::parseColumnList(const std::string& text) {
+  std::set<int> columns;
   std::string token;
   std::istringstream stream(text);
   while (std::getline(stream, token, ',')) {
@@ -102,15 +102,13 @@ std::vector<int> QLDeviceLayoutInfo::parseColumnList(const std::string& text) {
     std::string word;
     while (inner >> word) {
       try {
-        columns.push_back(std::stoi(word));
+        columns.insert(std::stoi(word));
       } catch (const std::exception&) {
         // a non-numeric entry is dropped rather than failing the whole resolve:
         // this file is informational and must never fail a compile.
       }
     }
   }
-  std::sort(columns.begin(), columns.end());
-  columns.erase(std::unique(columns.begin(), columns.end()), columns.end());
   return columns;
 }
 
@@ -342,14 +340,6 @@ void QLDeviceLayoutInfo::crossCheckAgainstDeviceVariantLayout(
           ", but the architecture declares " + std::to_string(variant_layout.width) +
           "x" + std::to_string(variant_layout.height) + " for layout '" +
           variant_layout.name + "'.\n");
-}
-
-std::string QLDeviceLayoutInfo::toCSVString() const {
-  if (!m_layout.resolved) {
-    return std::string();
-  }
-  return std::to_string(m_layout.width) + "," + std::to_string(m_layout.height) + "," +
-         joinColumns(m_layout.bramCols) + "," + joinColumns(m_layout.dspCols);
 }
 
 std::filesystem::path QLDeviceLayoutInfo::deviceLayoutJSONPath() {

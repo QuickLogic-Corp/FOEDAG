@@ -289,8 +289,8 @@ TEST(QLDeviceLayoutInfo, FixedDeviceResolvesFromTopLevelKeys) {
   EXPECT_EQ(layout.arrayY, 6);
   EXPECT_EQ(layout.width, 12);
   EXPECT_EQ(layout.height, 10);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({6}));
   EXPECT_EQ(layout.source, "config.json");
 }
 
@@ -306,8 +306,8 @@ TEST(QLDeviceLayoutInfo, CustomLayoutModeResolvesFromItsOwnSection) {
   EXPECT_TRUE(layout.resolved);
   EXPECT_EQ(layout.width, 12);
   EXPECT_EQ(layout.height, 10);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({6}));
 }
 
 TEST(QLDeviceLayoutInfo, CustomSectionFallsBackPerKeyToTopLevel) {
@@ -323,8 +323,8 @@ TEST(QLDeviceLayoutInfo, CustomSectionFallsBackPerKeyToTopLevel) {
   EXPECT_TRUE(layout.resolved);
   EXPECT_EQ(layout.width, 29);
   EXPECT_EQ(layout.height, 22);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));  // from the top level
-  EXPECT_EQ(layout.dspCols, std::vector<int>({8}));   // from the section
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));  // from the top level
+  EXPECT_EQ(layout.dspCols, std::set<int>({8}));   // from the section
 }
 
 TEST(QLDeviceLayoutInfo, AcceptsUnquotedNumbers) {
@@ -336,8 +336,8 @@ TEST(QLDeviceLayoutInfo, AcceptsUnquotedNumbers) {
 
   const QLDeviceLayout layout = parseConfig(config);
   EXPECT_TRUE(layout.resolved);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({6}));
 }
 
 TEST(QLDeviceLayoutInfo, MultiColumnDeviceRoundTrips) {
@@ -353,8 +353,8 @@ TEST(QLDeviceLayoutInfo, MultiColumnDeviceRoundTrips) {
   EXPECT_EQ(layout.height, 130);
   EXPECT_EQ(layout.bramCols.size(), 10u);
   EXPECT_EQ(layout.dspCols.size(), 10u);
-  EXPECT_EQ(layout.bramCols.front(), 12);
-  EXPECT_EQ(layout.dspCols.back(), 115);
+  EXPECT_EQ(*layout.bramCols.begin(), 12);
+  EXPECT_EQ(*layout.dspCols.rbegin(), 115);
 }
 
 TEST(QLDeviceLayoutInfo, MissingDeviceSizeIsUnresolvedNotAnError) {
@@ -378,14 +378,13 @@ TEST(QLDeviceLayoutInfo, AutoDeviceLogCarriesTheColumnLists) {
   EXPECT_EQ(layout.height, 106);
   EXPECT_EQ(layout.arrayX, 100);
   EXPECT_EQ(layout.arrayY, 102);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({98}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({98}));
   EXPECT_EQ(layout.source, "auto_device.log");
 }
 
-TEST(QLDeviceLayoutInfo, CSVStringIsWidthHeightBramDsp) {
+TEST(QLDeviceLayoutInfo, AccessorsReflectResolvedLayout) {
   QLDeviceLayoutInfo info{parseLog(AUTO_DEVICE_LOG)};
-  EXPECT_EQ(info.toCSVString(), "104,106,3,98");
   EXPECT_EQ(info.width(), 104);
   EXPECT_EQ(info.height(), 106);
 }
@@ -398,8 +397,8 @@ TEST(QLDeviceLayoutInfo, LogColumnsAreSpaceSeparated) {
   EXPECT_TRUE(layout.resolved);
   EXPECT_EQ(layout.width, 29);
   EXPECT_EQ(layout.height, 22);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3, 13, 18, 23}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({8}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3, 13, 18, 23}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({8}));
 }
 
 TEST(QLDeviceLayoutInfo, EmptyColumnListIsValid) {
@@ -418,7 +417,7 @@ TEST(QLDeviceLayoutInfo, LastCalculatedLayoutWins) {
       "Calculated layout: WIDTH=29, HEIGHT=22, ARRAY_X=25, ARRAY_Y=18, "
       "BRAM_COLS=3 13, DSP_COLS=8\n");
   EXPECT_EQ(layout.width, 29);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3, 13}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3, 13}));
 }
 
 TEST(QLDeviceLayoutInfo, LogWithoutCalculatedLayoutIsUnresolved) {
@@ -435,7 +434,7 @@ TEST(QLDeviceLayoutInfo, EmptyLogIsUnresolved) {
 // --- column list parsing ----------------------------------------------------
 
 TEST(QLDeviceLayoutInfo, ColumnListAcceptsBothSeparators) {
-  const std::vector<int> expected{6, 18, 30};
+  const std::set<int> expected{6, 18, 30};
   EXPECT_EQ(QLDeviceLayoutInfo::parseColumnList("6,18,30"), expected);
   EXPECT_EQ(QLDeviceLayoutInfo::parseColumnList("6 18 30"), expected);
   EXPECT_EQ(QLDeviceLayoutInfo::parseColumnList("6, 18,30"), expected);
@@ -443,17 +442,12 @@ TEST(QLDeviceLayoutInfo, ColumnListAcceptsBothSeparators) {
 
 TEST(QLDeviceLayoutInfo, ColumnListIsSortedAndDeduplicated) {
   EXPECT_EQ(QLDeviceLayoutInfo::parseColumnList("30,6,18,6"),
-            std::vector<int>({6, 18, 30}));
+            std::set<int>({6, 18, 30}));
 }
 
 TEST(QLDeviceLayoutInfo, ColumnListOfNothingIsEmpty) {
   EXPECT_TRUE(QLDeviceLayoutInfo::parseColumnList("").empty());
   EXPECT_TRUE(QLDeviceLayoutInfo::parseColumnList("   ").empty());
-}
-
-TEST(QLDeviceLayoutInfo, UnresolvedLayoutHasNoCSVString) {
-  QLDeviceLayoutInfo info{QLDeviceLayout{}};
-  EXPECT_TRUE(info.toCSVString().empty());
 }
 
 // --- which modes are resolved during packing --------------------------------
@@ -520,8 +514,8 @@ TEST(QLDeviceLayoutInfo, SampleFixedConfigResolvesImmediately) {
   EXPECT_EQ(layout.arrayY, 6);
   EXPECT_EQ(layout.width, 12);
   EXPECT_EQ(layout.height, 10);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({6}));
 }
 
 TEST(QLDeviceLayoutInfo, SampleCustomConfigResolvesImmediately) {
@@ -535,8 +529,8 @@ TEST(QLDeviceLayoutInfo, SampleCustomConfigResolvesImmediately) {
   ASSERT_TRUE(QLDeviceLayoutInfo::parseDeviceConfig(config, "CUSTOM", layout));
   EXPECT_EQ(layout.width, 12);
   EXPECT_EQ(layout.height, 10);
-  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
-  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+  EXPECT_EQ(layout.bramCols, std::set<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::set<int>({6}));
 }
 
 TEST(QLDeviceLayoutInfo, SampleAutoConfigIsDeferredToPacking) {
