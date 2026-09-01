@@ -310,6 +310,35 @@ class QLDeviceManager : public QObject {
 
   // "<major>.<minor>" -> numeric parts. False, outputs untouched, on anything else.
   static bool parseVersionString(const std::string& version, int& major, int& minor);
+
+  // An architecture counts the IO ring in its layout size and a device config does
+  // not: add_layout.py's 'WIDTH = ARRAY_X + 4' (two tiles per side). A fabric of
+  // this size or smaller is all ring and no core.
+  static constexpr int kLayoutIORingTiles = 4;
+
+  // A resource column list as a device config spells it: ascending, comma
+  // separated, no spaces.
+  static std::string joinLayoutColumnList(const std::set<long>& columns);
+
+  // Split a resource column list into its numbers, matching add_layout.py's
+  // split_cols(): commas and/or whitespace. False on anything not a whole number.
+  static bool parseLayoutColumnList(const std::string& value, std::set<long>& out_columns);
+
+  // One bounded whole number, for the dimension keys.
+  static bool parseLayoutDimension(const std::string& value, long& out_value);
+
+  // The BRAM/DSP columns a generated architecture actually placed, read back out
+  // of its <fixed_layout>, in device-config spelling.
+  static bool readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_xml_filepath,
+                                                 const std::string& layout_name,
+                                                 std::string& out_bram_cols,
+                                                 std::string& out_dsp_cols);
+
+  // Does the override ask for the fabric the device already has? Equal means all
+  // four values are present on both sides and match; an omitted key is not equal.
+  static bool customLayoutMatchesDeviceGeometry(const json& custom_layout_json,
+                                                const QLDeviceLayoutSettings& layout_settings,
+                                                std::string& out_geometry);
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
   // reported as not-present (a pre-2026.3 package), an unrecognised value as
