@@ -298,6 +298,27 @@ class QLDeviceManager : public QObject {
 
   // "<major>.<minor>" -> numeric parts. False, outputs untouched, on anything else.
   static bool parseVersionString(const std::string& version, int& major, int& minor);
+
+  // config.json geometry parsing. Pure, and static for the same reason as the
+  // version helpers above: testable without a device on disk.
+  //
+  // Parse a whole decimal number. Surrounding whitespace is allowed, trailing
+  // junk is not. Note a leading sign parses, so callers that need a
+  // non-negative value must check - see deriveDeviceResourceInformation().
+  static bool parseWholeNumber(const std::string& text, int& out_value);
+
+  // Parse a "<x>x<y>" geometry - the spelling of "DEVICE_SIZE" ("78x78"),
+  // "BRAM_SIZE" ("1x6") and "DSP_SIZE" ("1x3") in config.json.
+  static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y);
+
+  // Count the entries of a comma-separated column list ("BRAM_COLS": "3,10,17").
+  // An empty list is a device with none of that column, which is legal.
+  static int countDeviceColumns(const std::string& text);
+
+  // Read a config.json value that device packages spell inconsistently as
+  // either a JSON string or a JSON number ("IO_CAPACITY": "20" and 20 both occur).
+  static bool configJSONText(const json& config_json, const std::string& key,
+                             std::string& out_text);
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
   // reported as not-present (a pre-2026.3 package), an unrecognised value as

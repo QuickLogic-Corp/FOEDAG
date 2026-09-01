@@ -4276,9 +4276,7 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
 }
 
 
-// Read a config.json value that device packages spell inconsistently as either a
-// JSON string or a JSON number ("IO_CAPACITY": "20" and 20 both occur).
-static bool configJSONText(const json& config_json, const std::string& key, std::string& out_text) {
+bool QLDeviceManager::configJSONText(const json& config_json, const std::string& key, std::string& out_text) {
 
   if(!config_json.contains(key)) {
     return false;
@@ -4299,9 +4297,8 @@ static bool configJSONText(const json& config_json, const std::string& key, std:
 }
 
 
-// Parse a whole decimal number. Surrounding whitespace is allowed, trailing junk
-// is not: a half-parsed geometry would silently mis-size a device.
-static bool parseWholeNumber(const std::string& text, int& out_value) {
+// Trailing junk is rejected: a half-parsed geometry would silently mis-size a device.
+bool QLDeviceManager::parseWholeNumber(const std::string& text, int& out_value) {
 
   try {
     size_t consumed = 0;
@@ -4321,9 +4318,7 @@ static bool parseWholeNumber(const std::string& text, int& out_value) {
 }
 
 
-// Parse a "<x>x<y>" geometry - the spelling of "DEVICE_SIZE" ("78x78"),
-// "BRAM_SIZE" ("1x6") and "DSP_SIZE" ("1x3") in config.json.
-static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y) {
+bool QLDeviceManager::parseDeviceGeometry(const std::string& text, int& out_x, int& out_y) {
 
   const size_t separator = text.find_first_of("xX");
   if(separator == std::string::npos) {
@@ -4335,9 +4330,7 @@ static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y)
 }
 
 
-// Count the entries of a comma-separated column list ("BRAM_COLS": "3,10,17").
-// An empty list is a device with none of that column, which is legal.
-static int countDeviceColumns(const std::string& text) {
+int QLDeviceManager::countDeviceColumns(const std::string& text) {
 
   int count = 0;
 
