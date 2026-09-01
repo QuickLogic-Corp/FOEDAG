@@ -179,11 +179,20 @@ bool DeviceGridDescriptor::parseColumns(const QString& csv,
                                         std::set<int>& columns,
                                         const QString& key)
 {
+    // An empty value is the writer's spelling for "this device has zero of
+    // these columns" (CompilerOpenFPGA_ql.cpp writes it out rather than
+    // omitting the key), not a malformed list -- handle it as its own case
+    // so the loop below only ever sees entries that must parse.
+    if (csv.trimmed().isEmpty()) {
+        return true;
+    }
+
     const QStringList parts = csv.split(",");
     for (const QString& rawPart : parts) {
         const QString part = rawPart.trimmed();
         if (part.isEmpty()) {
-            continue;
+            m_error = QString("cannot parse `%1` column index from `%2`").arg(key, csv);
+            return false;
         }
         bool ok = false;
         const int column = part.toInt(&ok);
