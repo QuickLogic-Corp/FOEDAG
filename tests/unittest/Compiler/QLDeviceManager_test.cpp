@@ -341,6 +341,115 @@ TEST(QLDeviceManager, DeriveResourceCountsRejectsMismatchedLayout) {
   EXPECT_FALSE(QLDeviceManager::deriveResourceCounts(config, 12, 10).empty());
 }
 
+// ---- the per-layout DEVICE_TYPE_SETTINGS.CUSTOM spelling -------------------
+//
+// config.json spells the layout geometry flat ("DEVICE_SIZE": "8x6") and/or under
+// DEVICE_TYPE_SETTINGS.CUSTOM ("ARRAY_X": "8", "ARRAY_Y": "6"). A package shipping
+// one config per layout carries only the one that describes its own layout, so
+// which spelling answers is decided by matching the layout's size, not by
+// precedence. RESOURCES sits in the same block and is deliberately NOT read: it is
+// the resource REQUEST add_layout.py multiplies by MARGIN to size the array, not
+// the array's capacity.
+
+namespace {
+
+// EVAL-CCFF-CUSTOM's shape: an 8x6 array with one bram and one dsp column.
+const char* const CUSTOM_SPELLING = R"({
+  "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20",
+  "DEVICE_TYPE": "CUSTOM",
+  "DEVICE_TYPE_SETTINGS": {
+    "LAYOUT_MODE": "AUTO",
+    "MARGIN": 1.2,
+    "CUSTOM": {
+      "ARRAY_X": "8", "ARRAY_Y": "6", "BRAM_COLS": "3", "DSP_COLS": "6"
+    },
+    "RESOURCES": { "clb": 100, "bram": 6, "dsp": 1, "io": 1281 }
+  }
+})";
+
+}  // namespace
+
+TEST(QLDeviceManager, DeriveResourceCountsReadsTheCustomSpelling) {
+  std::string error;
+  const auto resources =
+      QLDeviceManager::deriveResourceCounts(json::parse(CUSTOM_SPELLING), 12, 10, &error);
+
+  ASSERT_FALSE(resources.empty()) << error;
+  EXPECT_EQ(countOf(resources, "clb"), 36);   // (8 - 1 - 1) * 6
+  EXPECT_EQ(countOf(resources, "bram"), 1);   // 1 column * (6 / 6)
+  EXPECT_EQ(countOf(resources, "dsp"), 2);    // 1 column * (6 / 3)
+  EXPECT_EQ(countOf(resources, "io"), 560);   // 2 * (8 + 6) * 20
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsIgnoresTheResourcesRequest) {
+  // RESOURCES says clb 100 / bram 6 / dsp 1 / io 1281. Those are what a design
+  // asks for, and add_layout.py sizes the array from them; reading them as the
+  // array's capacity would report a number roughly MARGIN-scaled and wrong.
+  const auto resources =
+      QLDeviceManager::deriveResourceCounts(json::parse(CUSTOM_SPELLING), 12, 10);
+
+  ASSERT_FALSE(resources.empty());
+  EXPECT_NE(countOf(resources, "clb"), 100);
+  EXPECT_NE(countOf(resources, "io"), 1281);
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsPicksTheSpellingMatchingTheLayout) {
+  // both spellings present and disagreeing - a multi-layout package, or a
+  // DEVICE_SIZE left over from the wrong device. Neither wins by precedence: the
+  // one describing the layout asked about does.
+  const char* const both = R"({
+    "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20",
+    "DEVICE_SIZE": "30x30", "BRAM_COLS": "12,25", "DSP_COLS": "6,19",
+    "DEVICE_TYPE_SETTINGS": {
+      "CUSTOM": { "ARRAY_X": "8", "ARRAY_Y": "6", "BRAM_COLS": "3", "DSP_COLS": "6" }
+    }
+  })";
+  const json config = json::parse(both);
+
+  // 12x10 is the 8x6 array plus its rings -> the CUSTOM block answers
+  const auto small = QLDeviceManager::deriveResourceCounts(config, 12, 10);
+  ASSERT_FALSE(small.empty());
+  EXPECT_EQ(countOf(small, "clb"), 36);
+
+  // 34x34 is the 30x30 array plus its rings -> DEVICE_SIZE answers
+  const auto large = QLDeviceManager::deriveResourceCounts(config, 34, 34);
+  ASSERT_FALSE(large.empty());
+  EXPECT_EQ(countOf(large, "clb"), 780);
+
+  // and a layout neither describes is declined, naming both
+  std::string error;
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 99, 99, &error).empty());
+  EXPECT_NE(error.find("DEVICE_SIZE"), std::string::npos) << error;
+  EXPECT_NE(error.find("CUSTOM"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsFallsBackToTheFlatColumnLists) {
+  // add_layout.py lets each CUSTOM key fall back to the flat one it does not
+  // restate, so a CUSTOM block giving only the array size still gets the columns
+  const char* const partial = R"({
+    "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20",
+    "BRAM_COLS": "3", "DSP_COLS": "6",
+    "DEVICE_TYPE_SETTINGS": { "CUSTOM": { "ARRAY_X": "8", "ARRAY_Y": "6" } }
+  })";
+  const auto resources =
+      QLDeviceManager::deriveResourceCounts(json::parse(partial), 12, 10);
+
+  ASSERT_FALSE(resources.empty());
+  EXPECT_EQ(countOf(resources, "clb"), 36);
+  EXPECT_EQ(countOf(resources, "bram"), 1);
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsNeedsSomeLayoutGeometry) {
+  // the block heights and IO_CAPACITY alone cannot size a layout
+  const char* const no_geometry =
+      R"({"BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20"})";
+  std::string error;
+
+  EXPECT_TRUE(
+      QLDeviceManager::deriveResourceCounts(json::parse(no_geometry), 12, 10, &error).empty());
+  EXPECT_NE(error.find("DEVICE_SIZE"), std::string::npos) << error;
+}
+
 TEST(QLDeviceManager, DeriveResourceCountsRequiresIOCapacity) {
   // it used to default to 20 per tile when absent, which silently halved or
   // doubled the io count for any device not built that way

@@ -4159,6 +4159,9 @@ constexpr const char* CONFIG_KEY_DSP_SIZE = "DSP_SIZE";
 constexpr const char* CONFIG_KEY_BRAM_COLS = "BRAM_COLS";
 constexpr const char* CONFIG_KEY_DSP_COLS = "DSP_COLS";
 constexpr const char* CONFIG_KEY_IO_CAPACITY = "IO_CAPACITY";
+constexpr const char* CONFIG_KEY_CUSTOM = "CUSTOM";
+constexpr const char* CONFIG_KEY_ARRAY_X = "ARRAY_X";
+constexpr const char* CONFIG_KEY_ARRAY_Y = "ARRAY_Y";
 
 
 QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
@@ -4367,9 +4370,15 @@ int QLDeviceManager::countDeviceColumns(const std::string& text) {
 //   clb  = (ARRAY_X - <bram columns> - <dsp columns>) * ARRAY_Y
 //   io   = 2 * (ARRAY_X + ARRAY_Y) * IO_CAPACITY
 //
+// The array size and column lists come from whichever of config.json's two
+// spellings describes THIS layout - flat "DEVICE_SIZE", or per layout under
+// DEVICE_TYPE_SETTINGS.CUSTOM - so a package carrying one config per layout, or
+// both spellings at once, resolves by matching the layout rather than by
+// precedence. The block heights and IO_CAPACITY are device-wide and always flat.
+//
 // Returns nothing when config.json lacks the full geometry (a package predating
-// the CRR keys) or describes an array other than this layout's: a wrong resource
-// count is worse than none.
+// the CRR keys) or when no spelling describes this layout's array: a wrong
+// resource count is worse than none.
 //
 // On a CUSTOM package with "LAYOUT_MODE": "AUTO" these are the counts of the
 // default layout that shipped. Aurora re-sizes the fabric per design in that
@@ -4414,6 +4423,25 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
 }
 
 
+// One spelling of a layout's geometry. config.json carries it flat
+// ("DEVICE_SIZE": "8x6") and/or per layout under DEVICE_TYPE_SETTINGS.CUSTOM
+// ("ARRAY_X": "8", "ARRAY_Y": "6"), and a package may carry both. Which one
+// describes THIS layout is decided by matching the layout's own size rather than by
+// a precedence rule, so a config naming a layout other than this one is skipped
+// instead of mis-sizing it.
+namespace {
+
+struct LayoutGeometryCandidate {
+  std::string source;
+  int array_x = 0;
+  int array_y = 0;
+  std::string bram_cols_text;
+  std::string dsp_cols_text;
+};
+
+}  // namespace
+
+
 std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(const json& config_json,
                                                                                int layout_width,
                                                                                int layout_height,
@@ -4434,36 +4462,27 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
     return fail("config.json is not a JSON object");
   }
 
-  std::string device_size_text;
+  // Device-wide, and always flat: a block's height and an io tile's capacity are
+  // properties of the silicon, not of a layout cut from it.
   std::string bram_size_text;
   std::string dsp_size_text;
-  std::string bram_cols_text;
-  std::string dsp_cols_text;
   std::string io_capacity_text;
-  const std::pair<const char*, std::string*> required_keys[] = {
-      {CONFIG_KEY_DEVICE_SIZE, &device_size_text},
+  const std::pair<const char*, std::string*> device_keys[] = {
       {CONFIG_KEY_BRAM_SIZE,   &bram_size_text},
       {CONFIG_KEY_DSP_SIZE,    &dsp_size_text},
-      {CONFIG_KEY_BRAM_COLS,   &bram_cols_text},
-      {CONFIG_KEY_DSP_COLS,    &dsp_cols_text},
       {CONFIG_KEY_IO_CAPACITY, &io_capacity_text},
   };
-  for(const auto& [key, out_text] : required_keys) {
+  for(const auto& [key, out_text] : device_keys) {
     if( !configJSONText(config_json, key, *out_text) ) {
       return fail(std::string("config.json has no usable \"") + key + "\" key");
     }
   }
 
-  int array_x = 0;
-  int array_y = 0;
   int bram_tile_width = 0;
   int bram_tile_height = 0;
   int dsp_tile_width = 0;
   int dsp_tile_height = 0;
-  if( !parseDeviceGeometry(device_size_text, array_x, array_y) || (array_x <= 0) || (array_y <= 0) ) {
-    return fail(std::string("\"") + CONFIG_KEY_DEVICE_SIZE + "\": \"" + device_size_text +
-                "\" is not a positive <x>x<y> geometry");
-  }
+  int io_capacity = 0;
   if( !parseDeviceGeometry(bram_size_text, bram_tile_width, bram_tile_height) || (bram_tile_height <= 0) ) {
     return fail(std::string("\"") + CONFIG_KEY_BRAM_SIZE + "\": \"" + bram_size_text +
                 "\" is not a positive <x>x<y> geometry");
@@ -4472,33 +4491,113 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
     return fail(std::string("\"") + CONFIG_KEY_DSP_SIZE + "\": \"" + dsp_size_text +
                 "\" is not a positive <x>x<y> geometry");
   }
-
-  const int bram_columns = countDeviceColumns(bram_cols_text);
-  const int dsp_columns = countDeviceColumns(dsp_cols_text);
-  if( (bram_columns + dsp_columns) >= array_x ) {
-    // the column lists do not fit the array: report nothing rather than a
-    // negative clb count.
-    return fail(std::string("\"") + CONFIG_KEY_BRAM_COLS + "\" (" + std::to_string(bram_columns) +
-                ") + \"" + CONFIG_KEY_DSP_COLS + "\" (" + std::to_string(dsp_columns) +
-                ") do not fit an array " + std::to_string(array_x) + " columns wide");
-  }
-
-  int io_capacity = 0;
   if( !parseWholeNumber(io_capacity_text, io_capacity) ) {
     return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
                 "\" is not a whole number");
   }
 
-  // a vpr layout is the array plus its io and empty rings, one tile each per
-  // side. Any other size in this package is a layout config.json's single
-  // DEVICE_SIZE does not describe - a legacy multi-layout architecture, say -
-  // which no longer has any source of counts.
+  // The column lists a candidate does not override itself.
+  std::string default_bram_cols_text;
+  std::string default_dsp_cols_text;
+  configJSONText(config_json, CONFIG_KEY_BRAM_COLS, default_bram_cols_text);
+  configJSONText(config_json, CONFIG_KEY_DSP_COLS, default_dsp_cols_text);
+
+  std::vector<LayoutGeometryCandidate> candidates;
+  std::vector<std::string> rejected;
+
+  // DEVICE_TYPE_SETTINGS.CUSTOM, the per-layout spelling. add_layout.py takes the
+  // layout size from ARRAY_X/ARRAY_Y here and lets each key fall back to the flat
+  // one it does not restate, so this reads it the same way.
+  if( config_json.contains(CONFIG_KEY_DEVICE_TYPE_SETTINGS) &&
+      config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS].is_object() ) {
+    const json& settings = config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS];
+    if( settings.contains(CONFIG_KEY_CUSTOM) && settings[CONFIG_KEY_CUSTOM].is_object() ) {
+      const json& custom = settings[CONFIG_KEY_CUSTOM];
+      const std::string source =
+          std::string(CONFIG_KEY_DEVICE_TYPE_SETTINGS) + "." + CONFIG_KEY_CUSTOM;
+
+      std::string array_x_text;
+      std::string array_y_text;
+      LayoutGeometryCandidate candidate;
+      candidate.source = source;
+      if( configJSONText(custom, CONFIG_KEY_ARRAY_X, array_x_text) &&
+          configJSONText(custom, CONFIG_KEY_ARRAY_Y, array_y_text) ) {
+        if( parseWholeNumber(array_x_text, candidate.array_x) &&
+            parseWholeNumber(array_y_text, candidate.array_y) &&
+            (candidate.array_x > 0) && (candidate.array_y > 0) ) {
+          candidate.bram_cols_text = default_bram_cols_text;
+          candidate.dsp_cols_text = default_dsp_cols_text;
+          configJSONText(custom, CONFIG_KEY_BRAM_COLS, candidate.bram_cols_text);
+          configJSONText(custom, CONFIG_KEY_DSP_COLS, candidate.dsp_cols_text);
+          candidates.push_back(candidate);
+        }
+        else {
+          rejected.push_back(source + " \"" + array_x_text + "\"x\"" + array_y_text +
+                             "\" is not a positive array size");
+        }
+      }
+    }
+  }
+
+  // "DEVICE_SIZE", the flat spelling.
+  std::string device_size_text;
+  if( configJSONText(config_json, CONFIG_KEY_DEVICE_SIZE, device_size_text) ) {
+    LayoutGeometryCandidate candidate;
+    candidate.source = std::string("\"") + CONFIG_KEY_DEVICE_SIZE + "\": \"" + device_size_text + "\"";
+    if( parseDeviceGeometry(device_size_text, candidate.array_x, candidate.array_y) &&
+        (candidate.array_x > 0) && (candidate.array_y > 0) ) {
+      candidate.bram_cols_text = default_bram_cols_text;
+      candidate.dsp_cols_text = default_dsp_cols_text;
+      candidates.push_back(candidate);
+    }
+    else {
+      rejected.push_back(candidate.source + " is not a positive <x>x<y> geometry");
+    }
+  }
+
+  if( candidates.empty() ) {
+    if( !rejected.empty() ) {
+      return fail("config.json has no usable layout geometry: " + StringUtils::join(rejected, "; "));
+    }
+    return fail(std::string("config.json has neither a \"") + CONFIG_KEY_DEVICE_SIZE +
+                "\" key nor \"" + CONFIG_KEY_DEVICE_TYPE_SETTINGS + "." + CONFIG_KEY_CUSTOM +
+                "\" array dimensions");
+  }
+
+  // a vpr layout is the array plus its io and empty rings, one tile each per side
+  // (add_layout.py: WIDTH = ARRAY_X + 4). A candidate of any other size describes a
+  // layout other than this one - another entry of a multi-layout package, or a
+  // DEVICE_SIZE that disagrees with the architecture - and cannot answer for it.
   const int LAYOUT_RING_TILES = 4;
-  if( (layout_width != (array_x + LAYOUT_RING_TILES)) ||
-      (layout_height != (array_y + LAYOUT_RING_TILES)) ) {
+  const LayoutGeometryCandidate* geometry = nullptr;
+  for(const LayoutGeometryCandidate& candidate : candidates) {
+    if( (layout_width == (candidate.array_x + LAYOUT_RING_TILES)) &&
+        (layout_height == (candidate.array_y + LAYOUT_RING_TILES)) ) {
+      geometry = &candidate;
+      break;
+    }
+    rejected.push_back(candidate.source + " describes " +
+                       std::to_string(candidate.array_x + LAYOUT_RING_TILES) + "x" +
+                       std::to_string(candidate.array_y + LAYOUT_RING_TILES));
+  }
+
+  if(geometry == nullptr) {
     return fail(std::string("is ") + std::to_string(layout_width) + "x" +
-                std::to_string(layout_height) + ", which \"" + CONFIG_KEY_DEVICE_SIZE +
-                "\": \"" + device_size_text + "\" does not describe");
+                std::to_string(layout_height) + ", which config.json does not describe: " +
+                StringUtils::join(rejected, "; "));
+  }
+
+  const int array_x = geometry->array_x;
+  const int array_y = geometry->array_y;
+  const int bram_columns = countDeviceColumns(geometry->bram_cols_text);
+  const int dsp_columns = countDeviceColumns(geometry->dsp_cols_text);
+  if( (bram_columns + dsp_columns) >= array_x ) {
+    // the column lists do not fit the array: report nothing rather than a
+    // negative clb count.
+    return fail(std::string("\"") + CONFIG_KEY_BRAM_COLS + "\" (" + std::to_string(bram_columns) +
+                ") + \"" + CONFIG_KEY_DSP_COLS + "\" (" + std::to_string(dsp_columns) +
+                ") from " + geometry->source + " do not fit an array " +
+                std::to_string(array_x) + " columns wide");
   }
 
   resources_vector.push_back(std::make_tuple(std::string("clb"),
