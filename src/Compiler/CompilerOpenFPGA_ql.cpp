@@ -8575,7 +8575,11 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   const std::filesystem::path deviceConfigFile =
       QLDeviceManager::getInstance()->deviceConfigJSONPath();
   if (!FileUtils::FileExists(deviceConfigFile)) {
-    ErrorMessage("Device config.json not found: " + deviceConfigFile.string() +
+    // deviceConfigJSONPath() clears its return value when config.json is
+    // absent, so name the device directory it looked in instead.
+    const std::filesystem::path deviceDir =
+        QLDeviceManager::getInstance()->deviceTypeDirPath();
+    ErrorMessage("Device config.json not found in: " + deviceDir.string() +
                  "; it is the only source of floorplanning geometry. "
                  "IO Floor Plan Generation Failed!");
     return false;
