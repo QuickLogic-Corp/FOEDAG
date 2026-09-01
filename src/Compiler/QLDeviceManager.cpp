@@ -4309,6 +4309,11 @@ bool QLDeviceManager::parseWholeNumber(const std::string& text, int& out_value) 
     if(consumed != text.size()) {
       return false;
     }
+    // stoi accepts a sign, but nothing config.json spells this way has a
+    // meaningful negative value - a geometry least of all.
+    if(value < 0) {
+      return false;
+    }
     out_value = value;
     return true;
   }
@@ -4478,7 +4483,7 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
   int io_capacity = DEFAULT_IO_CAPACITY;
   std::string io_capacity_text;
   if( configJSONText(config_json, CONFIG_KEY_IO_CAPACITY, io_capacity_text) ) {
-    if( !parseWholeNumber(io_capacity_text, io_capacity) || (io_capacity < 0) ) {
+    if( !parseWholeNumber(io_capacity_text, io_capacity) ) {
       return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
                   "\" is not a whole number");
     }

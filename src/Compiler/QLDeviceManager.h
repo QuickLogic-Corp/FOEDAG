@@ -303,8 +303,7 @@ class QLDeviceManager : public QObject {
   // version helpers above: testable without a device on disk.
   //
   // Parse a whole decimal number. Surrounding whitespace is allowed, trailing
-  // junk is not. Note a leading sign parses, so callers that need a
-  // non-negative value must check - see deriveDeviceResourceInformation().
+  // junk and a negative value are not.
   static bool parseWholeNumber(const std::string& text, int& out_value);
 
   // Parse a "<x>x<y>" geometry - the spelling of "DEVICE_SIZE" ("78x78"),

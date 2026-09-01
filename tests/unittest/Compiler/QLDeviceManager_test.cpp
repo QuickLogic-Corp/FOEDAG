@@ -133,16 +133,26 @@ TEST(QLDeviceManager, ParseWholeNumberRejectsOverflow) {
   EXPECT_EQ(value, -1);
 }
 
-TEST(QLDeviceManager, ParseWholeNumberAcceptsSign) {
+TEST(QLDeviceManager, ParseWholeNumberRejectsNegative) {
   int value = -1;
 
-  // documents current behaviour, which is why every caller that needs a
-  // non-negative value checks the sign itself
-  EXPECT_TRUE(QLDeviceManager::parseWholeNumber("-5", value));
-  EXPECT_EQ(value, -5);
+  // stoi would take the sign; nothing config.json spells this way has a
+  // meaningful negative value
+  EXPECT_FALSE(QLDeviceManager::parseWholeNumber("-5", value));
+  EXPECT_EQ(value, -1);  // left alone, not half-written
 
+  // an explicit plus is still a whole number
   EXPECT_TRUE(QLDeviceManager::parseWholeNumber("+5", value));
   EXPECT_EQ(value, 5);
+}
+
+TEST(QLDeviceManager, ParseDeviceGeometryRejectsNegativeDimensions) {
+  int x = 0;
+  int y = 0;
+
+  // "-30x-20" used to parse into a negative width and height
+  EXPECT_FALSE(QLDeviceManager::parseDeviceGeometry("-30x-20", x, y));
+  EXPECT_FALSE(QLDeviceManager::parseDeviceGeometry("30x-20", x, y));
 }
 
 TEST(QLDeviceManager, ParseDeviceGeometrySplitsOnEitherCase) {
