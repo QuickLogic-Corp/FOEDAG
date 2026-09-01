@@ -450,6 +450,30 @@ TEST(QLDeviceManager, DeriveResourceCountsNeedsSomeLayoutGeometry) {
   EXPECT_NE(error.find("DEVICE_SIZE"), std::string::npos) << error;
 }
 
+TEST(QLDeviceManager, DeriveResourceCountsRefusesABlockWiderThanOneTile) {
+  // the clb count subtracts one array column per BRAM_COLS/DSP_COLS entry, so a
+  // 2xN block would leave it too high. No package ships one; decline rather than
+  // report a number computed on an assumption the package contradicts.
+  const char* const wide_bram = R"({
+    "DEVICE_SIZE": "8x6", "BRAM_SIZE": "2x6", "DSP_SIZE": "1x3",
+    "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"
+  })";
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::deriveResourceCounts(json::parse(wide_bram), 12, 10, &error).empty());
+  EXPECT_NE(error.find("BRAM_SIZE"), std::string::npos) << error;
+  EXPECT_NE(error.find("tiles wide"), std::string::npos) << error;
+
+  const char* const wide_dsp = R"({
+    "DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "3x3",
+    "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"
+  })";
+  error.clear();
+  EXPECT_TRUE(
+      QLDeviceManager::deriveResourceCounts(json::parse(wide_dsp), 12, 10, &error).empty());
+  EXPECT_NE(error.find("DSP_SIZE"), std::string::npos) << error;
+}
+
 TEST(QLDeviceManager, DeriveResourceCountsRequiresIOCapacity) {
   // it used to default to 20 per tile when absent, which silently halved or
   // doubled the io count for any device not built that way

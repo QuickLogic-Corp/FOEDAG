@@ -4491,6 +4491,22 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
     return fail(std::string("\"") + CONFIG_KEY_DSP_SIZE + "\": \"" + dsp_size_text +
                 "\" is not a positive <x>x<y> geometry");
   }
+
+  // The clb count subtracts one array column per entry of BRAM_COLS/DSP_COLS, so a
+  // block wider than a single tile would leave clb too high and the columns-fit
+  // check too lax. Every QLF_K6N10 package is 1xN today; decline rather than
+  // report a count computed on an assumption the package contradicts, and whoever
+  // ships the first wide block gets this message instead of a wrong number.
+  const std::pair<const char*, int> block_widths[] = {
+      {CONFIG_KEY_BRAM_SIZE, bram_tile_width},
+      {CONFIG_KEY_DSP_SIZE,  dsp_tile_width},
+  };
+  for(const auto& [key, width] : block_widths) {
+    if(width != 1) {
+      return fail(std::string("\"") + key + "\" is " + std::to_string(width) +
+                  " tiles wide, and the clb count assumes one tile per block column");
+    }
+  }
   if( !parseWholeNumber(io_capacity_text, io_capacity) ) {
     return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
                 "\" is not a whole number");
