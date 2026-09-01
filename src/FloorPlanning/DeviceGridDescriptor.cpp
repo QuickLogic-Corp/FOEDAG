@@ -144,12 +144,17 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
     }
     m_bramSize = bramSize.value();
 
-    if (!parseColumns(dspColsStr, m_dspColumns, kDspCols)) {
+    const std::optional<std::set<int>> dspColumns = parseColumns(dspColsStr, kDspCols);
+    if (!dspColumns) {
         return false;
     }
-    if (!parseColumns(bramColsStr, m_bramColumns, kBramCols)) {
+    m_dspColumns = dspColumns.value();
+
+    const std::optional<std::set<int>> bramColumns = parseColumns(bramColsStr, kBramCols);
+    if (!bramColumns) {
         return false;
     }
+    m_bramColumns = bramColumns.value();
 
     return true;
 }
@@ -175,37 +180,37 @@ std::optional<QSize> DeviceGridDescriptor::parseSize(const QString& sizeStr,
     return QSize(width, height);
 }
 
-bool DeviceGridDescriptor::parseColumns(const QString& csv,
-                                        std::set<int>& columns,
-                                        const QString& key)
+std::optional<std::set<int>> DeviceGridDescriptor::parseColumns(const QString& csv,
+                                                                 const QString& key)
 {
     // An empty value is the writer's spelling for "this device has zero of
     // these columns" (CompilerOpenFPGA_ql.cpp writes it out rather than
     // omitting the key), not a malformed list -- handle it as its own case
     // so the loop below only ever sees entries that must parse.
     if (csv.trimmed().isEmpty()) {
-        return true;
+        return std::set<int>();
     }
 
+    std::set<int> columns;
     const QStringList parts = csv.split(",");
     for (const QString& rawPart : parts) {
         const QString part = rawPart.trimmed();
         if (part.isEmpty()) {
             m_error = QString("cannot parse `%1` column index from `%2`").arg(key, csv);
-            return false;
+            return std::nullopt;
         }
         bool ok = false;
         const int column = part.toInt(&ok);
         if (!ok) {
             m_error =
                 QString("cannot parse `%1` column index from `%2`").arg(key, part);
-            return false;
+            return std::nullopt;
         }
         // DSP_COLS/BRAM_COLS are 1-based core columns; shift into grid
         // coordinates which include the leading IO border column.
         columns.insert(column + kBorder);
     }
-    return true;
+    return columns;
 }
 
 bool DeviceGridDescriptor::validateFit()
