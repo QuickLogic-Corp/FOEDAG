@@ -2282,9 +2282,13 @@ void MainWindow::floorPlanningActionTriggered()
       const std::filesystem::path deviceConfigFile =
           QLDeviceManager::getInstance()->deviceConfigJSONPath();
       if (!FileUtils::FileExists(deviceConfigFile)) {
+        // deviceConfigJSONPath() clears its return value when config.json is
+        // absent, so name the device directory it looked in instead.
+        const std::filesystem::path deviceDir =
+            QLDeviceManager::getInstance()->deviceTypeDirPath();
         QMessageBox::critical(this, "Floor Planning cannot be started.",
-                              QString("Device config.json not found: %1")
-                                  .arg(QString::fromStdString(deviceConfigFile.string())));
+                              QString("Device config.json not found in: %1")
+                                  .arg(QString::fromStdString(deviceDir.string())));
         cleanFloorPlanningUI();
         return;
       }
