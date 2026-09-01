@@ -178,6 +178,12 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
     return;
   }
 
+  if (deferred) {
+    // resolveFromAutoDeviceLog() only sees auto_device.log, which never carries
+    // BRAM_SIZE/DSP_SIZE - those come from config.json regardless of layout mode.
+    resolveBlockSizesFromDeviceConfig(device_target);
+  }
+
   if (m_layout.layoutMode.empty()) {
     m_layout.layoutMode = layout_settings.layout_mode_present
                               ? layout_settings.layout_mode
@@ -256,6 +262,10 @@ bool QLDeviceLayoutInfo::parseDeviceConfig(const json& config_json,
   }
   out_layout.bramCols = parseColumnList(bram_cols);
   out_layout.dspCols = parseColumnList(dsp_cols);
+  // Block footprint, not layout geometry - config.json never states it in the
+  // CUSTOM section, only at the top level.
+  lookupString(config_json, "BRAM_SIZE", out_layout.bramSize);
+  lookupString(config_json, "DSP_SIZE", out_layout.dspSize);
   out_layout.source = "config.json";
   out_layout.resolved = true;
   return true;
@@ -272,6 +282,18 @@ bool QLDeviceLayoutInfo::resolveFromDeviceConfig(
   const std::string layout_mode =
       layout_settings.layout_mode_present ? layout_settings.layout_mode : std::string();
   return parseDeviceConfig(config_json, layout_mode, m_layout);
+}
+
+void QLDeviceLayoutInfo::resolveBlockSizesFromDeviceConfig(
+    const QLDeviceTarget& device_target) {
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+  json config_json;
+  if ((device_manager == nullptr) ||
+      !device_manager->loadDeviceConfigJSON(device_target, config_json)) {
+    return;
+  }
+  lookupString(config_json, "BRAM_SIZE", m_layout.bramSize);
+  lookupString(config_json, "DSP_SIZE", m_layout.dspSize);
 }
 
 bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
@@ -372,6 +394,8 @@ bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
   // device package without converting a numbering.
   layout_json["bram_cols"] = joinColumns(m_layout.bramCols);
   layout_json["dsp_cols"] = joinColumns(m_layout.dspCols);
+  layout_json["bram_size"] = m_layout.bramSize;
+  layout_json["dsp_size"] = m_layout.dspSize;
   layout_json["layout_name"] = m_layout.layoutName;
   layout_json["layout_mode"] = m_layout.layoutMode;
   layout_json["source"] = m_layout.source;
