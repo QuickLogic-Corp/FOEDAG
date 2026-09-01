@@ -978,6 +978,10 @@ void QLDeviceManager::parseDeviceData() {
   // clear the list before parsing
   device_list.clear();
 
+  // the dedupe in reportDeviceDataError() covers one walk: a re-parse after a
+  // device was added or its config.json fixed has to be able to report again.
+  reported_device_data_error_set.clear();
+
   // devices already discovered, keyed by device type string, so that the same device
   // appearing in two roots is reported rather than silently duplicated (REQ-006).
   std::set<std::string> discovered_device_type_set;
@@ -4380,7 +4384,7 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   const auto fail = [&](const std::string& reason) {
     if(out_error) {
       *out_error = std::string("cannot derive resource counts for ") +
-                   convertToDeviceString(device_target) + ": " + reason;
+                   convertToDeviceTypeString(device_target) + ": " + reason;
     }
     return std::vector<std::tuple<std::string, int>>();
   };
@@ -4526,13 +4530,58 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInforma
   // the device is about to be shown with no resources at all, so say why rather
   // than leaving it unexplained.
   if( resources_vector.empty() && !derive_error.empty() ) {
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
-    if(compiler) {
-      compiler->ErrorMessage(derive_error);
-    }
+    reportDeviceDataError(derive_error);
   }
 
   return resources_vector;
+}
+
+
+void QLDeviceManager::reportDeviceDataError(const std::string& message) {
+
+  if( !reported_device_data_error_set.insert(message).second ) {
+    return;
+  }
+
+  if(!GlobalSession) {
+    return;
+  }
+
+  // The GUI walks device_data from the MainWindow constructor, before the console
+  // the compiler's error stream is pointed at exists, so hold the message until
+  // MainWindow has wired it and flushes. A batch run has no console to wait for -
+  // stderr is its output, and nothing would ever flush.
+  const bool gui = GlobalSession->CmdLine() && GlobalSession->CmdLine()->WithQt();
+  if( gui && !device_data_error_console_ready ) {
+    deferred_device_data_error_list.push_back(message);
+    return;
+  }
+
+  CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
+  if(compiler) {
+    // append=false: no Tcl command is in flight while device_data is walked, and
+    // appending would land this in the result of whichever one runs next.
+    compiler->ErrorMessage(message, false);
+  }
+}
+
+
+void QLDeviceManager::flushDeferredDeviceDataErrors() {
+
+  device_data_error_console_ready = true;
+
+  std::vector<std::string> messages;
+  messages.swap(deferred_device_data_error_list);
+
+  CompilerOpenFPGA_ql* compiler =
+      GlobalSession ? (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler() : nullptr;
+  if(!compiler) {
+    return;
+  }
+
+  for(const std::string& message : messages) {
+    compiler->ErrorMessage(message, false);
+  }
 }
 
 
