@@ -101,6 +101,18 @@ class QLDeviceLayoutSettings {
     std::string device_type;
     // canonical "AUTO", "CUSTOM" or "RESOURCES".
     std::string layout_mode;
+    // the fabric the package records for itself, verbatim: "DEVICE_SIZE"
+    // ("30x30" - ARRAY_X x ARRAY_Y, without the arch file's IO ring) and the
+    // resource column lists ("12,25"). Descriptive metadata, not a mode
+    // selector, so a value that does not parse is left for the reader to reject
+    // and never sets 'invalid': failing every run on a package that mis-spelled
+    // one would be far worse than whatever reads it declining to.
+    bool device_size_present = false;
+    std::string device_size;
+    bool bram_cols_present = false;
+    std::string bram_cols;
+    bool dsp_cols_present = false;
+    std::string dsp_cols;
     // the config.json this was read from, reported in errors and passed to
     // add_layout.py as --device_config. set even when the file is absent.
     std::filesystem::path config_json_path;
@@ -298,6 +310,35 @@ class QLDeviceManager : public QObject {
 
   // "<major>.<minor>" -> numeric parts. False, outputs untouched, on anything else.
   static bool parseVersionString(const std::string& version, int& major, int& minor);
+
+  // An architecture counts the IO ring in its layout size and a device config does
+  // not: add_layout.py's 'WIDTH = ARRAY_X + 4' (two tiles per side). A fabric of
+  // this size or smaller is all ring and no core.
+  static constexpr int kLayoutIORingTiles = 4;
+
+  // A resource column list as a device config spells it: ascending, comma
+  // separated, no spaces.
+  static std::string joinLayoutColumnList(const std::set<long>& columns);
+
+  // Split a resource column list into its numbers, matching add_layout.py's
+  // split_cols(): commas and/or whitespace. False on anything not a whole number.
+  static bool parseLayoutColumnList(const std::string& value, std::set<long>& out_columns);
+
+  // One bounded whole number, for the dimension keys.
+  static bool parseLayoutDimension(const std::string& value, long& out_value);
+
+  // The BRAM/DSP columns a generated architecture actually placed, read back out
+  // of its <fixed_layout>, in device-config spelling.
+  static bool readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_xml_filepath,
+                                                 const std::string& layout_name,
+                                                 std::string& out_bram_cols,
+                                                 std::string& out_dsp_cols);
+
+  // Does the override ask for the fabric the device already has? Equal means all
+  // four values are present on both sides and match; an omitted key is not equal.
+  static bool customLayoutMatchesDeviceGeometry(const json& custom_layout_json,
+                                                const QLDeviceLayoutSettings& layout_settings,
+                                                std::string& out_geometry);
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
   // reported as not-present (a pre-2026.3 package), an unrecognised value as

@@ -34,6 +34,7 @@
 #include <QDebug>
 #include <QDomDocument>
 #include <QFile>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QJsonArray>
 #include <QDirIterator>
@@ -48,6 +49,7 @@
 #include <locale>
 #include <fstream>
 #include <cmath>
+#include <set>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -3611,7 +3613,8 @@ static bool resolveCustomLayoutYMLPath(const std::filesystem::path& project_path
 // so a key let through misspelled does not fail the run - it quietly builds a
 // 12x10 fabric instead of the one that was asked for, with no diagnostic
 // anywhere. An unknown key, a repeated key, a missing dimension or a value that
-// is not a whole number is therefore an error naming the key and the line.
+// is not a whole number - or, for the column keys, a comma-separated list of
+// whole numbers - is therefore an error naming the key and the line.
 static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_filepath,
                                 json& out_custom_layout_json,
                                 std::string& out_error) {
@@ -3619,16 +3622,20 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
   // The keys the CUSTOM section of the device config contract defines, with the
   // smallest value each accepts. ARRAY_X/ARRAY_Y size the fabric, so they must
   // be present; the column counts may legitimately be zero and may be omitted.
+  // A column key names one column per entry, so it also takes a comma-separated
+  // list: every device beyond the 8x6 seed shapes has BRAM and DSP in more than
+  // one column.
   struct CustomLayoutKey {
     const char* name;
     long minimum;
     bool required;
+    bool list_valued;
   };
   static const CustomLayoutKey custom_layout_keys[] = {
-    { "ARRAY_X",   1, true  },
-    { "ARRAY_Y",   1, true  },
-    { "BRAM_COLS", 0, false },
-    { "DSP_COLS",  0, false },
+    { "ARRAY_X",   1, true,  false },
+    { "ARRAY_Y",   1, true,  false },
+    { "BRAM_COLS", 0, false, true  },
+    { "DSP_COLS",  0, false, true  },
   };
   const std::size_t custom_layout_key_count =
       sizeof(custom_layout_keys) / sizeof(custom_layout_keys[0]);
@@ -3737,33 +3744,59 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
       return false;
     }
 
-    // Strictly a decimal integer. '-8', '8.5', 'null' and '[4, 8]' must not
-    // reach the script, which either aborts in int() or mis-sizes the fabric.
-    bool digits_only = !value.empty();
-    for(char c : value) {
-      if(c < '0' || c > '9') {
-        digits_only = false;
+    // Strictly a decimal integer - once for a dimension, once per element for a
+    // column list, whitespace around each element allowed. '-8', '8.5', 'null'
+    // and '[4, 8]' must not reach the script, which either aborts in int() or
+    // mis-sizes the fabric, and neither must a hole in the list ('12,' or
+    // '12,,25'), which int() fails on the same way.
+    std::size_t element_start = 0;
+    while(element_start <= value.size()) {
+      const std::size_t separator_pos =
+          known_key->list_valued ? value.find(',', element_start) : std::string::npos;
+      std::string element = (separator_pos == std::string::npos)
+                                ? value.substr(element_start)
+                                : value.substr(element_start, separator_pos - element_start);
+      // the value as a whole is already trimmed, so trim each element too:
+      // '12, 25' is what a person writes, and add_layout.py's split_cols
+      // (re.split(r'[,\s]+')) already accepts it.
+      StringUtils::trim(element);
+
+      if(element.empty()) {
+        out_error = "has an empty entry in '" + key + "' = '" + value + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      bool digits_only = true;
+      for(char c : element) {
+        if(c < '0' || c > '9') {
+          digits_only = false;
+          break;
+        }
+      }
+      if(!digits_only) {
+        out_error = "has a non-integer value '" + element + "' for '" + key + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      // bounded so the conversion below cannot overflow; no fabric dimension or
+      // column index comes anywhere near nine digits.
+      if(element.size() > 9) {
+        out_error = "has an out-of-range value '" + element + "' for '" + key + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      const long numeric_value = std::stol(element);
+      if(numeric_value < known_key->minimum) {
+        out_error = "has '" + key + "' = " + element + ", below the minimum of " +
+                    std::to_string(known_key->minimum) + " (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+
+      if(separator_pos == std::string::npos) {
         break;
       }
-    }
-    if(!digits_only) {
-      out_error = "has a non-integer value '" + value + "' for '" + key + "' (line " +
-                  std::to_string(line_number) + ")";
-      return false;
-    }
-    // bounded so the conversion below cannot overflow; no fabric dimension comes
-    // anywhere near nine digits.
-    if(value.size() > 9) {
-      out_error = "has an out-of-range value '" + value + "' for '" + key + "' (line " +
-                  std::to_string(line_number) + ")";
-      return false;
-    }
-    const long numeric_value = std::stol(value);
-    if(numeric_value < known_key->minimum) {
-      out_error = "has '" + key + "' = " + value + ", below the minimum of " +
-                  std::to_string(known_key->minimum) + " (line " +
-                  std::to_string(line_number) + ")";
-      return false;
+      element_start = separator_pos + 1;
     }
 
     // kept as a string: that is how the config contract spells the CUSTOM
@@ -4011,16 +4044,40 @@ bool CompilerOpenFPGA_ql::Packing() {
                      "/../custom_layout.yml': the project path could not be canonicalized.\n");
         return false;
       }
-      // FIXME(aurora2#2291): a device generated from an override is stamped FIXED, so
-      // re-running on it with that same custom_layout.yml still present lands here. Give
-      // a generated package provenance in its config.json and exempt it, rather than
-      // relaxing this guard, which real silicon depends on.
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
-        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
-                     layout_settings.config_json_path.string() +
-                     " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
-                     ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
-        return false;
+        // What REQ-005 refuses is a re-shape actually being ASKED for. A yml naming
+        // the geometry the device ALREADY HAS asks for nothing - there is no resize
+        // to refuse - and that is exactly what the flow hands itself: a generated
+        // device is stamped 'DEVICE_TYPE': 'FIXED', so on the next run the very yml
+        // that shaped it is still beside the project and lands here (aurora2#2291).
+        //
+        // So compare, and only refuse a genuine re-shape. No exemption and no
+        // provenance marker: 'DEVICE_TYPE' is plaintext in the same config.json, so
+        // anything that authenticated a "this was generated" field would be defeated
+        // by editing 'DEVICE_TYPE' instead. What matters is that the comparison
+        // cannot match by accident on real silicon, and an exact four-value match
+        // against the fabric in front of us cannot.
+        //
+        // A yml that does not parse is not a match either: we cannot tell what it
+        // asks for, so it is refused with the message below, unchanged.
+        json custom_layout_json;
+        std::string custom_layout_error;
+        std::string matched_geometry;
+        if(readCustomLayoutYML(custom_layout_yml_filepath, custom_layout_json, custom_layout_error) &&
+           QLDeviceManager::customLayoutMatchesDeviceGeometry(custom_layout_json, layout_settings,
+                                                              matched_geometry)) {
+          Message("[WARNING] Device '" + source_devicename + "' already has the geometry " +
+                  custom_layout_yml_filepath.string() + " asks for (" + matched_geometry +
+                  "), so no re-shape was requested. The override is ignored and the device "
+                  "is used as it ships.\n");
+        }
+        else {
+          ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                       layout_settings.config_json_path.string() +
+                       " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
+                       ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
+          return false;
+        }
       }
       // nothing asked for a re-shape: a fixed device runs the normal flow.
     }
@@ -4370,6 +4427,40 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
     }
 
+    // The geometry the generated device's own config.json has to record, taken
+    // from the fabric that was just built. The clone below starts from a copy of
+    // the SEED package, so without this a device generated at 30x30 still claims
+    // the seed's 'DEVICE_SIZE' ("8x6") and the seed's resource columns - a
+    // package describing a fabric that is not the one it ships. Read here, while
+    // the plaintext architecture file still exists: it is encrypted and deleted
+    // further down.
+    std::string generated_device_size;
+    std::string generated_device_bram_cols;
+    std::string generated_device_dsp_cols;
+    bool generated_device_columns_known = false;
+
+    // the arch file counts the IO ring and the device config does not:
+    // add_layout.py's 'WIDTH = ARRAY_X + 4'. A fabric that is all ring has no
+    // core to describe, so leave the size unset rather than record 0x0.
+    constexpr int io_ring = QLDeviceManager::kLayoutIORingTiles;
+    if((generated_layout_width > io_ring) && (generated_layout_height > io_ring)) {
+      generated_device_size = std::to_string(generated_layout_width - io_ring) + "x" +
+                              std::to_string(generated_layout_height - io_ring);
+    }
+
+    generated_device_columns_known =
+        QLDeviceManager::readGeneratedLayoutResourceColumns(generated_vpr_xml_path,
+                                                            m_autoLayoutGeneratedLayoutName,
+                                                            generated_device_bram_cols,
+                                                            generated_device_dsp_cols);
+    if(!generated_device_columns_known) {
+      // not fatal - the fabric is built and usable either way - but the columns
+      // must then be dropped rather than inherited, see step 5b.
+      Message("[WARNING] Could not read the resource columns of layout '" +
+              m_autoLayoutGeneratedLayoutName + "' from " + generated_vpr_xml_path.string() +
+              "; the generated device's config.json will not record them.\n");
+    }
+
 
 #if GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
@@ -4635,6 +4726,27 @@ bool CompilerOpenFPGA_ql::Packing() {
           "vpr.xml.en";
       FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
 
+      // Step 1 copied the source corner wholesale, so its plaintext vpr.xml is still
+      // beside the vpr.xml.en just written. Device discovery globs 'vpr\.xml.*' and
+      // refuses a device carrying more VPR XMLs than OpenFPGA XMLs
+      // (QLDeviceManager.cpp:1262), so leaving both makes every generated device
+      // unselectable as a target: "Mismatched number of VPR XML(s) w.r.t OPENFPGA
+      // XML(s)". Only drop it once the encrypted arch is actually in place.
+      if(FileUtils::FileExists(target_device_vpr_xml_filepath)) {
+        std::filesystem::path stale_source_vpr_xml =
+            target_device_vpr_xml_filepath.parent_path() / "vpr.xml";
+        if(FileUtils::FileExists(stale_source_vpr_xml)) {
+          std::error_code stale_remove_ec;
+          std::filesystem::remove(stale_source_vpr_xml, stale_remove_ec);
+          if(stale_remove_ec) {
+            ErrorMessage("Could not remove the source arch left in the generated device: " +
+                         stale_source_vpr_xml.string() + " (" + stale_remove_ec.message() +
+                         "). The device would not resolve as a target.\n");
+            return false;
+          }
+        }
+      }
+
 #if GENERATE_RR_GRAPH_FPGA_AUTO
       // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
       std::filesystem::path target_device_rr_graph_filepath =
@@ -4728,9 +4840,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       // shaped and its add_layout.py is removed below, so it must not resolve to
       // a generation mode again on the next run. Rewrite its own config.json the
       // way the silicon release task writes a non-reshapable part - 'DEVICE_TYPE':
-      // 'FIXED' with the layout settings dropped - and leave the rest of the file
-      // (BRAM_SIZE, DSP_SIZE, IO_CAPACITY, DSP_TYPE, ...) alone.
-      // A pre-contract package carries neither key, so nothing is written for it.
+      // 'FIXED' with the layout settings dropped - and record the geometry that
+      // was actually built, which the copied-from-the-seed file otherwise still
+      // describes. The rest of the file (BRAM_SIZE, DSP_SIZE, IO_CAPACITY,
+      // DSP_TYPE, ...) is left alone.
+      // A pre-contract package carries neither DEVICE_TYPE key, so the stamping
+      // writes nothing for it; the geometry keys are descriptive and are written
+      // either way.
       {
         std::filesystem::path target_device_config_json_filepath =
             target_device_copy_dirpath / "config.json";
@@ -4748,12 +4864,42 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
           target_device_config_json_ifstream.close();
 
+          bool target_device_config_json_modified = false;
+
           if(target_device_config_json.is_object() &&
              (target_device_config_json.contains("DEVICE_TYPE") ||
               target_device_config_json.contains("DEVICE_TYPE_SETTINGS"))) {
             target_device_config_json["DEVICE_TYPE"] = "FIXED";
             target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
+            target_device_config_json_modified = true;
+          }
 
+          if(target_device_config_json.is_object()) {
+            if(!generated_device_size.empty()) {
+              target_device_config_json["DEVICE_SIZE"] = generated_device_size;
+              target_device_config_json_modified = true;
+            }
+            if(generated_device_columns_known) {
+              // written even when empty: no BRAM column is a fact about this
+              // fabric, and an absent key would read as 'unknown'.
+              target_device_config_json["BRAM_COLS"] = generated_device_bram_cols;
+              target_device_config_json["DSP_COLS"] = generated_device_dsp_cols;
+              target_device_config_json_modified = true;
+            }
+            else {
+              // absent beats inherited-and-wrong: the seed's column lists say
+              // nothing about this device, and anything reading them as its own
+              // would be reading a lie.
+              if(target_device_config_json.erase("BRAM_COLS") > 0) {
+                target_device_config_json_modified = true;
+              }
+              if(target_device_config_json.erase("DSP_COLS") > 0) {
+                target_device_config_json_modified = true;
+              }
+            }
+          }
+
+          if(target_device_config_json_modified) {
             std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
             if(!target_device_config_json_ofstream.is_open()) {
               ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
