@@ -4142,6 +4142,21 @@ static bool normalizeLayoutMode(const std::string& value, std::string& out_layou
   return false;
 }
 
+
+// The config.json keys this file reads. Spelled once here so a rename in the
+// device data contract is a single edit, and a typo is a compile error rather
+// than a key that silently never matches.
+constexpr const char* CONFIG_KEY_DEVICE_TYPE = "DEVICE_TYPE";
+constexpr const char* CONFIG_KEY_DEVICE_TYPE_SETTINGS = "DEVICE_TYPE_SETTINGS";
+constexpr const char* CONFIG_KEY_LAYOUT_MODE = "LAYOUT_MODE";
+constexpr const char* CONFIG_KEY_DEVICE_SIZE = "DEVICE_SIZE";
+constexpr const char* CONFIG_KEY_BRAM_SIZE = "BRAM_SIZE";
+constexpr const char* CONFIG_KEY_DSP_SIZE = "DSP_SIZE";
+constexpr const char* CONFIG_KEY_BRAM_COLS = "BRAM_COLS";
+constexpr const char* CONFIG_KEY_DSP_COLS = "DSP_COLS";
+constexpr const char* CONFIG_KEY_IO_CAPACITY = "IO_CAPACITY";
+
+
 QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
 
   QLDeviceLayoutSettings layout_settings;
@@ -4180,40 +4195,41 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
   }
   layout_settings.config_found = true;
 
-  if( device_target_config_json.contains("DEVICE_TYPE") ) {
-    const auto& device_type = device_target_config_json["DEVICE_TYPE"];
+  if( device_target_config_json.contains(CONFIG_KEY_DEVICE_TYPE) ) {
+    const auto& device_type = device_target_config_json[CONFIG_KEY_DEVICE_TYPE];
     if( device_type.is_string() &&
         normalizeDeviceType(device_type.get<std::string>(), layout_settings.device_type) ) {
       layout_settings.device_type_present = true;
     }
     else {
       layout_settings.invalid = true;
-      layout_settings.invalid_key = "DEVICE_TYPE";
+      layout_settings.invalid_key = CONFIG_KEY_DEVICE_TYPE;
       layout_settings.invalid_value = device_type.is_string() ? device_type.get<std::string>()
                                                              : device_type.dump();
       return layout_settings;
     }
   }
 
-  if( device_target_config_json.contains("DEVICE_TYPE_SETTINGS") ) {
-    const auto& device_type_settings = device_target_config_json["DEVICE_TYPE_SETTINGS"];
+  if( device_target_config_json.contains(CONFIG_KEY_DEVICE_TYPE_SETTINGS) ) {
+    const auto& device_type_settings = device_target_config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS];
     if( !device_type_settings.is_object() ) {
       layout_settings.invalid = true;
-      layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS";
+      layout_settings.invalid_key = CONFIG_KEY_DEVICE_TYPE_SETTINGS;
       layout_settings.invalid_value = device_type_settings.dump();
       return layout_settings;
     }
     layout_settings.device_type_settings_present = true;
 
-    if( device_type_settings.contains("LAYOUT_MODE") ) {
-      const auto& layout_mode = device_type_settings["LAYOUT_MODE"];
+    if( device_type_settings.contains(CONFIG_KEY_LAYOUT_MODE) ) {
+      const auto& layout_mode = device_type_settings[CONFIG_KEY_LAYOUT_MODE];
       if( layout_mode.is_string() &&
           normalizeLayoutMode(layout_mode.get<std::string>(), layout_settings.layout_mode) ) {
         layout_settings.layout_mode_present = true;
       }
       else {
         layout_settings.invalid = true;
-        layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS.LAYOUT_MODE";
+        layout_settings.invalid_key =
+            std::string(CONFIG_KEY_DEVICE_TYPE_SETTINGS) + "." + CONFIG_KEY_LAYOUT_MODE;
         layout_settings.invalid_value = layout_mode.is_string() ? layout_mode.get<std::string>()
                                                                : layout_mode.dump();
         return layout_settings;
@@ -4361,7 +4377,8 @@ static int countDeviceColumns(const std::string& text) {
 // On a CUSTOM package with "LAYOUT_MODE": "AUTO" these are the counts of the
 // default layout that shipped. Aurora re-sizes the fabric per design in that
 // mode, so the device a given run actually uses may be larger or smaller.
-std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceInformation(QLDeviceTarget device_target) {
+std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceInformation(QLDeviceTarget device_target,
+                                                                                          std::string* out_error) {
 
   std::vector<std::tuple<std::string, int>> resources_vector;
 
@@ -4369,10 +4386,22 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
     device_target = this->device_target;
   }
 
-  json device_target_config_json;
-  if( !loadDeviceConfigJSON(device_target, device_target_config_json) ||
-      !device_target_config_json.is_object() ) {
+  // Every path below returns an empty vector; without a reason the caller can
+  // only report the device as having no resources at all.
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = std::string("cannot derive resource counts for ") +
+                   convertToDeviceString(device_target) + ": " + reason;
+    }
     return resources_vector;
+  };
+
+  json device_target_config_json;
+  std::string config_parse_error;
+  if( !loadDeviceConfigJSON(device_target, device_target_config_json, &config_parse_error) ||
+      !device_target_config_json.is_object() ) {
+    return fail(config_parse_error.empty() ? std::string("config.json is missing or unreadable")
+                                           : config_parse_error);
   }
 
   std::string device_size_text;
@@ -4380,12 +4409,17 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   std::string dsp_size_text;
   std::string bram_cols_text;
   std::string dsp_cols_text;
-  if( !configJSONText(device_target_config_json, "DEVICE_SIZE", device_size_text) ||
-      !configJSONText(device_target_config_json, "BRAM_SIZE", bram_size_text) ||
-      !configJSONText(device_target_config_json, "DSP_SIZE", dsp_size_text) ||
-      !configJSONText(device_target_config_json, "BRAM_COLS", bram_cols_text) ||
-      !configJSONText(device_target_config_json, "DSP_COLS", dsp_cols_text) ) {
-    return resources_vector;
+  const std::pair<const char*, std::string*> required_keys[] = {
+      {CONFIG_KEY_DEVICE_SIZE, &device_size_text},
+      {CONFIG_KEY_BRAM_SIZE,   &bram_size_text},
+      {CONFIG_KEY_DSP_SIZE,    &dsp_size_text},
+      {CONFIG_KEY_BRAM_COLS,   &bram_cols_text},
+      {CONFIG_KEY_DSP_COLS,    &dsp_cols_text},
+  };
+  for(const auto& [key, out_text] : required_keys) {
+    if( !configJSONText(device_target_config_json, key, *out_text) ) {
+      return fail(std::string("config.json has no usable \"") + key + "\" key");
+    }
   }
 
   int array_x = 0;
@@ -4394,11 +4428,17 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   int bram_tile_height = 0;
   int dsp_tile_width = 0;
   int dsp_tile_height = 0;
-  if( !parseDeviceGeometry(device_size_text, array_x, array_y) ||
-      !parseDeviceGeometry(bram_size_text, bram_tile_width, bram_tile_height) ||
-      !parseDeviceGeometry(dsp_size_text, dsp_tile_width, dsp_tile_height) ||
-      (array_x <= 0) || (array_y <= 0) || (bram_tile_height <= 0) || (dsp_tile_height <= 0) ) {
-    return resources_vector;
+  if( !parseDeviceGeometry(device_size_text, array_x, array_y) || (array_x <= 0) || (array_y <= 0) ) {
+    return fail(std::string("\"") + CONFIG_KEY_DEVICE_SIZE + "\": \"" + device_size_text +
+                "\" is not a positive <x>x<y> geometry");
+  }
+  if( !parseDeviceGeometry(bram_size_text, bram_tile_width, bram_tile_height) || (bram_tile_height <= 0) ) {
+    return fail(std::string("\"") + CONFIG_KEY_BRAM_SIZE + "\": \"" + bram_size_text +
+                "\" is not a positive <x>x<y> geometry");
+  }
+  if( !parseDeviceGeometry(dsp_size_text, dsp_tile_width, dsp_tile_height) || (dsp_tile_height <= 0) ) {
+    return fail(std::string("\"") + CONFIG_KEY_DSP_SIZE + "\": \"" + dsp_size_text +
+                "\" is not a positive <x>x<y> geometry");
   }
 
   const int bram_columns = countDeviceColumns(bram_cols_text);
@@ -4406,7 +4446,9 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   if( (bram_columns + dsp_columns) >= array_x ) {
     // the column lists do not fit the array: report nothing rather than a
     // negative clb count.
-    return resources_vector;
+    return fail(std::string("\"") + CONFIG_KEY_BRAM_COLS + "\" (" + std::to_string(bram_columns) +
+                ") + \"" + CONFIG_KEY_DSP_COLS + "\" (" + std::to_string(dsp_columns) +
+                ") do not fit an array " + std::to_string(array_x) + " columns wide");
   }
 
   // "IO_CAPACITY" is a late addition to the config contract. Every device in the
@@ -4415,9 +4457,10 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   const int DEFAULT_IO_CAPACITY = 20;
   int io_capacity = DEFAULT_IO_CAPACITY;
   std::string io_capacity_text;
-  if( configJSONText(device_target_config_json, "IO_CAPACITY", io_capacity_text) ) {
+  if( configJSONText(device_target_config_json, CONFIG_KEY_IO_CAPACITY, io_capacity_text) ) {
     if( !parseWholeNumber(io_capacity_text, io_capacity) || (io_capacity < 0) ) {
-      return resources_vector;
+      return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
+                  "\" is not a whole number");
     }
   }
 
@@ -4428,7 +4471,10 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   const int LAYOUT_RING_TILES = 4;
   if( (device_target.device_variant_layout.width != (array_x + LAYOUT_RING_TILES)) ||
       (device_target.device_variant_layout.height != (array_y + LAYOUT_RING_TILES)) ) {
-    return resources_vector;
+    return fail(std::string("layout \"") + device_target.device_variant_layout.name + "\" is " +
+                std::to_string(device_target.device_variant_layout.width) + "x" +
+                std::to_string(device_target.device_variant_layout.height) + ", which \"" +
+                CONFIG_KEY_DEVICE_SIZE + "\": \"" + device_size_text + "\" does not describe");
   }
 
   resources_vector.push_back(std::make_tuple(std::string("clb"),
@@ -4491,7 +4537,17 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInforma
   if(resources_vector.empty()) {
     // no resources.json in this package, or none for this layout: derive the
     // counts from config.json rather than reporting the device as empty.
-    resources_vector = deriveDeviceResourceInformation(device_target);
+    std::string derive_error;
+    resources_vector = deriveDeviceResourceInformation(device_target, &derive_error);
+
+    // both sources came up empty - the device is about to be shown with no
+    // resources at all, so say why rather than leaving it unexplained.
+    if( resources_vector.empty() && !derive_error.empty() ) {
+      CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
+      if(compiler) {
+        compiler->ErrorMessage(derive_error);
+      }
+    }
   }
 
   return resources_vector;

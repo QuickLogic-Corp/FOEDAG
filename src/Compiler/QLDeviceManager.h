@@ -307,8 +307,10 @@ class QLDeviceManager : public QObject {
   std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
   // Resource counts derived from the geometry keys in config.json, for packages
   // that ship no resources.json. Empty when config.json cannot answer for this
-  // layout - see the definition for the formulas and their limits.
-  std::vector<std::tuple<std::string, int>> deriveDeviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
+  // layout - see the definition for the formulas and their limits. When empty
+  // and out_error is given, it is set to the reason.
+  std::vector<std::tuple<std::string, int>> deriveDeviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget(),
+                                                                           std::string* out_error = nullptr);
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
