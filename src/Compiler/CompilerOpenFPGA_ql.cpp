@@ -4754,6 +4754,26 @@ bool CompilerOpenFPGA_ql::Packing() {
             target_device_config_json["DEVICE_TYPE"] = "FIXED";
             target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
 
+            // The copy still carries the SOURCE package's geometry, which describes
+            // the fabric this run replaced rather than the one it generated, so the
+            // generated device would report no resources at all (issue #2257). Take
+            // it from the architecture just written, the way the package's own
+            // add_layout.py reads it back.
+            LayoutGeometryResult generated_geometry =
+                parseLayoutGeometry(generated_vpr_xml_path, m_autoLayoutGeneratedLayoutName);
+            if(generated_geometry.error.empty()) {
+              target_device_config_json["DEVICE_SIZE"] =
+                  std::to_string(generated_geometry.array_x) + "x" +
+                  std::to_string(generated_geometry.array_y);
+              target_device_config_json["BRAM_COLS"] = generated_geometry.bram_cols;
+              target_device_config_json["DSP_COLS"] = generated_geometry.dsp_cols;
+            }
+            else {
+              // not fatal: the device works, it just cannot report its resources.
+              WarningMessage("generated device will report no resources - " +
+                             generated_geometry.error);
+            }
+
             std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
             if(!target_device_config_json_ofstream.is_open()) {
               ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
