@@ -10,17 +10,32 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <random>
 
 #include "gtest/gtest.h"
 
 fp::DeviceGridDescriptorPtr descriptorFromJson(const std::string& configJson)
 {
+    // A fixed name in the shared temp dir can collide with a leftover file
+    // from another user/run on a multi-user build box; a random suffix keeps
+    // this path ours alone.
+    static std::mt19937_64 rng(std::random_device{}());
+    const std::string testName =
+        ::testing::UnitTest::GetInstance()->current_test_info()->name();
     const std::filesystem::path configPath =
-        std::filesystem::temp_directory_path() / "fp_unittest_device_config.json";
+        std::filesystem::temp_directory_path() /
+        ("fp_unittest_device_config_" + testName + "_" +
+         std::to_string(rng()) + ".json");
 
+    bool wroteOk = false;
     {
         std::ofstream out(configPath);
         out << configJson;
+        wroteOk = out.good();
+    }
+    if (!wroteOk) {
+        ADD_FAILURE() << "failed to write test config.json to " << configPath;
+        return nullptr;
     }
 
     fp::DeviceGridDescriptorPtr descriptor =
