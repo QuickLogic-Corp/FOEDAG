@@ -1,6 +1,5 @@
 #include "QLDeviceLayoutInfo.h"
 
-#include <fstream>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -10,6 +9,7 @@
 #include "CompilerOpenFPGA_ql.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "Utils/FileUtils.h"
 #include "nlohmann_json/json.hpp"
 
 extern FOEDAG::Session* GlobalSession;
@@ -313,13 +313,13 @@ bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
   if (project_path.empty()) {
     return false;
   }
-  std::ifstream log_stream((project_path / "auto_device.log").string());
-  if (!log_stream.is_open()) {
+  bool ok = false;
+  const std::string contents =
+      FileUtils::GetFileContent(project_path / "auto_device.log", &ok);
+  if (!ok) {
     return false;
   }
-  std::ostringstream contents;
-  contents << log_stream.rdbuf();
-  return parseAutoDeviceLog(contents.str(), m_layout);
+  return parseAutoDeviceLog(contents, m_layout);
 }
 
 // The shipped <fixed_layout> is an independent witness for a FIXED part, so a
@@ -372,28 +372,22 @@ bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
   layout_json["layout_mode"] = m_layout.layoutMode;
   layout_json["source"] = m_layout.source;
 
-  const std::string contents = layout_json.dump(2) + "\n";
+  const std::string contents = layout_json.dump(2);
 
   // setCurrentDeviceTarget() is reached again from every
   // QLSettingsManager::getInstance(), so an unconditional write would rewrite this
   // file many times per run and churn its mtime for anything watching it.
-  std::ifstream existing(filepath.string());
-  if (existing.is_open()) {
-    std::ostringstream previous;
-    previous << existing.rdbuf();
-    if (previous.str() == contents) {
-      return true;
-    }
+  bool existing_ok = false;
+  const std::string existing = FileUtils::GetFileContent(filepath, &existing_ok);
+  if (existing_ok && (existing == contents + "\n")) {
+    return true;
   }
-  existing.close();
 
-  std::ofstream out(filepath.string());
-  if (!out.is_open()) {
+  if (!FileUtils::WriteToFile(filepath, contents)) {
     message("[WARNING] Cannot write " + filepath.string() + "\n");
     return false;
   }
-  out << contents;
-  return out.good();
+  return true;
 }
 
 void QLDeviceLayoutInfo::removeStaleDeviceLayoutJSON() {
