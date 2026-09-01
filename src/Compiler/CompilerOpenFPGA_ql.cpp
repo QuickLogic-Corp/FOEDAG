@@ -3545,10 +3545,26 @@ static std::string removeVprOption(const std::string& options, const std::string
 // Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'. The 'x' is
 // load-bearing: plain concatenation makes 12x10 read as 'AUTOFPGA1210', equally 1x210
 // and 121x0. Every construction site goes through here so they cannot drift apart.
-static std::string generatedLayoutName(const std::string& prefix, int width, int height) {
+// The generated device package is written into the SHARED device_data tree as a sibling
+// of the source device, named only by the fabric it describes. Two runs that resolve to
+// the same size therefore targeted the same directory and raced on the delete-then-copy
+// that installs it: one run's recursive delete lands in the middle of another's copy.
+// The benchmark suite runs many designs, and several synthesis tools per design, against
+// one device_data, so this is its normal operating condition rather than a corner case.
+//
+// The project path is the natural key: it is exactly what distinguishes one concurrent
+// aurora invocation from another. Hashed because it cannot go in a directory name as-is,
+// and in hex to keep the name short. Stable for a given project, so re-running reuses its
+// directory instead of leaving a new one behind each time.
+static std::string generatedLayoutName(const std::string& prefix, int width, int height,
+                                       const std::string& project_path) {
+
+  std::ostringstream run_token;
+  run_token << std::hex << std::hash<std::string>{}(project_path);
 
   return prefix + std::string("FPGA") +
-         std::to_string(width) + std::string("x") + std::to_string(height);
+         std::to_string(width) + std::string("x") + std::to_string(height) +
+         std::string("_") + run_token.str();
 }
 
 
@@ -4392,11 +4408,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       // device package ships.
       if(m_autoLayoutGenerationMode) {
         m_autoLayoutGeneratedLayoutName =
-                generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
+                generatedLayoutName("AUTO", generated_layout_width, generated_layout_height,
+                                    ProjManager()->projectPath());
       }
       if(m_customLayoutGenerationMode) {
         m_autoLayoutGeneratedLayoutName =
-                generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height);
+                generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height,
+                                    ProjManager()->projectPath());
       }
 
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(add_layout_script_generated_layout_name), m_autoLayoutGeneratedLayoutName);
@@ -4408,7 +4426,8 @@ bool CompilerOpenFPGA_ql::Packing() {
       generated_layout_width = current_device_target.device_variant_layout.width;
       generated_layout_height = current_device_target.device_variant_layout.height;
       m_autoLayoutGeneratedLayoutName =
-              generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
+              generatedLayoutName("AUTO", generated_layout_width, generated_layout_height,
+                                    ProjManager()->projectPath());
 
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
