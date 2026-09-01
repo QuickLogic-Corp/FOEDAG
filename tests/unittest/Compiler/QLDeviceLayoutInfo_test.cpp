@@ -54,10 +54,14 @@ constexpr const char* SAMPLE_CONFIG_FIXED = R"json({
   "DEVICE_SIZE": "8x6",
   "BRAM_COLS": "3",
   "DSP_COLS": "6",
+  "BRAM_SIZE": "1x6",
+  "DSP_SIZE": "1x3",
   "DEVICE_TYPE": "FIXED"
 }
 )json";
 constexpr const char* SAMPLE_CONFIG_CUSTOM = R"json({
+  "BRAM_SIZE": "1x6",
+  "DSP_SIZE": "1x3",
   "DEVICE_TYPE": "CUSTOM",
   "DEVICE_TYPE_SETTINGS": {
     "LAYOUT_MODE": "CUSTOM",
@@ -74,6 +78,8 @@ constexpr const char* SAMPLE_CONFIG_AUTO = R"json({
   "DEVICE_SIZE": "8x6",
   "BRAM_COLS": "3",
   "DSP_COLS": "6",
+  "BRAM_SIZE": "1x6",
+  "DSP_SIZE": "1x3",
   "DEVICE_TYPE": "CUSTOM",
   "DEVICE_TYPE_SETTINGS": {
     "LAYOUT_MODE": "AUTO"
@@ -119,6 +125,8 @@ TEST(QLDeviceLayoutInfo, FixedDeviceResolvesFromTopLevelKeys) {
   EXPECT_EQ(layout.height, 10);
   EXPECT_EQ(layout.bramCols, std::set<int>({3}));
   EXPECT_EQ(layout.dspCols, std::set<int>({6}));
+  EXPECT_EQ(layout.bramSize, "1x6");
+  EXPECT_EQ(layout.dspSize, "1x3");
   EXPECT_EQ(layout.source, "config.json");
 }
 
@@ -136,6 +144,10 @@ TEST(QLDeviceLayoutInfo, CustomLayoutModeResolvesFromItsOwnSection) {
   EXPECT_EQ(layout.height, 10);
   EXPECT_EQ(layout.bramCols, std::set<int>({3}));
   EXPECT_EQ(layout.dspCols, std::set<int>({6}));
+  // BRAM_SIZE/DSP_SIZE are never stated in the CUSTOM section - only at the
+  // top level, which baseConfig() already carries.
+  EXPECT_EQ(layout.bramSize, "1x6");
+  EXPECT_EQ(layout.dspSize, "1x3");
 }
 
 TEST(QLDeviceLayoutInfo, CustomSectionFallsBackPerKeyToTopLevel) {
@@ -183,6 +195,10 @@ TEST(QLDeviceLayoutInfo, MultiColumnDeviceRoundTrips) {
   EXPECT_EQ(layout.dspCols.size(), 10u);
   EXPECT_EQ(*layout.bramCols.begin(), 12);
   EXPECT_EQ(*layout.dspCols.rbegin(), 115);
+  // Pre-contract packages predate BRAM_SIZE/DSP_SIZE; absence must not fail
+  // the resolve.
+  EXPECT_TRUE(layout.bramSize.empty());
+  EXPECT_TRUE(layout.dspSize.empty());
 }
 
 TEST(QLDeviceLayoutInfo, MissingDeviceSizeIsUnresolvedNotAnError) {
@@ -344,6 +360,8 @@ TEST(QLDeviceLayoutInfo, SampleFixedConfigResolvesImmediately) {
   EXPECT_EQ(layout.height, 10);
   EXPECT_EQ(layout.bramCols, std::set<int>({3}));
   EXPECT_EQ(layout.dspCols, std::set<int>({6}));
+  EXPECT_EQ(layout.bramSize, "1x6");
+  EXPECT_EQ(layout.dspSize, "1x3");
 }
 
 TEST(QLDeviceLayoutInfo, SampleCustomConfigResolvesImmediately) {
@@ -359,6 +377,8 @@ TEST(QLDeviceLayoutInfo, SampleCustomConfigResolvesImmediately) {
   EXPECT_EQ(layout.height, 10);
   EXPECT_EQ(layout.bramCols, std::set<int>({3}));
   EXPECT_EQ(layout.dspCols, std::set<int>({6}));
+  EXPECT_EQ(layout.bramSize, "1x6");
+  EXPECT_EQ(layout.dspSize, "1x3");
 }
 
 TEST(QLDeviceLayoutInfo, SampleAutoConfigIsDeferredToPacking) {
@@ -372,6 +392,11 @@ TEST(QLDeviceLayoutInfo, SampleAutoConfigIsDeferredToPacking) {
 
   QLDeviceLayout layout;
   EXPECT_TRUE(QLDeviceLayoutInfo::parseDeviceConfig(config, "AUTO", layout));
+  // Unlike geometry, BRAM_SIZE/DSP_SIZE are the same fact regardless of mode -
+  // resolveBlockSizesFromDeviceConfig() picks these up separately for the real
+  // deferred path, but parseDeviceConfig() alone already carries them here too.
+  EXPECT_EQ(layout.bramSize, "1x6");
+  EXPECT_EQ(layout.dspSize, "1x3");
 }
 
 TEST(QLDeviceLayoutInfo, SampleResourcesConfigIsDeferredToPacking) {
