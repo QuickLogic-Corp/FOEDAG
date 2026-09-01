@@ -36,8 +36,8 @@ DeviceGridDescriptor::DeviceGridDescriptor(const std::filesystem::path& deviceCo
 {
     if (parse(deviceConfigFile)) {
         validateFit();
+        Tile::setDeviceRowsNum(m_rows);
     }
-    Tile::setDeviceRowsNum(m_rows);
 }
 
 bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
