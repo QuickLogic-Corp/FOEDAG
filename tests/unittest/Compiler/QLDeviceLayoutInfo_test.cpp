@@ -49,6 +49,224 @@ QLDeviceLayout parseLog(const std::string& text) {
 
 // The line add_layout.py prints for the AUTO run recorded in the reference
 // jpeg_top flow: a 100x102 array with one BRAM and one DSP column.
+// Byte-identical to the four v2.8 samples supplied with the request
+// (task workspace: config.json/config_{fixed,custom,auto,resources}.json). Full
+// files, not a hand-trimmed subset, so a resolve exercised here sees every key
+// QLDeviceManager and add_layout.py also read alongside the geometry ones.
+constexpr const char* SAMPLE_CONFIG_FIXED = R"json({
+  "CONFIG_FILE_VERSION": "v2.8",
+  "DEVICE_DATA_VERSION": "v2.0",
+  "CUSTOMER_NAME": "EVAL-MSC-CUSTOM",
+  "DEVICE_SIZE": "8x6",
+  "TAPEOUT_DATE": "2026Q2",
+  "AURORA_SETTINGS_TEMPLATE": "aurora/settings_template.json",
+  "AURORA_YOSYS_TEMPLATE_SCRIPT": "aurora/aurora_template_script.ys",
+  "AURORA_SYNPLIFY_TEMPLATE_SCRIPT": "aurora/aurora_template_script.prj",
+  "AURORA_OPENFPGA_TEMPLATE_SCRIPT": "aurora/aurora_template_script.openfpga",
+  "POWER_TEMPLATE": "aurora/power_template.json",
+  "PIN_TABLE": "aurora/efpga_pinmap.csv",
+  "FABRIC_KEY": "aurora/fabric_key.xml",
+  "FIXED_SIM_OPENFPGA": "aurora/fixed_sim_openfpga.xml",
+  "REPACK_DESIGN_CONSTRAINT": "aurora/repack_design_constraint.xml",
+  "BITSTREAM_ANNOTATION": "aurora/bitstream_annotation.xml",
+  "BITSTREAM_REMAPPING": "aurora/bitstream_remapping.xml",
+  "FPGA_IO_MAP": "aurora/fpga_io_map.xml",
+  "SB_MAPS": "aurora/SB_MAPS.yml",
+  "CORNER_VPR_ARCH": "vpr.xml",
+  "CORNER_SB_TEMPLATE_DIR": "CSV",
+  "CORNER_RRGRAPH_BIN": "rr_graph.bin",
+  "CORNER_ROUTER_LOOKAHEAD_BIN": "router_lookahead.bin",
+  "CORNER_OPENFPGA_ARCH": "openfpga.xml",
+  "CORNER_POWER_DATA": "power_data.json",
+  "CORNERS": {
+    "SSPG_0P72_M40C": "LVT/SSPG_0P72_M40C",
+    "SSPG_0P72_125C": "LVT/SSPG_0P72_125C",
+    "TT_0P80_25C": "LVT/TT_0P80_25C",
+    "FFPG_0P88_125C": "LVT/FFPG_0P88_125C",
+    "FFPG_0P88_M40C": "LVT/FFPG_0P88_M40C"
+  },
+  "AURORA_VERSION": "nightly",
+  "BRAM_TYPE": "TDP_ECC",
+  "CONFIG_TYPE": "WLBL",
+  "CRR_VERSION": "v2.4",
+  "BRAM_VERSION": "v4.0",
+  "DSP_VERSION": "v4.0",
+  "IO_PAD_VERSION": "v3.0",
+  "DSP_COLS": "6",
+  "DSP_SIZE": "1x3",
+  "BRAM_COLS": "3",
+  "BRAM_SIZE": "1x6",
+  "IO_CAPACITY": "20",
+  "DEVICE_TYPE": "FIXED"
+}
+)json";
+constexpr const char* SAMPLE_CONFIG_CUSTOM = R"json({
+  "CONFIG_FILE_VERSION": "v2.8",
+  "DEVICE_DATA_VERSION": "v2.0",
+  "CUSTOMER_NAME": "EVAL-MSC-CUSTOM",
+  "DEVICE_SIZE": "8x6",
+  "TAPEOUT_DATE": "2026Q2",
+  "AURORA_SETTINGS_TEMPLATE": "aurora/settings_template.json",
+  "AURORA_YOSYS_TEMPLATE_SCRIPT": "aurora/aurora_template_script.ys",
+  "AURORA_SYNPLIFY_TEMPLATE_SCRIPT": "aurora/aurora_template_script.prj",
+  "AURORA_OPENFPGA_TEMPLATE_SCRIPT": "aurora/aurora_template_script.openfpga",
+  "POWER_TEMPLATE": "aurora/power_template.json",
+  "PIN_TABLE": "aurora/efpga_pinmap.csv",
+  "FABRIC_KEY": "aurora/fabric_key.xml",
+  "FIXED_SIM_OPENFPGA": "aurora/fixed_sim_openfpga.xml",
+  "REPACK_DESIGN_CONSTRAINT": "aurora/repack_design_constraint.xml",
+  "BITSTREAM_ANNOTATION": "aurora/bitstream_annotation.xml",
+  "BITSTREAM_REMAPPING": "aurora/bitstream_remapping.xml",
+  "FPGA_IO_MAP": "aurora/fpga_io_map.xml",
+  "SB_MAPS": "aurora/SB_MAPS.yml",
+  "CORNER_VPR_ARCH": "vpr.xml",
+  "CORNER_SB_TEMPLATE_DIR": "CSV",
+  "CORNER_RRGRAPH_BIN": "rr_graph.bin",
+  "CORNER_ROUTER_LOOKAHEAD_BIN": "router_lookahead.bin",
+  "CORNER_OPENFPGA_ARCH": "openfpga.xml",
+  "CORNER_POWER_DATA": "power_data.json",
+  "CORNERS": {
+    "SSPG_0P72_M40C": "LVT/SSPG_0P72_M40C",
+    "SSPG_0P72_125C": "LVT/SSPG_0P72_125C",
+    "TT_0P80_25C": "LVT/TT_0P80_25C",
+    "FFPG_0P88_125C": "LVT/FFPG_0P88_125C",
+    "FFPG_0P88_M40C": "LVT/FFPG_0P88_M40C"
+  },
+  "AURORA_VERSION": "nightly",
+  "BRAM_TYPE": "TDP_ECC",
+  "CONFIG_TYPE": "WLBL",
+  "CRR_VERSION": "v2.4",
+  "BRAM_VERSION": "v4.0",
+  "DSP_VERSION": "v4.0",
+  "IO_PAD_VERSION": "v3.0",
+  "DSP_COLS": "6",
+  "DSP_SIZE": "1x3",
+  "BRAM_COLS": "3",
+  "BRAM_SIZE": "1x6",
+  "IO_CAPACITY": "20",
+  "DEVICE_TYPE": "CUSTOM",
+  "DEVICE_TYPE_SETTINGS": {
+    "LAYOUT_MODE": "CUSTOM",
+    "MARGIN": 1.2,
+    "CUSTOM": {
+      "ARRAY_X": "8",
+      "ARRAY_Y": "6",
+      "BRAM_COLS": "3",
+      "DSP_COLS": "6"
+    }
+  }
+}
+)json";
+constexpr const char* SAMPLE_CONFIG_AUTO = R"json({
+  "CONFIG_FILE_VERSION": "v2.8",
+  "DEVICE_DATA_VERSION": "v2.0",
+  "CUSTOMER_NAME": "EVAL-MSC-CUSTOM",
+  "DEVICE_SIZE": "8x6",
+  "TAPEOUT_DATE": "2026Q2",
+  "AURORA_SETTINGS_TEMPLATE": "aurora/settings_template.json",
+  "AURORA_YOSYS_TEMPLATE_SCRIPT": "aurora/aurora_template_script.ys",
+  "AURORA_SYNPLIFY_TEMPLATE_SCRIPT": "aurora/aurora_template_script.prj",
+  "AURORA_OPENFPGA_TEMPLATE_SCRIPT": "aurora/aurora_template_script.openfpga",
+  "POWER_TEMPLATE": "aurora/power_template.json",
+  "PIN_TABLE": "aurora/efpga_pinmap.csv",
+  "FABRIC_KEY": "aurora/fabric_key.xml",
+  "FIXED_SIM_OPENFPGA": "aurora/fixed_sim_openfpga.xml",
+  "REPACK_DESIGN_CONSTRAINT": "aurora/repack_design_constraint.xml",
+  "BITSTREAM_ANNOTATION": "aurora/bitstream_annotation.xml",
+  "BITSTREAM_REMAPPING": "aurora/bitstream_remapping.xml",
+  "FPGA_IO_MAP": "aurora/fpga_io_map.xml",
+  "SB_MAPS": "aurora/SB_MAPS.yml",
+  "CORNER_VPR_ARCH": "vpr.xml",
+  "CORNER_SB_TEMPLATE_DIR": "CSV",
+  "CORNER_RRGRAPH_BIN": "rr_graph.bin",
+  "CORNER_ROUTER_LOOKAHEAD_BIN": "router_lookahead.bin",
+  "CORNER_OPENFPGA_ARCH": "openfpga.xml",
+  "CORNER_POWER_DATA": "power_data.json",
+  "CORNERS": {
+    "SSPG_0P72_M40C": "LVT/SSPG_0P72_M40C",
+    "SSPG_0P72_125C": "LVT/SSPG_0P72_125C",
+    "TT_0P80_25C": "LVT/TT_0P80_25C",
+    "FFPG_0P88_125C": "LVT/FFPG_0P88_125C",
+    "FFPG_0P88_M40C": "LVT/FFPG_0P88_M40C"
+  },
+  "AURORA_VERSION": "nightly",
+  "BRAM_TYPE": "TDP_ECC",
+  "CONFIG_TYPE": "WLBL",
+  "CRR_VERSION": "v2.4",
+  "BRAM_VERSION": "v4.0",
+  "DSP_VERSION": "v4.0",
+  "IO_PAD_VERSION": "v3.0",
+  "DSP_COLS": "6",
+  "DSP_SIZE": "1x3",
+  "BRAM_COLS": "3",
+  "BRAM_SIZE": "1x6",
+  "IO_CAPACITY": "20",
+  "DEVICE_TYPE": "CUSTOM",
+  "DEVICE_TYPE_SETTINGS": {
+    "LAYOUT_MODE": "AUTO",
+    "MARGIN": 1.2
+  }
+}
+)json";
+constexpr const char* SAMPLE_CONFIG_RESOURCES = R"json({
+  "CONFIG_FILE_VERSION": "v2.8",
+  "DEVICE_DATA_VERSION": "v2.0",
+  "CUSTOMER_NAME": "EVAL-MSC-CUSTOM",
+  "DEVICE_SIZE": "8x6",
+  "TAPEOUT_DATE": "2026Q2",
+  "AURORA_SETTINGS_TEMPLATE": "aurora/settings_template.json",
+  "AURORA_YOSYS_TEMPLATE_SCRIPT": "aurora/aurora_template_script.ys",
+  "AURORA_SYNPLIFY_TEMPLATE_SCRIPT": "aurora/aurora_template_script.prj",
+  "AURORA_OPENFPGA_TEMPLATE_SCRIPT": "aurora/aurora_template_script.openfpga",
+  "POWER_TEMPLATE": "aurora/power_template.json",
+  "PIN_TABLE": "aurora/efpga_pinmap.csv",
+  "FABRIC_KEY": "aurora/fabric_key.xml",
+  "FIXED_SIM_OPENFPGA": "aurora/fixed_sim_openfpga.xml",
+  "REPACK_DESIGN_CONSTRAINT": "aurora/repack_design_constraint.xml",
+  "BITSTREAM_ANNOTATION": "aurora/bitstream_annotation.xml",
+  "BITSTREAM_REMAPPING": "aurora/bitstream_remapping.xml",
+  "FPGA_IO_MAP": "aurora/fpga_io_map.xml",
+  "SB_MAPS": "aurora/SB_MAPS.yml",
+  "CORNER_VPR_ARCH": "vpr.xml",
+  "CORNER_SB_TEMPLATE_DIR": "CSV",
+  "CORNER_RRGRAPH_BIN": "rr_graph.bin",
+  "CORNER_ROUTER_LOOKAHEAD_BIN": "router_lookahead.bin",
+  "CORNER_OPENFPGA_ARCH": "openfpga.xml",
+  "CORNER_POWER_DATA": "power_data.json",
+  "CORNERS": {
+    "SSPG_0P72_M40C": "LVT/SSPG_0P72_M40C",
+    "SSPG_0P72_125C": "LVT/SSPG_0P72_125C",
+    "TT_0P80_25C": "LVT/TT_0P80_25C",
+    "FFPG_0P88_125C": "LVT/FFPG_0P88_125C",
+    "FFPG_0P88_M40C": "LVT/FFPG_0P88_M40C"
+  },
+  "AURORA_VERSION": "nightly",
+  "BRAM_TYPE": "TDP_ECC",
+  "CONFIG_TYPE": "WLBL",
+  "CRR_VERSION": "v2.4",
+  "BRAM_VERSION": "v4.0",
+  "DSP_VERSION": "v4.0",
+  "IO_PAD_VERSION": "v3.0",
+  "DSP_COLS": "6",
+  "DSP_SIZE": "1x3",
+  "BRAM_COLS": "3",
+  "BRAM_SIZE": "1x6",
+  "IO_CAPACITY": "20",
+  "DEVICE_TYPE": "CUSTOM",
+  "DEVICE_TYPE_SETTINGS": {
+    "LAYOUT_MODE": "RESOURCES",
+    "MARGIN": 1.2,
+    "RESOURCES": {
+      "clb": 100,
+      "bram": 6,
+      "dsp": 1,
+      "io": 1281
+    }
+  }
+}
+)json";
+
+
 constexpr const char* AUTO_DEVICE_LOG =
     "Calculated layout: WIDTH=104, HEIGHT=106, ARRAY_X=100, ARRAY_Y=102, "
     "BRAM_COLS=3, DSP_COLS=98\n"
@@ -288,4 +506,59 @@ TEST(QLDeviceLayoutInfo, PreContractPackageIsDeferredOnItsLayoutName) {
   EXPECT_TRUE(deferred("", "", "FPGA_AUTO"));
   EXPECT_TRUE(deferred("", "", "FPGA_CUSTOM"));
   EXPECT_FALSE(deferred("", "", "FPGA3648"));
+}
+
+TEST(QLDeviceLayoutInfo, SampleFixedConfigResolvesImmediately) {
+  // config_fixed.json: DEVICE_TYPE: FIXED, no DEVICE_TYPE_SETTINGS at all.
+  const json config = json::parse(SAMPLE_CONFIG_FIXED);
+  EXPECT_FALSE(QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+      settings("FIXED", ""), targetWithLayoutName("FPGA0806")));
+
+  QLDeviceLayout layout;
+  ASSERT_TRUE(QLDeviceLayoutInfo::parseDeviceConfig(config, "", layout));
+  EXPECT_EQ(layout.arrayX, 8);
+  EXPECT_EQ(layout.arrayY, 6);
+  EXPECT_EQ(layout.width, 12);
+  EXPECT_EQ(layout.height, 10);
+  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+}
+
+TEST(QLDeviceLayoutInfo, SampleCustomConfigResolvesImmediately) {
+  // config_custom.json: DEVICE_TYPE: CUSTOM, LAYOUT_MODE: CUSTOM, geometry in
+  // DEVICE_TYPE_SETTINGS.CUSTOM.
+  const json config = json::parse(SAMPLE_CONFIG_CUSTOM);
+  EXPECT_FALSE(QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+      settings("CUSTOM", "CUSTOM"), targetWithLayoutName("FPGA0806")));
+
+  QLDeviceLayout layout;
+  ASSERT_TRUE(QLDeviceLayoutInfo::parseDeviceConfig(config, "CUSTOM", layout));
+  EXPECT_EQ(layout.width, 12);
+  EXPECT_EQ(layout.height, 10);
+  EXPECT_EQ(layout.bramCols, std::vector<int>({3}));
+  EXPECT_EQ(layout.dspCols, std::vector<int>({6}));
+}
+
+TEST(QLDeviceLayoutInfo, SampleAutoConfigIsDeferredToPacking) {
+  // config_auto.json: LAYOUT_MODE: AUTO. The config carries a DEVICE_SIZE that
+  // would parse if asked, but the geometry it describes is the package's own,
+  // not the one the run will produce - layoutIsResolvedDuringPacking() must
+  // defer regardless of what parseDeviceConfig() alone could extract.
+  const json config = json::parse(SAMPLE_CONFIG_AUTO);
+  EXPECT_TRUE(QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+      settings("CUSTOM", "AUTO"), targetWithLayoutName("FPGA0806")));
+
+  QLDeviceLayout layout;
+  EXPECT_TRUE(QLDeviceLayoutInfo::parseDeviceConfig(config, "AUTO", layout));
+}
+
+TEST(QLDeviceLayoutInfo, SampleResourcesConfigIsDeferredToPacking) {
+  // config_resources.json: LAYOUT_MODE: RESOURCES. Same reasoning as AUTO above -
+  // add_layout.py sizes the fabric from DEVICE_TYPE_SETTINGS.RESOURCES and MARGIN,
+  // and only auto_device.log records what it produced.
+  const json config = json::parse(SAMPLE_CONFIG_RESOURCES);
+  EXPECT_TRUE(QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+      settings("CUSTOM", "RESOURCES"), targetWithLayoutName("FPGA0806")));
+  ASSERT_TRUE(config["DEVICE_TYPE_SETTINGS"]["RESOURCES"].is_object());
+  EXPECT_EQ(config["DEVICE_TYPE_SETTINGS"]["RESOURCES"]["bram"], 6);
 }
