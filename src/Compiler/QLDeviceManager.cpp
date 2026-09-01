@@ -4683,19 +4683,29 @@ void QLDeviceManager::reportDeviceDataError(const std::string& message) {
 
 void QLDeviceManager::flushDeferredDeviceDataErrors() {
 
-  device_data_error_console_ready = true;
-
-  std::vector<std::string> messages;
-  messages.swap(deferred_device_data_error_list);
-
+  // Check for somewhere to write BEFORE taking the queue: called with no compiler
+  // yet, this has to keep holding the messages and stay un-flushed so that a later
+  // call still delivers them, rather than dropping them on the floor.
   CompilerOpenFPGA_ql* compiler =
       GlobalSession ? (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler() : nullptr;
   if(!compiler) {
     return;
   }
 
+  device_data_error_console_ready = true;
+
+  std::vector<std::string> messages;
+  messages.swap(deferred_device_data_error_list);
+
+  // reportDeviceDataError()'s dedupe covers one walk, and parseDeviceData() clears
+  // it at the start of the next one - so a re-parse before this first runs can
+  // queue a message already in the queue. Dedupe again here rather than printing
+  // the same line twice.
+  std::set<std::string> flushed;
   for(const std::string& message : messages) {
-    compiler->ErrorMessage(message, false);
+    if( flushed.insert(message).second ) {
+      compiler->ErrorMessage(message, false);
+    }
   }
 }
 
