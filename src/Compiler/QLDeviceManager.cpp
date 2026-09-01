@@ -4340,19 +4340,13 @@ static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y)
 static int countDeviceColumns(const std::string& text) {
 
   int count = 0;
-  size_t token_start = 0;
 
-  while(token_start <= text.size()) {
-    const size_t separator = text.find(',', token_start);
-    const size_t token_length = (separator == std::string::npos) ? std::string::npos
-                                                                 : (separator - token_start);
-    if( text.substr(token_start, token_length).find_first_not_of(" \t") != std::string::npos ) {
+  // tokenize()'s skipEmpty only drops "" - a whitespace-only entry ("3, ,10")
+  // is a column short of nothing, so trim before testing.
+  for(std::string token : StringUtils::tokenize(text, ",")) {
+    if( !StringUtils::trim(token).empty() ) {
       count++;
     }
-    if(separator == std::string::npos) {
-      break;
-    }
-    token_start = separator + 1;
   }
 
   return count;
