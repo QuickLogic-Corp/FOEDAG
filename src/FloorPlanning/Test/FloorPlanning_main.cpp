@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <random>
 
 std::set<std::string> genTestElements()
 {
@@ -43,12 +44,23 @@ fp::DeviceGridDescriptorPtr genTestDeviceDescriptor()
     }
 })";
 
+  // A fixed name in the shared temp dir can collide with a leftover file
+  // from another user/run; a random suffix keeps this path ours alone.
+  static std::mt19937_64 rng(std::random_device{}());
   const std::filesystem::path configPath =
-      std::filesystem::temp_directory_path() / "fp_test_device_config.json";
+      std::filesystem::temp_directory_path() /
+      ("fp_test_device_config_" + std::to_string(rng()) + ".json");
 
+  bool wroteOk = false;
   {
     std::ofstream out(configPath);
     out << configJson;
+    wroteOk = out.good();
+  }
+  if (!wroteOk) {
+    qCritical() << "failed to write test config.json to"
+                << QString::fromStdString(configPath.string());
+    return nullptr;
   }
 
   fp::DeviceGridDescriptorPtr descriptor =
@@ -76,6 +88,9 @@ int main(int argc, char** argv) {
 
     fp::DeviceGridDescriptorPtr descriptor = genTestDeviceDescriptor();
 
+    if (!descriptor) {
+        return 1;
+    }
     if (descriptor->hasError()) {
         qCritical() << descriptor->error();
         return 1;
