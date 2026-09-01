@@ -9488,50 +9488,33 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
   if (archFileProvider.get().empty()) {
     return "";
   }
-  TilesCfgResult tiles_cfg_result = parseTilesCfg(archFileProvider.get());
+  TilesCfgResult tiles_cfg_result = parseTilesCfg(archFileProvider.get(),
+                                                  device.device_variant_layout.name);
   archFileProvider.clean();
   if (!tiles_cfg_result.error.empty()) {
     ErrorMessage(tiles_cfg_result.error);
     return "";
   }
 
-  const int bram_size_y = tiles_cfg_result.contains("bram") ? tiles_cfg_result.tiles_cfg["bram"].second: 0;
-  const int dsp_size_y = tiles_cfg_result.contains("dsp") ? tiles_cfg_result.tiles_cfg["dsp"].second: 0;
-
-  const int clb_rows_without_io = device_size_y - 2;
-  const int per_column_bram_num = bram_size_y ? clb_rows_without_io / bram_size_y: 0;
-  const int per_column_dsp_num = dsp_size_y? clb_rows_without_io / dsp_size_y: 0;
-
-  int total_brams_num = 0;
-  int total_dsps_num = 0;
-  std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
-  for (const auto& [resource, value]: resources) {
-    if (resource == "bram") {
-      total_brams_num = value;
-    }
-    if (resource == "dsp") {
-      total_dsps_num = value;
-    }
+  // Counted off the architecture this run uses, not derived back out of
+  // deviceResourceInformation(): those counts are themselves computed from
+  // config.json's BRAM_COLS/DSP_COLS, they are empty for a package whose
+  // config.json cannot answer, and a generated device's config.json still carries
+  // the geometry of the package it was generated from. Any of the three left the
+  // calculator with 0 bram and dsp columns and a clb count too high by their sum.
+  const int device_bram_columns = tiles_cfg_result.columnsOf("bram");
+  const int device_dsp_columns = tiles_cfg_result.columnsOf("dsp");
+  if( (device_bram_columns < 0) || (device_dsp_columns < 0) ) {
+    ErrorMessage("Cannot count the bram and dsp columns of layout \"" +
+                 device.device_variant_layout.name +
+                 "\" in the vpr architecture, so the power calculator input would "
+                 "understate the fabric.");
+    return "";
   }
-
-  const int device_bram_columns = (per_column_bram_num && total_brams_num) ? total_brams_num / per_column_bram_num: 0;
-  const int device_dsp_columns = (per_column_dsp_num && total_dsps_num) ? total_dsps_num / per_column_dsp_num: 0;
 
   const int device_clb_columns = device_size_x - EMPTY_COLUMNS - IO_COLUMNS - device_bram_columns - device_dsp_columns;
   const std::string device_clb_columns_str = std::to_string(device_clb_columns);
   const std::string device_clb_rows_str = std::to_string(device_clb_rows);
-
-  // std::cout << "device_size_x=" << device_size_x << std::endl;
-  // std::cout << "device_size_y=" << device_size_y << std::endl;
-  // std::cout << "bram_size_y=" << bram_size_y << std::endl;
-  // std::cout << "dsp_size_y=" << dsp_size_y << std::endl;
-  // std::cout << "per_column_bram_num=" << per_column_bram_num << std::endl;
-  // std::cout << "per_column_dsp_num=" << per_column_dsp_num << std::endl;
-  // std::cout << "total_brams_num=" << total_brams_num << std::endl;
-  // std::cout << "total_dsps_num=" << total_dsps_num << std::endl;
-  // std::cout << "device_bram_columns=" << device_bram_columns << std::endl;
-  // std::cout << "device_dsp_columns=" << device_dsp_columns << std::endl;
-  // std::cout << "device_clb_columns=" << device_clb_columns << std::endl;
 
   const std::string device_bram_columns_str = std::to_string(device_bram_columns);
   const std::string device_dsp_columns_str = std::to_string(device_dsp_columns);
