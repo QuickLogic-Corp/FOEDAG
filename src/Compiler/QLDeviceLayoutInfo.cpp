@@ -230,8 +230,12 @@ bool QLDeviceLayoutInfo::parseDeviceConfig(const json& config_json,
     }
   } else {
     std::string device_size;
-    if (!lookupString(config_json, "DEVICE_SIZE", device_size) ||
-        !parseDeviceSize(device_size, out_layout.arrayX, out_layout.arrayY)) {
+    if (!lookupString(config_json, "DEVICE_SIZE", device_size)) {
+      return false;
+    }
+    if (!parseDeviceSize(device_size, out_layout.arrayX, out_layout.arrayY)) {
+      message("[WARNING] Device config's DEVICE_SIZE '" + device_size +
+              "' is not a valid WxH size.\n");
       return false;
     }
   }
