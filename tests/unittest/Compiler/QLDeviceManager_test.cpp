@@ -221,3 +221,128 @@ TEST(QLDeviceManager, ConfigJSONTextRejectsMissingAndUnusableValues) {
 
   EXPECT_EQ(text, "untouched");
 }
+
+// ---- derived counts vs. the shipped resources.json ------------------------
+//
+// The counts derived from config.json must equal the ones vpr wrote into
+// resources.json for the same device. Both files are inlined verbatim from
+// device_data rather than read off disk, so the check does not need a device
+// package and cannot go stale against a moving checkout.
+//
+// The devices below are every QLF_K6N10 package that ships both files with the
+// full geometry key set. Packages predating those keys are covered by
+// DeriveResourceCountsRejectsIncompleteConfig instead.
+
+namespace {
+
+struct DerivedResourcesCase {
+  const char* device;       // device_data path, for the failure message
+  const char* config_json;  // verbatim from that package's config.json
+  int layout_width;         // its vpr layout, DEVICE_SIZE plus the io/empty rings
+  int layout_height;
+  int clb;                  // verbatim from that package's resources.json
+  int bram;
+  int dsp;
+  int io;
+};
+
+int countOf(const std::vector<std::tuple<std::string, int>>& resources,
+            const std::string& name) {
+  for (const auto& [resource_name, resource_count] : resources) {
+    if (resource_name == name) return resource_count;
+  }
+  return -1;
+}
+
+}  // namespace
+
+TEST(QLDeviceManager, DeriveResourceCountsMatchesShippedResourcesJSON) {
+  const DerivedResourcesCase cases[] = {
+      {"QLF_K6N10/GF/12nm/IDAHO-FPGA0806_WLBL",
+       R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+           "BRAM_COLS": "3", "DSP_COLS": "6"})",
+       12, 10, 36, 1, 2, 560},
+
+      {"QLF_K6N10/GF/12nm/TURNKEY-FPGA3030",
+       R"({"DEVICE_SIZE": "30x30", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+           "BRAM_COLS": "12,25", "DSP_COLS": "6,19"})",
+       34, 34, 780, 10, 20, 2400},
+
+      {"QLF_K6N10/GF/12nm/TURNKEY-FPGA7878",
+       R"({"DEVICE_SIZE": "78x78", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+           "BRAM_COLS": "12,24,36,49,61,73", "DSP_COLS": "6,18,30,43,55,67"})",
+       82, 82, 5148, 78, 156, 6240},
+
+      {"QLF_K6N10/GF/12nm/TURNKEY-FPGA126126",
+       R"({"DEVICE_SIZE": "126x126", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+           "BRAM_COLS": "12,24,36,48,60,73,85,97,109,121",
+           "DSP_COLS": "6,18,30,42,54,67,79,91,103,115"})",
+       130, 130, 13356, 210, 420, 10080},
+
+      {"QLF_K6N10/GF/12nm/TURNKEY-FPGA258258",
+       R"({"DEVICE_SIZE": "258x258", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+           "BRAM_COLS": "12,24,36,48,60,72,84,96,108,120,133,145,157,169,181,193,205,217,229,241,253",
+           "DSP_COLS": "6,18,30,42,54,66,78,90,102,114,126,139,151,163,175,187,199,211,223,235,247"})",
+       262, 262, 55728, 903, 1806, 20640},
+  };
+
+  for (const auto& test_case : cases) {
+    std::string error;
+    const json config = json::parse(test_case.config_json);
+    const auto resources = QLDeviceManager::deriveResourceCounts(
+        config, test_case.layout_width, test_case.layout_height, &error);
+
+    ASSERT_FALSE(resources.empty()) << test_case.device << ": " << error;
+    EXPECT_EQ(countOf(resources, "clb"), test_case.clb) << test_case.device;
+    EXPECT_EQ(countOf(resources, "bram"), test_case.bram) << test_case.device;
+    EXPECT_EQ(countOf(resources, "dsp"), test_case.dsp) << test_case.device;
+    EXPECT_EQ(countOf(resources, "io"), test_case.io) << test_case.device;
+  }
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsRejectsIncompleteConfig) {
+  // a package predating the CRR keys: DEVICE_SIZE alone cannot answer, and a
+  // wrong count is worse than none
+  const json config = json::parse(R"({"DEVICE_SIZE": "8x6"})");
+  std::string error;
+
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 12, 10, &error).empty());
+  EXPECT_NE(error.find("BRAM_SIZE"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsRejectsMismatchedLayout) {
+  // a layout DEVICE_SIZE does not describe - a legacy multi-layout package -
+  // where only resources.json can answer
+  const json config = json::parse(
+      R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+          "BRAM_COLS": "3", "DSP_COLS": "6"})");
+  std::string error;
+
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 99, 99, &error).empty());
+  EXPECT_NE(error.find("does not describe"), std::string::npos) << error;
+
+  // the matching layout still derives
+  EXPECT_FALSE(QLDeviceManager::deriveResourceCounts(config, 12, 10).empty());
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
+  // IO_CAPACITY is a late addition; absent, the io count falls back to 20 per
+  // tile rather than reporting 0
+  const char* const without =
+      R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+          "BRAM_COLS": "3", "DSP_COLS": "6"})";
+  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(json::parse(without), 12, 10), "io"),
+            560);
+
+  // and both spellings of the key are honoured when present
+  const char* const as_number =
+      R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+          "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": 10})";
+  const char* const as_string =
+      R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
+          "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "10"})";
+  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(json::parse(as_number), 12, 10), "io"),
+            280);
+  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(json::parse(as_string), 12, 10), "io"),
+            280);
+}

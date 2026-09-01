@@ -4367,20 +4367,16 @@ int QLDeviceManager::countDeviceColumns(const std::string& text) {
 std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceInformation(QLDeviceTarget device_target,
                                                                                           std::string* out_error) {
 
-  std::vector<std::tuple<std::string, int>> resources_vector;
-
   if( !isDeviceTargetValid(device_target) ) {
     device_target = this->device_target;
   }
 
-  // Every path below returns an empty vector; without a reason the caller can
-  // only report the device as having no resources at all.
   const auto fail = [&](const std::string& reason) {
     if(out_error) {
       *out_error = std::string("cannot derive resource counts for ") +
                    convertToDeviceString(device_target) + ": " + reason;
     }
-    return resources_vector;
+    return std::vector<std::tuple<std::string, int>>();
   };
 
   json device_target_config_json;
@@ -4389,6 +4385,43 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
       !device_target_config_json.is_object() ) {
     return fail(config_parse_error.empty() ? std::string("config.json is missing or unreadable")
                                            : config_parse_error);
+  }
+
+  std::string reason;
+  std::vector<std::tuple<std::string, int>> resources_vector =
+      deriveResourceCounts(device_target_config_json,
+                           device_target.device_variant_layout.width,
+                           device_target.device_variant_layout.height,
+                           &reason);
+
+  if( resources_vector.empty() ) {
+    return fail(reason.empty() ? std::string("config.json does not describe this layout")
+                               : (std::string("layout \"") +
+                                  device_target.device_variant_layout.name + "\": " + reason));
+  }
+
+  return resources_vector;
+}
+
+
+std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(const json& config_json,
+                                                                               int layout_width,
+                                                                               int layout_height,
+                                                                               std::string* out_error) {
+
+  std::vector<std::tuple<std::string, int>> resources_vector;
+
+  // Every path below returns an empty vector; without a reason the caller can
+  // only report the device as having no resources at all.
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = reason;
+    }
+    return resources_vector;
+  };
+
+  if( !config_json.is_object() ) {
+    return fail("config.json is not a JSON object");
   }
 
   std::string device_size_text;
@@ -4404,7 +4437,7 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
       {CONFIG_KEY_DSP_COLS,    &dsp_cols_text},
   };
   for(const auto& [key, out_text] : required_keys) {
-    if( !configJSONText(device_target_config_json, key, *out_text) ) {
+    if( !configJSONText(config_json, key, *out_text) ) {
       return fail(std::string("config.json has no usable \"") + key + "\" key");
     }
   }
@@ -4444,7 +4477,7 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   const int DEFAULT_IO_CAPACITY = 20;
   int io_capacity = DEFAULT_IO_CAPACITY;
   std::string io_capacity_text;
-  if( configJSONText(device_target_config_json, CONFIG_KEY_IO_CAPACITY, io_capacity_text) ) {
+  if( configJSONText(config_json, CONFIG_KEY_IO_CAPACITY, io_capacity_text) ) {
     if( !parseWholeNumber(io_capacity_text, io_capacity) || (io_capacity < 0) ) {
       return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
                   "\" is not a whole number");
@@ -4456,12 +4489,11 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceI
   // DEVICE_SIZE does not describe - a legacy multi-layout architecture, say -
   // and only resources.json can answer for it.
   const int LAYOUT_RING_TILES = 4;
-  if( (device_target.device_variant_layout.width != (array_x + LAYOUT_RING_TILES)) ||
-      (device_target.device_variant_layout.height != (array_y + LAYOUT_RING_TILES)) ) {
-    return fail(std::string("layout \"") + device_target.device_variant_layout.name + "\" is " +
-                std::to_string(device_target.device_variant_layout.width) + "x" +
-                std::to_string(device_target.device_variant_layout.height) + ", which \"" +
-                CONFIG_KEY_DEVICE_SIZE + "\": \"" + device_size_text + "\" does not describe");
+  if( (layout_width != (array_x + LAYOUT_RING_TILES)) ||
+      (layout_height != (array_y + LAYOUT_RING_TILES)) ) {
+    return fail(std::string("is ") + std::to_string(layout_width) + "x" +
+                std::to_string(layout_height) + ", which \"" + CONFIG_KEY_DEVICE_SIZE +
+                "\": \"" + device_size_text + "\" does not describe");
   }
 
   resources_vector.push_back(std::make_tuple(std::string("clb"),
