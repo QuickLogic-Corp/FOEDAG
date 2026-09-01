@@ -4435,12 +4435,14 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
   std::string dsp_size_text;
   std::string bram_cols_text;
   std::string dsp_cols_text;
+  std::string io_capacity_text;
   const std::pair<const char*, std::string*> required_keys[] = {
       {CONFIG_KEY_DEVICE_SIZE, &device_size_text},
       {CONFIG_KEY_BRAM_SIZE,   &bram_size_text},
       {CONFIG_KEY_DSP_SIZE,    &dsp_size_text},
       {CONFIG_KEY_BRAM_COLS,   &bram_cols_text},
       {CONFIG_KEY_DSP_COLS,    &dsp_cols_text},
+      {CONFIG_KEY_IO_CAPACITY, &io_capacity_text},
   };
   for(const auto& [key, out_text] : required_keys) {
     if( !configJSONText(config_json, key, *out_text) ) {
@@ -4477,17 +4479,10 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
                 ") do not fit an array " + std::to_string(array_x) + " columns wide");
   }
 
-  // "IO_CAPACITY" is a late addition to the config contract. Every device in the
-  // tree declares io tiles of capacity 20 in its vpr.xml, with the key or
-  // without, so a package predating it keeps its io count instead of showing 0.
-  const int DEFAULT_IO_CAPACITY = 20;
-  int io_capacity = DEFAULT_IO_CAPACITY;
-  std::string io_capacity_text;
-  if( configJSONText(config_json, CONFIG_KEY_IO_CAPACITY, io_capacity_text) ) {
-    if( !parseWholeNumber(io_capacity_text, io_capacity) ) {
-      return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
-                  "\" is not a whole number");
-    }
+  int io_capacity = 0;
+  if( !parseWholeNumber(io_capacity_text, io_capacity) ) {
+    return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
+                "\" is not a whole number");
   }
 
   // a vpr layout is the array plus its io and empty rings, one tile each per

@@ -234,13 +234,16 @@ TEST(QLDeviceManager, ConfigJSONTextRejectsMissingAndUnusableValues) {
 
 // ---- derived counts vs. the shipped resources.json ------------------------
 //
-// The counts derived from config.json must equal the ones vpr wrote into
-// resources.json for the same device. Both files are inlined verbatim from
-// device_data rather than read off disk, so the check does not need a device
-// package and cannot go stale against a moving checkout.
+// The counts derived from config.json must equal the ones vpr wrote into the
+// resources.json these packages shipped before it was retired. Both are inlined
+// rather than read off disk, so the check needs no device package and cannot go
+// stale against a moving checkout.
 //
-// The devices below are every QLF_K6N10 package that ships both files with the
-// full geometry key set. Packages predating those keys are covered by
+// The devices below are every QLF_K6N10 package that shipped both files with the
+// full geometry key set. Their config.json is verbatim except for IO_CAPACITY,
+// which none of them declare and which device_data still has to be backfilled
+// with; 20 is the value their vpr.xml used and the one that reproduces the io
+// counts below. Packages missing the other geometry keys are covered by
 // DeriveResourceCountsRejectsIncompleteConfig instead.
 
 namespace {
@@ -270,29 +273,32 @@ TEST(QLDeviceManager, DeriveResourceCountsMatchesShippedResourcesJSON) {
   const DerivedResourcesCase cases[] = {
       {"QLF_K6N10/GF/12nm/IDAHO-FPGA0806_WLBL",
        R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
-           "BRAM_COLS": "3", "DSP_COLS": "6"})",
+           "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"})",
        12, 10, 36, 1, 2, 560},
 
       {"QLF_K6N10/GF/12nm/TURNKEY-FPGA3030",
        R"({"DEVICE_SIZE": "30x30", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
-           "BRAM_COLS": "12,25", "DSP_COLS": "6,19"})",
+           "BRAM_COLS": "12,25", "DSP_COLS": "6,19", "IO_CAPACITY": "20"})",
        34, 34, 780, 10, 20, 2400},
 
       {"QLF_K6N10/GF/12nm/TURNKEY-FPGA7878",
        R"({"DEVICE_SIZE": "78x78", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
-           "BRAM_COLS": "12,24,36,49,61,73", "DSP_COLS": "6,18,30,43,55,67"})",
+           "BRAM_COLS": "12,24,36,49,61,73", "DSP_COLS": "6,18,30,43,55,67",
+           "IO_CAPACITY": "20"})",
        82, 82, 5148, 78, 156, 6240},
 
       {"QLF_K6N10/GF/12nm/TURNKEY-FPGA126126",
        R"({"DEVICE_SIZE": "126x126", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
            "BRAM_COLS": "12,24,36,48,60,73,85,97,109,121",
-           "DSP_COLS": "6,18,30,42,54,67,79,91,103,115"})",
+           "DSP_COLS": "6,18,30,42,54,67,79,91,103,115",
+           "IO_CAPACITY": "20"})",
        130, 130, 13356, 210, 420, 10080},
 
       {"QLF_K6N10/GF/12nm/TURNKEY-FPGA258258",
        R"({"DEVICE_SIZE": "258x258", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
            "BRAM_COLS": "12,24,36,48,60,72,84,96,108,120,133,145,157,169,181,193,205,217,229,241,253",
-           "DSP_COLS": "6,18,30,42,54,66,78,90,102,114,126,139,151,163,175,187,199,211,223,235,247"})",
+           "DSP_COLS": "6,18,30,42,54,66,78,90,102,114,126,139,151,163,175,187,199,211,223,235,247",
+           "IO_CAPACITY": "20"})",
        262, 262, 55728, 903, 1806, 20640},
   };
 
@@ -325,7 +331,7 @@ TEST(QLDeviceManager, DeriveResourceCountsRejectsMismatchedLayout) {
   // where only resources.json can answer
   const json config = json::parse(
       R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
-          "BRAM_COLS": "3", "DSP_COLS": "6"})");
+          "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"})");
   std::string error;
 
   EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 99, 99, &error).empty());
@@ -335,16 +341,21 @@ TEST(QLDeviceManager, DeriveResourceCountsRejectsMismatchedLayout) {
   EXPECT_FALSE(QLDeviceManager::deriveResourceCounts(config, 12, 10).empty());
 }
 
-TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
-  // IO_CAPACITY is a late addition; absent, the io count falls back to 20 per
-  // tile rather than reporting 0
+TEST(QLDeviceManager, DeriveResourceCountsRequiresIOCapacity) {
+  // it used to default to 20 per tile when absent, which silently halved or
+  // doubled the io count for any device not built that way
   const char* const without =
       R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
           "BRAM_COLS": "3", "DSP_COLS": "6"})";
-  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(json::parse(without), 12, 10), "io"),
-            560);
+  std::string error;
 
-  // and both spellings of the key are honoured when present
+  EXPECT_TRUE(
+      QLDeviceManager::deriveResourceCounts(json::parse(without), 12, 10, &error).empty());
+  EXPECT_NE(error.find("IO_CAPACITY"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
+  // both spellings of the key are honoured
   const char* const as_number =
       R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
           "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": 10})";
