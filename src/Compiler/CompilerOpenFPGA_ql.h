@@ -391,11 +391,6 @@ private:
   // yet), so a missing input here just skips this stage rather than failing synthesis,
   // which has already succeeded by the time this runs.
   // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P4).
-  // [aurora2#1725 stage P2b] name maps -- optional, gated on general.options.namemap.
-  // Runs floorplanning_netlist_namemap.py over the debug JSON stage P4 already uses, producing [5]
-  // namemap.csv so check 3 has an input at all. Best-effort, like its siblings.
-  bool RunNetlistNamemap();
-
   bool RunValidateInstances();
 
   // [aurora2#1725] "<project>_floorplanning" -- the stem every artifact this feature

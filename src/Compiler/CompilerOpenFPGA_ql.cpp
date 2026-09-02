@@ -2627,104 +2627,6 @@ void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
   }
 }
 
-// [aurora2#1725 stage P2b] AURORA_P2B_AUDIT_ENABLED (CMakeLists.txt) gates this stage
-// entirely, defaulting to on for now to gather P2b-redundancy evidence across the whole
-// test suite before removing it; flip the default, or delete RunNetlistNamemap() outright,
-// once CI confirms P2b is safe to remove. [6] namemap_hier.csv, which the stage was
-// specified around, is produced nowhere; [5] namemap.csv is what this actually generates,
-// from the debug JSON stage P4 already consumes.
-bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
-#if !AURORA_P2B_AUDIT_ENABLED
-  return true;
-#endif
-  const std::string topModule = ProjManager()->DesignTopModule();
-  std::filesystem::path projectPath{ProjManager()->projectPath()};
-  std::filesystem::path debug_json_path = projectPath / (topModule + "_post_synth_debug.json");
-  if (!FileUtils::FileExists(debug_json_path)) {
-    return true;  // device template has no P2/P3 blocks; nothing to map
-  }
-
-  std::filesystem::path namemap_script_path =
-      InstalledScript(std::filesystem::path("floorplanning_netlist_namemap.py"));
-  if (namemap_script_path.empty()) {
-    ErrorMessage("Cannot locate scripts/floorplanning_netlist_namemap.py in the "
-                 "installation. Name-map generation failed!");
-    return false;
-  }
-
-#ifdef _WIN32
-  std::filesystem::path python_exec{"python.exe"};
-#else // _WIN32
-  std::filesystem::path python_exec{"python3"};
-#endif // _WIN32
-
-  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-    ErrorMessage("System " + python_exec.string() +
-                 " is not found; skipping name maps (floorplanning_netlist_namemap.py).");
-    return true;  // best-effort, like every other stage this feature adds
-  }
-
-  std::vector<std::string> args;
-  args.push_back(namemap_script_path.string());
-  args.push_back(debug_json_path.string());
-  args.push_back("-o");
-  args.push_back((FloorplanningArtifact("namemap.csv")).string());
-
-  int status = RunFloorplanningStage(python_exec.string(), args);
-  if (status != 0) {
-    ErrorMessage("Design " + ProjManager()->projectName() +
-                 " name map generation (floorplanning_netlist_namemap.py) failed, see " +
-                 FloorplanningStageLog().string());
-    return true;  // no namemap.csv to audit
-  }
-
-  // The only consumer of namemap.csv: does it know any instance->atom pair that stage P3's
-  // atomsets.json does not? An empty p2b.log across the suite is the argument for deleting
-  // this stage. Its exit code IS checked, deliberately: a real finding means P2b is not
-  // (yet) provably redundant, so this hard-fails the build rather than logging and moving
-  // on. See docs/specs/p2b-namemap-redundancy/spec.md.
-  std::filesystem::path atomsets_path = FloorplanningAtomsets();
-  if (!FileUtils::FileExists(atomsets_path)) {
-    return true;  // no P3 output to compare against
-  }
-
-  std::filesystem::path p2b_audit_script_path =
-      InstalledScript(std::filesystem::path("floorplanning_p2b_audit.py"));
-  if (p2b_audit_script_path.empty()) {
-    ErrorMessage("Cannot locate scripts/floorplanning_p2b_audit.py in the "
-                 "installation. Name-map audit failed!");
-    return false;
-  }
-
-  // Inputs are named explicitly rather than left to the script to guess from --project:
-  // the artifact prefix is this class's convention, and one place should own it.
-  std::vector<std::string> audit_args;
-  audit_args.push_back(p2b_audit_script_path.string());
-  audit_args.push_back("--project");
-  audit_args.push_back(projectPath.string());
-  audit_args.push_back("--atomsets");
-  audit_args.push_back(atomsets_path.string());
-  audit_args.push_back("--namemap");
-  audit_args.push_back(FloorplanningArtifact("namemap.csv").string());
-  audit_args.push_back("-o");
-  std::filesystem::path p2b_log_path = FloorplanningArtifact("p2b.log");
-  audit_args.push_back(p2b_log_path.string());
-
-  int audit_status = RunFloorplanningStage(python_exec.string(), audit_args);
-  if (audit_status != 0) {
-    ErrorMessage(
-        "Design " + ProjManager()->projectName() +
-        ": stage P2b (floorplanning_p2b_audit.py) found an RTL instance -> atom pair "
-        "that stage P3's atomsets.json does not know about -- see " +
-        p2b_log_path.string() +
-        ". This means P2b is not (yet) provably safe to remove "
-        "(docs/specs/p2b-namemap-redundancy/spec.md); failing the build so this is "
-        "investigated rather than silently ignored.");
-    return false;
-  }
-  return true;
-}
-
 // [aurora2#1725 stage P4] validation gate -- see scripts/floorplanning_validate_instances.py's
 // docstring and docs/specs/region-based-placement-synthesis-integration/pipeline.md
 // (A.P4). Called from Synthesize() after the Yosys tool has actually run (Synplify
@@ -2773,9 +2675,6 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
 
   std::filesystem::path instances_json_path = FloorplanningArtifact("instances.json");
   std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
-  // [aurora2#1725 stage P2b] optional; floorplanning_validate_instances.py records check 3 as
-  // "unknown" and grades on the rest when this is absent.
-  std::filesystem::path namemap_hier_path = FloorplanningArtifact("namemap.hier.csv");
   std::filesystem::path validation_json_path = FloorplanningArtifact("validation.json");
 
   std::vector<std::string> args;
@@ -2793,17 +2692,6 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   if (FileUtils::FileExists(synth_log_path)) {
     args.push_back("--synth-log");
     args.push_back(synth_log_path.string());
-  }
-  // [5], generated by RunNetlistNamemap() when the option is on. floorplanning_validate_instances.py
-  // prefers [6] when it exists and falls back to this.
-  std::filesystem::path namemap_path = FloorplanningArtifact("namemap.csv");
-  if (FileUtils::FileExists(namemap_path)) {
-    args.push_back("--namemap");
-    args.push_back(namemap_path.string());
-  }
-  if (FileUtils::FileExists(namemap_hier_path)) {
-    args.push_back("--namemap-hier");
-    args.push_back(namemap_hier_path.string());
   }
   args.push_back("-o");
   args.push_back(validation_json_path.string());
@@ -3076,11 +2964,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
             ", skipping synthesis.");
     // [aurora2#1725 stage P4] re-run even on a skip: instances.json may have changed
     // (see EnsureElaborated() above) since the last time this ran, and validation.json
-    // should reflect it. RunValidateInstances() itself stays best-effort; RunNetlistNamemap()
-    // does not -- a real P2b finding hard-fails the build, see its own comment.
-    if (!RunNetlistNamemap()) {
-      return false;
-    }
+    // should reflect it. Best-effort, like every stage this feature adds.
     RunValidateInstances();
     RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
@@ -3108,9 +2992,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
     // still runs even though synthesis itself didn't.
-    if (!RunNetlistNamemap()) {
-      return false;
-    }
     RunValidateInstances();
     RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
@@ -3137,11 +3018,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     // [aurora2#1725 stage P4] validation gate -- grade every instance against the
-    // synthesis output just produced. RunValidateInstances() stays best-effort;
-    // RunNetlistNamemap() hard-fails on a real P2b finding, see its own comment.
-    if (!RunNetlistNamemap()) {
-      return false;
-    }
+    // synthesis output just produced. Best-effort.
     RunValidateInstances();
     // [aurora2#1725 stage P7] tier 2 -- exact per-instance primitive counts, now that
     // atomsets.json describes the netlist just written.
