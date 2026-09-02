@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/QLDeviceLayoutInfo.h"
 #include "Compiler/TaskManager.h"
 #include "Compiler/TaskModel.h"
 #include "Console/DummyParser.h"
@@ -2276,23 +2277,32 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
-      // The device's config.json is the only source of floorplanning geometry.
-      // Anything wrong with its contents is reported by DeviceGridDescriptor
-      // below, which names the key it could not read.
-      const std::filesystem::path deviceConfigFile =
-          QLDeviceManager::getInstance()->deviceConfigJSONPath();
-      if (!FileUtils::FileExists(deviceConfigFile)) {
-        // deviceConfigJSONPath() clears its return value when config.json is
-        // absent, so name the device directory it looked in instead.
-        const std::filesystem::path deviceDir =
-            QLDeviceManager::getInstance()->deviceTypeDirPath();
-        QMessageBox::critical(this, "Floor Planning cannot be started.",
-                              QString("Device config.json not found in: %1")
-                                  .arg(QString::fromStdString(deviceDir.string())));
+      // device_layout.json (QLDeviceLayoutInfo) is the only source of
+      // floorplanning geometry now. Anything wrong with its contents is
+      // reported by DeviceGridDescriptor below, which names the key it could
+      // not read.
+      const std::filesystem::path deviceLayoutFile =
+          QLDeviceLayoutInfo::deviceLayoutJSONPath();
+      if (!FileUtils::FileExists(deviceLayoutFile)) {
+        QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+        const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
+        const QLDeviceLayoutSettings layout_settings =
+            device_manager->deviceLayoutSettings(current_device);
+        const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+            layout_settings, current_device);
+        const QString message =
+            deferred
+                ? QString("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                          "geometry is only known after Packing succeeds. Run Packing "
+                          "first, then start Floor Planning again.")
+                : QString("device_layout.json not found in: %1")
+                      .arg(QString::fromStdString(
+                          device_manager->deviceTypeDirPath().string()));
+        QMessageBox::critical(this, "Floor Planning cannot be started.", message);
         cleanFloorPlanningUI();
         return;
       }
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceConfigFile);
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceLayoutFile);
 
       if (descriptor->hasError()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
