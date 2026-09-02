@@ -400,6 +400,7 @@ set_option -retiming ${RETIMING_VALUE}
 set_option -update_models_cp 0
 set_option -run_prop_extract 1
 set_option -use_bramsdp ${SDP_BRAM_VALUE}
+set_option -enable_dsp4 ${DSP4_VALUE}
 
 # common_options
 set_option -add_dut_hierarchy 0
@@ -3546,26 +3547,33 @@ static std::string removeVprOption(const std::string& options, const std::string
 // Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'. The 'x' is
 // load-bearing: plain concatenation makes 12x10 read as 'AUTOFPGA1210', equally 1x210
 // and 121x0. Every construction site goes through here so they cannot drift apart.
-// The generated device package is written into the SHARED device_data tree as a sibling
-// of the source device, named only by the fabric it describes. Two runs that resolve to
-// the same size therefore targeted the same directory and raced on the delete-then-copy
-// that installs it: one run's recursive delete lands in the middle of another's copy.
-// The benchmark suite runs many designs, and several synthesis tools per design, against
-// one device_data, so this is its normal operating condition rather than a corner case.
-//
-// The project path is the natural key: it is exactly what distinguishes one concurrent
-// aurora invocation from another. Hashed because it cannot go in a directory name as-is,
-// and in hex to keep the name short. Stable for a given project, so re-running reuses its
-// directory instead of leaving a new one behind each time.
-static std::string generatedLayoutName(const std::string& prefix, int width, int height,
-                                       const std::string& project_path) {
-
-  std::ostringstream run_token;
-  run_token << std::hex << std::hash<std::string>{}(project_path);
+static std::string generatedLayoutName(const std::string& prefix, int width, int height) {
 
   return prefix + std::string("FPGA") +
-         std::to_string(width) + std::string("x") + std::to_string(height) +
-         std::string("_") + run_token.str();
+         std::to_string(width) + std::string("x") + std::to_string(height);
+}
+
+
+// A per-run token for the generated device DIRECTORY, which is what concurrent runs race on.
+//
+// The generated package is written into the SHARED device_data tree as a sibling of the
+// source device. Two runs resolving to the same fabric size targeted one directory and raced
+// on the delete-then-copy that installs it: one run's recursive delete lands in the middle of
+// another's copy. The benchmark suite runs many designs, and several synthesis tools per
+// design, against one device_data, so that is its normal operating condition.
+//
+// The project path is the natural key -- it is exactly what distinguishes one concurrent
+// aurora invocation from another. Hashed because a path cannot go in a directory name, in hex
+// to keep it short, and stable for a given project so a re-run reuses its own directory.
+//
+// It goes on the device name and NOT the layout name: the layout name reaches
+// <fixed_layout name=...> and vpr's --device, where uniqueness buys nothing, and REQ-014
+// fixes it as AUTOFPGA<W>x<H>.
+static std::string generatedDeviceRunToken(const std::string& project_path) {
+
+  std::ostringstream token;
+  token << std::hex << std::hash<std::string>{}(project_path);
+  return std::string("_") + token.str();
 }
 
 
@@ -4409,13 +4417,11 @@ bool CompilerOpenFPGA_ql::Packing() {
       // device package ships.
       if(m_autoLayoutGenerationMode) {
         m_autoLayoutGeneratedLayoutName =
-                generatedLayoutName("AUTO", generated_layout_width, generated_layout_height,
-                                    ProjManager()->projectPath());
+                generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
       }
       if(m_customLayoutGenerationMode) {
         m_autoLayoutGeneratedLayoutName =
-                generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height,
-                                    ProjManager()->projectPath());
+                generatedLayoutName("CUSTOM", generated_layout_width, generated_layout_height);
       }
 
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(add_layout_script_generated_layout_name), m_autoLayoutGeneratedLayoutName);
@@ -4427,8 +4433,7 @@ bool CompilerOpenFPGA_ql::Packing() {
       generated_layout_width = current_device_target.device_variant_layout.width;
       generated_layout_height = current_device_target.device_variant_layout.height;
       m_autoLayoutGeneratedLayoutName =
-              generatedLayoutName("AUTO", generated_layout_width, generated_layout_height,
-                                    ProjManager()->projectPath());
+              generatedLayoutName("AUTO", generated_layout_width, generated_layout_height);
 
       // copy the decrypted vpr.xml of the current device into the same path as the python script would have done.
       FileUtils::overwriteFile(m_architectureFile, generated_vpr_xml_path);
@@ -4647,7 +4652,8 @@ bool CompilerOpenFPGA_ql::Packing() {
       // 1 copy the source device directory recursively to create new device.
       //   and derive the new devicename from the generated layoutname.
       std::string target_device_copy_devicename =
-          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName);
+          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName) +
+          generatedDeviceRunToken(ProjManager()->projectPath());
 
       // Backstop. If the derived name did not change, the "new" device directory
       // IS the source device directory, and the code just below deletes an
@@ -11020,6 +11026,29 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       else{
         ErrorMessage("BRAM_TYPE specified is not TDP, TDP_ECC, SDP, or SDP_ECC.");
       }
+
+      // The DSP generation is selected by DSP_VERSION ("v4.0"), which replaces the
+      // older DSP_TYPE ("DSPV4"). Both are in the field during the migration and
+      // neither is universal -- some devices carry only the new key, the fixed
+      // TURNKEY parts still carry only the old one -- so read DSP_VERSION first
+      // and fall back to DSP_TYPE. Both are optional, unlike BRAM_TYPE above: a
+      // device with neither has no DSP generation to select, so a missing key
+      // means "not V4" rather than a configuration error.
+      bool dsp_v4 = false;
+      if (device_target_config_json.contains("DSP_VERSION")) {
+        std::string dsp_version =
+            device_target_config_json["DSP_VERSION"].get<std::string>();
+        // Match the major version so v4.1 and later keep working, not the
+        // exact string.
+        dsp_v4 = dsp_version.size() >= 2 &&
+                 (dsp_version[0] == 'v' || dsp_version[0] == 'V') &&
+                 dsp_version[1] == '4';
+      }
+      else if (device_target_config_json.contains("DSP_TYPE")) {
+        dsp_v4 =
+            device_target_config_json["DSP_TYPE"].get<std::string>() == "DSPV4";
+      }
+      synplifyScript->apply("${DSP4_VALUE}", dsp_v4 ? "1" : "0");
       designFiles += filesScript + "\n";
     }
 #ifdef _WIN32

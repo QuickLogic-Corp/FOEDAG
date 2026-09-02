@@ -2045,6 +2045,19 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           const size_t encrypt_list_size_before = source_device_data_file_list_to_encrypt.size();
           const size_t copy_list_size_before = source_device_data_file_list_to_copy.size();
 
+          // copy everything under 'aurora/IP_Catalog/' (the device-local IP catalog)
+          // as-is, and skip all the rules below for these files. the rules below sort
+          // files by extension, which mishandles catalog content: .eblif netlists match
+          // nothing (dropped), .xml would get encrypted (unreadable by ipgenerate),
+          // .md would be skipped. the catalog must arrive complete and unmodified,
+          // so copy the whole directory and don't let any other rule touch it.
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]aurora[\/\\]IP_Catalog[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            continue;
+          }
+
           // skip entries which are in specific directories in device data:
           // skip '/extra/' or '\extra\'
           if (std::regex_match(dir_entry.path().string(),
