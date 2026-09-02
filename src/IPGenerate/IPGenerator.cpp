@@ -1102,7 +1102,11 @@ static std::string NetlistArtifactsFingerprint(
     entries.push_back(
         std::filesystem::relative(it->path(), netlistsDir, ec)
             .generic_string() +
-        ":" + std::to_string(size) + ":" + std::to_string(mtime));
+        // static_cast avoids an Apple libc++ overload-resolution ambiguity:
+        // file_time_type::rep is convertible to multiple std::to_string
+        // overloads with equal rank on that standard library.
+        ":" + std::to_string(size) + ":" +
+        std::to_string(static_cast<long long>(mtime)));
   }
   std::sort(entries.begin(), entries.end());
   std::string fingerprint;
