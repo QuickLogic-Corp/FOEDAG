@@ -14,7 +14,7 @@ namespace fp {
 
 class DeviceGridDescriptor {
 public:
-    DeviceGridDescriptor(const std::filesystem::path& deviceConfigFile);
+    DeviceGridDescriptor(const std::filesystem::path& deviceLayoutFile);
 
     bool hasError() const { return !m_error.isEmpty(); }
     const QString& error() const { return m_error; }
@@ -43,16 +43,16 @@ public:
     bool validateFit();
 
     // Number of border (IO) cells the displayed grid adds around the device
-    // core on each side. config.json's DEVICE_SIZE is the core grid; the grid
-    // wraps it with one IO ring, so columns()/rows() = core + 2*kBorder and the
-    // 1-based DSP_COLS/BRAM_COLS core columns are shifted by kBorder into grid
-    // coordinates.
+    // core on each side. device_layout.json's array_x/array_y are the core
+    // grid; the grid wraps it with one IO ring, so columns()/rows() = core +
+    // 2*kBorder and the 1-based bram_cols/dsp_cols core columns are shifted by
+    // kBorder into grid coordinates.
     static constexpr int kBorder = 1;
 
 private:
     QString m_error;
-    // Path of the parsed config.json, so validateFit() can name it too.
-    QString m_configPath;
+    // Path of the parsed device_layout.json, so validateFit() can name it too.
+    QString m_layoutPath;
     int m_columns = -1;
     int m_rows = -1;
     std::set<int> m_dspColumns;
@@ -60,7 +60,7 @@ private:
     QSize m_dspSize;
     QSize m_bramSize;
 
-    bool parse(const std::filesystem::path& deviceConfigFile);
+    bool parse(const std::filesystem::path& deviceLayoutFile);
 
     std::optional<QSize> parseSize(const QString& sizeStr, const QString& key);
     std::optional<std::set<int>> parseColumns(const QString& csv, const QString& key);

@@ -25,48 +25,42 @@ std::set<std::string> genTestElements()
 
 fp::DeviceGridDescriptorPtr genTestDeviceDescriptor()
 {
-  // Minimal device config.json: a 30x30 core (-> 32x32 grid) with the DSP/BRAM
-  // layout this test used to hard-code. A device variant is a layout, so the
-  // geometry sits in DEVICE_TYPE_SETTINGS.CUSTOM; DSP_COLS/BRAM_COLS are
-  // 1-based core columns (grid column minus the IO border).
-  const std::string configJson = R"({
-    "DSP_SIZE": "1x3",
-    "BRAM_SIZE": "1x6",
-    "DEVICE_TYPE": "CUSTOM",
-    "DEVICE_TYPE_SETTINGS": {
-        "LAYOUT_MODE": "AUTO",
-        "CUSTOM": {
-            "ARRAY_X": "30",
-            "ARRAY_Y": "30",
-            "DSP_COLS": "5,18",
-            "BRAM_COLS": "11,24"
-        }
-    }
+  // Minimal device_layout.json: a 30x30 core (-> 32x32 grid) with the DSP/BRAM
+  // layout this test used to hard-code. dsp_cols/bram_cols are 1-based core
+  // columns (grid column minus the IO border); already resolved by
+  // QLDeviceLayoutInfo, so there is no CUSTOM-vs-flat spelling to choose here.
+  const std::string deviceLayoutJson = R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "1x3",
+    "bram_size": "1x6",
+    "dsp_cols": "5,18",
+    "bram_cols": "11,24"
 })";
 
   // A fixed name in the shared temp dir can collide with a leftover file
   // from another user/run; a random suffix keeps this path ours alone.
   static std::mt19937_64 rng(std::random_device{}());
-  const std::filesystem::path configPath =
+  const std::filesystem::path layoutPath =
       std::filesystem::temp_directory_path() /
-      ("fp_test_device_config_" + std::to_string(rng()) + ".json");
+      ("fp_test_device_layout_" + std::to_string(rng()) + ".json");
 
   bool wroteOk = false;
   {
-    std::ofstream out(configPath);
-    out << configJson;
+    std::ofstream out(layoutPath);
+    out << deviceLayoutJson;
     wroteOk = out.good();
   }
   if (!wroteOk) {
-    qCritical() << "failed to write test config.json to"
-                << QString::fromStdString(configPath.string());
+    qCritical() << "failed to write test device_layout.json to"
+                << QString::fromStdString(layoutPath.string());
     return nullptr;
   }
 
   fp::DeviceGridDescriptorPtr descriptor =
-      std::make_shared<fp::DeviceGridDescriptor>(configPath);
+      std::make_shared<fp::DeviceGridDescriptor>(layoutPath);
 
-  std::filesystem::remove(configPath);
+  std::filesystem::remove(layoutPath);
 
   return descriptor;
 }

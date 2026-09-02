@@ -10,50 +10,44 @@ namespace fp {
 
 namespace {
 
-// config.json keys. Named once because several are read under both spellings --
-// DSP_COLS and BRAM_COLS live either at the top level or inside the CUSTOM
-// block -- and a typo in one of a matched pair is the kind of thing that reads
-// as "device has no DSP columns" rather than as an error.
-constexpr auto kDeviceTypeSettings = "DEVICE_TYPE_SETTINGS";
-constexpr auto kCustom = "CUSTOM";
-constexpr auto kArrayX = "ARRAY_X";
-constexpr auto kArrayY = "ARRAY_Y";
-constexpr auto kDeviceSize = "DEVICE_SIZE";
-constexpr auto kDspSize = "DSP_SIZE";
-constexpr auto kBramSize = "BRAM_SIZE";
-constexpr auto kDspCols = "DSP_COLS";
-constexpr auto kBramCols = "BRAM_COLS";
+// device_layout.json keys (QLDeviceLayoutInfo::writeDeviceLayoutJSON()). Already
+// resolved and flat -- no DEVICE_TYPE_SETTINGS.CUSTOM-vs-flat-DEVICE_SIZE
+// ambiguity left for this class to handle; QLDeviceLayoutInfo picked the right
+// one, by device layout mode, before writing this file.
+constexpr auto kArrayX = "array_x";
+constexpr auto kArrayY = "array_y";
+constexpr auto kDspSize = "dsp_size";
+constexpr auto kBramSize = "bram_size";
+constexpr auto kDspCols = "dsp_cols";
+constexpr auto kBramCols = "bram_cols";
 
-// Where a key was looked for, for the error message. Plain prose: the message
-// format quotes the key, not the place.
-constexpr auto kInConfigJson = "config.json";
-constexpr auto kInCustomBlock = "DEVICE_TYPE_SETTINGS.CUSTOM";
+constexpr auto kInDeviceLayoutJson = "device_layout.json";
 
 }  // namespace
 
 
-DeviceGridDescriptor::DeviceGridDescriptor(const std::filesystem::path& deviceConfigFile)
+DeviceGridDescriptor::DeviceGridDescriptor(const std::filesystem::path& deviceLayoutFile)
 {
-    if (parse(deviceConfigFile)) {
+    if (parse(deviceLayoutFile)) {
         validateFit();
         Tile::setDeviceRowsNum(m_rows);
     }
 }
 
-bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
+bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceLayoutFile)
 {
     m_error = "";
 
     // Every failure below names the file, and the key when there is one: this
     // string is what the user is shown when floorplanning refuses to start.
-    m_configPath = QString::fromStdString(deviceConfigFile.string());
-    const QString& configPath = m_configPath;
+    m_layoutPath = QString::fromStdString(deviceLayoutFile.string());
+    const QString& layoutPath = m_layoutPath;
 
     bool readOk = false;
     const QByteArray content = QByteArray::fromStdString(
-        FOEDAG::FileUtils::GetFileContent(deviceConfigFile, &readOk));
+        FOEDAG::FileUtils::GetFileContent(deviceLayoutFile, &readOk));
     if (!readOk) {
-        m_error = QString("cannot read %1").arg(configPath);
+        m_error = QString("cannot read %1").arg(layoutPath);
         return false;
     }
 
@@ -62,75 +56,52 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceConfigFile)
     if (doc.isNull()) {
         // Not folded in with the is-not-an-object case below: valid JSON that is
         // not an object leaves jsonError saying "no error occurred".
-        m_error = QString("%1: %2").arg(configPath, jsonError.errorString());
+        m_error = QString("%1: %2").arg(layoutPath, jsonError.errorString());
         return false;
     }
     if (!doc.isObject()) {
-        m_error = QString("%1: root is not a JSON object").arg(configPath);
+        m_error = QString("%1: root is not a JSON object").arg(layoutPath);
         return false;
     }
-    const QJsonObject config = doc.object();
+    const QJsonObject layout = doc.object();
 
-    auto stringValue = [&](const QJsonObject& object, const QString& key,
-                           const QString& where, QString& out) -> bool {
+    auto stringValue = [&](const QJsonObject& object, const QString& key, QString& out) -> bool {
         const QJsonValue value = object.value(key);
         if (!value.isString()) {
-            m_error = QString("`%1` string key not found in %2").arg(key, where);
+            m_error = QString("`%1` string key not found in %2").arg(key, kInDeviceLayoutJson);
             return false;
         }
         out = value.toString();
         return true;
     };
+    auto intValue = [&](const QJsonObject& object, const QString& key, int& out) -> bool {
+        const QJsonValue value = object.value(key);
+        if (!value.isDouble()) {
+            m_error = QString("`%1` numeric key not found in %2").arg(key, kInDeviceLayoutJson);
+            return false;
+        }
+        out = value.toInt();
+        return true;
+    };
 
-    // A resizable device (`DEVICE_TYPE: CUSTOM`) states its geometry under
-    // DEVICE_TYPE_SETTINGS.CUSTOM, and that block is what a per-layout
-    // config.json carries. The flat keys are the older spelling and still the
-    // only one on 22 of device_data's 24 devices, so they stay the fallback
-    // until every device carries a CUSTOM block. This mirrors
-    // get_core_dimensions() in generate_floorplanning.py -- the widget and the
-    // constraints it produces must be sized off the same block.
-    const QJsonObject deviceTypeSettings =
-        config.value(kDeviceTypeSettings).toObject();
-    const bool hasCustom = deviceTypeSettings.contains(kCustom);
-    const QJsonObject custom = deviceTypeSettings.value(kCustom).toObject();
+    int arrayX = 0;
+    int arrayY = 0;
+    if (!intValue(layout, kArrayX, arrayX)) return false;
+    if (!intValue(layout, kArrayY, arrayY)) return false;
 
     QString dspSizeStr;
     QString bramSizeStr;
     QString dspColsStr;
     QString bramColsStr;
-    std::optional<QSize> coreSize;
-
-    if (hasCustom) {
-        // Present but incomplete is malformed, not old: report the key rather
-        // than falling back to a stale DEVICE_SIZE.
-        QString arrayX;
-        QString arrayY;
-        if (!stringValue(custom, kArrayX, kInCustomBlock, arrayX)) return false;
-        if (!stringValue(custom, kArrayY, kInCustomBlock, arrayY)) return false;
-        if (!stringValue(custom, kDspCols, kInCustomBlock, dspColsStr)) return false;
-        if (!stringValue(custom, kBramCols, kInCustomBlock, bramColsStr)) return false;
-        coreSize = parseSize(arrayX + "x" + arrayY,
-                             QString("%1/%2").arg(kArrayX, kArrayY));
-    } else {
-        QString deviceSizeStr;
-        if (!stringValue(config, kDeviceSize, kInConfigJson, deviceSizeStr)) return false;
-        if (!stringValue(config, kDspCols, kInConfigJson, dspColsStr)) return false;
-        if (!stringValue(config, kBramCols, kInConfigJson, bramColsStr)) return false;
-        coreSize = parseSize(deviceSizeStr, kDeviceSize);
-    }
-    if (!coreSize) {
-        return false;
-    }
-
-    // Tile sizes are a property of the tile, not of the layout, so they stay
-    // top-level whichever spelling supplied the core size.
-    if (!stringValue(config, kDspSize, kInConfigJson, dspSizeStr)) return false;
-    if (!stringValue(config, kBramSize, kInConfigJson, bramSizeStr)) return false;
+    if (!stringValue(layout, kDspSize, dspSizeStr)) return false;
+    if (!stringValue(layout, kBramSize, bramSizeStr)) return false;
+    if (!stringValue(layout, kDspCols, dspColsStr)) return false;
+    if (!stringValue(layout, kBramCols, bramColsStr)) return false;
 
     // The core grid; the displayed grid wraps it with one IO ring on each side.
     // Add the IO border on each side (low + core + high).
-    m_columns = kBorder + coreSize->width() + kBorder;
-    m_rows = kBorder + coreSize->height() + kBorder;
+    m_columns = kBorder + arrayX + kBorder;
+    m_rows = kBorder + arrayY + kBorder;
 
     const std::optional<QSize> dspSize = parseSize(dspSizeStr, kDspSize);
     if (!dspSize) {
@@ -217,25 +188,25 @@ bool DeviceGridDescriptor::validateFit()
 {
     const int nonIoRows = m_rows - 2*kBorder;
     if (nonIoRows <= 0) {
-        m_error = QString("%1: number of effective clbs cannot be less than or equal to 0").arg(m_configPath);
+        m_error = QString("%1: number of effective clbs cannot be less than or equal to 0").arg(m_layoutPath);
         return false;
     }
 
     if (m_dspSize.height() <= 0) {
-        m_error = QString("%1: dsp height cannot be less than or equal to 0").arg(m_configPath);
+        m_error = QString("%1: dsp height cannot be less than or equal to 0").arg(m_layoutPath);
         return false;
     }
     if (m_bramSize.height() <= 0) {
-        m_error = QString("%1: bram height cannot be less than or equal to 0").arg(m_configPath);
+        m_error = QString("%1: bram height cannot be less than or equal to 0").arg(m_layoutPath);
         return false;
     }
 
     if (nonIoRows % m_dspSize.height() != 0) {
-        m_error = QString("%1: cannot fit required number of dsp blocks into a column").arg(m_configPath);
+        m_error = QString("%1: cannot fit required number of dsp blocks into a column").arg(m_layoutPath);
         return false;
     }
     if (nonIoRows % m_bramSize.height() != 0) {
-        m_error = QString("%1: cannot fit required number of bram blocks into a column").arg(m_configPath);
+        m_error = QString("%1: cannot fit required number of bram blocks into a column").arg(m_layoutPath);
         return false;
     }
 

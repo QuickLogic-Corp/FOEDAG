@@ -14,7 +14,7 @@
 
 #include "gtest/gtest.h"
 
-fp::DeviceGridDescriptorPtr descriptorFromJson(const std::string& configJson)
+fp::DeviceGridDescriptorPtr descriptorFromJson(const std::string& deviceLayoutJson)
 {
     // A fixed name in the shared temp dir can collide with a leftover file
     // from another user/run on a multi-user build box; a random suffix keeps
@@ -22,69 +22,47 @@ fp::DeviceGridDescriptorPtr descriptorFromJson(const std::string& configJson)
     static std::mt19937_64 rng(std::random_device{}());
     const std::string testName =
         ::testing::UnitTest::GetInstance()->current_test_info()->name();
-    const std::filesystem::path configPath =
+    const std::filesystem::path layoutPath =
         std::filesystem::temp_directory_path() /
-        ("fp_unittest_device_config_" + testName + "_" +
+        ("fp_unittest_device_layout_" + testName + "_" +
          std::to_string(rng()) + ".json");
 
     bool wroteOk = false;
     {
-        std::ofstream out(configPath);
-        out << configJson;
+        std::ofstream out(layoutPath);
+        out << deviceLayoutJson;
         wroteOk = out.good();
     }
     if (!wroteOk) {
-        ADD_FAILURE() << "failed to write test config.json to " << configPath;
+        ADD_FAILURE() << "failed to write test device_layout.json to " << layoutPath;
         return nullptr;
     }
 
     fp::DeviceGridDescriptorPtr descriptor =
-        std::make_shared<fp::DeviceGridDescriptor>(configPath);
+        std::make_shared<fp::DeviceGridDescriptor>(layoutPath);
 
-    std::filesystem::remove(configPath);
+    std::filesystem::remove(layoutPath);
 
     return descriptor;
 }
 
 fp::DeviceGridDescriptorPtr genTestDescriptor()
 {
-    // Minimal device config.json: a 30x30 core (-> 32x32 grid) with DSP columns
-    // at grid {7,20} and BRAM columns at grid {13,26}. A device variant is a
-    // layout, so the geometry sits in DEVICE_TYPE_SETTINGS.CUSTOM;
-    // DSP_COLS/BRAM_COLS are 1-based core columns (grid column minus the IO
-    // border).
-    const std::string configJson = R"({
-    "DSP_SIZE": "1x3",
-    "BRAM_SIZE": "1x6",
-    "DEVICE_TYPE": "CUSTOM",
-    "DEVICE_TYPE_SETTINGS": {
-        "LAYOUT_MODE": "AUTO",
-        "CUSTOM": {
-            "ARRAY_X": "30",
-            "ARRAY_Y": "30",
-            "DSP_COLS": "6,19",
-            "BRAM_COLS": "12,25"
-        }
-    }
+    // Minimal device_layout.json: a 30x30 core (-> 32x32 grid) with DSP columns
+    // at grid {7,20} and BRAM columns at grid {13,26}. dsp_cols/bram_cols are
+    // 1-based core columns (grid column minus the IO border) -- already
+    // resolved by QLDeviceLayoutInfo, so there is no CUSTOM-vs-flat spelling
+    // left to choose between here.
+    const std::string deviceLayoutJson = R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "1x3",
+    "bram_size": "1x6",
+    "dsp_cols": "6,19",
+    "bram_cols": "12,25"
 })";
 
-    return descriptorFromJson(configJson);
-}
-
-// The same device in the older spelling: a flat DEVICE_SIZE with the column
-// lists beside it, no CUSTOM block. Every device in device_data still reads
-// this way, so the fallback has to stay exercised.
-fp::DeviceGridDescriptorPtr genFlatTestDescriptor()
-{
-    const std::string configJson = R"({
-    "DEVICE_SIZE": "30x30",
-    "DSP_SIZE": "1x3",
-    "BRAM_SIZE": "1x6",
-    "DSP_COLS": "6,19",
-    "BRAM_COLS": "12,25"
-})";
-
-    return descriptorFromJson(configJson);
+    return descriptorFromJson(deviceLayoutJson);
 }
 
 std::string toString(const fp::HierarhyElements& elements)
@@ -270,47 +248,37 @@ bool test_partition(const fp::Tile::Index& bottomLeftIndex, const fp::Tile::Inde
     return true;
 }
 
-// A device variant states its geometry under DEVICE_TYPE_SETTINGS.CUSTOM; the
-// flat keys are the older spelling. Both describe the same device, so the widget
-// must size itself identically from either -- otherwise a device gains or loses
-// rows the moment its config.json is re-spelled.
-TEST(FloorPlanning, flatKeysAndCustomBlockAgree)
+TEST(FloorPlanning, resolvesFromDeviceLayoutJson)
 {
-    fp::DeviceGridDescriptorPtr custom = genTestDescriptor();
-    fp::DeviceGridDescriptorPtr flat = genFlatTestDescriptor();
+    fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
 
-    ASSERT_FALSE(custom->hasError()) << custom->error().toStdString();
-    ASSERT_FALSE(flat->hasError()) << flat->error().toStdString();
+    ASSERT_FALSE(descriptor->hasError()) << descriptor->error().toStdString();
 
-    EXPECT_EQ(flat->columns(), custom->columns());
-    EXPECT_EQ(flat->rows(), custom->rows());
-    EXPECT_EQ(flat->dspSize().width(), custom->dspSize().width());
-    EXPECT_EQ(flat->dspSize().height(), custom->dspSize().height());
-    EXPECT_EQ(flat->bramSize().width(), custom->bramSize().width());
-    EXPECT_EQ(flat->bramSize().height(), custom->bramSize().height());
-
-    for (int column = 0; column <= custom->columns(); ++column) {
-        EXPECT_EQ(flat->isDspColumn(column), custom->isDspColumn(column))
-            << "dsp column " << column;
-        EXPECT_EQ(flat->isBramColumn(column), custom->isBramColumn(column))
-            << "bram column " << column;
-    }
+    EXPECT_EQ(descriptor->columns(), 32);
+    EXPECT_EQ(descriptor->rows(), 32);
+    EXPECT_EQ(descriptor->dspSize(), QSize(1, 3));
+    EXPECT_EQ(descriptor->bramSize(), QSize(1, 6));
+    EXPECT_TRUE(descriptor->isDspColumn(7));
+    EXPECT_TRUE(descriptor->isDspColumn(20));
+    EXPECT_TRUE(descriptor->isBramColumn(13));
+    EXPECT_TRUE(descriptor->isBramColumn(26));
 }
 
-// A CUSTOM block is authoritative once present: an incomplete one is malformed
-// rather than old, so it must be reported and not quietly resolved from the
-// flat DEVICE_SIZE sitting next to it.
-TEST(FloorPlanning, incompleteCustomBlockIsReported)
+// A present-but-incomplete device_layout.json is malformed, not merely
+// unresolved: it must be reported, naming the key, rather than silently
+// producing a wrong-sized grid.
+TEST(FloorPlanning, missingKeyIsReported)
 {
     fp::DeviceGridDescriptorPtr descriptor = descriptorFromJson(R"({
-    "DEVICE_SIZE": "30x30",
-    "DSP_SIZE": "1x3",
-    "BRAM_SIZE": "1x6",
-    "DEVICE_TYPE_SETTINGS": { "CUSTOM": { "ARRAY_X": "30" } }
+    "array_x": 30,
+    "dsp_size": "1x3",
+    "bram_size": "1x6",
+    "dsp_cols": "6,19",
+    "bram_cols": "12,25"
 })");
 
     ASSERT_TRUE(descriptor->hasError());
-    EXPECT_NE(descriptor->error().indexOf("ARRAY_Y"), -1)
+    EXPECT_NE(descriptor->error().indexOf("array_y"), -1)
         << descriptor->error().toStdString();
 }
 
