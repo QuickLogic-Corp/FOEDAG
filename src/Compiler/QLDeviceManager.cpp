@@ -789,15 +789,20 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
     }
 
     // update the layout's resource information:
+    // "-" rather than "0" for a resource count that is not yet known - e.g. an
+    // AUTO/RESOURCES device before Packing() has resolved its real geometry.
+    const auto resourceText = [](const std::optional<int>& count) {
+      return count.has_value() ? QString::number(*count) : QString("-");
+    };
     QString archInfo;
     //archInfo += "| ";
     archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
     archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
     archInfo += "\n";
-    archInfo += "clb: <b>" + QString::number(device_target_selected.device_variant_layout.clb) + " </b>| ";
-    archInfo += "dsp: <b>" + QString::number(device_target_selected.device_variant_layout.dsp) + " </b>| ";
-    archInfo += "bram: <b>" + QString::number(device_target_selected.device_variant_layout.bram) + " </b>| ";
-    archInfo += "io: <b>" + QString::number(device_target_selected.device_variant_layout.io) + " </b>";
+    archInfo += "clb: <b>" + resourceText(device_target_selected.device_variant_layout.clb) + " </b>| ";
+    archInfo += "dsp: <b>" + resourceText(device_target_selected.device_variant_layout.dsp) + " </b>| ";
+    archInfo += "bram: <b>" + resourceText(device_target_selected.device_variant_layout.bram) + " </b>| ";
+    archInfo += "io: <b>" + resourceText(device_target_selected.device_variant_layout.io) + " </b>";
     m_device_resources_label->setText(archInfo);
   }
 
@@ -1120,12 +1125,13 @@ void QLDeviceManager::parseDeviceData() {
                                                               device_variant.p_v_t_corner,
                                                               device_variant_layout.name);
 
-        std::vector<std::tuple<std::string, int>> resources_vector = deviceResourceInformation(_device_target);
+        std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+            deviceResourceInformation(_device_target);
 
         for (const auto& resource_tuple : resources_vector) {
-          
+
           std::string resourcename = std::get<0>(resource_tuple);
-          int resourcecount = std::get<1>(resource_tuple);
+          std::optional<int> resourcecount = std::get<1>(resource_tuple);
 
           // this part is a carry-over, we should make the layout resource structure
           // in c++ code generic, so we don't need to have these ifs ? TODO future
@@ -4160,15 +4166,6 @@ static bool normalizeLayoutMode(const std::string& value, std::string& out_layou
 constexpr const char* CONFIG_KEY_DEVICE_TYPE = "DEVICE_TYPE";
 constexpr const char* CONFIG_KEY_DEVICE_TYPE_SETTINGS = "DEVICE_TYPE_SETTINGS";
 constexpr const char* CONFIG_KEY_LAYOUT_MODE = "LAYOUT_MODE";
-constexpr const char* CONFIG_KEY_DEVICE_SIZE = "DEVICE_SIZE";
-constexpr const char* CONFIG_KEY_BRAM_SIZE = "BRAM_SIZE";
-constexpr const char* CONFIG_KEY_DSP_SIZE = "DSP_SIZE";
-constexpr const char* CONFIG_KEY_BRAM_COLS = "BRAM_COLS";
-constexpr const char* CONFIG_KEY_DSP_COLS = "DSP_COLS";
-constexpr const char* CONFIG_KEY_IO_CAPACITY = "IO_CAPACITY";
-constexpr const char* CONFIG_KEY_CUSTOM = "CUSTOM";
-constexpr const char* CONFIG_KEY_ARRAY_X = "ARRAY_X";
-constexpr const char* CONFIG_KEY_ARRAY_Y = "ARRAY_Y";
 
 
 QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
@@ -4290,27 +4287,6 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
 }
 
 
-bool QLDeviceManager::configJSONText(const json& config_json, const std::string& key, std::string& out_text) {
-
-  if(!config_json.contains(key)) {
-    return false;
-  }
-
-  const auto& value = config_json[key];
-
-  if(value.is_string()) {
-    out_text = value.get<std::string>();
-    return true;
-  }
-  if(value.is_number_integer()) {
-    out_text = std::to_string(value.get<long long>());
-    return true;
-  }
-
-  return false;
-}
-
-
 // Trailing junk is rejected: a half-parsed geometry would silently mis-size a device.
 bool QLDeviceManager::parseWholeNumber(const std::string& text, int& out_value) {
 
@@ -4349,115 +4325,27 @@ bool QLDeviceManager::parseDeviceGeometry(const std::string& text, int& out_x, i
 }
 
 
-int QLDeviceManager::countDeviceColumns(const std::string& text) {
-
-  int count = 0;
-
-  // tokenize()'s skipEmpty only drops "" - a whitespace-only entry ("3, ,10")
-  // is a column short of nothing, so trim before testing.
-  for(std::string token : StringUtils::tokenize(text, ",")) {
-    if( !StringUtils::trim(token).empty() ) {
-      count++;
-    }
-  }
-
-  return count;
-}
-
-
-// Derive the layout's resource counts from the geometry already in config.json.
+// Derive the layout's resource counts from its resolved QLDeviceLayoutInfo.
 //
 // This is the only source of resource counts. They were previously read from a
 // resources.json generated by running vpr over the architecture, which a package
-// cut outside the Aurora tree never had; the counts are a pure function of keys
-// config.json already carries (issue #2257):
+// cut outside the Aurora tree never had; the counts are a pure function of the
+// resolved layout (issue #2257):
 //
-//   bram = <bram columns> * floor(ARRAY_Y / <bram tile height>)
-//   dsp  = <dsp columns>  * floor(ARRAY_Y / <dsp tile height>)
-//   clb  = (ARRAY_X - <bram columns> - <dsp columns>) * ARRAY_Y
-//   io   = 2 * (ARRAY_X + ARRAY_Y) * IO_CAPACITY
+//   bram = <bram columns> * floor(arrayY / <bram tile height>)
+//   dsp  = <dsp columns>  * floor(arrayY / <dsp tile height>)
+//   clb  = (arrayX - <bram columns> - <dsp columns>) * arrayY
+//   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
 //
-// The array size and column lists come from whichever of config.json's two
-// spellings describes THIS layout - flat "DEVICE_SIZE", or per layout under
-// DEVICE_TYPE_SETTINGS.CUSTOM - so a package carrying one config per layout, or
-// both spellings at once, resolves by matching the layout rather than by
-// precedence. The block heights and IO_CAPACITY are device-wide and always flat.
-//
-// Returns nothing when config.json lacks the full geometry (a package predating
-// the CRR keys) or when no spelling describes this layout's array: a wrong
-// resource count is worse than none.
-//
-// On a CUSTOM package with "LAYOUT_MODE": "AUTO" these are the counts of the
-// default layout that shipped. Aurora re-sizes the fabric per design in that
-// mode, so the device a given run actually uses may be larger or smaller.
-std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveDeviceResourceInformation(QLDeviceTarget device_target,
-                                                                                          std::string* out_error) {
+// An AUTO/RESOURCES device that has not been through Packing() yet is expected
+// to be unresolved - deriveDeviceResourceInformation() filters that case out
+// before ever calling here, so an unresolved layout reaching this function is
+// always a genuine config.json problem, not a "not yet known" state.
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveResourceCounts(
+    const QLDeviceLayoutInfo& layout_info, std::string* out_error) {
 
-  if( !isDeviceTargetValid(device_target) ) {
-    device_target = this->device_target;
-  }
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector;
 
-  const auto fail = [&](const std::string& reason) {
-    if(out_error) {
-      *out_error = std::string("cannot derive resource counts for ") +
-                   convertToDeviceTypeString(device_target) + ": " + reason;
-    }
-    return std::vector<std::tuple<std::string, int>>();
-  };
-
-  json device_target_config_json;
-  std::string config_parse_error;
-  if( !loadDeviceConfigJSON(device_target, device_target_config_json, &config_parse_error) ||
-      !device_target_config_json.is_object() ) {
-    return fail(config_parse_error.empty() ? std::string("config.json is missing or unreadable")
-                                           : config_parse_error);
-  }
-
-  std::string reason;
-  std::vector<std::tuple<std::string, int>> resources_vector =
-      deriveResourceCounts(device_target_config_json,
-                           device_target.device_variant_layout.width,
-                           device_target.device_variant_layout.height,
-                           &reason);
-
-  if( resources_vector.empty() ) {
-    return fail(reason.empty() ? std::string("config.json does not describe this layout")
-                               : (std::string("layout \"") +
-                                  device_target.device_variant_layout.name + "\": " + reason));
-  }
-
-  return resources_vector;
-}
-
-
-// One spelling of a layout's geometry. config.json carries it flat
-// ("DEVICE_SIZE": "8x6") and/or per layout under DEVICE_TYPE_SETTINGS.CUSTOM
-// ("ARRAY_X": "8", "ARRAY_Y": "6"), and a package may carry both. Which one
-// describes THIS layout is decided by matching the layout's own size rather than by
-// a precedence rule, so a config naming a layout other than this one is skipped
-// instead of mis-sizing it.
-namespace {
-
-struct LayoutGeometryCandidate {
-  std::string source;
-  int array_x = 0;
-  int array_y = 0;
-  std::string bram_cols_text;
-  std::string dsp_cols_text;
-};
-
-}  // namespace
-
-
-std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(const json& config_json,
-                                                                               int layout_width,
-                                                                               int layout_height,
-                                                                               std::string* out_error) {
-
-  std::vector<std::tuple<std::string, int>> resources_vector;
-
-  // Every path below returns an empty vector; without a reason the caller can
-  // only report the device as having no resources at all.
   const auto fail = [&](const std::string& reason) {
     if(out_error) {
       *out_error = reason;
@@ -4465,48 +4353,31 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
     return resources_vector;
   };
 
-  if( !config_json.is_object() ) {
-    return fail("config.json is not a JSON object");
+  if( !layout_info.resolved() ) {
+    return fail("layout is not resolved");
   }
 
-  // Device-wide, and always flat: a block's height and an io tile's capacity are
-  // properties of the silicon, not of a layout cut from it.
-  std::string bram_size_text;
-  std::string dsp_size_text;
-  std::string io_capacity_text;
-  const std::pair<const char*, std::string*> device_keys[] = {
-      {CONFIG_KEY_BRAM_SIZE,   &bram_size_text},
-      {CONFIG_KEY_DSP_SIZE,    &dsp_size_text},
-      {CONFIG_KEY_IO_CAPACITY, &io_capacity_text},
-  };
-  for(const auto& [key, out_text] : device_keys) {
-    if( !configJSONText(config_json, key, *out_text) ) {
-      return fail(std::string("config.json has no usable \"") + key + "\" key");
-    }
-  }
+  const QLDeviceLayout& layout = layout_info.layout();
 
   int bram_tile_width = 0;
   int bram_tile_height = 0;
   int dsp_tile_width = 0;
   int dsp_tile_height = 0;
-  int io_capacity = 0;
-  if( !parseDeviceGeometry(bram_size_text, bram_tile_width, bram_tile_height) || (bram_tile_height <= 0) ) {
-    return fail(std::string("\"") + CONFIG_KEY_BRAM_SIZE + "\": \"" + bram_size_text +
-                "\" is not a positive <x>x<y> geometry");
+  if( !parseDeviceGeometry(layout.bramSize, bram_tile_width, bram_tile_height) || (bram_tile_height <= 0) ) {
+    return fail("\"BRAM_SIZE\": \"" + layout.bramSize + "\" is not a positive <x>x<y> geometry");
   }
-  if( !parseDeviceGeometry(dsp_size_text, dsp_tile_width, dsp_tile_height) || (dsp_tile_height <= 0) ) {
-    return fail(std::string("\"") + CONFIG_KEY_DSP_SIZE + "\": \"" + dsp_size_text +
-                "\" is not a positive <x>x<y> geometry");
+  if( !parseDeviceGeometry(layout.dspSize, dsp_tile_width, dsp_tile_height) || (dsp_tile_height <= 0) ) {
+    return fail("\"DSP_SIZE\": \"" + layout.dspSize + "\" is not a positive <x>x<y> geometry");
   }
 
-  // The clb count subtracts one array column per entry of BRAM_COLS/DSP_COLS, so a
+  // The clb count subtracts one array column per entry of bramCols/dspCols, so a
   // block wider than a single tile would leave clb too high and the columns-fit
   // check too lax. Every QLF_K6N10 package is 1xN today; decline rather than
   // report a count computed on an assumption the package contradicts, and whoever
   // ships the first wide block gets this message instead of a wrong number.
   const std::pair<const char*, int> block_widths[] = {
-      {CONFIG_KEY_BRAM_SIZE, bram_tile_width},
-      {CONFIG_KEY_DSP_SIZE,  dsp_tile_width},
+      {"BRAM_SIZE", bram_tile_width},
+      {"DSP_SIZE",  dsp_tile_width},
   };
   for(const auto& [key, width] : block_widths) {
     if(width != 1) {
@@ -4514,143 +4385,90 @@ std::vector<std::tuple<std::string, int>> QLDeviceManager::deriveResourceCounts(
                   " tiles wide, and the clb count assumes one tile per block column");
     }
   }
-  if( !parseWholeNumber(io_capacity_text, io_capacity) ) {
-    return fail(std::string("\"") + CONFIG_KEY_IO_CAPACITY + "\": \"" + io_capacity_text +
-                "\" is not a whole number");
+  if( !layout.ioCapacity.has_value() ) {
+    return fail("config.json has no usable \"IO_CAPACITY\" key");
   }
 
-  // The column lists a candidate does not override itself.
-  std::string default_bram_cols_text;
-  std::string default_dsp_cols_text;
-  configJSONText(config_json, CONFIG_KEY_BRAM_COLS, default_bram_cols_text);
-  configJSONText(config_json, CONFIG_KEY_DSP_COLS, default_dsp_cols_text);
-
-  std::vector<LayoutGeometryCandidate> candidates;
-  std::vector<std::string> rejected;
-
-  // DEVICE_TYPE_SETTINGS.CUSTOM, the per-layout spelling. add_layout.py takes the
-  // layout size from ARRAY_X/ARRAY_Y here and lets each key fall back to the flat
-  // one it does not restate, so this reads it the same way.
-  if( config_json.contains(CONFIG_KEY_DEVICE_TYPE_SETTINGS) &&
-      config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS].is_object() ) {
-    const json& settings = config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS];
-    if( settings.contains(CONFIG_KEY_CUSTOM) && settings[CONFIG_KEY_CUSTOM].is_object() ) {
-      const json& custom = settings[CONFIG_KEY_CUSTOM];
-      const std::string source =
-          std::string(CONFIG_KEY_DEVICE_TYPE_SETTINGS) + "." + CONFIG_KEY_CUSTOM;
-
-      std::string array_x_text;
-      std::string array_y_text;
-      LayoutGeometryCandidate candidate;
-      candidate.source = source;
-      if( configJSONText(custom, CONFIG_KEY_ARRAY_X, array_x_text) &&
-          configJSONText(custom, CONFIG_KEY_ARRAY_Y, array_y_text) ) {
-        if( parseWholeNumber(array_x_text, candidate.array_x) &&
-            parseWholeNumber(array_y_text, candidate.array_y) &&
-            (candidate.array_x > 0) && (candidate.array_y > 0) ) {
-          candidate.bram_cols_text = default_bram_cols_text;
-          candidate.dsp_cols_text = default_dsp_cols_text;
-          configJSONText(custom, CONFIG_KEY_BRAM_COLS, candidate.bram_cols_text);
-          configJSONText(custom, CONFIG_KEY_DSP_COLS, candidate.dsp_cols_text);
-          candidates.push_back(candidate);
-        }
-        else {
-          rejected.push_back(source + " \"" + array_x_text + "\"x\"" + array_y_text +
-                             "\" is not a positive array size");
-        }
-      }
-    }
-  }
-
-  // "DEVICE_SIZE", the flat spelling.
-  std::string device_size_text;
-  if( configJSONText(config_json, CONFIG_KEY_DEVICE_SIZE, device_size_text) ) {
-    LayoutGeometryCandidate candidate;
-    candidate.source = std::string("\"") + CONFIG_KEY_DEVICE_SIZE + "\": \"" + device_size_text + "\"";
-    if( parseDeviceGeometry(device_size_text, candidate.array_x, candidate.array_y) &&
-        (candidate.array_x > 0) && (candidate.array_y > 0) ) {
-      candidate.bram_cols_text = default_bram_cols_text;
-      candidate.dsp_cols_text = default_dsp_cols_text;
-      candidates.push_back(candidate);
-    }
-    else {
-      rejected.push_back(candidate.source + " is not a positive <x>x<y> geometry");
-    }
-  }
-
-  if( candidates.empty() ) {
-    if( !rejected.empty() ) {
-      return fail("config.json has no usable layout geometry: " + StringUtils::join(rejected, "; "));
-    }
-    return fail(std::string("config.json has neither a \"") + CONFIG_KEY_DEVICE_SIZE +
-                "\" key nor \"" + CONFIG_KEY_DEVICE_TYPE_SETTINGS + "." + CONFIG_KEY_CUSTOM +
-                "\" array dimensions");
-  }
-
-  // a vpr layout is the array plus its io and empty rings, one tile each per side
-  // (add_layout.py: WIDTH = ARRAY_X + 4). A candidate of any other size describes a
-  // layout other than this one - another entry of a multi-layout package, or a
-  // DEVICE_SIZE that disagrees with the architecture - and cannot answer for it.
-  const int LAYOUT_RING_TILES = 4;
-  const LayoutGeometryCandidate* geometry = nullptr;
-  for(const LayoutGeometryCandidate& candidate : candidates) {
-    if( (layout_width == (candidate.array_x + LAYOUT_RING_TILES)) &&
-        (layout_height == (candidate.array_y + LAYOUT_RING_TILES)) ) {
-      geometry = &candidate;
-      break;
-    }
-    rejected.push_back(candidate.source + " describes " +
-                       std::to_string(candidate.array_x + LAYOUT_RING_TILES) + "x" +
-                       std::to_string(candidate.array_y + LAYOUT_RING_TILES));
-  }
-
-  if(geometry == nullptr) {
-    return fail(std::string("is ") + std::to_string(layout_width) + "x" +
-                std::to_string(layout_height) + ", which config.json does not describe: " +
-                StringUtils::join(rejected, "; "));
-  }
-
-  const int array_x = geometry->array_x;
-  const int array_y = geometry->array_y;
-  const int bram_columns = countDeviceColumns(geometry->bram_cols_text);
-  const int dsp_columns = countDeviceColumns(geometry->dsp_cols_text);
+  const int array_x = layout.arrayX;
+  const int array_y = layout.arrayY;
+  const int bram_columns = static_cast<int>(layout.bramCols.size());
+  const int dsp_columns = static_cast<int>(layout.dspCols.size());
   if( (bram_columns + dsp_columns) >= array_x ) {
     // the column lists do not fit the array: report nothing rather than a
     // negative clb count.
-    return fail(std::string("\"") + CONFIG_KEY_BRAM_COLS + "\" (" + std::to_string(bram_columns) +
-                ") + \"" + CONFIG_KEY_DSP_COLS + "\" (" + std::to_string(dsp_columns) +
-                ") from " + geometry->source + " do not fit an array " +
+    return fail("\"BRAM_COLS\" (" + std::to_string(bram_columns) + ") + \"DSP_COLS\" (" +
+                std::to_string(dsp_columns) + ") do not fit an array " +
                 std::to_string(array_x) + " columns wide");
   }
 
   resources_vector.push_back(std::make_tuple(std::string("clb"),
-                                             (array_x - bram_columns - dsp_columns) * array_y));
+      std::optional<int>((array_x - bram_columns - dsp_columns) * array_y)));
   resources_vector.push_back(std::make_tuple(std::string("bram"),
-                                             bram_columns * (array_y / bram_tile_height)));
+      std::optional<int>(bram_columns * (array_y / bram_tile_height))));
   resources_vector.push_back(std::make_tuple(std::string("dsp"),
-                                             dsp_columns * (array_y / dsp_tile_height)));
+      std::optional<int>(dsp_columns * (array_y / dsp_tile_height))));
   resources_vector.push_back(std::make_tuple(std::string("io"),
-                                             2 * (array_x + array_y) * io_capacity));
+      std::optional<int>(2 * (array_x + array_y) * (*layout.ioCapacity))));
 
   return resources_vector;
 }
 
 
-std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInformation(QLDeviceTarget device_target){
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveDeviceResourceInformation(
+    QLDeviceTarget device_target, std::string* out_error) {
 
-  // Resource counts are computed from the geometry in config.json. They used to
-  // be read from a resources.json generated by running vpr over the
-  // architecture; that file is no longer produced or consumed.
-  //
-  // vector of tuples, one per resource type and its count:
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  const QLDeviceLayoutSettings layout_settings = deviceLayoutSettings(device_target);
+  const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(layout_settings, device_target);
+
+  // AUTO/RESOURCES geometry only resolves from the CURRENT project's
+  // auto_device.log; reusing that path for an unrelated device_target (e.g.
+  // while listing the whole device-data catalog) would misattribute this
+  // project's resolved geometry to a device it has nothing to do with.
+  const bool is_current_device =
+      convertToDeviceString(device_target) == convertToDeviceString(getCurrentDeviceTarget());
+  if( deferred && !is_current_device ) {
+    return {};
+  }
+
+  const QLDeviceLayoutInfo layout_info(device_target);
+  if( deferred && !layout_info.resolved() ) {
+    // The current device, but Packing() has not produced auto_device.log yet -
+    // expected, not a failure worth reporting.
+    return {};
+  }
+
+  std::string reason;
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+      deriveResourceCounts(layout_info, &reason);
+
+  if( resources_vector.empty() && !reason.empty() && out_error ) {
+    *out_error = std::string("cannot derive resource counts for ") +
+                 convertToDeviceTypeString(device_target) + ": layout \"" +
+                 device_target.device_variant_layout.name + "\": " + reason;
+  }
+
+  return resources_vector;
+}
+
+
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deviceResourceInformation(
+    QLDeviceTarget device_target) {
+
+  // vector of tuples, one per resource type and its count - unset when not yet
+  // known (e.g. an AUTO/RESOURCES device before Packing() has run):
   // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
 
   std::string derive_error;
-  std::vector<std::tuple<std::string, int>> resources_vector =
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
       deriveDeviceResourceInformation(device_target, &derive_error);
 
   // the device is about to be shown with no resources at all, so say why rather
-  // than leaving it unexplained.
+  // than leaving it unexplained. Silent when derive_error is empty: that means
+  // "not yet known", not a failure.
   if( resources_vector.empty() && !derive_error.empty() ) {
     reportDeviceDataError(derive_error);
   }

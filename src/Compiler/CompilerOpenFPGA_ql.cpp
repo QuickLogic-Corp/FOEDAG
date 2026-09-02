@@ -40,6 +40,7 @@
 #include <QTemporaryFile>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <regex>
@@ -4758,21 +4759,30 @@ bool CompilerOpenFPGA_ql::Packing() {
             // The copy still carries the SOURCE package's geometry, which describes
             // the fabric this run replaced rather than the one it generated, so the
             // generated device would report no resources at all (issue #2257). Take
-            // it from the architecture just written, the way the package's own
-            // add_layout.py reads it back.
-            LayoutGeometryResult generated_geometry =
-                parseLayoutGeometry(generated_vpr_xml_path, m_autoLayoutGeneratedLayoutName);
-            if(generated_geometry.error.empty()) {
+            // it from the already-resolved current-run layout - the same resize
+            // event QLDeviceLayoutInfo has just observed via auto_device.log.
+            QLDeviceLayoutInfo generated_layout_info(
+                QLDeviceManager::getInstance()->getCurrentDeviceTarget());
+            if(generated_layout_info.resolved()) {
+              const QLDeviceLayout& generated_layout = generated_layout_info.layout();
               target_device_config_json["DEVICE_SIZE"] =
-                  std::to_string(generated_geometry.array_x) + "x" +
-                  std::to_string(generated_geometry.array_y);
-              target_device_config_json["BRAM_COLS"] = generated_geometry.bram_cols;
-              target_device_config_json["DSP_COLS"] = generated_geometry.dsp_cols;
+                  std::to_string(generated_layout.arrayX) + "x" +
+                  std::to_string(generated_layout.arrayY);
+              std::string bram_cols_text;
+              for(int col : generated_layout_info.bramCols()) {
+                bram_cols_text += (bram_cols_text.empty() ? "" : ",") + std::to_string(col);
+              }
+              std::string dsp_cols_text;
+              for(int col : generated_layout_info.dspCols()) {
+                dsp_cols_text += (dsp_cols_text.empty() ? "" : ",") + std::to_string(col);
+              }
+              target_device_config_json["BRAM_COLS"] = bram_cols_text;
+              target_device_config_json["DSP_COLS"] = dsp_cols_text;
             }
             else {
               // not fatal: the device works, it just cannot report its resources.
-              WarningMessage("generated device will report no resources - " +
-                             generated_geometry.error);
+              WarningMessage("generated device will report no resources - "
+                             "layout not resolved");
             }
 
             std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
@@ -9362,13 +9372,13 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
   int total_brams_num = 0;
   int total_dsps_num = 0;
-  std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
+  std::vector<std::tuple<std::string, std::optional<int>>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
   for (const auto& [resource, value]: resources) {
     if (resource == "bram") {
-      total_brams_num = value;
+      total_brams_num = value.value_or(0);
     }
     if (resource == "dsp") {
-      total_dsps_num = value;
+      total_dsps_num = value.value_or(0);
     }
   }
 

@@ -21,6 +21,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/QLDeviceManager.h"
 
+#include <optional>
+
+#include "Compiler/QLDeviceLayoutInfo.h"
 #include "gtest/gtest.h"
 using namespace FOEDAG;
 
@@ -183,61 +186,17 @@ TEST(QLDeviceManager, ParseDeviceGeometryRejectsMalformed) {
   EXPECT_FALSE(QLDeviceManager::parseDeviceGeometry("", x, y));
 }
 
-TEST(QLDeviceManager, CountDeviceColumnsCountsEntries) {
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns("3,10,17"), 3);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns("10"), 1);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns(" 3 , 10 "), 2);
-}
-
-TEST(QLDeviceManager, CountDeviceColumnsIgnoresBlankEntries) {
-  // an empty list is a device with none of that column, which is legal
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns(""), 0);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns(" "), 0);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns(","), 0);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns(" , , "), 0);
-
-  // a whitespace-only entry is a column short of nothing, so it does not count
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns("3, ,10"), 2);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns("3,\t,10"), 2);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns("3,,10"), 2);
-
-  // leading and trailing separators do not invent entries
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns(",3,10"), 2);
-  EXPECT_EQ(QLDeviceManager::countDeviceColumns("3,10,"), 2);
-}
-
-TEST(QLDeviceManager, ConfigJSONTextReadsBothSpellings) {
-  // the inconsistency this helper exists for: packages spell the same key as a
-  // JSON string or a JSON number
-  const json config = {{"IO_CAPACITY_STR", "20"}, {"IO_CAPACITY_NUM", 20}};
-  std::string text;
-
-  EXPECT_TRUE(QLDeviceManager::configJSONText(config, "IO_CAPACITY_STR", text));
-  EXPECT_EQ(text, "20");
-
-  text.clear();
-  EXPECT_TRUE(QLDeviceManager::configJSONText(config, "IO_CAPACITY_NUM", text));
-  EXPECT_EQ(text, "20");
-}
-
-TEST(QLDeviceManager, ConfigJSONTextRejectsMissingAndUnusableValues) {
-  const json config = {{"REAL", 1.5}, {"LIST", {1, 2}}, {"NESTED", {{"a", 1}}}};
-  std::string text{"untouched"};
-
-  EXPECT_FALSE(QLDeviceManager::configJSONText(config, "ABSENT", text));
-  EXPECT_FALSE(QLDeviceManager::configJSONText(config, "REAL", text));
-  EXPECT_FALSE(QLDeviceManager::configJSONText(config, "LIST", text));
-  EXPECT_FALSE(QLDeviceManager::configJSONText(config, "NESTED", text));
-
-  EXPECT_EQ(text, "untouched");
-}
-
 // ---- derived counts vs. the shipped resources.json ------------------------
 //
-// The counts derived from config.json must equal the ones vpr wrote into the
-// resources.json these packages shipped before it was retired. Both are inlined
-// rather than read off disk, so the check needs no device package and cannot go
-// stale against a moving checkout.
+// The counts derived from a resolved layout must equal the ones vpr wrote into
+// the resources.json these packages shipped before it was retired. Both are
+// inlined rather than read off disk, so the check needs no device package and
+// cannot go stale against a moving checkout.
+//
+// The geometry itself is resolved via QLDeviceLayoutInfo::parseDeviceConfig() -
+// already covered by QLDeviceLayoutInfo_test.cpp - so these cases only need to
+// carry a resolvable config.json; what they check is the arithmetic and the
+// failure modes deriveResourceCounts() itself owns.
 //
 // The devices below are every QLF_K6N10 package that shipped both files with the
 // full geometry key set. Their config.json is verbatim except for IO_CAPACITY,
@@ -259,12 +218,20 @@ struct DerivedResourcesCase {
   int io;
 };
 
-int countOf(const std::vector<std::tuple<std::string, int>>& resources,
+int countOf(const std::vector<std::tuple<std::string, std::optional<int>>>& resources,
             const std::string& name) {
   for (const auto& [resource_name, resource_count] : resources) {
-    if (resource_name == name) return resource_count;
+    if (resource_name == name) return resource_count.value_or(-1);
   }
   return -1;
+}
+
+// Resolve config.json the same way the flow does, then wrap the result the way
+// QLDeviceLayoutInfo's own tests do - the constructor exists for exactly this.
+QLDeviceLayoutInfo resolve(const char* config_json_text, const std::string& layout_mode = "") {
+  QLDeviceLayout layout;
+  QLDeviceLayoutInfo::parseDeviceConfig(json::parse(config_json_text), layout_mode, layout);
+  return QLDeviceLayoutInfo(layout);
 }
 
 }  // namespace
@@ -303,10 +270,13 @@ TEST(QLDeviceManager, DeriveResourceCountsMatchesShippedResourcesJSON) {
   };
 
   for (const auto& test_case : cases) {
+    const QLDeviceLayoutInfo layout_info = resolve(test_case.config_json);
+    ASSERT_TRUE(layout_info.resolved()) << test_case.device;
+    ASSERT_EQ(layout_info.width(), test_case.layout_width) << test_case.device;
+    ASSERT_EQ(layout_info.height(), test_case.layout_height) << test_case.device;
+
     std::string error;
-    const json config = json::parse(test_case.config_json);
-    const auto resources = QLDeviceManager::deriveResourceCounts(
-        config, test_case.layout_width, test_case.layout_height, &error);
+    const auto resources = QLDeviceManager::deriveResourceCounts(layout_info, &error);
 
     ASSERT_FALSE(resources.empty()) << test_case.device << ": " << error;
     EXPECT_EQ(countOf(resources, "clb"), test_case.clb) << test_case.device;
@@ -316,138 +286,26 @@ TEST(QLDeviceManager, DeriveResourceCountsMatchesShippedResourcesJSON) {
   }
 }
 
+TEST(QLDeviceManager, DeriveResourceCountsRejectsUnresolvedLayout) {
+  // an unresolved layout reaching deriveResourceCounts() is always a genuine
+  // problem by the time it gets here - the expected "not yet known" case
+  // (AUTO/RESOURCES before Packing()) is filtered out earlier, by
+  // deriveDeviceResourceInformation().
+  std::string error;
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(QLDeviceLayoutInfo(QLDeviceLayout{}), &error)
+                  .empty());
+  EXPECT_NE(error.find("not resolved"), std::string::npos) << error;
+}
+
 TEST(QLDeviceManager, DeriveResourceCountsRejectsIncompleteConfig) {
-  // a package predating the CRR keys: DEVICE_SIZE alone cannot answer, and a
-  // wrong count is worse than none
-  const json config = json::parse(R"({"DEVICE_SIZE": "8x6"})");
-  std::string error;
+  // a package predating the CRR keys: DEVICE_SIZE alone resolves the layout,
+  // but BRAM_SIZE is still absent, and a wrong count is worse than none
+  const QLDeviceLayoutInfo layout_info = resolve(R"({"DEVICE_SIZE": "8x6"})");
+  ASSERT_TRUE(layout_info.resolved());
 
-  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 12, 10, &error).empty());
+  std::string error;
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(layout_info, &error).empty());
   EXPECT_NE(error.find("BRAM_SIZE"), std::string::npos) << error;
-}
-
-TEST(QLDeviceManager, DeriveResourceCountsRejectsMismatchedLayout) {
-  // a layout DEVICE_SIZE does not describe - a legacy multi-layout package -
-  // where only resources.json can answer
-  const json config = json::parse(
-      R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
-          "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"})");
-  std::string error;
-
-  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 99, 99, &error).empty());
-  EXPECT_NE(error.find("does not describe"), std::string::npos) << error;
-
-  // the matching layout still derives
-  EXPECT_FALSE(QLDeviceManager::deriveResourceCounts(config, 12, 10).empty());
-}
-
-// ---- the per-layout DEVICE_TYPE_SETTINGS.CUSTOM spelling -------------------
-//
-// config.json spells the layout geometry flat ("DEVICE_SIZE": "8x6") and/or under
-// DEVICE_TYPE_SETTINGS.CUSTOM ("ARRAY_X": "8", "ARRAY_Y": "6"). A package shipping
-// one config per layout carries only the one that describes its own layout, so
-// which spelling answers is decided by matching the layout's size, not by
-// precedence. RESOURCES sits in the same block and is deliberately NOT read: it is
-// the resource REQUEST add_layout.py multiplies by MARGIN to size the array, not
-// the array's capacity.
-
-namespace {
-
-// EVAL-CCFF-CUSTOM's shape: an 8x6 array with one bram and one dsp column.
-const char* const CUSTOM_SPELLING = R"({
-  "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20",
-  "DEVICE_TYPE": "CUSTOM",
-  "DEVICE_TYPE_SETTINGS": {
-    "LAYOUT_MODE": "AUTO",
-    "MARGIN": 1.2,
-    "CUSTOM": {
-      "ARRAY_X": "8", "ARRAY_Y": "6", "BRAM_COLS": "3", "DSP_COLS": "6"
-    },
-    "RESOURCES": { "clb": 100, "bram": 6, "dsp": 1, "io": 1281 }
-  }
-})";
-
-}  // namespace
-
-TEST(QLDeviceManager, DeriveResourceCountsReadsTheCustomSpelling) {
-  std::string error;
-  const auto resources =
-      QLDeviceManager::deriveResourceCounts(json::parse(CUSTOM_SPELLING), 12, 10, &error);
-
-  ASSERT_FALSE(resources.empty()) << error;
-  EXPECT_EQ(countOf(resources, "clb"), 36);   // (8 - 1 - 1) * 6
-  EXPECT_EQ(countOf(resources, "bram"), 1);   // 1 column * (6 / 6)
-  EXPECT_EQ(countOf(resources, "dsp"), 2);    // 1 column * (6 / 3)
-  EXPECT_EQ(countOf(resources, "io"), 560);   // 2 * (8 + 6) * 20
-}
-
-TEST(QLDeviceManager, DeriveResourceCountsIgnoresTheResourcesRequest) {
-  // RESOURCES says clb 100 / bram 6 / dsp 1 / io 1281. Those are what a design
-  // asks for, and add_layout.py sizes the array from them; reading them as the
-  // array's capacity would report a number roughly MARGIN-scaled and wrong.
-  const auto resources =
-      QLDeviceManager::deriveResourceCounts(json::parse(CUSTOM_SPELLING), 12, 10);
-
-  ASSERT_FALSE(resources.empty());
-  EXPECT_NE(countOf(resources, "clb"), 100);
-  EXPECT_NE(countOf(resources, "io"), 1281);
-}
-
-TEST(QLDeviceManager, DeriveResourceCountsPicksTheSpellingMatchingTheLayout) {
-  // both spellings present and disagreeing - a multi-layout package, or a
-  // DEVICE_SIZE left over from the wrong device. Neither wins by precedence: the
-  // one describing the layout asked about does.
-  const char* const both = R"({
-    "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20",
-    "DEVICE_SIZE": "30x30", "BRAM_COLS": "12,25", "DSP_COLS": "6,19",
-    "DEVICE_TYPE_SETTINGS": {
-      "CUSTOM": { "ARRAY_X": "8", "ARRAY_Y": "6", "BRAM_COLS": "3", "DSP_COLS": "6" }
-    }
-  })";
-  const json config = json::parse(both);
-
-  // 12x10 is the 8x6 array plus its rings -> the CUSTOM block answers
-  const auto small = QLDeviceManager::deriveResourceCounts(config, 12, 10);
-  ASSERT_FALSE(small.empty());
-  EXPECT_EQ(countOf(small, "clb"), 36);
-
-  // 34x34 is the 30x30 array plus its rings -> DEVICE_SIZE answers
-  const auto large = QLDeviceManager::deriveResourceCounts(config, 34, 34);
-  ASSERT_FALSE(large.empty());
-  EXPECT_EQ(countOf(large, "clb"), 780);
-
-  // and a layout neither describes is declined, naming both
-  std::string error;
-  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(config, 99, 99, &error).empty());
-  EXPECT_NE(error.find("DEVICE_SIZE"), std::string::npos) << error;
-  EXPECT_NE(error.find("CUSTOM"), std::string::npos) << error;
-}
-
-TEST(QLDeviceManager, DeriveResourceCountsFallsBackToTheFlatColumnLists) {
-  // add_layout.py lets each CUSTOM key fall back to the flat one it does not
-  // restate, so a CUSTOM block giving only the array size still gets the columns
-  const char* const partial = R"({
-    "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20",
-    "BRAM_COLS": "3", "DSP_COLS": "6",
-    "DEVICE_TYPE_SETTINGS": { "CUSTOM": { "ARRAY_X": "8", "ARRAY_Y": "6" } }
-  })";
-  const auto resources =
-      QLDeviceManager::deriveResourceCounts(json::parse(partial), 12, 10);
-
-  ASSERT_FALSE(resources.empty());
-  EXPECT_EQ(countOf(resources, "clb"), 36);
-  EXPECT_EQ(countOf(resources, "bram"), 1);
-}
-
-TEST(QLDeviceManager, DeriveResourceCountsNeedsSomeLayoutGeometry) {
-  // the block heights and IO_CAPACITY alone cannot size a layout
-  const char* const no_geometry =
-      R"({"BRAM_SIZE": "1x6", "DSP_SIZE": "1x3", "IO_CAPACITY": "20"})";
-  std::string error;
-
-  EXPECT_TRUE(
-      QLDeviceManager::deriveResourceCounts(json::parse(no_geometry), 12, 10, &error).empty());
-  EXPECT_NE(error.find("DEVICE_SIZE"), std::string::npos) << error;
 }
 
 TEST(QLDeviceManager, DeriveResourceCountsRefusesABlockWiderThanOneTile) {
@@ -459,8 +317,7 @@ TEST(QLDeviceManager, DeriveResourceCountsRefusesABlockWiderThanOneTile) {
     "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"
   })";
   std::string error;
-  EXPECT_TRUE(
-      QLDeviceManager::deriveResourceCounts(json::parse(wide_bram), 12, 10, &error).empty());
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(resolve(wide_bram), &error).empty());
   EXPECT_NE(error.find("BRAM_SIZE"), std::string::npos) << error;
   EXPECT_NE(error.find("tiles wide"), std::string::npos) << error;
 
@@ -469,8 +326,7 @@ TEST(QLDeviceManager, DeriveResourceCountsRefusesABlockWiderThanOneTile) {
     "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "20"
   })";
   error.clear();
-  EXPECT_TRUE(
-      QLDeviceManager::deriveResourceCounts(json::parse(wide_dsp), 12, 10, &error).empty());
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(resolve(wide_dsp), &error).empty());
   EXPECT_NE(error.find("DSP_SIZE"), std::string::npos) << error;
 }
 
@@ -482,8 +338,7 @@ TEST(QLDeviceManager, DeriveResourceCountsRequiresIOCapacity) {
           "BRAM_COLS": "3", "DSP_COLS": "6"})";
   std::string error;
 
-  EXPECT_TRUE(
-      QLDeviceManager::deriveResourceCounts(json::parse(without), 12, 10, &error).empty());
+  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(resolve(without), &error).empty());
   EXPECT_NE(error.find("IO_CAPACITY"), std::string::npos) << error;
 }
 
@@ -495,8 +350,6 @@ TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
   const char* const as_string =
       R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
           "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "10"})";
-  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(json::parse(as_number), 12, 10), "io"),
-            280);
-  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(json::parse(as_string), 12, 10), "io"),
-            280);
+  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_number)), "io"), 280);
+  EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_string)), "io"), 280);
 }

@@ -9,6 +9,7 @@
 #include <vector>
 #include <set>
 #include <filesystem>
+#include <optional>
 
 #include "nlohmann_json/json.hpp"
 
@@ -20,6 +21,7 @@ using json = nlohmann::ordered_json;
 namespace FOEDAG {
 
 class QLSettingsManager;
+class QLDeviceLayoutInfo;
 
 
 struct LayoutInfoHelper {
@@ -36,10 +38,12 @@ class QLDeviceVariantLayout {
     std::string name;
     int width = 0;
     int height = 0;
-    int bram = 0;
-    int dsp = 0;
-    int clb = 0;
-    int io = 0;
+    // unset means "not yet resolved" (e.g. an AUTO/RESOURCES device before
+    // Packing() has run), distinct from a genuine zero count.
+    std::optional<int> bram;
+    std::optional<int> dsp;
+    std::optional<int> clb;
+    std::optional<int> io;
 };
 
 class QLDeviceVariant {
@@ -318,40 +322,36 @@ class QLDeviceManager : public QObject {
   // junk and a negative value are not.
   static bool parseWholeNumber(const std::string& text, int& out_value);
 
-  // Parse a "<x>x<y>" geometry - the spelling of "DEVICE_SIZE" ("78x78"),
-  // "BRAM_SIZE" ("1x6") and "DSP_SIZE" ("1x3") in config.json.
+  // Parse a "<x>x<y>" geometry - the spelling of "BRAM_SIZE" ("1x6") and
+  // "DSP_SIZE" ("1x3") in config.json.
   static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y);
 
-  // Count the entries of a comma-separated column list ("BRAM_COLS": "3,10,17").
-  // An empty list is a device with none of that column, which is legal.
-  static int countDeviceColumns(const std::string& text);
-
-  // Read a config.json value that device packages spell inconsistently as
-  // either a JSON string or a JSON number ("IO_CAPACITY": "20" and 20 both occur).
-  static bool configJSONText(const json& config_json, const std::string& key,
-                             std::string& out_text);
   // Layout-generation settings of the device package, from "DEVICE_TYPE" and
   // "DEVICE_TYPE_SETTINGS.LAYOUT_MODE" in config.json. An absent key is
   // reported as not-present (a pre-2026.3 package), an unrecognised value as
   // invalid - never defaulted, because a wrong default here silently re-shapes
   // a device.
   QLDeviceLayoutSettings deviceLayoutSettings(QLDeviceTarget device_target = QLDeviceTarget());
-  std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
-  // Resource counts derived from the geometry keys in config.json, for packages
-  // that ship no resources.json. Empty when config.json cannot answer for this
-  // layout - see the definition for the formulas and their limits. When empty
-  // and out_error is given, it is set to the reason.
-  std::vector<std::tuple<std::string, int>> deriveDeviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget(),
-                                                                           std::string* out_error = nullptr);
+  // Empty vectors are ambiguous by design: with out_error empty, the layout is
+  // simply not resolved yet (e.g. AUTO/RESOURCES before Packing()), not a
+  // failure; with out_error set, config.json genuinely cannot answer.
+  std::vector<std::tuple<std::string, std::optional<int>>> deviceResourceInformation(
+      QLDeviceTarget device_target = QLDeviceTarget());
+  std::vector<std::tuple<std::string, std::optional<int>>> deriveDeviceResourceInformation(
+      QLDeviceTarget device_target = QLDeviceTarget(), std::string* out_error = nullptr);
 
-  // The formulas themselves: resource counts implied by config.json's geometry
-  // for a layout of the given size. Empty, with a reason, when config.json
-  // cannot answer for that layout. Pure, so the arithmetic is checkable against
-  // a package's resources.json without a device on disk.
-  static std::vector<std::tuple<std::string, int>> deriveResourceCounts(const json& config_json,
-                                                                       int layout_width,
-                                                                       int layout_height,
-                                                                       std::string* out_error = nullptr);
+  // The formulas themselves: resource counts implied by the resolved layout's
+  // geometry. Always empty with a reason when the layout is not resolved or is
+  // missing a key the formulas need (a package predating
+  // BRAM_SIZE/DSP_SIZE/IO_CAPACITY) - callers filter out the expected
+  // not-yet-known case before reaching here, see deriveDeviceResourceInformation().
+  //
+  //   bram = <bram columns> * floor(arrayY / <bram tile height>)
+  //   dsp  = <dsp columns>  * floor(arrayY / <dsp tile height>)
+  //   clb  = (arrayX - <bram columns> - <dsp columns>) * arrayY
+  //   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
+  static std::vector<std::tuple<std::string, std::optional<int>>> deriveResourceCounts(
+      const QLDeviceLayoutInfo& layout_info, std::string* out_error = nullptr);
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
