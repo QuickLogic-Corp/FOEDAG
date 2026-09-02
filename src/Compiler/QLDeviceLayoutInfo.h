@@ -53,6 +53,10 @@ class QLDeviceLayoutInfo {
   explicit QLDeviceLayoutInfo(const QLDeviceLayout& layout) : m_layout(layout) {}
 
   bool resolved() const { return m_layout.resolved; }
+  // Non-empty only when unresolved because config.json is corrupt or invalid -
+  // a real problem worth reporting, unlike an AUTO/RESOURCES device that is
+  // simply unresolved because Packing() has not run yet.
+  const std::string& error() const { return m_error; }
   int width() const { return m_layout.width; }
   int height() const { return m_layout.height; }
   const std::set<int>& bramCols() const { return m_layout.bramCols; }
@@ -69,6 +73,14 @@ class QLDeviceLayoutInfo {
   // Resolve for the current device and write device_layout.json when the answer
   // exists; otherwise remove any stale file. The whole feature's entry point.
   static void refresh(QLDeviceTarget device_target = QLDeviceTarget());
+
+  // auto_device.log names no device - it is just whatever Packing() last ran
+  // add_layout.py for. Call before switching the current device: if the
+  // switch is a real change (not just re-reading the same device's settings),
+  // any existing auto_device.log can only describe the device being left
+  // behind, and must not be read as an answer for the new one.
+  static void invalidateStaleAutoDeviceLog(const QLDeviceTarget& previous_device_target,
+                                           const QLDeviceTarget& new_device_target);
 
   // Pure text -> geometry parsers. Static and public because every edge case that
   // matters (empty column list, comma vs space, string vs number) is one no
@@ -99,6 +111,7 @@ class QLDeviceLayoutInfo {
   void crossCheckAgainstDeviceVariantLayout(const QLDeviceTarget& device_target) const;
 
   QLDeviceLayout m_layout;
+  std::string m_error;
 };
 
 }  // namespace FOEDAG

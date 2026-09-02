@@ -1727,6 +1727,11 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
   // std::cout << "newProjectMode: " << newProjectMode << std::endl;
   // std::cout << "device_target: " << convertToDeviceString(device_target) << std::endl;
 
+  // before switching, drop any auto_device.log left by the device being left
+  // behind - it can only describe that device's fabric, not the new one's,
+  // even when both use AUTO/RESOURCES sizing.
+  QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(this->device_target, device_target);
+
   if(isDeviceTargetValid(device_target)) {
 
     this->device_target = device_target;
@@ -4501,12 +4506,23 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
   // here re-derives that decision.
   const QLDeviceLayoutInfo layout_info(device_target);
 
+  if( !layout_info.error().empty() ) {
+    // config.json is corrupt or invalid - a real problem, not "not yet known".
+    if( out_error ) {
+      *out_error = std::string("cannot derive resource counts for ") +
+                   convertToDeviceTypeString(device_target) + ": layout \"" +
+                   device_target.device_variant_layout.name + "\": " + layout_info.error();
+    }
+    return {};
+  }
+
   std::string reason;
   std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
       deriveResourceCounts(layout_info, &reason);
 
   if( resources_vector.empty() && !layout_info.resolved() ) {
-    // not yet known, not a failure worth reporting.
+    // not yet known (e.g. AUTO/RESOURCES before Packing()), not a failure
+    // worth reporting.
     return resources_vector;
   }
 

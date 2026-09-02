@@ -177,9 +177,17 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
   const QLDeviceLayoutSettings layout_settings =
       device_manager->deviceLayoutSettings(device_target);
 
-  // A corrupt or invalid config is the caller's problem to report - Packing()
-  // already fails the run over it. Here it just means "no answer".
-  if (layout_settings.config_parse_failed || layout_settings.invalid) {
+  // A corrupt or invalid config leaves this unresolved same as any other
+  // "no answer" case, but unlike an AUTO/RESOURCES device awaiting Packing(),
+  // it is a real problem - record why so a caller can tell the two apart
+  // instead of both reading as a silent "-".
+  if (layout_settings.config_parse_failed) {
+    m_error = layout_settings.config_json_path.string() + ": " + layout_settings.config_parse_error;
+    return;
+  }
+  if (layout_settings.invalid) {
+    m_error = layout_settings.config_json_path.string() + ": \"" + layout_settings.invalid_key +
+              "\" is \"" + layout_settings.invalid_value + "\", which is not a recognised value";
     return;
   }
 
@@ -455,6 +463,29 @@ void QLDeviceLayoutInfo::removeStaleDeviceLayoutJSON() {
   }
   std::error_code ec;
   std::filesystem::remove(filepath, ec);
+}
+
+void QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(
+    const QLDeviceTarget& previous_device_target, const QLDeviceTarget& new_device_target) {
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+  if ((device_manager == nullptr) ||
+      !device_manager->isDeviceTargetValid(previous_device_target)) {
+    // Nothing was actually current yet this session (e.g. the first
+    // setCurrentDeviceTarget() of a project load) - whatever auto_device.log
+    // is on disk was written for the device the project already names, not
+    // for some other device being left behind.
+    return;
+  }
+  if (device_manager->convertToDeviceString(previous_device_target) ==
+      device_manager->convertToDeviceString(new_device_target)) {
+    return;
+  }
+  const std::filesystem::path project_path = projectPath();
+  if (project_path.empty()) {
+    return;
+  }
+  std::error_code ec;
+  std::filesystem::remove(project_path / "auto_device.log", ec);
 }
 
 void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
