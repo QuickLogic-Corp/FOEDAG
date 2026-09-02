@@ -438,9 +438,17 @@ void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
     // AUTO/RESOURCES before packing, or a package that states no geometry. Either
     // way the previous run's file must not be left behind to be read as current.
     removeStaleDeviceLayoutJSON();
-    return;
+  } else {
+    layout_info.writeDeviceLayoutJSON();
   }
-  layout_info.writeDeviceLayoutJSON();
+
+  // Packing's CommandWrapper tracks this file's content (see
+  // getPackingCommand()), but nothing re-checks that comparison on its own -
+  // without this, the Task view keeps showing Packing as green until the user
+  // happens to run it again. Same pattern as onQdcFileSaved()/onPcfFileSaved().
+  if (Compiler* c = compiler()) {
+    c->invalidateTaskStatuses();
+  }
 }
 
 }  // namespace FOEDAG
