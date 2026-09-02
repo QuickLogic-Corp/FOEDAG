@@ -2283,13 +2283,26 @@ void MainWindow::floorPlanningActionTriggered()
       // not read.
       const std::filesystem::path deviceLayoutFile =
           QLDeviceLayoutInfo::deviceLayoutJSONPath();
-      if (!FileUtils::FileExists(deviceLayoutFile)) {
-        QLDeviceManager* device_manager = QLDeviceManager::getInstance();
-        const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
-        const QLDeviceLayoutSettings layout_settings =
-            device_manager->deviceLayoutSettings(current_device);
-        const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
-            layout_settings, current_device);
+      QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+      const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
+      const QLDeviceLayoutSettings layout_settings =
+          device_manager->deviceLayoutSettings(current_device);
+      const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+          layout_settings, current_device);
+
+      // For AUTO/RESOURCES, the file existing is not enough on its own: it
+      // only ever gets removed the next time refresh() runs (a device
+      // reselect, or Packing itself), so one left over from an earlier,
+      // now-invalidated Packing run would otherwise be read as current. The
+      // Packing task's own status is what actually says whether this run's
+      // geometry is still good.
+      Task* packingTask = compiler->GetTaskManager()
+                              ? compiler->GetTaskManager()->task(PACKING)
+                              : nullptr;
+      const bool packingIsGreen =
+          (packingTask != nullptr) && (packingTask->status() == TaskStatus::Success);
+
+      if (!FileUtils::FileExists(deviceLayoutFile) || (deferred && !packingIsGreen)) {
         const QString message =
             deferred
                 ? QString("This device uses AUTO/RESOURCES layout sizing, so its fabric "
