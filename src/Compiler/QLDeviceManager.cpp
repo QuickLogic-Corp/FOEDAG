@@ -803,11 +803,18 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
 // QLDeviceLayoutInfo is the single gate deciding what is known right now - "-"
 // rather than "0" for whatever it has not resolved yet (e.g. an AUTO/RESOURCES
 // device before Packing(), or one only being previewed, not yet applied).
+//
+// Also refreshes device_layout.json on disk for this selection, by explicit
+// request: every combo change - not only Apply - keeps that file matching
+// whatever is currently picked here, deleting it when the pick is
+// unresolved (AUTO/RESOURCES before Packing()).
 void QLDeviceManager::updateDeviceResourcesLabel() {
 
   if(device_manager_widget == nullptr) {
     return;
   }
+
+  QLDeviceLayoutInfo::refresh(device_target_selected);
 
   const auto resourceText = [](const std::optional<int>& count) {
     return count.has_value() ? QString::number(*count) : QString("-");
