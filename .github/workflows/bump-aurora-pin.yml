@@ -1,0 +1,82 @@
+# When a PR merges into develop, open a reviewed PR in aurora2 that bumps the
+# foedag submodule pin on master. Human-merged — aurora2's own CI (and, for
+# platform-specific breaks like macOS, manual verification) gates the merge;
+# this workflow only proposes the bump.
+#
+# Re-running (e.g. several merges to develop before the aurora2 PR lands) does
+# not pile up duplicate PRs: it force-pushes the same branch, which refreshes
+# the existing open PR to the latest SHA instead of opening a new one.
+
+name: bump-aurora-pin
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+  workflow_dispatch: # manual (bumps to the current develop HEAD)
+
+concurrency:
+  group: bump-aurora-pin
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve merged SHA
+        id: sha
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=${{ github.event.pull_request.merge_commit_sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate app token (QL-Proprietary)
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_KEY }}
+          owner: QL-Proprietary
+          repositories: aurora2
+
+      - name: Checkout aurora2 (master, no submodules)
+        uses: actions/checkout@v5
+        with:
+          repository: QL-Proprietary/aurora2
+          ref: master
+          token: ${{ steps.app-token.outputs.token }}
+          path: aurora2
+          fetch-depth: 1
+
+      - name: Bump foedag pin + open/update PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NEW: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          cd aurora2
+          git config user.name  "aurora-tabbycad-automation-bot[bot]"
+          git config user.email "aurora-tabbycad-automation-bot[bot]@users.noreply.github.com"
+
+          cur=$(git ls-tree HEAD foedag/foedag-gh | awk '{print $3}')
+          echo "aurora2 master foedag pin: current=$cur  new=$NEW"
+          if [ "$cur" = "$NEW" ]; then echo "already up to date — nothing to do"; exit 0; fi
+
+          pr_branch="auto/bump-foedag-pin"
+          git checkout -B "$pr_branch"
+          # Set the gitlink from the index (NOT `git add` — the submodule isn't checked out).
+          git update-index --cacheinfo 160000,"$NEW",foedag/foedag-gh
+          git commit -q -m "Bump foedag submodule to ${NEW:0:8}"
+          git push -f origin "$pr_branch"
+
+          if gh pr view "$pr_branch" --repo QL-Proprietary/aurora2 --json state --jq .state 2>/dev/null | grep -q OPEN; then
+            echo "PR for $pr_branch already open — refreshed by the force-push"
+          else
+            gh pr create --repo QL-Proprietary/aurora2 --base master --head "$pr_branch" \
+              --title "Bump foedag submodule to ${NEW:0:8}" \
+              --body "Automated: FOEDAG \`develop\` advanced to \`${NEW}\`. Bumps aurora2 \`master\` foedag pin. Merge after CI and, for platform-specific changes, manual verification (aurora2 CI does not cover macOS)."
+          fi
