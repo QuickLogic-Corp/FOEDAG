@@ -441,20 +441,6 @@ void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
     return;
   }
   layout_info.writeDeviceLayoutJSON();
-
-  if (layout_info.layout().source == "auto_device.log") {
-    // AUTO/RESOURCES just resolved this run's geometry - Packing() itself is
-    // still mid-flight here (this runs from its own tail, before it returns
-    // to the task manager). Defer the Task view refresh to when the whole
-    // run finishes rather than calling invalidateTaskStatuses() here: it has
-    // no accurate picture of task state until the run has actually settled,
-    // and calling it from a task's own call chain risks recursing back into
-    // this same path (it walks into QLSettingsManager::getInstance(), which
-    // re-syncs the device target from settings.json on every call).
-    if (Compiler* c = compiler()) {
-      c->requestTaskStatusInvalidationOnDone();
-    }
-  }
 }
 
 }  // namespace FOEDAG

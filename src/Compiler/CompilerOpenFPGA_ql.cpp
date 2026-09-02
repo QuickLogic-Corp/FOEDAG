@@ -11915,15 +11915,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
 
   command->append("--pack");
 
-  // Track device_layout.json's content, not as a VPR argument but so
-  // incremental compilation notices when it changes - e.g. a re-selected
-  // device, or a config.json edit - and marks Packing (and everything after
-  // it) dirty. Not a VPR input by itself: this stage is what resolves an
-  // AUTO/RESOURCES device's geometry into that file in the first place.
-  ScriptRendererPtr packingTrackedFiles = std::make_shared<ScriptRenderer>();
-  packingTrackedFiles->addFile(QLDeviceLayoutInfo::deviceLayoutJSONPath());
-  command->setScriptRenderer(packingTrackedFiles);
-
   return command;
 }
 
@@ -12166,14 +12157,6 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
       // for more details see https://github.com/QL-Proprietary/aurora2/issues/1344
       return;
     }
-  }
-
-  if (GetTaskManager() == nullptr) {
-    // Reachable this early via QLDeviceLayoutInfo::refresh() -> setCurrentDeviceTarget(),
-    // which can run before setTaskManager() has wired up the GUI's TaskManager (e.g. an
-    // auto-reopened project during MainWindow construction). Every check below calls
-    // GetTaskManager() unconditionally, so this must return rather than crash.
-    return;
   }
 
   CompilationFilesScopedSession compilationFilesScopedSession;
