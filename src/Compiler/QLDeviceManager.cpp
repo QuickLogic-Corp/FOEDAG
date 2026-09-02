@@ -953,13 +953,24 @@ void QLDeviceManager::applyButtonClicked() {
   setCurrentDeviceTarget(device_target_selected);
 
   triggerUIUpdate();
-  
+
   // signal to the QLSettingsManager to update the settings JSON
   // to reflect the device_target selection!
   // change this to emit signal later...
   if(settings_manager != nullptr) {
     settings_manager->newProjectMode = newProjectMode;
     settings_manager->updateJSONSettingsForDeviceTarget(device_target);
+  }
+
+  // Only safe here, after settings.json matches device_target: this call can
+  // walk into QLSettingsManager::getInstance(), which unconditionally
+  // re-syncs device_target from settings.json on every call. Doing this any
+  // earlier - e.g. from QLDeviceLayoutInfo::refresh(), reached via
+  // setCurrentDeviceTarget() above - re-reads the file before this write
+  // happens and silently reverts device_target back to the device being
+  // replaced.
+  if(GlobalSession != nullptr && GlobalSession->GetCompiler() != nullptr) {
+    GlobalSession->GetCompiler()->invalidateTaskStatuses();
   }
 }
 

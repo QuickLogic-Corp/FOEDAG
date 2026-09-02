@@ -2460,6 +2460,16 @@ void Compiler::setTaskManager(TaskManager* newTaskManager) {
         ->setCustomData({CustomDataType::Sim,
                          QVariant::fromValue(
                              Simulator::SimulationType::BitstreamBackDoor)});
+
+    // see requestTaskStatusInvalidationOnDone(). m_taskManager (a QObject) is
+    // the connection's context so it auto-disconnects if the task manager is
+    // ever replaced/destroyed - Compiler itself is not a QObject.
+    QObject::connect(m_taskManager, &TaskManager::done, m_taskManager, [this]() {
+      if (m_taskStatusInvalidationPending) {
+        m_taskStatusInvalidationPending = false;
+        invalidateTaskStatuses();
+      }
+    });
   }
 }
 

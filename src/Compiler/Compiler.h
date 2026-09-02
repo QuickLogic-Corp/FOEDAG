@@ -284,6 +284,18 @@ class Compiler {
   virtual void clearCompilationCache() {}
   virtual void invalidateTaskStatuses() {}
 
+  // Ask for invalidateTaskStatuses() once the task manager's current run
+  // finishes (TaskManager::done()), instead of calling it mid-run. A task's
+  // own call chain reaching back into invalidateTaskStatuses() before the run
+  // has settled - e.g. a device_layout.json write reached from
+  // setCurrentDeviceTarget() - can recurse (invalidateTaskStatuses() walks
+  // into QLSettingsManager::getInstance(), which re-syncs the device target
+  // from settings.json on every call) and does not have an accurate picture
+  // of task state until the run has actually finished.
+  void requestTaskStatusInvalidationOnDone() {
+    m_taskStatusInvalidationPending = true;
+  }
+
  protected:
   /* Methods that can be customized for each new compiler flow */
   virtual bool IPGenerate();
@@ -358,6 +370,8 @@ class Compiler {
   // call 'copy_files_on_add on' to enable this feature.
   // this will apply to all file types as of now.
   bool m_copyFilesWhileAdding = false;
+  // see requestTaskStatusInvalidationOnDone()
+  bool m_taskStatusInvalidationPending = false;
   bool m_autoLayoutGenerationMode = false;
   bool m_customLayoutGenerationMode = false;
   std::string m_autoLayoutGeneratedLayoutName{};
