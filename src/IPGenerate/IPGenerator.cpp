@@ -356,17 +356,26 @@ std::filesystem::path IPGenerator::ProjectUserCatalogPath() const {
          "IP_Catalog";
 }
 
+std::filesystem::path IPGenerator::DeviceCatalogPath() const {
+  auto* devices = QLDeviceManager::getInstance();
+  const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+  if (!devices->isDeviceTargetValid(target)) return {};
+  // deviceTypeDirPath resolves against the root the device was discovered
+  // under, so an externally installed device reads its own catalog.
+  return devices->deviceTypeDirPath(target) / "aurora" / "IP_Catalog";
+}
+
 void IPGenerator::LoadDefaultCatalogs() {
   const std::filesystem::path defaultRoot = DefaultIPCatalogPath();
+  const std::filesystem::path deviceRoot = DeviceCatalogPath();
   const std::filesystem::path userRoot = ProjectUserCatalogPath();
-  for (const std::filesystem::path& root : {defaultRoot, userRoot}) {
+  for (const std::filesystem::path& root : {defaultRoot, deviceRoot, userRoot}) {
     if (root.empty()) continue;
     const std::string key = std::filesystem::weakly_canonical(root).string();
     if (m_compiler->LoadedIpCatalogRoots().count(key)) continue;
     if (!FileUtils::FileExists(root)) {
-      // The project-local catalog is optional and usually absent; the
-      // installed one missing is worth a warning (but not a hard failure —
-      // an explicitly added catalog may be all the session needs).
+      // The device-local and project-local catalogs are optional; the installed one missing is worth a warning (but not a hard
+      // failure — an explicitly added catalog may be all the session needs).
       if (root == defaultRoot) {
         m_compiler->Message("WARNING: installed IP catalog not found: " +
                             root.string());

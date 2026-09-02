@@ -19,6 +19,7 @@
 #include <QTextEdit>
 #include <QDebug>
 #include <QDomDocument>
+#include <QRegularExpression>
 #include <QFile>
 #include <QTextStream>
 #include <QJsonArray>
@@ -2084,6 +2085,19 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           // and a flag would silently rot the first time a rule is added without it.
           const size_t encrypt_list_size_before = source_device_data_file_list_to_encrypt.size();
           const size_t copy_list_size_before = source_device_data_file_list_to_copy.size();
+
+          // copy everything under 'aurora/IP_Catalog/' (the device-local IP catalog)
+          // as-is, and skip all the rules below for these files. the rules below sort
+          // files by extension, which mishandles catalog content: .eblif netlists match
+          // nothing (dropped), .xml would get encrypted (unreadable by ipgenerate),
+          // .md would be skipped. the catalog must arrive complete and unmodified,
+          // so copy the whole directory and don't let any other rule touch it.
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]aurora[\/\\]IP_Catalog[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            continue;
+          }
 
           // skip entries which are in specific directories in device data:
           // skip '/extra/' or '\extra\'
@@ -4278,6 +4292,36 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
     }
   }
 
+  // the geometry the package records for itself. Read last and never fatally:
+  // these keys describe the fabric, they do not select a code path, so a package
+  // that spells one oddly must still run.
+  struct GeometryKey {
+    const char* name;
+    bool* present;
+    std::string* value;
+  };
+  const GeometryKey geometry_keys[] = {
+    { "DEVICE_SIZE", &layout_settings.device_size_present, &layout_settings.device_size },
+    { "BRAM_COLS",   &layout_settings.bram_cols_present,   &layout_settings.bram_cols   },
+    { "DSP_COLS",    &layout_settings.dsp_cols_present,    &layout_settings.dsp_cols    },
+  };
+  for( const GeometryKey& geometry_key : geometry_keys ) {
+    if( !device_target_config_json.contains(geometry_key.name) ) {
+      continue;
+    }
+    const auto& geometry_value = device_target_config_json[geometry_key.name];
+    // the contract spells these as strings ("BRAM_COLS": "12,25"), but a
+    // single-column package hand-edited to a bare 3 means the same thing.
+    if( geometry_value.is_string() ) {
+      *geometry_key.value = geometry_value.get<std::string>();
+      *geometry_key.present = true;
+    }
+    else if( geometry_value.is_number_unsigned() ) {
+      *geometry_key.value = std::to_string(geometry_value.get<unsigned long long>());
+      *geometry_key.present = true;
+    }
+  }
+
   return layout_settings;
 }
 
@@ -6142,6 +6186,218 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceYosysModulesPathList(Q
   std::sort(yosys_modules_pathlist.begin(),yosys_modules_pathlist.end());
 
   return yosys_modules_pathlist;
+}
+
+// A resource column list as the device config spells it: ascending, comma
+// separated, no spaces - the shape every shipped config.json already carries
+// ('12,25').
+std::string QLDeviceManager::joinLayoutColumnList(const std::set<long>& columns) {
+
+  std::string joined;
+  for(long column : columns) {
+    if(!joined.empty()) {
+      joined += ",";
+    }
+    joined += std::to_string(column);
+  }
+  return joined;
+}
+
+
+// The resource columns of a generated '<fixed_layout>', read back out of the
+// architecture file that was just built, in the numbering the DEVICE CONFIG uses.
+//
+// add_layout.py writes each region at 'column + 1' (arch x=0 is the EMPTY ring),
+// so the config value is the region's 'startx' less one - the same inversion
+// add_layout.py's own read_vars_from_arch() does. Only 'bram' and 'dsp' regions
+// count: the 'io_bram_*' / 'io_dsp_*' regions repeat those columns in the IO ring.
+bool QLDeviceManager::readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_xml_filepath,
+                                                         const std::string& layout_name,
+                                                         std::string& out_bram_cols,
+                                                         std::string& out_dsp_cols) {
+
+  QFile file(QString::fromStdString(vpr_xml_filepath.string()));
+  if(!file.open(QFile::ReadOnly)) {
+    return false;
+  }
+  QDomDocument doc;
+  if(!doc.setContent(&file)) {
+    file.close();
+    return false;
+  }
+  file.close();
+
+  // by name, not 'the first one': an architecture file may carry several fixed
+  // layouts - EVAL-2024Q1-MULTI ships ten - and only the generated one describes
+  // the fabric that was just built.
+  QDomElement fixed_layout;
+  const QDomNodeList fixed_layouts = doc.elementsByTagName("fixed_layout");
+  for(int i = 0; i < fixed_layouts.count(); i++) {
+    const QDomElement candidate = fixed_layouts.at(i).toElement();
+    if(!candidate.isNull() && (candidate.attribute("name").toStdString() == layout_name)) {
+      fixed_layout = candidate;
+      break;
+    }
+  }
+  if(fixed_layout.isNull()) {
+    return false;
+  }
+
+  std::set<long> bram_columns;
+  std::set<long> dsp_columns;
+  for(QDomElement region = fixed_layout.firstChildElement("region");
+      !region.isNull();
+      region = region.nextSiblingElement("region")) {
+
+    const std::string region_type = region.attribute("type").toStdString();
+    if((region_type != "bram") && (region_type != "dsp")) {
+      continue;
+    }
+    bool startx_ok = false;
+    const long startx = region.attribute("startx").toLong(&startx_ok);
+    if(!startx_ok || (startx < 1)) {
+      return false;
+    }
+    ((region_type == "bram") ? bram_columns : dsp_columns).insert(startx - 1);
+  }
+
+  out_bram_cols = joinLayoutColumnList(bram_columns);
+  out_dsp_cols = joinLayoutColumnList(dsp_columns);
+  return true;
+}
+
+
+// Split a resource column list into its numbers. add_layout.py's split_cols()
+// separates on commas AND whitespace, so '12,25', '12, 25' and '12 25' all name
+// the same two columns - a comparison has to be on the numbers, never on the
+// spelling. A set, because a column list is a set of positions and not an order.
+// Returns false on anything that is not a whole number.
+bool QLDeviceManager::parseLayoutColumnList(const std::string& value, std::set<long>& out_columns) {
+
+  out_columns.clear();
+
+  std::string entry;
+  // the trailing ',' flushes the last entry without repeating the body below.
+  for(std::size_t i = 0; i <= value.size(); i++) {
+    const char c = (i < value.size()) ? value[i] : ',';
+    if((c >= '0') && (c <= '9')) {
+      entry += c;
+      // bounded so the conversion below cannot overflow; no fabric has a column
+      // index anywhere near nine digits.
+      if(entry.size() > 9) {
+        return false;
+      }
+      continue;
+    }
+    if((c != ',') && (c != ' ') && (c != '\t')) {
+      return false;
+    }
+    if(!entry.empty()) {
+      out_columns.insert(std::stol(entry));
+      entry.clear();
+    }
+  }
+
+  return true;
+}
+
+
+// One bounded whole number, for the dimension keys.
+bool QLDeviceManager::parseLayoutDimension(const std::string& value, long& out_value) {
+
+  std::set<long> numbers;
+  if(!parseLayoutColumnList(value, numbers) || (numbers.size() != 1)) {
+    return false;
+  }
+  out_value = *numbers.begin();
+  return true;
+}
+
+
+// Does the override ask for the fabric the device ALREADY HAS?
+//
+// REQ-005 refuses a re-shape that was actually requested. An override naming the
+// geometry already in the package requests nothing, and that is not a corner
+// case: the flow stamps every device it generates 'DEVICE_TYPE': 'FIXED', so on
+// the next run the very custom_layout.yml that shaped it is still beside the
+// project and lands on the gate (aurora2#2291).
+//
+// Compared in the DEVICE CONFIG's space on both sides. The yml's keys and the
+// config's keys are the same keys - add_layout.py reads 'ARRAY_X' / 'BRAM_COLS'
+// out of either and writes the architecture from them - so nothing here needs
+// the arch file's '+1' column offset or its 'width = ARRAY_X + 4' IO ring.
+//
+// EQUAL means all four values are present on both sides and match. A yml that
+// OMITS a column key is deliberately NOT equal: omitting it does not mean 'keep
+// what the device has', it resolves against add_layout.py's own module default
+// ('BRAM_COLS' = '3'), so we cannot tell whether that default is the fabric in
+// front of us - and on hard silicon the safe answer to 'cannot tell' is the
+// refusal that is already there. Same for a package that records no geometry.
+bool QLDeviceManager::customLayoutMatchesDeviceGeometry(const json& custom_layout_json,
+                                                        const QLDeviceLayoutSettings& layout_settings,
+                                                        std::string& out_geometry) {
+
+  if(!layout_settings.device_size_present ||
+     !layout_settings.bram_cols_present ||
+     !layout_settings.dsp_cols_present) {
+    return false;
+  }
+
+  // 'DEVICE_SIZE' is '<ARRAY_X>x<ARRAY_Y>'.
+  const QRegularExpression device_size_regex("^\\s*(\\d+)\\s*[xX]\\s*(\\d+)\\s*$");
+  const QRegularExpressionMatch device_size_match =
+      device_size_regex.match(QString::fromStdString(layout_settings.device_size));
+  if(!device_size_match.hasMatch()) {
+    return false;
+  }
+  bool array_x_ok = false;
+  bool array_y_ok = false;
+  const long device_array_x = device_size_match.captured(1).toLong(&array_x_ok);
+  const long device_array_y = device_size_match.captured(2).toLong(&array_y_ok);
+  if(!array_x_ok || !array_y_ok) {
+    return false;
+  }
+
+  const struct { const char* key; long device_value; } dimensions[] = {
+    { "ARRAY_X", device_array_x },
+    { "ARRAY_Y", device_array_y },
+  };
+  for(const auto& dimension : dimensions) {
+    if(!custom_layout_json.contains(dimension.key) ||
+       !custom_layout_json[dimension.key].is_string()) {
+      return false;
+    }
+    long requested_value = 0;
+    if(!parseLayoutDimension(custom_layout_json[dimension.key].get<std::string>(),
+                             requested_value) ||
+       (requested_value != dimension.device_value)) {
+      return false;
+    }
+  }
+
+  const struct { const char* key; const std::string* device_value; } column_keys[] = {
+    { "BRAM_COLS", &layout_settings.bram_cols },
+    { "DSP_COLS",  &layout_settings.dsp_cols  },
+  };
+  for(const auto& column_key : column_keys) {
+    if(!custom_layout_json.contains(column_key.key) ||
+       !custom_layout_json[column_key.key].is_string()) {
+      return false;
+    }
+    std::set<long> requested_columns;
+    std::set<long> device_columns;
+    if(!parseLayoutColumnList(custom_layout_json[column_key.key].get<std::string>(),
+                              requested_columns) ||
+       !parseLayoutColumnList(*column_key.device_value, device_columns) ||
+       (requested_columns != device_columns)) {
+      return false;
+    }
+  }
+
+  out_geometry = std::to_string(device_array_x) + "x" + std::to_string(device_array_y) +
+                 ", 'BRAM_COLS': '" + layout_settings.bram_cols +
+                 "', 'DSP_COLS': '" + layout_settings.dsp_cols + "'";
+  return true;
 }
 
 } // namespace FOEDAG
