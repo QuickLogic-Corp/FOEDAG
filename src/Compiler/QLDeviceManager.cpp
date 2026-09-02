@@ -788,39 +788,47 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
         // }
     }
 
-    // update the layout's resource information. Recomputed live here rather
-    // than trusting the one-time whole-catalog scan's snapshot on
-    // device_target_selected.device_variant_layout: a FIXED/CUSTOM device's
-    // real counts are available the moment it is picked, and this selection
-    // has not gone through setCurrentDeviceTarget() yet (Apply has not been
-    // clicked), so nothing else would refresh that snapshot for it.
-    // "-" rather than "0" for a resource count that is not yet known - e.g.
-    // an AUTO/RESOURCES device before Packing() has resolved its real
-    // geometry (deviceResourceInformation() only resolves AUTO/RESOURCES for
-    // the actual current project device, never an unapplied selection).
-    const auto resourceText = [](const std::optional<int>& count) {
-      return count.has_value() ? QString::number(*count) : QString("-");
-    };
-    std::optional<int> clb_count, dsp_count, bram_count, io_count;
-    for (const auto& [resource_name, resource_count] :
-         deviceResourceInformation(device_target_selected)) {
-      if (resource_name == "clb") clb_count = resource_count;
-      if (resource_name == "dsp") dsp_count = resource_count;
-      if (resource_name == "bram") bram_count = resource_count;
-      if (resource_name == "io") io_count = resource_count;
-    }
-    QString archInfo;
-    //archInfo += "| ";
-    archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
-    archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
-    archInfo += "\n";
-    archInfo += "clb: <b>" + resourceText(clb_count) + " </b>| ";
-    archInfo += "dsp: <b>" + resourceText(dsp_count) + " </b>| ";
-    archInfo += "bram: <b>" + resourceText(bram_count) + " </b>| ";
-    archInfo += "io: <b>" + resourceText(io_count) + " </b>";
-    m_device_resources_label->setText(archInfo);
+    updateDeviceResourcesLabel();
   }
 
+}
+
+
+// refreshes m_device_resources_label from device_target_selected's current
+// QLDeviceLayoutInfo. Recomputed live here rather than trusting the one-time
+// whole-catalog scan's snapshot on device_target_selected.device_variant_layout:
+// a FIXED/CUSTOM device's real counts are available the moment it is picked,
+// and this selection has not gone through setCurrentDeviceTarget() yet (Apply
+// has not been clicked), so nothing else would refresh that snapshot for it.
+// QLDeviceLayoutInfo is the single gate deciding what is known right now - "-"
+// rather than "0" for whatever it has not resolved yet (e.g. an AUTO/RESOURCES
+// device before Packing(), or one only being previewed, not yet applied).
+void QLDeviceManager::updateDeviceResourcesLabel() {
+
+  if(device_manager_widget == nullptr) {
+    return;
+  }
+
+  const auto resourceText = [](const std::optional<int>& count) {
+    return count.has_value() ? QString::number(*count) : QString("-");
+  };
+  std::optional<int> clb_count, dsp_count, bram_count, io_count;
+  for (const auto& [resource_name, resource_count] :
+       deviceResourceInformation(device_target_selected)) {
+    if (resource_name == "clb") clb_count = resource_count;
+    if (resource_name == "dsp") dsp_count = resource_count;
+    if (resource_name == "bram") bram_count = resource_count;
+    if (resource_name == "io") io_count = resource_count;
+  }
+  QString archInfo;
+  archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
+  archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
+  archInfo += "\n";
+  archInfo += "clb: <b>" + resourceText(clb_count) + " </b>| ";
+  archInfo += "dsp: <b>" + resourceText(dsp_count) + " </b>| ";
+  archInfo += "bram: <b>" + resourceText(bram_count) + " </b>| ";
+  archInfo += "io: <b>" + resourceText(io_count) + " </b>";
+  m_device_resources_label->setText(archInfo);
 }
 
 
@@ -4352,10 +4360,10 @@ bool QLDeviceManager::parseDeviceGeometry(const std::string& text, int& out_x, i
 //   clb  = (arrayX - <bram columns> - <dsp columns>) * arrayY
 //   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
 //
-// An AUTO/RESOURCES device that has not been through Packing() yet is expected
-// to be unresolved - deriveDeviceResourceInformation() filters that case out
-// before ever calling here, so an unresolved layout reaching this function is
-// always a genuine config.json problem, not a "not yet known" state.
+// An AUTO/RESOURCES device that has not been through Packing() yet - or one
+// only being previewed, not yet the project's actual device - is expected to
+// be unresolved; deriveDeviceResourceInformation() checks layout_info.resolved()
+// itself to tell that apart from a genuine config.json problem.
 std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveResourceCounts(
     const QLDeviceLayoutInfo& layout_info, std::string* out_error) {
 
@@ -4436,29 +4444,20 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
     device_target = this->device_target;
   }
 
-  const QLDeviceLayoutSettings layout_settings = deviceLayoutSettings(device_target);
-  const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(layout_settings, device_target);
-
-  // AUTO/RESOURCES geometry only resolves from the CURRENT project's
-  // auto_device.log; reusing that path for an unrelated device_target (e.g.
-  // while listing the whole device-data catalog) would misattribute this
-  // project's resolved geometry to a device it has nothing to do with.
-  const bool is_current_device =
-      convertToDeviceString(device_target) == convertToDeviceString(getCurrentDeviceTarget());
-  if( deferred && !is_current_device ) {
-    return {};
-  }
-
+  // QLDeviceLayoutInfo is the single gate deciding whether a layout resolves
+  // at all (AUTO/RESOURCES before Packing(), or one only being previewed and
+  // not yet the project's actual device, comes back unresolved) - nothing
+  // here re-derives that decision.
   const QLDeviceLayoutInfo layout_info(device_target);
-  if( deferred && !layout_info.resolved() ) {
-    // The current device, but Packing() has not produced auto_device.log yet -
-    // expected, not a failure worth reporting.
-    return {};
-  }
 
   std::string reason;
   std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
       deriveResourceCounts(layout_info, &reason);
+
+  if( resources_vector.empty() && !layout_info.resolved() ) {
+    // not yet known, not a failure worth reporting.
+    return resources_vector;
+  }
 
   if( resources_vector.empty() && !reason.empty() && out_error ) {
     *out_error = std::string("cannot derive resource counts for ") +

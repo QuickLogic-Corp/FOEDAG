@@ -409,6 +409,15 @@ class QLDeviceManager : public QObject {
  void resetButtonClicked();
  void applyButtonClicked();
 
+ private:
+ // refreshes m_device_resources_label from device_target_selected's current
+ // QLDeviceLayoutInfo - the single gate for whether its clb/bram/dsp/io are
+ // known yet. Called from every combo-box change handler so a selection is
+ // reflected immediately, not only once 'Apply' is clicked.
+ void updateDeviceResourcesLabel();
+
+ public:
+
  public:
   // singleton instance of ourself
   static QLDeviceManager* instance;

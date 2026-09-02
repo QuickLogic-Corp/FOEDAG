@@ -185,6 +185,18 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
 
   const bool deferred = layoutIsResolvedDuringPacking(layout_settings, device_target);
 
+  // auto_device.log belongs to the current project's actual configured device -
+  // it carries no per-device identity, so resolving it for any other
+  // device_target (e.g. one merely being previewed in the settings dialog,
+  // not yet applied) would misattribute this project's resolved geometry to a
+  // device it has nothing to do with. This is the single point deciding
+  // whether a deferred layout can resolve at all - callers must not
+  // second-guess it with their own "is this the current device" check.
+  if (deferred && (device_manager->convertToDeviceString(device_target) !=
+                   device_manager->getCurrentDeviceTargetString())) {
+    return;
+  }
+
   const bool ok = deferred ? resolveFromAutoDeviceLog()
                            : resolveFromDeviceConfig(layout_settings, device_target);
   if (!ok) {
