@@ -142,6 +142,11 @@ class Compiler {
     return m_projManager;
   }
   std::string& getResult() { return m_result; }
+  // Name of the layout produced by a re-shape ('AUTOFPGA16x14'), empty when the
+  // run targets the layout its device package ships.
+  const std::string& AutoLayoutGeneratedLayoutName() const {
+    return m_autoLayoutGeneratedLayoutName;
+  }
 
   void setTaskManager(TaskManager* newTaskManager);
   TaskManager* GetTaskManager() const;
