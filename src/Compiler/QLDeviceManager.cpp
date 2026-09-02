@@ -47,6 +47,7 @@
 
 #include <qlcrypt/qlcrypt.hpp>
 #include "CompilerOpenFPGA_ql.h"
+#include "QLDeviceLayoutInfo.h"
 #include "Compiler/Compiler.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
@@ -1695,6 +1696,12 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
     QLDeviceTarget empty_device_target;
     this->device_target = empty_device_target;
   }
+
+  // The device determines its config.json, and for a FIXED or LAYOUT_MODE: CUSTOM
+  // package that file already states the fabric geometry - so this is the earliest
+  // point device_layout.json can be written. AUTO and RESOURCES have no answer yet
+  // and are picked up again at the end of packing.
+  QLDeviceLayoutInfo::refresh(this->device_target);
 }
 
 

@@ -77,6 +77,7 @@
 #include <QLabel>
 
 #include "QLDeviceManager.h"
+#include "QLDeviceLayoutInfo.h"
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
@@ -5031,6 +5032,8 @@ bool CompilerOpenFPGA_ql::Packing() {
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
+  // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
+  QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
 }
