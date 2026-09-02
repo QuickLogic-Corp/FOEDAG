@@ -8569,9 +8569,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back(clocksFile.string());
   }
   // No resolved layout, no geometry: the script would have to guess the device
-  // it is constraining. Fail here instead -- both BaseVprCommand callers treat
-  // a false return as fatal, so the flow stops rather than placing a design
-  // against an unknown grid.
+  // it is constraining.
   const std::filesystem::path deviceLayoutFile = QLDeviceLayoutInfo::deviceLayoutJSONPath();
   if (!FileUtils::FileExists(deviceLayoutFile)) {
     QLDeviceManager* device_manager = QLDeviceManager::getInstance();
@@ -8581,15 +8579,25 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     const bool deferred =
         QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(layout_settings, current_device);
     if (deferred) {
-      ErrorMessage("This device uses AUTO/RESOURCES layout sizing, so its fabric "
-                   "geometry is only known after Packing succeeds. Run Packing "
-                   "first. IO Floor Plan Generation Failed!");
-    } else {
-      const std::filesystem::path deviceDir = device_manager->deviceTypeDirPath();
-      ErrorMessage("device_layout.json not found in: " + deviceDir.string() +
-                   "; it is the only source of floorplanning geometry. "
-                   "IO Floor Plan Generation Failed!");
+      // This path is also reached from FinishSynthesisScript() and
+      // onQdcFileSaved()/onPcfFileSaved() - all of which run before Packing()
+      // has ever resolved an AUTO/RESOURCES device's geometry. Failing here
+      // would make Packing() itself unreachable whenever a QDC/PCF file is
+      // already present: Synthesis calls this on every run, this would always
+      // fail for a device that has never been packed, and "run Packing first"
+      // is not something the user can do if Synthesis can never complete.
+      // Skip instead - the caller already tolerates no constraints file being
+      // written (see the pcf 'no set_clock' case above), and floorplanning
+      // constraints simply regenerate once Packing has resolved the geometry.
+      WarningMessage("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                     "geometry is only known after Packing succeeds. Skipping IO "
+                     "Floor Plan Generation until then.");
+      return true;
     }
+    const std::filesystem::path deviceDir = device_manager->deviceTypeDirPath();
+    ErrorMessage("device_layout.json not found in: " + deviceDir.string() +
+                 "; it is the only source of floorplanning geometry. "
+                 "IO Floor Plan Generation Failed!");
     return false;
   }
   args.push_back("--device_layout_file");
