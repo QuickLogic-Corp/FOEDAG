@@ -397,6 +397,7 @@ set_option -retiming ${RETIMING_VALUE}
 set_option -update_models_cp 0
 set_option -run_prop_extract 1
 set_option -use_bramsdp ${SDP_BRAM_VALUE}
+set_option -enable_dsp4 ${DSP4_VALUE}
 
 # common_options
 set_option -add_dut_hierarchy 0
@@ -10837,6 +10838,21 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       }
       else{
         ErrorMessage("BRAM_TYPE specified is not TDP, TDP_ECC, SDP, or SDP_ECC.");
+      }
+
+      // DSP_TYPE selects the Synplify DSP inference generation. Unlike BRAM_TYPE
+      // this key is optional: most devices predate it and simply have no DSP
+      // generation to select, so a missing or non-V4 value means "not V4" rather
+      // than a configuration error.
+      std::string dsp_type;
+      if (device_target_config_json.contains("DSP_TYPE")) {
+        dsp_type = device_target_config_json["DSP_TYPE"].get<std::string>();
+      }
+      if (dsp_type == "DSPV4") {
+        synplifyScript->apply("${DSP4_VALUE}", "1");
+      }
+      else {
+        synplifyScript->apply("${DSP4_VALUE}", "0");
       }
       designFiles += filesScript + "\n";
     }
