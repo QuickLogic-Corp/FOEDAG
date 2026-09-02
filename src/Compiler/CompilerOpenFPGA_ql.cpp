@@ -12168,6 +12168,14 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  if (GetTaskManager() == nullptr) {
+    // Reachable this early via QLDeviceLayoutInfo::refresh() -> setCurrentDeviceTarget(),
+    // which can run before setTaskManager() has wired up the GUI's TaskManager (e.g. an
+    // auto-reopened project during MainWindow construction). Every check below calls
+    // GetTaskManager() unconditionally, so this must return rather than crash.
+    return;
+  }
+
   CompilationFilesScopedSession compilationFilesScopedSession;
 
   if (!isSynthesisStatusActual()) {
