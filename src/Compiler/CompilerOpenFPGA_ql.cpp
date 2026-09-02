@@ -12506,16 +12506,16 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
   const std::filesystem::path aurora_rehier_script_path =
       resolveFloorplanningScript("aurora_rehier.tcl",
-                                 "floorplanning stage P2 rehierarchisation");
+                                 "floorplanning rehierarchisation");
   const std::filesystem::path aurora_atomsets_script_path =
       resolveFloorplanningScript("floorplanning_atomsets.tcl",
-                                 "floorplanning stage P3 atom-set extraction");
+                                 "floorplanning atom-set extraction");
   const std::filesystem::path floorplanning_pre_synth_script_path =
       resolveFloorplanningScript("floorplanning_pre_synth.tcl",
-                                 "floorplanning stage P2 scope tagging");
+                                 "floorplanning scope tagging");
   const std::filesystem::path floorplanning_post_synth_script_path =
       resolveFloorplanningScript("floorplanning_post_synth.tcl",
-                                 "floorplanning stages P2/P3");
+                                 "floorplanning scope tagging and atom-set extraction");
 
   yosysScript->addFile(aurora_rehier_script_path);
   yosysScript->addFile(aurora_atomsets_script_path);
