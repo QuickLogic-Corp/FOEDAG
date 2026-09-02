@@ -10840,20 +10840,28 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
         ErrorMessage("BRAM_TYPE specified is not TDP, TDP_ECC, SDP, or SDP_ECC.");
       }
 
-      // DSP_TYPE selects the Synplify DSP inference generation. Unlike BRAM_TYPE
-      // this key is optional: most devices predate it and simply have no DSP
-      // generation to select, so a missing or non-V4 value means "not V4" rather
-      // than a configuration error.
-      std::string dsp_type;
-      if (device_target_config_json.contains("DSP_TYPE")) {
-        dsp_type = device_target_config_json["DSP_TYPE"].get<std::string>();
+      // The DSP generation is selected by DSP_VERSION ("v4.0"), which replaces the
+      // older DSP_TYPE ("DSPV4"). Both are in the field during the migration and
+      // neither is universal -- some devices carry only the new key, the fixed
+      // TURNKEY parts still carry only the old one -- so read DSP_VERSION first
+      // and fall back to DSP_TYPE. Both are optional, unlike BRAM_TYPE above: a
+      // device with neither has no DSP generation to select, so a missing key
+      // means "not V4" rather than a configuration error.
+      bool dsp_v4 = false;
+      if (device_target_config_json.contains("DSP_VERSION")) {
+        std::string dsp_version =
+            device_target_config_json["DSP_VERSION"].get<std::string>();
+        // Match the major version so v4.1 and later keep working, not the
+        // exact string.
+        dsp_v4 = dsp_version.size() >= 2 &&
+                 (dsp_version[0] == 'v' || dsp_version[0] == 'V') &&
+                 dsp_version[1] == '4';
       }
-      if (dsp_type == "DSPV4") {
-        synplifyScript->apply("${DSP4_VALUE}", "1");
+      else if (device_target_config_json.contains("DSP_TYPE")) {
+        dsp_v4 =
+            device_target_config_json["DSP_TYPE"].get<std::string>() == "DSPV4";
       }
-      else {
-        synplifyScript->apply("${DSP4_VALUE}", "0");
-      }
+      synplifyScript->apply("${DSP4_VALUE}", dsp_v4 ? "1" : "0");
       designFiles += filesScript + "\n";
     }
 #ifdef _WIN32
