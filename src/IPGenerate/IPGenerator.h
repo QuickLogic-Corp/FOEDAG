@@ -121,12 +121,18 @@ class IPGenerator {
   // addition to the installed one. Empty when no project is open. An
   // -rpm_ip authoring project packages its IP here by default.
   std::filesystem::path ProjectUserCatalogPath() const;
-  // Lazily load the catalog roots the tool knows about (installed first,
-  // then project-local; a name found in both roots is a load error), each at
-  // most once per session — BuildLiteXIPCatalog records the scanned roots
-  // and only this loader consults the record. Called by
+  // The selected device's own catalog (<device dir>/aurora/IP_Catalog) —
+  // device-specific IPs that ship with the device data. Empty when no valid
+  // device target is selected.
+  std::filesystem::path DeviceCatalogPath() const;
+  // Lazily load the catalog roots the tool knows about (installed, then
+  // device-local, then project-local; a name found in two roots is a load
+  // error), each at most once per session — BuildLiteXIPCatalog records the
+  // scanned roots and only this loader consults the record. Called by
   // ip_catalog/configure_ip; explicit add_litex_ip_catalog calls always
-  // rescan and never suppress these defaults.
+  // rescan and never suppress these defaults. A device-target change is
+  // picked up here without extra plumbing: the new device's root is a path
+  // never yet recorded, so the next lazy load scans it.
   void LoadDefaultCatalogs();
 
   IPCatalog* Catalog() { return m_catalog; }

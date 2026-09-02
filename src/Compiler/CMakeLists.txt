@@ -81,6 +81,7 @@ set (SRC_CPP_LIST
   Reports/TimingAnalysisReportManager_ql.cpp
   Reports/PowerAnalysisReportManager_ql.cpp
   QLDeviceManager.cpp
+  QLDeviceLayoutInfo.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   WildcardFileFinder.cpp
@@ -118,6 +119,7 @@ set (SRC_H_INSTALL_LIST
   Reports/DataProfiles.h
   TaskGlobal.h
   QLDeviceManager.h
+  QLDeviceLayoutInfo.h
   QLSettingsManager.h
   QLMetricsManager.h
   WildcardFileFinder.h
