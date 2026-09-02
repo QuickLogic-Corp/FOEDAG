@@ -6,9 +6,11 @@
 #include <system_error>
 
 #include "Compiler/Compiler.h"
+#include "CompilerDefines.h"
 #include "CompilerOpenFPGA_ql.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "TaskManager.h"
 #include "Utils/FileUtils.h"
 #include "nlohmann_json/json.hpp"
 
@@ -371,6 +373,21 @@ bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
 }
 
 bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
+  // auto_device.log outlives the run that wrote it - a prior session's
+  // Packing(), or a design change since, leaves it on disk describing a
+  // fabric this session has not actually rebuilt. Trust it only while this
+  // session's own Packing task is still green: TaskStatus::Success is the run
+  // that just wrote it, and any other status (None on a fresh launch before
+  // Packing has been run this session, Dirty once something upstream
+  // invalidates it, Fail, InProgress) means the log's contents are not backed
+  // by a Packing run this session can vouch for.
+  Compiler* c = compiler();
+  TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
+  Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
+  if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {
+    return false;
+  }
+
   const std::filesystem::path project_path = projectPath();
   if (project_path.empty()) {
     return false;
