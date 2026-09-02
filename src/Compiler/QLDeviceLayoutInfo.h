@@ -2,6 +2,7 @@
 #define QLDEVICELAYOUTINFO_H
 
 #include <filesystem>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -25,6 +26,7 @@ class QLDeviceLayout {
   std::set<int> dspCols;   // may be empty
   std::string bramSize;    // config.json BRAM_SIZE, e.g. "1x6"; empty when absent
   std::string dspSize;     // config.json DSP_SIZE, e.g. "1x3"; empty when absent
+  std::optional<int> ioCapacity;  // config.json IO_CAPACITY; unset when absent
   std::string layoutName;
   std::string layoutMode;  // "FIXED" | "CUSTOM" | "AUTO" | "RESOURCES"
   std::string source;      // "config.json" | "auto_device.log"
@@ -89,10 +91,11 @@ class QLDeviceLayoutInfo {
   bool resolveFromDeviceConfig(const QLDeviceLayoutSettings& layout_settings,
                                QLDeviceTarget device_target);
   bool resolveFromAutoDeviceLog();
-  // bramSize/dspSize are a static property of the package, not the layout, so
-  // AUTO/RESOURCES devices - whose geometry comes from auto_device.log, not
-  // config.json - still need this separate fetch to carry them.
-  void resolveBlockSizesFromDeviceConfig(const QLDeviceTarget& device_target);
+  // bramSize/dspSize/ioCapacity are static properties of the package, not the
+  // layout, so AUTO/RESOURCES devices - whose geometry comes from
+  // auto_device.log, not config.json - still need this separate fetch to
+  // carry them.
+  void resolvePackageFactsFromDeviceConfig(const QLDeviceTarget& device_target);
   void crossCheckAgainstDeviceVariantLayout(const QLDeviceTarget& device_target) const;
 
   QLDeviceLayout m_layout;

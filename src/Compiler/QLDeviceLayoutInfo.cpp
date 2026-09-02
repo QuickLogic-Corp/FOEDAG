@@ -64,6 +64,19 @@ bool lookupString(const json& object, const std::string& key, std::string& out) 
   return object.is_object() && object.contains(key) && asString(object[key], out);
 }
 
+bool lookupInt(const json& object, const std::string& key, std::optional<int>& out) {
+  std::string text;
+  if (!lookupString(object, key, text)) {
+    return false;
+  }
+  try {
+    out = std::stoi(text);
+  } catch (const std::exception&) {
+    return false;
+  }
+  return true;
+}
+
 // "8x6" -> 8, 6. The array dimensions, NOT the grid: see GRID_RING_TILES.
 bool parseDeviceSize(const std::string& text, int& out_x, int& out_y) {
   static const std::regex size_regex(R"(^\s*(\d+)\s*[xX]\s*(\d+)\s*$)");
@@ -180,8 +193,9 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
 
   if (deferred) {
     // resolveFromAutoDeviceLog() only sees auto_device.log, which never carries
-    // BRAM_SIZE/DSP_SIZE - those come from config.json regardless of layout mode.
-    resolveBlockSizesFromDeviceConfig(device_target);
+    // BRAM_SIZE/DSP_SIZE/IO_CAPACITY - those come from config.json regardless
+    // of layout mode.
+    resolvePackageFactsFromDeviceConfig(device_target);
   }
 
   if (m_layout.layoutMode.empty()) {
@@ -262,10 +276,11 @@ bool QLDeviceLayoutInfo::parseDeviceConfig(const json& config_json,
   }
   out_layout.bramCols = parseColumnList(bram_cols);
   out_layout.dspCols = parseColumnList(dsp_cols);
-  // Block footprint, not layout geometry - config.json never states it in the
-  // CUSTOM section, only at the top level.
+  // Block footprint and IO capacity, not layout geometry - config.json never
+  // states them in the CUSTOM section, only at the top level.
   lookupString(config_json, "BRAM_SIZE", out_layout.bramSize);
   lookupString(config_json, "DSP_SIZE", out_layout.dspSize);
+  lookupInt(config_json, "IO_CAPACITY", out_layout.ioCapacity);
   out_layout.source = "config.json";
   out_layout.resolved = true;
   return true;
@@ -284,7 +299,7 @@ bool QLDeviceLayoutInfo::resolveFromDeviceConfig(
   return parseDeviceConfig(config_json, layout_mode, m_layout);
 }
 
-void QLDeviceLayoutInfo::resolveBlockSizesFromDeviceConfig(
+void QLDeviceLayoutInfo::resolvePackageFactsFromDeviceConfig(
     const QLDeviceTarget& device_target) {
   QLDeviceManager* device_manager = QLDeviceManager::getInstance();
   json config_json;
@@ -294,6 +309,7 @@ void QLDeviceLayoutInfo::resolveBlockSizesFromDeviceConfig(
   }
   lookupString(config_json, "BRAM_SIZE", m_layout.bramSize);
   lookupString(config_json, "DSP_SIZE", m_layout.dspSize);
+  lookupInt(config_json, "IO_CAPACITY", m_layout.ioCapacity);
 }
 
 bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
@@ -396,6 +412,8 @@ bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
   layout_json["dsp_cols"] = joinColumns(m_layout.dspCols);
   layout_json["bram_size"] = m_layout.bramSize;
   layout_json["dsp_size"] = m_layout.dspSize;
+  layout_json["io_capacity"] =
+      m_layout.ioCapacity.has_value() ? json(*m_layout.ioCapacity) : json(nullptr);
   layout_json["layout_name"] = m_layout.layoutName;
   layout_json["layout_mode"] = m_layout.layoutMode;
   layout_json["source"] = m_layout.source;
