@@ -788,21 +788,36 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
         // }
     }
 
-    // update the layout's resource information:
-    // "-" rather than "0" for a resource count that is not yet known - e.g. an
-    // AUTO/RESOURCES device before Packing() has resolved its real geometry.
+    // update the layout's resource information. Recomputed live here rather
+    // than trusting the one-time whole-catalog scan's snapshot on
+    // device_target_selected.device_variant_layout: a FIXED/CUSTOM device's
+    // real counts are available the moment it is picked, and this selection
+    // has not gone through setCurrentDeviceTarget() yet (Apply has not been
+    // clicked), so nothing else would refresh that snapshot for it.
+    // "-" rather than "0" for a resource count that is not yet known - e.g.
+    // an AUTO/RESOURCES device before Packing() has resolved its real
+    // geometry (deviceResourceInformation() only resolves AUTO/RESOURCES for
+    // the actual current project device, never an unapplied selection).
     const auto resourceText = [](const std::optional<int>& count) {
       return count.has_value() ? QString::number(*count) : QString("-");
     };
+    std::optional<int> clb_count, dsp_count, bram_count, io_count;
+    for (const auto& [resource_name, resource_count] :
+         deviceResourceInformation(device_target_selected)) {
+      if (resource_name == "clb") clb_count = resource_count;
+      if (resource_name == "dsp") dsp_count = resource_count;
+      if (resource_name == "bram") bram_count = resource_count;
+      if (resource_name == "io") io_count = resource_count;
+    }
     QString archInfo;
     //archInfo += "| ";
     archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
     archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
     archInfo += "\n";
-    archInfo += "clb: <b>" + resourceText(device_target_selected.device_variant_layout.clb) + " </b>| ";
-    archInfo += "dsp: <b>" + resourceText(device_target_selected.device_variant_layout.dsp) + " </b>| ";
-    archInfo += "bram: <b>" + resourceText(device_target_selected.device_variant_layout.bram) + " </b>| ";
-    archInfo += "io: <b>" + resourceText(device_target_selected.device_variant_layout.io) + " </b>";
+    archInfo += "clb: <b>" + resourceText(clb_count) + " </b>| ";
+    archInfo += "dsp: <b>" + resourceText(dsp_count) + " </b>| ";
+    archInfo += "bram: <b>" + resourceText(bram_count) + " </b>| ";
+    archInfo += "io: <b>" + resourceText(io_count) + " </b>";
     m_device_resources_label->setText(archInfo);
   }
 
