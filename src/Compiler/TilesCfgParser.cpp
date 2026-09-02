@@ -1,7 +1,5 @@
 #include "TilesCfgParser.h"
 
-#include <set>
-
 #include <QDomDocument>
 #include <QDomElement>
 #include <QFile>
@@ -48,7 +46,7 @@ TilesCfgResult parseTilesCfg(const std::filesystem::path& xmlPath)
         tileElem = tileElem.nextSiblingElement("tile");
     }
 
-    return tilesCfgResult;
+    return tilesCfgResult;   
 }
 
 }  // namespace FOEDAG
