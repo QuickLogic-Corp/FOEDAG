@@ -11915,6 +11915,15 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
 
   command->append("--pack");
 
+  // Track device_layout.json's content, not as a VPR argument but so
+  // incremental compilation notices when it changes - e.g. a re-selected
+  // device, or a config.json edit - and marks Packing (and everything after
+  // it) dirty. Not a VPR input by itself: this stage is what resolves an
+  // AUTO/RESOURCES device's geometry into that file in the first place.
+  ScriptRendererPtr packingTrackedFiles = std::make_shared<ScriptRenderer>();
+  packingTrackedFiles->addFile(QLDeviceLayoutInfo::deviceLayoutJSONPath());
+  command->setScriptRenderer(packingTrackedFiles);
+
   return command;
 }
 
