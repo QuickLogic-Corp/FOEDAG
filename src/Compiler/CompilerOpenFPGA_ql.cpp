@@ -2467,27 +2467,12 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
     return false;
   }
 
-  std::filesystem::path elab_instances_script_path =
-      InstalledScript(std::filesystem::path("floorplanning_elab_instances.py"));
-  if (elab_instances_script_path.empty()) {
-    ErrorMessage("Cannot locate scripts/floorplanning_elab_instances.py in the "
-                 "installation. Instance-tree derivation failed!");
-    return false;
-  }
-
-#ifdef _WIN32
-  std::filesystem::path python_exec{"python.exe"};
-#else // _WIN32
-  std::filesystem::path python_exec{"python3"};
-#endif // _WIN32
-
-  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-    ErrorMessage("System " + python_exec.string() +
-                 " is not found, Please install " + python_exec.string() +
-                 " and make sure it's in the PATH variable."
-                 " Instance-tree derivation (floorplanning_elab_instances.py) failed!");
-    return false;
-  }
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "floorplanning_elab_instances.py", "Instance-tree derivation",
+      MissingPython::Fatal);
+  if (!tool.ready) return tool.result;
+  const std::filesystem::path& elab_instances_script_path = tool.script;
+  const std::filesystem::path& python_exec = tool.python;
 
   std::filesystem::path instances_json_path =
       FloorplanningArtifact("instances.json");
@@ -2613,6 +2598,45 @@ int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
   return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).realCode;
 }
 
+// [aurora2#1725] The prelude every floorplanning helper stage shared verbatim: resolve
+// the installed script, resolve python, and decide what an absent one means. Only the
+// last decision ever differed between the stages, so it is the single parameter.
+CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanningTool(
+    const std::string& scriptName, const std::string& label, MissingPython policy,
+    const std::string& skipPhrase) {
+  FloorplanningTool tool;
+
+  tool.script = InstalledScript(std::filesystem::path(scriptName));
+  if (tool.script.empty()) {
+    ErrorMessage("Cannot locate scripts/" + scriptName + " in the installation. " +
+                 label + " failed!");
+    return tool;  // ready=false, result=false: a broken installation is an error
+  }
+
+#ifdef _WIN32
+  tool.python = std::filesystem::path{"python.exe"};
+#else // _WIN32
+  tool.python = std::filesystem::path{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(tool.python.string())) {
+    if (policy == MissingPython::Fatal) {
+      ErrorMessage("System " + tool.python.string() + " is not found, Please install " +
+                   tool.python.string() +
+                   " and make sure it's in the PATH variable. " + label + " (" +
+                   scriptName + ") failed!");
+    } else {
+      ErrorMessage("System " + tool.python.string() + " is not found; skipping " +
+                   skipPhrase + " (" + scriptName + ").");
+      tool.result = true;
+    }
+    return tool;
+  }
+
+  tool.ready = true;
+  return tool;
+}
+
 // [aurora2#1725] Running the in-session tcl scripts under `tee -q` means a hard Yosys error
 // inside one goes only to that script's artifact log, so <top>_synth.log would just stop
 // after synth_ql with no reason given. Quiet on success is the point; quiet on failure is a
@@ -2656,26 +2680,13 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
     return true;
   }
 
-  std::filesystem::path validate_instances_script_path =
-      InstalledScript(std::filesystem::path("floorplanning_validate_instances.py"));
-  if (validate_instances_script_path.empty()) {
-    ErrorMessage("Cannot locate scripts/floorplanning_validate_instances.py in the "
-                 "installation. Instance validation failed!");
-    return false;
-  }
-
-#ifdef _WIN32
-  std::filesystem::path python_exec{"python.exe"};
-#else // _WIN32
-  std::filesystem::path python_exec{"python3"};
-#endif // _WIN32
-
-  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-    ErrorMessage("System " + python_exec.string() +
-                 " is not found; skipping instance validation "
-                 "(floorplanning_validate_instances.py).");
-    return true;  // best-effort: not required for synthesis to have succeeded
-  }
+  // Best-effort: synthesis has already succeeded by the time this runs.
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "floorplanning_validate_instances.py", "Instance validation",
+      MissingPython::Skip, "instance validation");
+  if (!tool.ready) return tool.result;
+  const std::filesystem::path& validate_instances_script_path = tool.script;
+  const std::filesystem::path& python_exec = tool.python;
 
   std::filesystem::path instances_json_path = FloorplanningArtifact("instances.json");
   std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
@@ -2736,26 +2747,13 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
     return true;
   }
 
-  std::filesystem::path design_resources_script_path =
-      InstalledScript(std::filesystem::path("floorplanning_design_resources.py"));
-  if (design_resources_script_path.empty()) {
-    ErrorMessage("Cannot locate scripts/floorplanning_design_resources.py in the "
-                 "installation. Design-resource extraction failed!");
-    return false;
-  }
-
-#ifdef _WIN32
-  std::filesystem::path python_exec{"python.exe"};
-#else // _WIN32
-  std::filesystem::path python_exec{"python3"};
-#endif // _WIN32
-
-  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-    ErrorMessage("System " + python_exec.string() +
-                 " is not found; skipping resource reporting "
-                 "(floorplanning_design_resources.py).");
-    return true;  // best-effort: the compile stage itself has already succeeded
-  }
+  // Best-effort: the compile stage itself has already succeeded.
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "floorplanning_design_resources.py", "Design-resource extraction",
+      MissingPython::Skip, "resource reporting");
+  if (!tool.ready) return tool.result;
+  const std::filesystem::path& design_resources_script_path = tool.script;
+  const std::filesystem::path& python_exec = tool.python;
 
   std::filesystem::path design_resources_path = FloorplanningArtifact("design_resources.json");
   // Persists across tier 1 and tier 2's separate invocations, unlike design_resources_path
@@ -2813,26 +2811,13 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
     return true;
   }
 
-  std::filesystem::path constraint_compliance_script_path =
-      InstalledScript(std::filesystem::path("floorplanning_constraint_compliance.py"));
-  if (constraint_compliance_script_path.empty()) {
-    ErrorMessage("Cannot locate scripts/floorplanning_constraint_compliance.py in the "
-                 "installation. Constraint-compliance check failed!");
-    return false;
-  }
-
-#ifdef _WIN32
-  std::filesystem::path python_exec{"python.exe"};
-#else // _WIN32
-  std::filesystem::path python_exec{"python3"};
-#endif // _WIN32
-
-  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
-    ErrorMessage("System " + python_exec.string() +
-                 " is not found; skipping constraint compliance "
-                 "(floorplanning_constraint_compliance.py).");
-    return true;  // best-effort: placement has already succeeded
-  }
+  // Best-effort: placement has already succeeded.
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "floorplanning_constraint_compliance.py", "Constraint-compliance check",
+      MissingPython::Skip, "constraint compliance");
+  if (!tool.ready) return tool.result;
+  const std::filesystem::path& constraint_compliance_script_path = tool.script;
+  const std::filesystem::path& python_exec = tool.python;
 
   std::filesystem::path manifest_path =
       FloorplanningArtifact("constraints.manifest.json");

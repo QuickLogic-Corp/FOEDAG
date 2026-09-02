@@ -433,6 +433,31 @@ private:
   int RunFloorplanningStage(const std::string& command,
                             const std::vector<std::string>& args);
 
+  // [aurora2#1725] What a floorplanning helper stage needs before it can run, and what
+  // its caller should return when it cannot. `ready` false means "stop now and return
+  // `result`" -- which is false for a missing script (a broken installation) and, for a
+  // missing python, whichever the stage's policy says.
+  struct FloorplanningTool {
+    std::filesystem::path script;
+    std::filesystem::path python;
+    bool ready = false;
+    bool result = false;
+  };
+
+  // Absent python is fatal for the stage that gates the GUI's instance tree, and merely
+  // a skip for the post-synthesis stages, which run after their compile step already
+  // succeeded. That is the only way the four preludes differed.
+  enum class MissingPython { Fatal, Skip };
+
+  // Locate one floorplanning helper script and the interpreter to run it with.
+  // `label` names the stage in the error text ("Instance validation"); `skipPhrase` is
+  // the wording used when python is absent and the stage is a Skip ("instance
+  // validation"), unused for Fatal.
+  FloorplanningTool ResolveFloorplanningTool(const std::string& scriptName,
+                                             const std::string& label,
+                                             MissingPython policy,
+                                             const std::string& skipPhrase = {});
+
   // Echo any ERROR the in-session tcl scripts recorded in their own logs. Called only when
   // synthesis failed, so `tee -q` cannot hide the reason it failed.
   void ReportFloorplanningYosysErrors();
