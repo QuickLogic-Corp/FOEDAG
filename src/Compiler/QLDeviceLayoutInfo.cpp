@@ -11,6 +11,7 @@
 #include "NewProject/ProjectManager/project_manager.h"
 #include "Utils/FileUtils.h"
 #include "nlohmann_json/json.hpp"
+#include "scope_guard/scope_guard.hpp"
 
 extern FOEDAG::Session* GlobalSession;
 
@@ -428,6 +429,20 @@ void QLDeviceLayoutInfo::removeStaleDeviceLayoutJSON() {
 }
 
 void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
+  // Re-entrancy guard: invalidateTaskStatuses() below can walk into
+  // getSynthesisCommands() -> QLSettingsManager::getInstance(), which
+  // unconditionally calls setCurrentDeviceTarget() again on every invocation
+  // (by design - it re-syncs from the settings JSON every call) - which
+  // re-enters refresh() right back here. Without this, that cycle recurses
+  // until the stack overflows. The outer call already has this covered by
+  // the time any inner one would run.
+  static thread_local bool in_progress = false;
+  if (in_progress) {
+    return;
+  }
+  in_progress = true;
+  auto reset_guard = sg::make_scope_guard([] { in_progress = false; });
+
   if (projectPath().empty()) {
     // No project: device selection in the new-project wizard has nowhere to write
     // and nothing to invalidate.
@@ -438,9 +453,17 @@ void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
     // AUTO/RESOURCES before packing, or a package that states no geometry. Either
     // way the previous run's file must not be left behind to be read as current.
     removeStaleDeviceLayoutJSON();
-    return;
+  } else {
+    layout_info.writeDeviceLayoutJSON();
   }
-  layout_info.writeDeviceLayoutJSON();
+
+  // Packing's CommandWrapper tracks this file's content (see
+  // getPackingCommand()), but nothing re-checks that comparison on its own -
+  // without this, the Task view keeps showing Packing as green until the user
+  // happens to run it again. Same pattern as onQdcFileSaved()/onPcfFileSaved().
+  if (Compiler* c = compiler()) {
+    c->invalidateTaskStatuses();
+  }
 }
 
 }  // namespace FOEDAG
