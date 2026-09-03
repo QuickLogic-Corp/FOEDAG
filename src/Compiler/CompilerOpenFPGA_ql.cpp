@@ -9294,11 +9294,11 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOuts
 }
 
 
-bool CompilerOpenFPGA_ql::decryptDeviceFile(
+bool CompilerOpenFPGA_ql::decryptDeviceFileToString(
     const std::filesystem::path& src_en,
-    const std::filesystem::path& dst_plain,
     const std::filesystem::path& deviceTypeDir,
-    const std::string& deviceTypeString) {
+    const std::string& deviceTypeString,
+    std::string& out_plaintext) {
   const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
   m_cryptdbPath = cryptdb;
 
@@ -9319,10 +9319,23 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
   }
 
   qlcrypt::FileCrypt fc(keys);
-  std::string plaintext;
-  if (auto s = fc.decryptFile(src_en.string(), plaintext); !qlcrypt::ok(s)) {
+  out_plaintext.clear();
+  if (auto s = fc.decryptFile(src_en.string(), out_plaintext); !qlcrypt::ok(s)) {
     ErrorMessage(std::string("decryption failed: ") + src_en.string() +
                  " -> " + std::string(qlcrypt::toString(s)));
+    return false;
+  }
+  return true;
+}
+
+
+bool CompilerOpenFPGA_ql::decryptDeviceFile(
+    const std::filesystem::path& src_en,
+    const std::filesystem::path& dst_plain,
+    const std::filesystem::path& deviceTypeDir,
+    const std::string& deviceTypeString) {
+  std::string plaintext;
+  if (!decryptDeviceFileToString(src_en, deviceTypeDir, deviceTypeString, plaintext)) {
     return false;
   }
 
@@ -9332,6 +9345,11 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
     return false;
   }
   out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
+  // Close before testing the stream: an ofstream flushes on destruction, so
+  // returning out.good() while it is still open reports a write that failed at
+  // flush time (ENOSPC on a full disk) as success, leaving the caller to use a
+  // truncated device file.
+  out.close();
   return out.good();
 }
 

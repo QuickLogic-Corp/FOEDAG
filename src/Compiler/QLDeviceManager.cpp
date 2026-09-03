@@ -1404,15 +1404,21 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
   std::filesystem::path device_variant_dir = device_data_dir_path / voltage_threshold / p_v_t_corner;
 
   
-  std::filesystem::path source_vpr_xml_filepath;
-  std::filesystem::path vpr_xml_filepath;
+  // Read the arch into memory. The encrypted case decrypts to a buffer rather
+  // than staging ~12MB in /tmp: this is parsed in-process, so the file only ever
+  // existed to be read straight back, and a run killed before CleanTempFiles()
+  // stranded it.
+  std::filesystem::path source_vpr_xml_filepath = device_variant_dir / "vpr.xml";
+  QByteArray vpr_xml_contents;
 
-  // check for unencrypted vpr xml file first:
-  source_vpr_xml_filepath = device_variant_dir / "vpr.xml";
-  
   if (FileUtils::FileExists(source_vpr_xml_filepath)) {
-    // use this file as is
-    vpr_xml_filepath = source_vpr_xml_filepath;
+    QFile plaintext_file(source_vpr_xml_filepath.string().c_str());
+    if (!plaintext_file.open(QFile::ReadOnly)) {
+      std::cout << "Cannot open file: " + source_vpr_xml_filepath.string() << std::endl;
+      return device_variant_layouts;
+    }
+    vpr_xml_contents = plaintext_file.readAll();
+    plaintext_file.close();
   }
   else {
     // we should have an encrypted vpr xml file:
@@ -1422,43 +1428,28 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
       // this means we don't have a vpr xml file, which is an error!
       std::cout << "vpr xml: " + source_vpr_xml_filepath.string() << std::endl;
       std::cout << "vpr xml not found!" << std::endl;
-      ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
       return device_variant_layouts;
     }
 
-    // decrypt the encrypted vpr xml file. and then use that:
     CompilerOpenFPGA_ql* compiler =
         (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
-    vpr_xml_filepath = compiler->GenerateTempFilePath();
-
-    if (!compiler->decryptDeviceFile(
-            source_vpr_xml_filepath, vpr_xml_filepath, device_data_dir_path,
-            DeviceTypeString(family, foundry, node, devicename))) {
-      compiler->CleanTempFiles();
+    std::string plaintext;
+    if (!compiler->decryptDeviceFileToString(
+            source_vpr_xml_filepath, device_data_dir_path,
+            DeviceTypeString(family, foundry, node, devicename), plaintext)) {
       return device_variant_layouts;
     }
-  }
-
-
-  // open file with Qt
-  // qDebug() << "vpr xml" << QString::fromStdString(vpr_xml_filepath.string());
-  QFile file(vpr_xml_filepath.string().c_str());
-  if (!file.open(QFile::ReadOnly)) {
-    std::cout << "Cannot open file: " + vpr_xml_filepath.string() << std::endl;
-    ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
-    return device_variant_layouts;
+    // fromStdString copies, so the buffer outlives 'plaintext' going out of
+    // scope below. Do not "optimise" this to fromRawData().
+    vpr_xml_contents = QByteArray::fromStdString(plaintext);
   }
 
   // parse as XML with Qt
   QDomDocument doc;
-  if (!doc.setContent(&file)) {
-    file.close();
-    std::cout << "Incorrect file: " + vpr_xml_filepath.string() << std::endl;
-    ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
+  if (!doc.setContent(vpr_xml_contents)) {
+    std::cout << "Incorrect file: " + source_vpr_xml_filepath.string() << std::endl;
     return device_variant_layouts;
   }
-  file.close();
-  ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles(); // the decrypted file is not needed anymore.
 
 
   QDomNodeList nodes = doc.elementsByTagName("fixed_layout");
