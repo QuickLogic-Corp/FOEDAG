@@ -6,9 +6,11 @@
 #include <system_error>
 
 #include "Compiler/Compiler.h"
+#include "CompilerDefines.h"
 #include "CompilerOpenFPGA_ql.h"
 #include "MainWindow/Session.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "TaskManager.h"
 #include "Utils/FileUtils.h"
 #include "nlohmann_json/json.hpp"
 
@@ -62,6 +64,19 @@ bool asString(const json& value, std::string& out) {
 
 bool lookupString(const json& object, const std::string& key, std::string& out) {
   return object.is_object() && object.contains(key) && asString(object[key], out);
+}
+
+bool lookupInt(const json& object, const std::string& key, std::optional<int>& out) {
+  std::string text;
+  if (!lookupString(object, key, text)) {
+    return false;
+  }
+  try {
+    out = std::stoi(text);
+  } catch (const std::exception&) {
+    return false;
+  }
+  return true;
 }
 
 // "8x6" -> 8, 6. The array dimensions, NOT the grid: see GRID_RING_TILES.
@@ -164,13 +179,33 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
   const QLDeviceLayoutSettings layout_settings =
       device_manager->deviceLayoutSettings(device_target);
 
-  // A corrupt or invalid config is the caller's problem to report - Packing()
-  // already fails the run over it. Here it just means "no answer".
-  if (layout_settings.config_parse_failed || layout_settings.invalid) {
+  // A corrupt or invalid config leaves this unresolved same as any other
+  // "no answer" case, but unlike an AUTO/RESOURCES device awaiting Packing(),
+  // it is a real problem - record why so a caller can tell the two apart
+  // instead of both reading as a silent "-".
+  if (layout_settings.config_parse_failed) {
+    m_error = layout_settings.config_json_path.string() + ": " + layout_settings.config_parse_error;
+    return;
+  }
+  if (layout_settings.invalid) {
+    m_error = layout_settings.config_json_path.string() + ": \"" + layout_settings.invalid_key +
+              "\" is \"" + layout_settings.invalid_value + "\", which is not a recognised value";
     return;
   }
 
   const bool deferred = layoutIsResolvedDuringPacking(layout_settings, device_target);
+
+  // auto_device.log belongs to the current project's actual configured device -
+  // it carries no per-device identity, so resolving it for any other
+  // device_target (e.g. one merely being previewed in the settings dialog,
+  // not yet applied) would misattribute this project's resolved geometry to a
+  // device it has nothing to do with. This is the single point deciding
+  // whether a deferred layout can resolve at all - callers must not
+  // second-guess it with their own "is this the current device" check.
+  if (deferred && (device_manager->convertToDeviceString(device_target) !=
+                   device_manager->getCurrentDeviceTargetString())) {
+    return;
+  }
 
   const bool ok = deferred ? resolveFromAutoDeviceLog()
                            : resolveFromDeviceConfig(layout_settings, device_target);
@@ -180,8 +215,9 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
 
   if (deferred) {
     // resolveFromAutoDeviceLog() only sees auto_device.log, which never carries
-    // BRAM_SIZE/DSP_SIZE - those come from config.json regardless of layout mode.
-    resolveBlockSizesFromDeviceConfig(device_target);
+    // BRAM_SIZE/DSP_SIZE/IO_CAPACITY - those come from config.json regardless
+    // of layout mode.
+    resolvePackageFactsFromDeviceConfig(device_target);
   }
 
   if (m_layout.layoutMode.empty()) {
@@ -262,10 +298,11 @@ bool QLDeviceLayoutInfo::parseDeviceConfig(const json& config_json,
   }
   out_layout.bramCols = parseColumnList(bram_cols);
   out_layout.dspCols = parseColumnList(dsp_cols);
-  // Block footprint, not layout geometry - config.json never states it in the
-  // CUSTOM section, only at the top level.
+  // Block footprint and IO capacity, not layout geometry - config.json never
+  // states them in the CUSTOM section, only at the top level.
   lookupString(config_json, "BRAM_SIZE", out_layout.bramSize);
   lookupString(config_json, "DSP_SIZE", out_layout.dspSize);
+  lookupInt(config_json, "IO_CAPACITY", out_layout.ioCapacity);
   out_layout.source = "config.json";
   out_layout.resolved = true;
   return true;
@@ -284,7 +321,7 @@ bool QLDeviceLayoutInfo::resolveFromDeviceConfig(
   return parseDeviceConfig(config_json, layout_mode, m_layout);
 }
 
-void QLDeviceLayoutInfo::resolveBlockSizesFromDeviceConfig(
+void QLDeviceLayoutInfo::resolvePackageFactsFromDeviceConfig(
     const QLDeviceTarget& device_target) {
   QLDeviceManager* device_manager = QLDeviceManager::getInstance();
   json config_json;
@@ -294,6 +331,7 @@ void QLDeviceLayoutInfo::resolveBlockSizesFromDeviceConfig(
   }
   lookupString(config_json, "BRAM_SIZE", m_layout.bramSize);
   lookupString(config_json, "DSP_SIZE", m_layout.dspSize);
+  lookupInt(config_json, "IO_CAPACITY", m_layout.ioCapacity);
 }
 
 bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
@@ -335,6 +373,21 @@ bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
 }
 
 bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
+  // auto_device.log outlives the run that wrote it - a prior session's
+  // Packing(), or a design change since, leaves it on disk describing a
+  // fabric this session has not actually rebuilt. Trust it only while this
+  // session's own Packing task is still green: TaskStatus::Success is the run
+  // that just wrote it, and any other status (None on a fresh launch before
+  // Packing has been run this session, Dirty once something upstream
+  // invalidates it, Fail, InProgress) means the log's contents are not backed
+  // by a Packing run this session can vouch for.
+  Compiler* c = compiler();
+  TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
+  Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
+  if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {
+    return false;
+  }
+
   const std::filesystem::path project_path = projectPath();
   if (project_path.empty()) {
     return false;
@@ -396,6 +449,8 @@ bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
   layout_json["dsp_cols"] = joinColumns(m_layout.dspCols);
   layout_json["bram_size"] = m_layout.bramSize;
   layout_json["dsp_size"] = m_layout.dspSize;
+  layout_json["io_capacity"] =
+      m_layout.ioCapacity.has_value() ? json(*m_layout.ioCapacity) : json(nullptr);
   layout_json["layout_name"] = m_layout.layoutName;
   layout_json["layout_mode"] = m_layout.layoutMode;
   layout_json["source"] = m_layout.source;
@@ -425,6 +480,29 @@ void QLDeviceLayoutInfo::removeStaleDeviceLayoutJSON() {
   }
   std::error_code ec;
   std::filesystem::remove(filepath, ec);
+}
+
+void QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(
+    const QLDeviceTarget& previous_device_target, const QLDeviceTarget& new_device_target) {
+  QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+  if ((device_manager == nullptr) ||
+      !device_manager->isDeviceTargetValid(previous_device_target)) {
+    // Nothing was actually current yet this session (e.g. the first
+    // setCurrentDeviceTarget() of a project load) - whatever auto_device.log
+    // is on disk was written for the device the project already names, not
+    // for some other device being left behind.
+    return;
+  }
+  if (device_manager->convertToDeviceString(previous_device_target) ==
+      device_manager->convertToDeviceString(new_device_target)) {
+    return;
+  }
+  const std::filesystem::path project_path = projectPath();
+  if (project_path.empty()) {
+    return;
+  }
+  std::error_code ec;
+  std::filesystem::remove(project_path / "auto_device.log", ec);
 }
 
 void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {

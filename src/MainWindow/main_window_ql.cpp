@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/QLDeviceLayoutInfo.h"
 #include "Compiler/TaskManager.h"
 #include "Compiler/TaskModel.h"
 #include "Console/DummyParser.h"
@@ -1849,6 +1850,9 @@ void MainWindow::ReShowWindow(QString strProject) {
   m_compiler->SetInterpreter(m_interpreter);
   m_compiler->SetOutStream(&buffer->getStream());
   m_compiler->SetErrStream(&console->getErrorBuffer()->getStream());
+  // device_data was walked in this window's constructor, before the console the
+  // compiler now writes to existed. Anything it found goes out here.
+  QLDeviceManager::getInstance()->flushDeferredDeviceDataErrors();
   auto compilerNotifier = new FOEDAG::CompilerNotifier{c};
   m_compiler->SetTclInterpreterHandler(compilerNotifier);
   auto tclCommandIntegration = sourcesForm->createTclCommandIntegarion();

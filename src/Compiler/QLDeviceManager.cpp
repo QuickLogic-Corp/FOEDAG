@@ -1,6 +1,7 @@
 #include "QLDeviceManager.h"
 
 #include <cstdlib>   // std::getenv
+#include <cctype>    // std::isspace
 
 #include <QObject>
 #include <QWidget>
@@ -790,19 +791,54 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
         // }
     }
 
-    // update the layout's resource information:
-    QString archInfo;
-    //archInfo += "| ";
-    archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
-    archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
-    archInfo += "\n";
-    archInfo += "clb: <b>" + QString::number(device_target_selected.device_variant_layout.clb) + " </b>| ";
-    archInfo += "dsp: <b>" + QString::number(device_target_selected.device_variant_layout.dsp) + " </b>| ";
-    archInfo += "bram: <b>" + QString::number(device_target_selected.device_variant_layout.bram) + " </b>| ";
-    archInfo += "io: <b>" + QString::number(device_target_selected.device_variant_layout.io) + " </b>";
-    m_device_resources_label->setText(archInfo);
+    updateDeviceResourcesLabel();
   }
 
+}
+
+
+// refreshes m_device_resources_label from device_target_selected's current
+// QLDeviceLayoutInfo. Recomputed live here rather than trusting the one-time
+// whole-catalog scan's snapshot on device_target_selected.device_variant_layout:
+// a FIXED/CUSTOM device's real counts are available the moment it is picked,
+// and this selection has not gone through setCurrentDeviceTarget() yet (Apply
+// has not been clicked), so nothing else would refresh that snapshot for it.
+// QLDeviceLayoutInfo is the single gate deciding what is known right now - "-"
+// rather than "0" for whatever it has not resolved yet (e.g. an AUTO/RESOURCES
+// device before Packing(), or one only being previewed, not yet applied).
+//
+// Also refreshes device_layout.json on disk for this selection, by explicit
+// request: every combo change - not only Apply - keeps that file matching
+// whatever is currently picked here, deleting it when the pick is
+// unresolved (AUTO/RESOURCES before Packing()).
+void QLDeviceManager::updateDeviceResourcesLabel() {
+
+  if(device_manager_widget == nullptr) {
+    return;
+  }
+
+  QLDeviceLayoutInfo::refresh(device_target_selected);
+
+  const auto resourceText = [](const std::optional<int>& count) {
+    return count.has_value() ? QString::number(*count) : QString("-");
+  };
+  std::optional<int> clb_count, dsp_count, bram_count, io_count;
+  for (const auto& [resource_name, resource_count] :
+       deviceResourceInformation(device_target_selected)) {
+    if (resource_name == "clb") clb_count = resource_count;
+    if (resource_name == "dsp") dsp_count = resource_count;
+    if (resource_name == "bram") bram_count = resource_count;
+    if (resource_name == "io") io_count = resource_count;
+  }
+  QString archInfo;
+  archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
+  archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
+  archInfo += "\n";
+  archInfo += "clb: <b>" + resourceText(clb_count) + " </b>| ";
+  archInfo += "dsp: <b>" + resourceText(dsp_count) + " </b>| ";
+  archInfo += "bram: <b>" + resourceText(bram_count) + " </b>| ";
+  archInfo += "io: <b>" + resourceText(io_count) + " </b>";
+  m_device_resources_label->setText(archInfo);
 }
 
 
@@ -980,6 +1016,10 @@ void QLDeviceManager::parseDeviceData() {
 
   // clear the list before parsing
   device_list.clear();
+
+  // the dedupe in reportDeviceDataError() covers one walk: a re-parse after a
+  // device was added or its config.json fixed has to be able to report again.
+  reported_device_data_error_set.clear();
 
   // devices already discovered, keyed by device type string, so that the same device
   // appearing in two roots is reported rather than silently duplicated (REQ-006).
@@ -1511,13 +1551,13 @@ void QLDeviceManager::populateVariantLayoutResources(QLDeviceVariant& device_var
     // resolve every other variant to answer what we already hold.
     device_target.device_variant_layout = device_variant_layout;
 
-    std::vector<std::tuple<std::string, int>> resources_vector =
+    std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
         deviceResourceInformation(device_target);
 
     for (const auto& resource_tuple : resources_vector) {
 
       std::string resourcename = std::get<0>(resource_tuple);
-      int resourcecount = std::get<1>(resource_tuple);
+      std::optional<int> resourcecount = std::get<1>(resource_tuple);
 
       // this part is a carry-over, we should make the layout resource structure
       // in c++ code generic, so we don't need to have these ifs ? TODO future
@@ -1734,6 +1774,11 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
   // std::cout << "setCurrentDeviceTarget" << std::endl;
   // std::cout << "newProjectMode: " << newProjectMode << std::endl;
   // std::cout << "device_target: " << convertToDeviceString(device_target) << std::endl;
+
+  // before switching, drop any auto_device.log left by the device being left
+  // behind - it can only describe that device's fabric, not the new one's,
+  // even when both use AUTO/RESOURCES sizing.
+  QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(this->device_target, device_target);
 
   if(isDeviceTargetValid(device_target)) {
 
@@ -4218,6 +4263,15 @@ static bool normalizeLayoutMode(const std::string& value, std::string& out_layou
   return false;
 }
 
+
+// The config.json keys this file reads. Spelled once here so a rename in the
+// device data contract is a single edit, and a typo is a compile error rather
+// than a key that silently never matches.
+constexpr const char* CONFIG_KEY_DEVICE_TYPE = "DEVICE_TYPE";
+constexpr const char* CONFIG_KEY_DEVICE_TYPE_SETTINGS = "DEVICE_TYPE_SETTINGS";
+constexpr const char* CONFIG_KEY_LAYOUT_MODE = "LAYOUT_MODE";
+
+
 QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
 
   QLDeviceLayoutSettings layout_settings;
@@ -4256,40 +4310,41 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
   }
   layout_settings.config_found = true;
 
-  if( device_target_config_json.contains("DEVICE_TYPE") ) {
-    const auto& device_type = device_target_config_json["DEVICE_TYPE"];
+  if( device_target_config_json.contains(CONFIG_KEY_DEVICE_TYPE) ) {
+    const auto& device_type = device_target_config_json[CONFIG_KEY_DEVICE_TYPE];
     if( device_type.is_string() &&
         normalizeDeviceType(device_type.get<std::string>(), layout_settings.device_type) ) {
       layout_settings.device_type_present = true;
     }
     else {
       layout_settings.invalid = true;
-      layout_settings.invalid_key = "DEVICE_TYPE";
+      layout_settings.invalid_key = CONFIG_KEY_DEVICE_TYPE;
       layout_settings.invalid_value = device_type.is_string() ? device_type.get<std::string>()
                                                              : device_type.dump();
       return layout_settings;
     }
   }
 
-  if( device_target_config_json.contains("DEVICE_TYPE_SETTINGS") ) {
-    const auto& device_type_settings = device_target_config_json["DEVICE_TYPE_SETTINGS"];
+  if( device_target_config_json.contains(CONFIG_KEY_DEVICE_TYPE_SETTINGS) ) {
+    const auto& device_type_settings = device_target_config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS];
     if( !device_type_settings.is_object() ) {
       layout_settings.invalid = true;
-      layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS";
+      layout_settings.invalid_key = CONFIG_KEY_DEVICE_TYPE_SETTINGS;
       layout_settings.invalid_value = device_type_settings.dump();
       return layout_settings;
     }
     layout_settings.device_type_settings_present = true;
 
-    if( device_type_settings.contains("LAYOUT_MODE") ) {
-      const auto& layout_mode = device_type_settings["LAYOUT_MODE"];
+    if( device_type_settings.contains(CONFIG_KEY_LAYOUT_MODE) ) {
+      const auto& layout_mode = device_type_settings[CONFIG_KEY_LAYOUT_MODE];
       if( layout_mode.is_string() &&
           normalizeLayoutMode(layout_mode.get<std::string>(), layout_settings.layout_mode) ) {
         layout_settings.layout_mode_present = true;
       }
       else {
         layout_settings.invalid = true;
-        layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS.LAYOUT_MODE";
+        layout_settings.invalid_key =
+            std::string(CONFIG_KEY_DEVICE_TYPE_SETTINGS) + "." + CONFIG_KEY_LAYOUT_MODE;
         layout_settings.invalid_value = layout_mode.is_string() ? layout_mode.get<std::string>()
                                                                : layout_mode.dump();
         return layout_settings;
@@ -4366,51 +4421,253 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
 }
 
 
-std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInformation(QLDeviceTarget device_target){
+// Trailing junk is rejected: a half-parsed geometry would silently mis-size a device.
+bool QLDeviceManager::parseWholeNumber(const std::string& text, int& out_value) {
 
-  // the resource information for the target device is stored in a "resources.json" in the device_type_dir_path
-  // as the resouces are (must be) the same for all the variants of a device-type.
-  // {
-  //   "layout_1": {
-  //     "resourcename1": resourcecount1,
-  //     "resourcename2": resourcecount2,
-  //     ...
-  //   },
-  //   "layout_2": {
-  //     "resourcename1": resourcecount1,
-  //     "resourcename2": resourcecount2,
-  //     ...
-  //   },
-  //   ...
-  // }
-
-  // we extract the information for specific layout from the json file, and structure it into a vector of tuples.
-  // each tuple has information about a specific resource type and its count, such as clb, dsp, bram etc.
-  // vector for the device target will have tuples like below:
-  // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
-
-  std::vector<std::tuple<std::string, int>> resources_vector;
-
-  std::filesystem::path device_resources_json_filepath = deviceTypeDirPath(device_target) / std::string("resources.json");
-
-  if(FileUtils::FileExists(device_resources_json_filepath)) {
-
-    std::ifstream device_resources_json_path_ifstream(device_resources_json_filepath.string());
-    json device_resources_json = json::parse(device_resources_json_path_ifstream);
-
-    // std::cout << device_resources_json.dump() << std::endl;
-    
-    if( device_resources_json.contains(device_target.device_variant_layout.name) ) {
-      auto layout_resources_json = device_resources_json[device_target.device_variant_layout.name];
-      for (auto [resource_name, resource_count] : layout_resources_json.items()) {
-        // std::cout << "resource_name: " << resource_name << std::endl;
-        // std::cout << "resource_count: " << resource_count << std::endl;
-        resources_vector.push_back(std::make_tuple(resource_name, resource_count));
-      }
+  try {
+    size_t consumed = 0;
+    const int value = std::stoi(text, &consumed);
+    while( (consumed < text.size()) && std::isspace(static_cast<unsigned char>(text[consumed])) ) {
+      consumed++;
     }
+    if(consumed != text.size()) {
+      return false;
+    }
+    // stoi accepts a sign, but nothing config.json spells this way has a
+    // meaningful negative value - a geometry least of all.
+    if(value < 0) {
+      return false;
+    }
+    out_value = value;
+    return true;
+  }
+  catch(const std::exception&) {
+    return false;
+  }
+}
+
+
+bool QLDeviceManager::parseDeviceGeometry(const std::string& text, int& out_x, int& out_y) {
+
+  const size_t separator = text.find_first_of("xX");
+  if(separator == std::string::npos) {
+    return false;
+  }
+
+  return parseWholeNumber(text.substr(0, separator), out_x) &&
+         parseWholeNumber(text.substr(separator + 1), out_y);
+}
+
+
+// Derive the layout's resource counts from its resolved QLDeviceLayoutInfo.
+//
+// This is the only source of resource counts. They were previously read from a
+// resources.json generated by running vpr over the architecture, which a package
+// cut outside the Aurora tree never had; the counts are a pure function of the
+// resolved layout (issue #2257):
+//
+//   bram = <bram columns> * floor(arrayY / <bram tile height>)
+//   dsp  = <dsp columns>  * floor(arrayY / <dsp tile height>)
+//   clb  = (arrayX - <bram columns> - <dsp columns>) * arrayY
+//   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
+//
+// An AUTO/RESOURCES device that has not been through Packing() yet - or one
+// only being previewed, not yet the project's actual device - is expected to
+// be unresolved; deriveDeviceResourceInformation() checks layout_info.resolved()
+// itself to tell that apart from a genuine config.json problem.
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveResourceCounts(
+    const QLDeviceLayoutInfo& layout_info, std::string* out_error) {
+
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector;
+
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = reason;
+    }
+    return resources_vector;
+  };
+
+  if( !layout_info.resolved() ) {
+    return fail("layout is not resolved");
+  }
+
+  const QLDeviceLayout& layout = layout_info.layout();
+
+  int bram_tile_width = 0;
+  int bram_tile_height = 0;
+  int dsp_tile_width = 0;
+  int dsp_tile_height = 0;
+  if( !parseDeviceGeometry(layout.bramSize, bram_tile_width, bram_tile_height) || (bram_tile_height <= 0) ) {
+    return fail("\"BRAM_SIZE\": \"" + layout.bramSize + "\" is not a positive <x>x<y> geometry");
+  }
+  if( !parseDeviceGeometry(layout.dspSize, dsp_tile_width, dsp_tile_height) || (dsp_tile_height <= 0) ) {
+    return fail("\"DSP_SIZE\": \"" + layout.dspSize + "\" is not a positive <x>x<y> geometry");
+  }
+
+  // The clb count subtracts one array column per entry of bramCols/dspCols, so a
+  // block wider than a single tile would leave clb too high and the columns-fit
+  // check too lax. Every QLF_K6N10 package is 1xN today; decline rather than
+  // report a count computed on an assumption the package contradicts, and whoever
+  // ships the first wide block gets this message instead of a wrong number.
+  const std::pair<const char*, int> block_widths[] = {
+      {"BRAM_SIZE", bram_tile_width},
+      {"DSP_SIZE",  dsp_tile_width},
+  };
+  for(const auto& [key, width] : block_widths) {
+    if(width != 1) {
+      return fail(std::string("\"") + key + "\" is " + std::to_string(width) +
+                  " tiles wide, and the clb count assumes one tile per block column");
+    }
+  }
+  if( !layout.ioCapacity.has_value() ) {
+    return fail("config.json has no usable \"IO_CAPACITY\" key");
+  }
+
+  const int array_x = layout.arrayX;
+  const int array_y = layout.arrayY;
+  const int bram_columns = static_cast<int>(layout.bramCols.size());
+  const int dsp_columns = static_cast<int>(layout.dspCols.size());
+  if( (bram_columns + dsp_columns) >= array_x ) {
+    // the column lists do not fit the array: report nothing rather than a
+    // negative clb count.
+    return fail("\"BRAM_COLS\" (" + std::to_string(bram_columns) + ") + \"DSP_COLS\" (" +
+                std::to_string(dsp_columns) + ") do not fit an array " +
+                std::to_string(array_x) + " columns wide");
+  }
+
+  resources_vector.push_back(std::make_tuple(std::string("clb"),
+      std::optional<int>((array_x - bram_columns - dsp_columns) * array_y)));
+  resources_vector.push_back(std::make_tuple(std::string("bram"),
+      std::optional<int>(bram_columns * (array_y / bram_tile_height))));
+  resources_vector.push_back(std::make_tuple(std::string("dsp"),
+      std::optional<int>(dsp_columns * (array_y / dsp_tile_height))));
+  resources_vector.push_back(std::make_tuple(std::string("io"),
+      std::optional<int>(2 * (array_x + array_y) * (*layout.ioCapacity))));
+
+  return resources_vector;
+}
+
+
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveDeviceResourceInformation(
+    QLDeviceTarget device_target, std::string* out_error) {
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // QLDeviceLayoutInfo is the single gate deciding whether a layout resolves
+  // at all (AUTO/RESOURCES before Packing(), or one only being previewed and
+  // not yet the project's actual device, comes back unresolved) - nothing
+  // here re-derives that decision.
+  const QLDeviceLayoutInfo layout_info(device_target);
+
+  if( !layout_info.error().empty() ) {
+    // config.json is corrupt or invalid - a real problem, not "not yet known".
+    if( out_error ) {
+      *out_error = std::string("cannot derive resource counts for ") +
+                   convertToDeviceTypeString(device_target) + ": layout \"" +
+                   device_target.device_variant_layout.name + "\": " + layout_info.error();
+    }
+    return {};
+  }
+
+  std::string reason;
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+      deriveResourceCounts(layout_info, &reason);
+
+  if( resources_vector.empty() && !layout_info.resolved() ) {
+    // not yet known (e.g. AUTO/RESOURCES before Packing()), not a failure
+    // worth reporting.
+    return resources_vector;
+  }
+
+  if( resources_vector.empty() && !reason.empty() && out_error ) {
+    *out_error = std::string("cannot derive resource counts for ") +
+                 convertToDeviceTypeString(device_target) + ": layout \"" +
+                 device_target.device_variant_layout.name + "\": " + reason;
   }
 
   return resources_vector;
+}
+
+
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deviceResourceInformation(
+    QLDeviceTarget device_target) {
+
+  // vector of tuples, one per resource type and its count - unset when not yet
+  // known (e.g. an AUTO/RESOURCES device before Packing() has run):
+  // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
+
+  std::string derive_error;
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+      deriveDeviceResourceInformation(device_target, &derive_error);
+
+  // the device is about to be shown with no resources at all, so say why rather
+  // than leaving it unexplained. Silent when derive_error is empty: that means
+  // "not yet known", not a failure.
+  if( resources_vector.empty() && !derive_error.empty() ) {
+    reportDeviceDataError(derive_error);
+  }
+
+  return resources_vector;
+}
+
+
+void QLDeviceManager::reportDeviceDataError(const std::string& message) {
+
+  if( !reported_device_data_error_set.insert(message).second ) {
+    return;
+  }
+
+  if(!GlobalSession) {
+    return;
+  }
+
+  // The GUI walks device_data from the MainWindow constructor, before the console
+  // the compiler's error stream is pointed at exists, so hold the message until
+  // MainWindow has wired it and flushes. A batch run has no console to wait for -
+  // stderr is its output, and nothing would ever flush.
+  const bool gui = GlobalSession->CmdLine() && GlobalSession->CmdLine()->WithQt();
+  if( gui && !device_data_error_console_ready ) {
+    deferred_device_data_error_list.push_back(message);
+    return;
+  }
+
+  CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
+  if(compiler) {
+    // append=false: no Tcl command is in flight while device_data is walked, and
+    // appending would land this in the result of whichever one runs next.
+    compiler->ErrorMessage(message, false);
+  }
+}
+
+
+void QLDeviceManager::flushDeferredDeviceDataErrors() {
+
+  // Check for somewhere to write BEFORE taking the queue: called with no compiler
+  // yet, this has to keep holding the messages and stay un-flushed so that a later
+  // call still delivers them, rather than dropping them on the floor.
+  CompilerOpenFPGA_ql* compiler =
+      GlobalSession ? (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler() : nullptr;
+  if(!compiler) {
+    return;
+  }
+
+  device_data_error_console_ready = true;
+
+  std::vector<std::string> messages;
+  messages.swap(deferred_device_data_error_list);
+
+  // reportDeviceDataError()'s dedupe covers one walk, and parseDeviceData() clears
+  // it at the start of the next one - so a re-parse before this first runs can
+  // queue a message already in the queue. Dedupe again here rather than printing
+  // the same line twice.
+  std::set<std::string> flushed;
+  for(const std::string& message : messages) {
+    if( flushed.insert(message).second ) {
+      compiler->ErrorMessage(message, false);
+    }
+  }
 }
 
 
@@ -6014,85 +6271,6 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceYosysModulesPathList(Q
 
   return yosys_modules_pathlist;
 }
-
-// A resource column list as the device config spells it: ascending, comma
-// separated, no spaces - the shape every shipped config.json already carries
-// ('12,25').
-std::string QLDeviceManager::joinLayoutColumnList(const std::set<long>& columns) {
-
-  std::string joined;
-  for(long column : columns) {
-    if(!joined.empty()) {
-      joined += ",";
-    }
-    joined += std::to_string(column);
-  }
-  return joined;
-}
-
-
-// The resource columns of a generated '<fixed_layout>', read back out of the
-// architecture file that was just built, in the numbering the DEVICE CONFIG uses.
-//
-// add_layout.py writes each region at 'column + 1' (arch x=0 is the EMPTY ring),
-// so the config value is the region's 'startx' less one - the same inversion
-// add_layout.py's own read_vars_from_arch() does. Only 'bram' and 'dsp' regions
-// count: the 'io_bram_*' / 'io_dsp_*' regions repeat those columns in the IO ring.
-bool QLDeviceManager::readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_xml_filepath,
-                                                         const std::string& layout_name,
-                                                         std::string& out_bram_cols,
-                                                         std::string& out_dsp_cols) {
-
-  QFile file(QString::fromStdString(vpr_xml_filepath.string()));
-  if(!file.open(QFile::ReadOnly)) {
-    return false;
-  }
-  QDomDocument doc;
-  if(!doc.setContent(&file)) {
-    file.close();
-    return false;
-  }
-  file.close();
-
-  // by name, not 'the first one': an architecture file may carry several fixed
-  // layouts - EVAL-2024Q1-MULTI ships ten - and only the generated one describes
-  // the fabric that was just built.
-  QDomElement fixed_layout;
-  const QDomNodeList fixed_layouts = doc.elementsByTagName("fixed_layout");
-  for(int i = 0; i < fixed_layouts.count(); i++) {
-    const QDomElement candidate = fixed_layouts.at(i).toElement();
-    if(!candidate.isNull() && (candidate.attribute("name").toStdString() == layout_name)) {
-      fixed_layout = candidate;
-      break;
-    }
-  }
-  if(fixed_layout.isNull()) {
-    return false;
-  }
-
-  std::set<long> bram_columns;
-  std::set<long> dsp_columns;
-  for(QDomElement region = fixed_layout.firstChildElement("region");
-      !region.isNull();
-      region = region.nextSiblingElement("region")) {
-
-    const std::string region_type = region.attribute("type").toStdString();
-    if((region_type != "bram") && (region_type != "dsp")) {
-      continue;
-    }
-    bool startx_ok = false;
-    const long startx = region.attribute("startx").toLong(&startx_ok);
-    if(!startx_ok || (startx < 1)) {
-      return false;
-    }
-    ((region_type == "bram") ? bram_columns : dsp_columns).insert(startx - 1);
-  }
-
-  out_bram_cols = joinLayoutColumnList(bram_columns);
-  out_dsp_cols = joinLayoutColumnList(dsp_columns);
-  return true;
-}
-
 
 // Split a resource column list into its numbers. add_layout.py's split_cols()
 // separates on commas AND whitespace, so '12,25', '12, 25' and '12 25' all name
