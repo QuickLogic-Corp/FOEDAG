@@ -32,6 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <ctime>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <queue>
 #include <sstream>
 #include <thread>
@@ -436,12 +437,20 @@ void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
     std::string layout = targetDevice.device_variant_layout.name;
     int width = targetDevice.device_variant_layout.width;
     int height = targetDevice.device_variant_layout.height;
-    int bram = targetDevice.device_variant_layout.bram;
-    int dsp = targetDevice.device_variant_layout.dsp;
-    int clb = targetDevice.device_variant_layout.clb;
-    int io = targetDevice.device_variant_layout.io;
+    std::optional<int> bram = targetDevice.device_variant_layout.bram;
+    std::optional<int> dsp = targetDevice.device_variant_layout.dsp;
+    std::optional<int> clb = targetDevice.device_variant_layout.clb;
+    std::optional<int> io = targetDevice.device_variant_layout.io;
 
     nlohmann::ordered_json json;
+
+    // null rather than a string count for a resource that is not yet known -
+    // e.g. an AUTO/RESOURCES device before Packing() has resolved its real
+    // geometry - so a consumer can tell "unresolved" apart from a real count.
+    const auto resourceJson = [](const std::optional<int>& count) -> nlohmann::ordered_json {
+      return count.has_value() ? nlohmann::ordered_json(std::to_string(*count))
+                                : nlohmann::ordered_json(nullptr);
+    };
 
     json["family"] = StringUtils::toLower(family);
     json["foundry"] = StringUtils::toLower(foundry);
@@ -450,10 +459,10 @@ void IPGenerator::dumpDeviceInfo(const std::filesystem::path& path)
     json["layout"] = StringUtils::toLower(layout);
     json["width"] = std::to_string(width);
     json["height"] = std::to_string(height);
-    json["bram"] = std::to_string(bram);
-    json["dsp"] = std::to_string(dsp);
-    json["clb"] = std::to_string(clb);
-    json["io"] = std::to_string(io);
+    json["bram"] = resourceJson(bram);
+    json["dsp"] = resourceJson(dsp);
+    json["clb"] = resourceJson(clb);
+    json["io"] = resourceJson(io);
 
     if (!std::filesystem::exists(path)) {
       FileUtils::MkDirs(path);

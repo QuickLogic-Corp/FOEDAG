@@ -37,6 +37,16 @@ void StringUtils::tokenize(std::string_view str, std::string_view separator,
   const auto sepSize = separator.size();
   const auto stringSize = str.size();
   std::string tmp;
+
+  // An empty separator splits nothing, and find("", pos) returns pos, so the
+  // loop below would never advance pos and would spin forever. Yield the whole
+  // input as one token, matching what the tail block does for a separator that
+  // never matches.
+  if (separator.empty()) {
+    if (!str.empty()) result.push_back(std::string(str));
+    return;
+  }
+
   std::string::size_type n = str.find(separator, pos);
   while (n != std::string::npos) {
     tmp = str.substr(pos, n - pos);
