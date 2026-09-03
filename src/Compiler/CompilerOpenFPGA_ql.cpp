@@ -34,12 +34,14 @@
 #include <QDebug>
 #include <QDomDocument>
 #include <QFile>
+#include <QRegularExpression>
 #include <QTextStream>
 #include <QJsonArray>
 #include <QDirIterator>
 #include <QTemporaryFile>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <regex>
@@ -48,6 +50,7 @@
 #include <locale>
 #include <fstream>
 #include <cmath>
+#include <set>
 #include <unordered_set>
 #include <unordered_map>
 
@@ -75,6 +78,7 @@
 #include <QLabel>
 
 #include "QLDeviceManager.h"
+#include "QLDeviceLayoutInfo.h"
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
@@ -400,6 +404,7 @@ set_option -retiming ${RETIMING_VALUE}
 set_option -update_models_cp 0
 set_option -run_prop_extract 1
 set_option -use_bramsdp ${SDP_BRAM_VALUE}
+set_option -enable_dsp4 ${DSP4_VALUE}
 
 # common_options
 set_option -add_dut_hierarchy 0
@@ -1333,6 +1338,11 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                           const char* argv[]) -> int {
 
   QLDeviceManager* device_manager = QLDeviceManager::getInstance(true);
+
+  // This command enumerates the whole catalogue, so it is the one caller that
+  // must pay for every variant's layouts - one arch decrypt each. Everything
+  // else resolves only the variant it is asking about.
+  device_manager->resolveAllVariantLayouts();
 
   std::vector <QLDeviceType>device_list = device_manager->device_list;
 
@@ -3322,6 +3332,102 @@ std::filesystem::path CompilerOpenFPGA_ql::FindSynthSDCPaths(){
   return synth_sdc_filepath;
 }
 
+namespace {
+
+// CRR v2.4 shifted the routing-channel origin by one tile on both axes; without a
+// matching offset VPR builds the wrong rr_graph and bitstream generation fails.
+// Interim: the offset belongs in the device's own config.json, not in a version
+// mapping here. Tracked in ql-device-data#90.
+constexpr int CRR_OFFSET_FIRST_MAJOR = 2;   // offsets apply from CRR v2.4 onwards
+constexpr int CRR_OFFSET_FIRST_MINOR = 4;
+constexpr int CRR_VALIDATED_MAJOR = 2;      // newest CRR the mapping was checked against
+constexpr int CRR_VALIDATED_MINOR = 4;
+constexpr int CRR_RR_GRAPH_OFFSET = 1;
+
+// true when (major, minor) is at or after (ref_major, ref_minor).
+bool versionAtLeast(int major, int minor, int ref_major, int ref_minor) {
+  return (major > ref_major) || (major == ref_major && minor >= ref_minor);
+}
+
+// Value of 'flag' in 'options', for "--flag value" and "--flag=value".
+// Tokenised, not regex-matched: compares whole tokens and needs no escaping.
+bool vprOptionValue(const std::string& options, const std::string& flag, std::string& value) {
+  const std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] == flag) {
+      // trailing flag with no value: present but valueless, don't read past the end
+      value = (i + 1 < tokens.size()) ? tokens[i + 1] : std::string();
+      return true;
+    }
+    if(tokens[i].rfind(flag + "=", 0) == 0) {
+      value = tokens[i].substr(flag.size() + 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
+    QLDeviceTarget device_target, const std::string& existing_options) {
+
+  std::vector<std::string> options;
+
+  const std::string version = QLDeviceManager::getInstance()->deviceCRRVersion(device_target);
+
+  int major = 0;
+  int minor = 0;
+  if( !QLDeviceManager::parseVersionString(version, major, minor) ) {
+    // Only reached on the dynamic-CRR path: an rr_graph is being built from device
+    // data that does not say which CRR produced it, i.e. an incomplete package.
+    WarningMessage("Device uses custom routing resources but declares no readable "
+                   "CRR_VERSION in config.json; building the rr_graph with no "
+                   "channel offset. Results will be wrong if this device needs one.");
+    return options;
+  }
+
+  if( !versionAtLeast(major, minor, CRR_OFFSET_FIRST_MAJOR, CRR_OFFSET_FIRST_MINOR) ) {
+    // Pre-2.4 CRR data was generated with the origin unshifted.
+    return options;
+  }
+
+  // Newer CRR than this mapping knows: still offset, since falling back to 0 is the
+  // failure being guarded against - but do not let it pass silently.
+  if( !versionAtLeast(CRR_VALIDATED_MAJOR, CRR_VALIDATED_MINOR, major, minor) ) {
+    WarningMessage("Device declares CRR v" + version + ", which is newer than v" +
+                   std::to_string(CRR_VALIDATED_MAJOR) + "." +
+                   std::to_string(CRR_VALIDATED_MINOR) +
+                   ", the newest these rr_graph offsets were validated against. "
+                   "Applying the v" + std::to_string(CRR_VALIDATED_MAJOR) + "." +
+                   std::to_string(CRR_VALIDATED_MINOR) +
+                   " offsets; confirm they are still correct for this device.");
+  }
+
+  const std::string expected = std::to_string(CRR_RR_GRAPH_OFFSET);
+
+  for( const std::string& flag : {std::string("--rr_graph_x_offset"),
+                                  std::string("--rr_graph_y_offset")} ) {
+
+    std::string existing;
+    if( vprOptionValue(existing_options, flag, existing) ) {
+      // Already set by the project settings: keep the user's value, but flag a
+      // disagreement - a stale project JSON is how a wrong offset survives.
+      if( existing != expected ) {
+        WarningMessage("Project settings pass " + flag + " " + existing +
+                       ", but device CRR v" + version + " expects " + expected +
+                       ". Keeping the project value; results will be wrong if that "
+                       "is unintended.");
+      }
+      continue;
+    }
+
+    options.push_back(flag + " " + expected);
+  }
+
+  return options;
+}
+
 std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
@@ -3693,6 +3799,10 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // vpr_options += " --allow_dangling_combinational_nodes on";
+
+      for(const std::string& option : rrGraphOffsetOptions(device_target, vpr_options)) {
+        vpr_options += " " + option;
+      }
     }
   }
 
@@ -4099,6 +4209,10 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // this is always enabled in the default Aurora flow, so don't add here.
       // if that is removed, only then uncomment this.
       // command->append("--allow_dangling_combinational_nodes on");
+
+      for(const std::string& option : rrGraphOffsetOptions(device_target, command->string())) {
+        command->append(option);
+      }
     }
   }
 
@@ -4279,6 +4393,29 @@ static std::string generatedLayoutName(const std::string& prefix, int width, int
 }
 
 
+// A per-run token for the generated device DIRECTORY, which is what concurrent runs race on.
+//
+// The generated package is written into the SHARED device_data tree as a sibling of the
+// source device. Two runs resolving to the same fabric size targeted one directory and raced
+// on the delete-then-copy that installs it: one run's recursive delete lands in the middle of
+// another's copy. The benchmark suite runs many designs, and several synthesis tools per
+// design, against one device_data, so that is its normal operating condition.
+//
+// The project path is the natural key -- it is exactly what distinguishes one concurrent
+// aurora invocation from another. Hashed because a path cannot go in a directory name, in hex
+// to keep it short, and stable for a given project so a re-run reuses its own directory.
+//
+// It goes on the device name and NOT the layout name: the layout name reaches
+// <fixed_layout name=...> and vpr's --device, where uniqueness buys nothing, and REQ-014
+// fixes it as AUTOFPGA<W>x<H>.
+static std::string generatedDeviceRunToken(const std::string& project_path) {
+
+  std::ostringstream token;
+  token << std::hex << std::hash<std::string>{}(project_path);
+  return std::string("_") + token.str();
+}
+
+
 // Directory name (== devicename) of the device package generated from a re-shaped
 // layout.
 //
@@ -4340,7 +4477,8 @@ static bool resolveCustomLayoutYMLPath(const std::filesystem::path& project_path
 // so a key let through misspelled does not fail the run - it quietly builds a
 // 12x10 fabric instead of the one that was asked for, with no diagnostic
 // anywhere. An unknown key, a repeated key, a missing dimension or a value that
-// is not a whole number is therefore an error naming the key and the line.
+// is not a whole number - or, for the column keys, a comma-separated list of
+// whole numbers - is therefore an error naming the key and the line.
 static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_filepath,
                                 json& out_custom_layout_json,
                                 std::string& out_error) {
@@ -4348,16 +4486,20 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
   // The keys the CUSTOM section of the device config contract defines, with the
   // smallest value each accepts. ARRAY_X/ARRAY_Y size the fabric, so they must
   // be present; the column counts may legitimately be zero and may be omitted.
+  // A column key names one column per entry, so it also takes a comma-separated
+  // list: every device beyond the 8x6 seed shapes has BRAM and DSP in more than
+  // one column.
   struct CustomLayoutKey {
     const char* name;
     long minimum;
     bool required;
+    bool list_valued;
   };
   static const CustomLayoutKey custom_layout_keys[] = {
-    { "ARRAY_X",   1, true  },
-    { "ARRAY_Y",   1, true  },
-    { "BRAM_COLS", 0, false },
-    { "DSP_COLS",  0, false },
+    { "ARRAY_X",   1, true,  false },
+    { "ARRAY_Y",   1, true,  false },
+    { "BRAM_COLS", 0, false, true  },
+    { "DSP_COLS",  0, false, true  },
   };
   const std::size_t custom_layout_key_count =
       sizeof(custom_layout_keys) / sizeof(custom_layout_keys[0]);
@@ -4466,33 +4608,59 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
       return false;
     }
 
-    // Strictly a decimal integer. '-8', '8.5', 'null' and '[4, 8]' must not
-    // reach the script, which either aborts in int() or mis-sizes the fabric.
-    bool digits_only = !value.empty();
-    for(char c : value) {
-      if(c < '0' || c > '9') {
-        digits_only = false;
+    // Strictly a decimal integer - once for a dimension, once per element for a
+    // column list, whitespace around each element allowed. '-8', '8.5', 'null'
+    // and '[4, 8]' must not reach the script, which either aborts in int() or
+    // mis-sizes the fabric, and neither must a hole in the list ('12,' or
+    // '12,,25'), which int() fails on the same way.
+    std::size_t element_start = 0;
+    while(element_start <= value.size()) {
+      const std::size_t separator_pos =
+          known_key->list_valued ? value.find(',', element_start) : std::string::npos;
+      std::string element = (separator_pos == std::string::npos)
+                                ? value.substr(element_start)
+                                : value.substr(element_start, separator_pos - element_start);
+      // the value as a whole is already trimmed, so trim each element too:
+      // '12, 25' is what a person writes, and add_layout.py's split_cols
+      // (re.split(r'[,\s]+')) already accepts it.
+      StringUtils::trim(element);
+
+      if(element.empty()) {
+        out_error = "has an empty entry in '" + key + "' = '" + value + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      bool digits_only = true;
+      for(char c : element) {
+        if(c < '0' || c > '9') {
+          digits_only = false;
+          break;
+        }
+      }
+      if(!digits_only) {
+        out_error = "has a non-integer value '" + element + "' for '" + key + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      // bounded so the conversion below cannot overflow; no fabric dimension or
+      // column index comes anywhere near nine digits.
+      if(element.size() > 9) {
+        out_error = "has an out-of-range value '" + element + "' for '" + key + "' (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+      const long numeric_value = std::stol(element);
+      if(numeric_value < known_key->minimum) {
+        out_error = "has '" + key + "' = " + element + ", below the minimum of " +
+                    std::to_string(known_key->minimum) + " (line " +
+                    std::to_string(line_number) + ")";
+        return false;
+      }
+
+      if(separator_pos == std::string::npos) {
         break;
       }
-    }
-    if(!digits_only) {
-      out_error = "has a non-integer value '" + value + "' for '" + key + "' (line " +
-                  std::to_string(line_number) + ")";
-      return false;
-    }
-    // bounded so the conversion below cannot overflow; no fabric dimension comes
-    // anywhere near nine digits.
-    if(value.size() > 9) {
-      out_error = "has an out-of-range value '" + value + "' for '" + key + "' (line " +
-                  std::to_string(line_number) + ")";
-      return false;
-    }
-    const long numeric_value = std::stol(value);
-    if(numeric_value < known_key->minimum) {
-      out_error = "has '" + key + "' = " + value + ", below the minimum of " +
-                  std::to_string(known_key->minimum) + " (line " +
-                  std::to_string(line_number) + ")";
-      return false;
+      element_start = separator_pos + 1;
     }
 
     // kept as a string: that is how the config contract spells the CUSTOM
@@ -4740,16 +4908,40 @@ bool CompilerOpenFPGA_ql::Packing() {
                      "/../custom_layout.yml': the project path could not be canonicalized.\n");
         return false;
       }
-      // FIXME(aurora2#2291): a device generated from an override is stamped FIXED, so
-      // re-running on it with that same custom_layout.yml still present lands here. Give
-      // a generated package provenance in its config.json and exempt it, rather than
-      // relaxing this guard, which real silicon depends on.
       if(FileUtils::FileExists(custom_layout_yml_filepath)) {
-        ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
-                     layout_settings.config_json_path.string() +
-                     " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
-                     ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
-        return false;
+        // What REQ-005 refuses is a re-shape actually being ASKED for. A yml naming
+        // the geometry the device ALREADY HAS asks for nothing - there is no resize
+        // to refuse - and that is exactly what the flow hands itself: a generated
+        // device is stamped 'DEVICE_TYPE': 'FIXED', so on the next run the very yml
+        // that shaped it is still beside the project and lands here (aurora2#2291).
+        //
+        // So compare, and only refuse a genuine re-shape. No exemption and no
+        // provenance marker: 'DEVICE_TYPE' is plaintext in the same config.json, so
+        // anything that authenticated a "this was generated" field would be defeated
+        // by editing 'DEVICE_TYPE' instead. What matters is that the comparison
+        // cannot match by accident on real silicon, and an exact four-value match
+        // against the fabric in front of us cannot.
+        //
+        // A yml that does not parse is not a match either: we cannot tell what it
+        // asks for, so it is refused with the message below, unchanged.
+        json custom_layout_json;
+        std::string custom_layout_error;
+        std::string matched_geometry;
+        if(readCustomLayoutYML(custom_layout_yml_filepath, custom_layout_json, custom_layout_error) &&
+           QLDeviceManager::customLayoutMatchesDeviceGeometry(custom_layout_json, layout_settings,
+                                                              matched_geometry)) {
+          Message("[WARNING] Device '" + source_devicename + "' already has the geometry " +
+                  custom_layout_yml_filepath.string() + " asks for (" + matched_geometry +
+                  "), so no re-shape was requested. The override is ignored and the device "
+                  "is used as it ships.\n");
+        }
+        else {
+          ErrorMessage("Device '" + source_devicename + "' has 'DEVICE_TYPE': 'FIXED' in " +
+                       layout_settings.config_json_path.string() +
+                       " and cannot be re-shaped by " + custom_layout_yml_filepath.string() +
+                       ". Remove that file, or select a device whose 'DEVICE_TYPE' is 'CUSTOM'.\n");
+          return false;
+        }
       }
       // nothing asked for a re-shape: a fixed device runs the normal flow.
     }
@@ -5099,7 +5291,6 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
     }
 
-
 #if GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
     // so that the next stages can be run quicker.
@@ -5301,7 +5492,8 @@ bool CompilerOpenFPGA_ql::Packing() {
       // 1 copy the source device directory recursively to create new device.
       //   and derive the new devicename from the generated layoutname.
       std::string target_device_copy_devicename =
-          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName);
+          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName) +
+          generatedDeviceRunToken(ProjManager()->projectPath());
 
       // Backstop. If the derived name did not change, the "new" device directory
       // IS the source device directory, and the code just below deletes an
@@ -5364,6 +5556,27 @@ bool CompilerOpenFPGA_ql::Packing() {
           current_device_target.device_variant.p_v_t_corner /
           "vpr.xml.en";
       FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
+
+      // Step 1 copied the source corner wholesale, so its plaintext vpr.xml is still
+      // beside the vpr.xml.en just written. Device discovery globs 'vpr\.xml.*' and
+      // refuses a device carrying more VPR XMLs than OpenFPGA XMLs
+      // (QLDeviceManager.cpp:1262), so leaving both makes every generated device
+      // unselectable as a target: "Mismatched number of VPR XML(s) w.r.t OPENFPGA
+      // XML(s)". Only drop it once the encrypted arch is actually in place.
+      if(FileUtils::FileExists(target_device_vpr_xml_filepath)) {
+        std::filesystem::path stale_source_vpr_xml =
+            target_device_vpr_xml_filepath.parent_path() / "vpr.xml";
+        if(FileUtils::FileExists(stale_source_vpr_xml)) {
+          std::error_code stale_remove_ec;
+          std::filesystem::remove(stale_source_vpr_xml, stale_remove_ec);
+          if(stale_remove_ec) {
+            ErrorMessage("Could not remove the source arch left in the generated device: " +
+                         stale_source_vpr_xml.string() + " (" + stale_remove_ec.message() +
+                         "). The device would not resolve as a target.\n");
+            return false;
+          }
+        }
+      }
 
 #if GENERATE_RR_GRAPH_FPGA_AUTO
       // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
@@ -5458,9 +5671,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       // shaped and its add_layout.py is removed below, so it must not resolve to
       // a generation mode again on the next run. Rewrite its own config.json the
       // way the silicon release task writes a non-reshapable part - 'DEVICE_TYPE':
-      // 'FIXED' with the layout settings dropped - and leave the rest of the file
-      // (BRAM_SIZE, DSP_SIZE, IO_CAPACITY, DSP_TYPE, ...) alone.
-      // A pre-contract package carries neither key, so nothing is written for it.
+      // 'FIXED' with the layout settings dropped - and record the geometry that
+      // was actually built, which the copied-from-the-seed file otherwise still
+      // describes. The rest of the file (BRAM_SIZE, DSP_SIZE, IO_CAPACITY,
+      // DSP_TYPE, ...) is left alone.
+      // A pre-contract package carries neither DEVICE_TYPE key, so the stamping
+      // writes nothing for it; the geometry keys are descriptive and are written
+      // either way.
       {
         std::filesystem::path target_device_config_json_filepath =
             target_device_copy_dirpath / "config.json";
@@ -5478,12 +5695,68 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
           target_device_config_json_ifstream.close();
 
+          bool target_device_config_json_modified = false;
+
           if(target_device_config_json.is_object() &&
              (target_device_config_json.contains("DEVICE_TYPE") ||
               target_device_config_json.contains("DEVICE_TYPE_SETTINGS"))) {
             target_device_config_json["DEVICE_TYPE"] = "FIXED";
             target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
+            target_device_config_json_modified = true;
+          }
 
+          if(target_device_config_json.is_object()) {
+            // The geometry the generated device's own config.json has to
+            // record, taken from the fabric that was just built. The clone
+            // above starts from a copy of the SEED package, so without this a
+            // device generated at 30x30 still claims the seed's 'DEVICE_SIZE'
+            // ("8x6") and the seed's resource columns - a package describing a
+            // fabric that is not the one it ships. Read from the
+            // already-resolved current-run layout - the same resize event
+            // QLDeviceLayoutInfo has just observed via auto_device.log.
+            const QLDeviceLayoutInfo generated_layout_info(
+                QLDeviceManager::getInstance()->getCurrentDeviceTarget());
+            if(generated_layout_info.resolved()) {
+              const QLDeviceLayout& generated_layout = generated_layout_info.layout();
+              target_device_config_json["DEVICE_SIZE"] =
+                  std::to_string(generated_layout.arrayX) + "x" +
+                  std::to_string(generated_layout.arrayY);
+              // written even when empty: no BRAM column is a fact about this
+              // fabric, and an absent key would read as 'unknown'.
+              std::string bram_cols_text;
+              for(int col : generated_layout_info.bramCols()) {
+                bram_cols_text += (bram_cols_text.empty() ? "" : ",") + std::to_string(col);
+              }
+              std::string dsp_cols_text;
+              for(int col : generated_layout_info.dspCols()) {
+                dsp_cols_text += (dsp_cols_text.empty() ? "" : ",") + std::to_string(col);
+              }
+              target_device_config_json["BRAM_COLS"] = bram_cols_text;
+              target_device_config_json["DSP_COLS"] = dsp_cols_text;
+              target_device_config_json_modified = true;
+            }
+            else {
+              // not fatal - the fabric is built and usable either way - but
+              // absent beats inherited-and-wrong: the seed's geometry and
+              // column lists say nothing about this device, and anything
+              // reading them as its own would be reading a lie.
+              Message("[WARNING] Could not resolve the layout of '" +
+                      m_autoLayoutGeneratedLayoutName +
+                      "'; the generated device's config.json will not record "
+                      "its geometry or resource columns.\n");
+              if(target_device_config_json.erase("DEVICE_SIZE") > 0) {
+                target_device_config_json_modified = true;
+              }
+              if(target_device_config_json.erase("BRAM_COLS") > 0) {
+                target_device_config_json_modified = true;
+              }
+              if(target_device_config_json.erase("DSP_COLS") > 0) {
+                target_device_config_json_modified = true;
+              }
+            }
+          }
+
+          if(target_device_config_json_modified) {
             std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
             if(!target_device_config_json_ofstream.is_open()) {
               ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
@@ -5596,6 +5869,8 @@ bool CompilerOpenFPGA_ql::Packing() {
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
+  // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
+  QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
 }
@@ -7789,20 +8064,48 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
 
 
   // [optional] repack design contraint file
-  m_OpenFpgaRepackConstraintsFile = 
-      QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile();
-  if(m_OpenFpgaRepackConstraintsFile.empty()) {
+  //
+  // Precedence:
+  //   1. the file generated for this design, which already folds in the pcf's
+  //      'set_clock' commands and/or a user supplied file plus tool defaults.
+  //      Its path is set directly, never discovered by directory search,
+  //   2. a file named by 'bitstream_config_files -repack <file>' -- reachable
+  //      only when nothing was generated, i.e. the design has no clocks,
+  //   3. the normal project / tcl-dir / device lookup.
+  //
+  // NOTE: resolve into a local, and leave m_OpenFpgaRepackConstraintsFile
+  // holding whatever the user named. This function runs once per VPR stage, and
+  // GenerateIOFloorPlanConstraints reads that member to find the user's file.
+  // Overwriting it here with our own generated path made the next floorplanning
+  // pass see its own output, correctly reject it as "generated by a previous
+  // run", and fall back to tool defaults -- silently discarding the user's
+  // bindings on the last pass.
+  std::filesystem::path generated_repack_constraints =
+      std::filesystem::path(ProjManager()->projectPath()) /
+      (ProjManager()->projectName() + "_repack_design_constraint.xml");
+  std::filesystem::path repack_constraints_file;
+  if (FileUtils::FileExists(generated_repack_constraints)) {
+    repack_constraints_file = generated_repack_constraints;
+  }
+  else if (!m_OpenFpgaRepackConstraintsFile.empty()) {
+    repack_constraints_file = m_OpenFpgaRepackConstraintsFile;
+  }
+  else {
+    repack_constraints_file =
+        QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile();
+  }
+  if(repack_constraints_file.empty()) {
 
     Message("Proceeding without user provided repack design contraint file.");
   }
   else {
 
-    if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_OpenFpgaRepackConstraintsFile)) {
+    if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(repack_constraints_file)) {
       
-      std::filesystem::path repack_design_contraint_xml_en_path = m_OpenFpgaRepackConstraintsFile;
-      m_OpenFpgaRepackConstraintsFile = GenerateTempFilePath();
+      std::filesystem::path repack_design_contraint_xml_en_path = repack_constraints_file;
+      repack_constraints_file = GenerateTempFilePath();
 
-      if (!decryptDeviceFile(repack_design_contraint_xml_en_path, m_OpenFpgaRepackConstraintsFile,
+      if (!decryptDeviceFile(repack_design_contraint_xml_en_path, repack_constraints_file,
                              QLDeviceManager::getInstance()->deviceTypeDirPath(),
                              QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // empty string returned on error.
@@ -8074,14 +8377,22 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   // repack constraints
   // 1. pass in the user provided repack design constraint xml if available with '--design_constraints'
   std::string openfpga_repack_constraints_command = "repack";
-  if(!m_OpenFpgaRepackConstraintsFile.empty()) {
+  if(!repack_constraints_file.empty()) {
     openfpga_repack_constraints_command += 
-        " --design_constraints " + m_OpenFpgaRepackConstraintsFile.string();
+        " --design_constraints " + repack_constraints_file.string();
     result = ReplaceAll(result, "${REPACK_DESIGN_CONSTRAINT_XML}",
-                      m_OpenFpgaRepackConstraintsFile.string());
+                      repack_constraints_file.string());
   }
   else {
+    // ${REPACK_DESIGN_CONSTRAINT_XML} is deliberately left unsubstituted here,
+    // so a device template written in that form emits a malformed
+    // 'repack --design_constraints ${REPACK_DESIGN_CONSTRAINT_XML}'. Templates
+    // written as ${OPENFPGA_REPACK_CONSTRAINTS_COMMAND} degrade to a bare
+    // 'repack' instead. Both dialects are in use across device_data.
     Message("<warning> REPACK_DESIGN_CONSTRAINT_XML is not found in the device.\n");
+    Message("<warning> No repack design constraint file was resolved: design clocks"
+            " will not be bound to the fabric global clock pins, and bitstream"
+            " generation might not work properly.\n");
   }
   result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
                       openfpga_repack_constraints_command);
@@ -8943,7 +9254,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+  auto current_device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_target) ) {
     ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
@@ -9226,10 +9538,39 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--clocks_file");
     args.push_back(clocksFile.string());
   }
-  args.push_back("--arch_file");
-  args.push_back(m_architectureFile.string());
-  args.push_back("--fpga_layout");
-  args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
+  // No resolved layout, no geometry: the script would have to guess the device
+  // it is constraining.
+  const std::filesystem::path deviceLayoutFile = QLDeviceLayoutInfo::deviceLayoutJSONPath();
+  if (!FileUtils::FileExists(deviceLayoutFile)) {
+    QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+    const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
+    const QLDeviceLayoutSettings layout_settings =
+        device_manager->deviceLayoutSettings(current_device);
+    const bool deferred =
+        QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(layout_settings, current_device);
+    if (deferred) {
+      // This path is also reached from FinishSynthesisScript() and
+      // onQdcFileSaved()/onPcfFileSaved() - all of which run before Packing()
+      // has ever resolved an AUTO/RESOURCES device's geometry. Failing here
+      // would make Packing() itself unreachable whenever a QDC/PCF file is
+      // already present: Synthesis calls this on every run, this would always
+      // fail for a device that has never been packed, and "run Packing first"
+      // is not something the user can do if Synthesis can never complete.
+      // Skip instead - the caller already tolerates no constraints file being
+      // written (see the pcf 'no set_clock' case above), and floorplanning
+      // constraints simply regenerate once Packing has resolved the geometry.
+      WarningMessage("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                     "geometry is only known after Packing succeeds. Skipping IO "
+                     "Floor Plan Generation until then.");
+      return true;
+    }
+    ErrorMessage("device_layout.json not found: " + deviceLayoutFile.string() +
+                 "; it is the only source of floorplanning geometry. "
+                 "IO Floor Plan Generation Failed!");
+    return false;
+  }
+  args.push_back("--device_layout_file");
+  args.push_back(deviceLayoutFile.string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
 
@@ -9250,6 +9591,115 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   if (fs::exists(pin_constraint_filepath)) {
     args.push_back("--pcf_file");
     args.push_back(pin_constraint_filepath.string());
+  }
+
+  // repack design constraints.
+  //
+  // The generated file goes into the project directory, which
+  // deviceOpenFPGARepackDesignConstraintFile() consults first, so it outranks
+  // both a design supplied file next to the tcl script and the device copy.
+  //
+  // Which of those two wins is decided by generate_floorplanning.py, because the
+  // rule depends on the pcf contents and only the script parses the pcf:
+  //   1. 'set_clock' in the pcf  -> generate, overriding a design supplied file,
+  //   2. otherwise               -> the design supplied file is left to be picked
+  //                                 up verbatim, and nothing is generated.
+  // The script signals (2) simply by not writing the output file, so the lookup
+  // falls through to the tcl script directory on its own.
+  //
+  // The template is always the device copy (device_only), never the normal
+  // lookup: the normal lookup checks the project directory first, which is where
+  // we write, so it would feed a previous run's output back in as its own
+  // template and let stale clock bindings accumulate.
+  // The generated file goes into the project's generated area under a name of its
+  // own, and its path is handed to openfpga directly (see FinishOpenFPGAScript).
+  // Nothing about it is discovered by directory convention, which is what keeps
+  // it from ever colliding with -- or being mistaken for -- a file the user
+  // supplied, and keeps it out of the design's source directory.
+  std::filesystem::path repack_constraints_out =
+      std::filesystem::path(ProjManager()->projectPath()) /
+      (ProjManager()->projectName() + "_repack_design_constraint.xml");
+
+  // Always drop a previous run's generated file first. It lives in the directory
+  // the lookup consults before the tcl script directory, so leaving it behind
+  // would shadow a design supplied file, and would survive into a run that
+  // produces no constraints at all. Only on the path that actually runs the
+  // script -- the !forceOverwrite early return above keeps the previous output.
+  // Drop a previous run's output so a run that generates nothing (a design with
+  // no clocks) cannot inherit it. The name is ours alone, so this can never
+  // delete a file the user supplied.
+  std::error_code repack_remove_ec;
+  fs::remove(repack_constraints_out, repack_remove_ec);
+
+  std::filesystem::path repack_constraints_in =
+      QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile(
+          QLDeviceTarget(), /*device_only*/ true, /*report_missing*/ false);
+  if (!repack_constraints_in.empty()) {
+    if (QLDeviceManager::getInstance()->deviceFileIsEncrypted(repack_constraints_in)) {
+      std::filesystem::path repack_constraints_en_path = repack_constraints_in;
+      repack_constraints_in = GenerateTempFilePath();
+      if (!decryptDeviceFile(repack_constraints_en_path, repack_constraints_in,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
+        // Not fatal: without a template we skip generating the per-design repack
+        // constraints and the flow falls back to the device file as before.
+        Message("<warning> could not decrypt the repack design constraint file;"
+                " proceeding without 'set_clock' support.\n");
+        repack_constraints_in.clear();
+      }
+    }
+  }
+
+  // A repack design constraint file supplied with the design, either named
+  // explicitly by 'bitstream_config_files -repack' or found next to the tcl
+  // script by convention. The explicit form wins.
+  // A repack design constraint file supplied with the design: named explicitly by
+  // 'bitstream_config_files -repack', or found next to the tcl script by
+  // convention. The explicit form wins.
+  std::filesystem::path user_repack_constraints = m_OpenFpgaRepackConstraintsFile;
+  if (!user_repack_constraints.empty() && user_repack_constraints.is_relative()) {
+    // 'bitstream_config_files' stores a relative path prefixed with "..",
+    // because the openfpga script it is normally consumed by runs with the
+    // project directory as its working directory. We are called earlier, from
+    // packing, with a different working directory, so resolve it explicitly
+    // rather than letting the existence check below fail and silently drop it.
+    user_repack_constraints = std::filesystem::weakly_canonical(
+        std::filesystem::path(ProjManager()->projectPath()) / user_repack_constraints);
+  }
+  if (!user_repack_constraints.empty() &&
+      !FileUtils::FileExists(user_repack_constraints)) {
+    user_repack_constraints.clear();
+  }
+  if (user_repack_constraints.empty()) {
+    std::filesystem::path tcl_dir = QLSettingsManager::getTCLScriptDirPath();
+    if (!tcl_dir.empty()) {
+      user_repack_constraints = tcl_dir / std::string("repack_design_constraint.xml");
+      if (!FileUtils::FileExists(user_repack_constraints)) {
+        user_repack_constraints.clear();
+      }
+    }
+  }
+
+  if (!repack_constraints_in.empty()) {
+    args.push_back("--repack_constraints_in");
+    args.push_back(repack_constraints_in.string());
+    args.push_back("--repack_constraints_out");
+    args.push_back(repack_constraints_out.string());
+    if (!user_repack_constraints.empty()) {
+      args.push_back("--user_repack_constraints");
+      args.push_back(user_repack_constraints.string());
+    }
+  }
+  else if (user_repack_constraints.empty()) {
+    // No device copy and nothing supplied with the design. Nothing will bind the
+    // design clocks to the fabric global clock pins. Device templates written as
+    // '${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}' degrade to a bare 'repack'; the
+    // ones written as 'repack --design_constraints ${REPACK_DESIGN_CONSTRAINT_XML}'
+    // leave that variable unsubstituted and emit a malformed command.
+    Message("<warning> No repack design constraint file was found for this device,"
+            " and none was supplied with the design.");
+    Message("<warning> Design clocks will not be bound to the fabric global clock"
+            " pins, and bitstream generation might not work properly.");
   }
 
   int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
@@ -9835,11 +10285,11 @@ std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOuts
 }
 
 
-bool CompilerOpenFPGA_ql::decryptDeviceFile(
+bool CompilerOpenFPGA_ql::decryptDeviceFileToString(
     const std::filesystem::path& src_en,
-    const std::filesystem::path& dst_plain,
     const std::filesystem::path& deviceTypeDir,
-    const std::string& deviceTypeString) {
+    const std::string& deviceTypeString,
+    std::string& out_plaintext) {
   const std::filesystem::path cryptdb = deviceTypeDir / (deviceTypeString + "_Supp.db");
   m_cryptdbPath = cryptdb;
 
@@ -9860,10 +10310,23 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
   }
 
   qlcrypt::FileCrypt fc(keys);
-  std::string plaintext;
-  if (auto s = fc.decryptFile(src_en.string(), plaintext); !qlcrypt::ok(s)) {
+  out_plaintext.clear();
+  if (auto s = fc.decryptFile(src_en.string(), out_plaintext); !qlcrypt::ok(s)) {
     ErrorMessage(std::string("decryption failed: ") + src_en.string() +
                  " -> " + std::string(qlcrypt::toString(s)));
+    return false;
+  }
+  return true;
+}
+
+
+bool CompilerOpenFPGA_ql::decryptDeviceFile(
+    const std::filesystem::path& src_en,
+    const std::filesystem::path& dst_plain,
+    const std::filesystem::path& deviceTypeDir,
+    const std::string& deviceTypeString) {
+  std::string plaintext;
+  if (!decryptDeviceFileToString(src_en, deviceTypeDir, deviceTypeString, plaintext)) {
     return false;
   }
 
@@ -9873,6 +10336,11 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
     return false;
   }
   out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
+  // Close before testing the stream: an ofstream flushes on destruction, so
+  // returning out.good() while it is still open reports a write that failed at
+  // flush time (ENOSPC on a full disk) as success, leaving the caller to use a
+  // truncated device file.
+  out.close();
   return out.good();
 }
 
@@ -10054,13 +10522,13 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
   int total_brams_num = 0;
   int total_dsps_num = 0;
-  std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
+  std::vector<std::tuple<std::string, std::optional<int>>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
   for (const auto& [resource, value]: resources) {
     if (resource == "bram") {
-      total_brams_num = value;
+      total_brams_num = value.value_or(0);
     }
     if (resource == "dsp") {
-      total_dsps_num = value;
+      total_dsps_num = value.value_or(0);
     }
   }
 
@@ -11553,6 +12021,29 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       else{
         ErrorMessage("BRAM_TYPE specified is not TDP, TDP_ECC, SDP, or SDP_ECC.");
       }
+
+      // The DSP generation is selected by DSP_VERSION ("v4.0"), which replaces the
+      // older DSP_TYPE ("DSPV4"). Both are in the field during the migration and
+      // neither is universal -- some devices carry only the new key, the fixed
+      // TURNKEY parts still carry only the old one -- so read DSP_VERSION first
+      // and fall back to DSP_TYPE. Both are optional, unlike BRAM_TYPE above: a
+      // device with neither has no DSP generation to select, so a missing key
+      // means "not V4" rather than a configuration error.
+      bool dsp_v4 = false;
+      if (device_target_config_json.contains("DSP_VERSION")) {
+        std::string dsp_version =
+            device_target_config_json["DSP_VERSION"].get<std::string>();
+        // Match the major version so v4.1 and later keep working, not the
+        // exact string.
+        dsp_v4 = dsp_version.size() >= 2 &&
+                 (dsp_version[0] == 'v' || dsp_version[0] == 'V') &&
+                 dsp_version[1] == '4';
+      }
+      else if (device_target_config_json.contains("DSP_TYPE")) {
+        dsp_v4 =
+            device_target_config_json["DSP_TYPE"].get<std::string>() == "DSPV4";
+      }
+      synplifyScript->apply("${DSP4_VALUE}", dsp_v4 ? "1" : "0");
       designFiles += filesScript + "\n";
     }
 #ifdef _WIN32
@@ -12084,6 +12575,15 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   
   yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
+  // Aurora's floorplanning runs after synthesis (scripts/generate_floorplanning.py
+  // feeding VPR's --read_vpr_constraints), so these Yosys-level hooks have nothing
+  // to emit; substitute empty until such a feature exists. EVAL-MSC-CUSTOM ships
+  // them in its .ys, and without this every Yosys flow on it dies in yosys with
+  // "No such command: ${FLOORPLANNING_PRE_SYNTH}". Templates omitting them are
+  // unaffected: apply() on an absent placeholder is a no-op.
+  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}", std::string(""));
+  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}", std::string(""));
+
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
 #define STRINGIZE2(s) #s
@@ -12353,6 +12853,14 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
   
+  // Promote boundary registers into the IO tile flip-flops. Reset-carrying
+  // registers become io_sdffr/io_sdffnr, which only exist on a GPIO v3.0
+  // architecture, so this stays opt-in.
+  if( QLSettingsManager::getStringValue("yosys", "general", "ioff") == "checked" ) {
+
+    yosys_options += " -ioff";
+  }
+
   #ifdef __linux__
   if( !QLSettingsManager::getStringValue("yosys", "general", "de").empty() ) {
     yosys_options += std::string(" -de") + 

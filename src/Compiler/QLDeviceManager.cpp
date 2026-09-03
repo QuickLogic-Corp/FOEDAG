@@ -1,6 +1,7 @@
 #include "QLDeviceManager.h"
 
 #include <cstdlib>   // std::getenv
+#include <cctype>    // std::isspace
 
 #include <QObject>
 #include <QWidget>
@@ -18,6 +19,7 @@
 #include <QTextEdit>
 #include <QDebug>
 #include <QDomDocument>
+#include <QRegularExpression>
 #include <QFile>
 #include <QTextStream>
 #include <QJsonArray>
@@ -46,6 +48,7 @@
 
 #include <qlcrypt/qlcrypt.hpp>
 #include "CompilerOpenFPGA_ql.h"
+#include "QLDeviceLayoutInfo.h"
 #include "Compiler/Compiler.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
@@ -640,15 +643,17 @@ void QLDeviceManager::p_v_t_cornerChanged(const QString& p_v_t_corner_qstring)
   m_combobox_layout->blockSignals(true);
   m_combobox_layout->clear();
 
-  for (QLDeviceType device: this->device_list) {
+  for (QLDeviceType& device: this->device_list) {
     if (device.family == family) {
       std::string _foundrynode = convertToFoundryNode(device.foundry, device.node);
       if (_foundrynode == foundrynode) {
         if (device.devicename == devicename) {
-          for (QLDeviceVariant variant : device.device_variants) {
+          for (QLDeviceVariant& variant : device.device_variants) {
             if (variant.voltage_threshold == voltage_threshold) {
               if(variant.p_v_t_corner == p_v_t_corner) {
-                for(QLDeviceVariantLayout _layout : variant.device_variant_layouts) {
+                // the dropdown only shows the corner the user selected, so this
+                // resolves one variant's arch, not the whole install.
+                for(const QLDeviceVariantLayout& _layout : resolvedVariantLayouts(variant)) {
                   // ensure that the item being added has not been added before using std::set
                   // for performance reasons, keeping a vector as final container for future need of sorting.
                   if(singularity.insert(_layout.name).second == true) {
@@ -786,19 +791,54 @@ void QLDeviceManager::layoutChanged(const QString& layout_qstring) {
         // }
     }
 
-    // update the layout's resource information:
-    QString archInfo;
-    //archInfo += "| ";
-    archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
-    archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
-    archInfo += "\n";
-    archInfo += "clb: <b>" + QString::number(device_target_selected.device_variant_layout.clb) + " </b>| ";
-    archInfo += "dsp: <b>" + QString::number(device_target_selected.device_variant_layout.dsp) + " </b>| ";
-    archInfo += "bram: <b>" + QString::number(device_target_selected.device_variant_layout.bram) + " </b>| ";
-    archInfo += "io: <b>" + QString::number(device_target_selected.device_variant_layout.io) + " </b>";
-    m_device_resources_label->setText(archInfo);
+    updateDeviceResourcesLabel();
   }
 
+}
+
+
+// refreshes m_device_resources_label from device_target_selected's current
+// QLDeviceLayoutInfo. Recomputed live here rather than trusting the one-time
+// whole-catalog scan's snapshot on device_target_selected.device_variant_layout:
+// a FIXED/CUSTOM device's real counts are available the moment it is picked,
+// and this selection has not gone through setCurrentDeviceTarget() yet (Apply
+// has not been clicked), so nothing else would refresh that snapshot for it.
+// QLDeviceLayoutInfo is the single gate deciding what is known right now - "-"
+// rather than "0" for whatever it has not resolved yet (e.g. an AUTO/RESOURCES
+// device before Packing(), or one only being previewed, not yet applied).
+//
+// Also refreshes device_layout.json on disk for this selection, by explicit
+// request: every combo change - not only Apply - keeps that file matching
+// whatever is currently picked here, deleting it when the pick is
+// unresolved (AUTO/RESOURCES before Packing()).
+void QLDeviceManager::updateDeviceResourcesLabel() {
+
+  if(device_manager_widget == nullptr) {
+    return;
+  }
+
+  QLDeviceLayoutInfo::refresh(device_target_selected);
+
+  const auto resourceText = [](const std::optional<int>& count) {
+    return count.has_value() ? QString::number(*count) : QString("-");
+  };
+  std::optional<int> clb_count, dsp_count, bram_count, io_count;
+  for (const auto& [resource_name, resource_count] :
+       deviceResourceInformation(device_target_selected)) {
+    if (resource_name == "clb") clb_count = resource_count;
+    if (resource_name == "dsp") dsp_count = resource_count;
+    if (resource_name == "bram") bram_count = resource_count;
+    if (resource_name == "io") io_count = resource_count;
+  }
+  QString archInfo;
+  archInfo += "width: <b>" + QString::number(device_target_selected.device_variant_layout.width) + " </b>| ";
+  archInfo += "height: <b>" + QString::number(device_target_selected.device_variant_layout.height) + " </b>| ";
+  archInfo += "\n";
+  archInfo += "clb: <b>" + resourceText(clb_count) + " </b>| ";
+  archInfo += "dsp: <b>" + resourceText(dsp_count) + " </b>| ";
+  archInfo += "bram: <b>" + resourceText(bram_count) + " </b>| ";
+  archInfo += "io: <b>" + resourceText(io_count) + " </b>";
+  m_device_resources_label->setText(archInfo);
 }
 
 
@@ -977,6 +1017,10 @@ void QLDeviceManager::parseDeviceData() {
   // clear the list before parsing
   device_list.clear();
 
+  // the dedupe in reportDeviceDataError() covers one walk: a re-parse after a
+  // device was added or its config.json fixed has to be able to report again.
+  reported_device_data_error_set.clear();
+
   // devices already discovered, keyed by device type string, so that the same device
   // appearing in two roots is reported rather than silently duplicated (REQ-006).
   std::set<std::string> discovered_device_type_set;
@@ -1099,47 +1143,9 @@ void QLDeviceManager::parseDeviceData() {
   } // for each device_data root
 
 
-  // parse resources information for each device variant in the device_list:
-  for (QLDeviceType &device: device_list) {
-
-    for (QLDeviceVariant &device_variant: device.device_variants) {
-
-      for (QLDeviceVariantLayout &device_variant_layout: device_variant.device_variant_layouts) {
-
-        QLDeviceTarget _device_target = convertToDeviceTarget(device.family,
-                                                              device.foundry,
-                                                              device.node,
-                                                              device.devicename,
-                                                              device_variant.voltage_threshold,
-                                                              device_variant.p_v_t_corner,
-                                                              device_variant_layout.name);
-
-        std::vector<std::tuple<std::string, int>> resources_vector = deviceResourceInformation(_device_target);
-
-        for (const auto& resource_tuple : resources_vector) {
-          
-          std::string resourcename = std::get<0>(resource_tuple);
-          int resourcecount = std::get<1>(resource_tuple);
-
-          // this part is a carry-over, we should make the layout resource structure
-          // in c++ code generic, so we don't need to have these ifs ? TODO future
-          if(resourcename == "clb") {
-            device_variant_layout.clb = resourcecount;
-          }
-          if(resourcename == "io") {
-            device_variant_layout.io = resourcecount;
-          }
-          if(resourcename == "dsp") {
-            device_variant_layout.dsp = resourcecount;
-          }
-          if(resourcename == "bram") {
-            device_variant_layout.bram = resourcecount;
-          }
-        }
-      }
-      // collectDeviceVariantAvailableResources(device_variant);
-    }
-  }
+  // Resource counts are filled per variant by populateVariantLayoutResources()
+  // when that variant's layouts are resolved - they are keyed by layout name, so
+  // there is nothing to fill until the layouts exist.
 
 
   // DEBUG
@@ -1339,16 +1345,11 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
     device_variant.voltage_threshold = voltage_threshold;
     device_variant.p_v_t_corner = p_v_t_corner;
 
-    // list and store all the layouts available in this device_variant:
-    // pass the device dir we were given: this device may live in an external root, and its
-    // encrypted vpr.xml can only be decrypted with the _Supp.db sitting beside it.
-    device_variant.device_variant_layouts = listDeviceVariantLayouts(family,
-                                                                     foundry,
-                                                                     node,
-                                                                     devicename,
-                                                                     voltage_threshold,
-                                                                     p_v_t_corner,
-                                                                     device_data_dir_path_c);
+    // Record the device dir rather than reading the layouts now. Resolving them
+    // decrypts the arch, and discovery has no idea which variant the caller wants.
+    // The dir has to be remembered: this device may live in an external root, and
+    // its encrypted vpr.xml can only be decrypted with the _Supp.db beside it.
+    device_variant.device_data_dir_path = device_data_dir_path_c;
 
     // add the variant to the list
     device_variants.push_back(device_variant);
@@ -1402,15 +1403,21 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
   std::filesystem::path device_variant_dir = device_data_dir_path / voltage_threshold / p_v_t_corner;
 
   
-  std::filesystem::path source_vpr_xml_filepath;
-  std::filesystem::path vpr_xml_filepath;
+  // Read the arch into memory. The encrypted case decrypts to a buffer rather
+  // than staging ~12MB in /tmp: this is parsed in-process, so the file only ever
+  // existed to be read straight back, and a run killed before CleanTempFiles()
+  // stranded it.
+  std::filesystem::path source_vpr_xml_filepath = device_variant_dir / "vpr.xml";
+  QByteArray vpr_xml_contents;
 
-  // check for unencrypted vpr xml file first:
-  source_vpr_xml_filepath = device_variant_dir / "vpr.xml";
-  
   if (FileUtils::FileExists(source_vpr_xml_filepath)) {
-    // use this file as is
-    vpr_xml_filepath = source_vpr_xml_filepath;
+    QFile plaintext_file(source_vpr_xml_filepath.string().c_str());
+    if (!plaintext_file.open(QFile::ReadOnly)) {
+      std::cout << "Cannot open file: " + source_vpr_xml_filepath.string() << std::endl;
+      return device_variant_layouts;
+    }
+    vpr_xml_contents = plaintext_file.readAll();
+    plaintext_file.close();
   }
   else {
     // we should have an encrypted vpr xml file:
@@ -1420,43 +1427,31 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
       // this means we don't have a vpr xml file, which is an error!
       std::cout << "vpr xml: " + source_vpr_xml_filepath.string() << std::endl;
       std::cout << "vpr xml not found!" << std::endl;
-      ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
       return device_variant_layouts;
     }
 
-    // decrypt the encrypted vpr xml file. and then use that:
     CompilerOpenFPGA_ql* compiler =
         (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
-    vpr_xml_filepath = compiler->GenerateTempFilePath();
-
-    if (!compiler->decryptDeviceFile(
-            source_vpr_xml_filepath, vpr_xml_filepath, device_data_dir_path,
-            DeviceTypeString(family, foundry, node, devicename))) {
-      compiler->CleanTempFiles();
+    std::string plaintext;
+    if (!compiler->decryptDeviceFileToString(
+            source_vpr_xml_filepath, device_data_dir_path,
+            DeviceTypeString(family, foundry, node, devicename), plaintext)) {
       return device_variant_layouts;
     }
+    // fromStdString copies, so the buffer outlives 'plaintext' going out of
+    // scope below. Do not "optimise" this to fromRawData().
+    vpr_xml_contents = QByteArray::fromStdString(plaintext);
   }
 
-
-  // open file with Qt
-  // qDebug() << "vpr xml" << QString::fromStdString(vpr_xml_filepath.string());
-  QFile file(vpr_xml_filepath.string().c_str());
-  if (!file.open(QFile::ReadOnly)) {
-    std::cout << "Cannot open file: " + vpr_xml_filepath.string() << std::endl;
-    ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
-    return device_variant_layouts;
-  }
-
-  // parse as XML with Qt
+  // parse as XML with Qt.
+  // Keep the argument a QByteArray: setContent(const QString&) is also viable for
+  // a single-argument call, so passing a QString compiles silently and parses the
+  // arch through QString conversion instead of honouring its XML declaration.
   QDomDocument doc;
-  if (!doc.setContent(&file)) {
-    file.close();
-    std::cout << "Incorrect file: " + vpr_xml_filepath.string() << std::endl;
-    ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles();
+  if (!doc.setContent(vpr_xml_contents)) {
+    std::cout << "Incorrect file: " + source_vpr_xml_filepath.string() << std::endl;
     return device_variant_layouts;
   }
-  file.close();
-  ((CompilerOpenFPGA_ql* )GlobalSession->GetCompiler())->CleanTempFiles(); // the decrypted file is not needed anymore.
 
 
   QDomNodeList nodes = doc.elementsByTagName("fixed_layout");
@@ -1507,6 +1502,81 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
 
   return device_variant_layouts;
 }
+
+
+const std::vector<QLDeviceVariantLayout>& QLDeviceManager::resolvedVariantLayouts(
+    QLDeviceVariant& device_variant) {
+
+  std::lock_guard<std::recursive_mutex> resolution_lock(layout_resolution_mutex);
+
+  if (device_variant.layouts_resolved) {
+    return device_variant.device_variant_layouts;
+  }
+
+  // Mark resolved first: a device whose arch is missing or unparseable yields no
+  // layouts, and retrying that decrypt on every lookup would be the old sweep.
+  device_variant.layouts_resolved = true;
+
+  device_variant.device_variant_layouts = listDeviceVariantLayouts(
+      device_variant.family, device_variant.foundry, device_variant.node,
+      device_variant.devicename, device_variant.voltage_threshold,
+      device_variant.p_v_t_corner, device_variant.device_data_dir_path);
+
+  populateVariantLayoutResources(device_variant);
+
+  return device_variant.device_variant_layouts;
+}
+
+
+void QLDeviceManager::resolveAllVariantLayouts() {
+
+  for (QLDeviceType& device : device_list) {
+    for (QLDeviceVariant& device_variant : device.device_variants) {
+      resolvedVariantLayouts(device_variant);
+    }
+  }
+}
+
+
+void QLDeviceManager::populateVariantLayoutResources(QLDeviceVariant& device_variant) {
+
+  // Built once: only the layout changes per iteration, and copying the variant
+  // (which owns the layouts vector) inside the loop is quadratic.
+  QLDeviceTarget device_target;
+  device_target.device_variant = device_variant;
+
+  for (QLDeviceVariantLayout& device_variant_layout: device_variant.device_variant_layouts) {
+
+    // convertToDeviceTarget() searches device_list by layout name, which would
+    // resolve every other variant to answer what we already hold.
+    device_target.device_variant_layout = device_variant_layout;
+
+    std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+        deviceResourceInformation(device_target);
+
+    for (const auto& resource_tuple : resources_vector) {
+
+      std::string resourcename = std::get<0>(resource_tuple);
+      std::optional<int> resourcecount = std::get<1>(resource_tuple);
+
+      // this part is a carry-over, we should make the layout resource structure
+      // in c++ code generic, so we don't need to have these ifs ? TODO future
+      if(resourcename == "clb") {
+        device_variant_layout.clb = resourcecount;
+      }
+      if(resourcename == "io") {
+        device_variant_layout.io = resourcecount;
+      }
+      if(resourcename == "dsp") {
+        device_variant_layout.dsp = resourcecount;
+      }
+      if(resourcename == "bram") {
+        device_variant_layout.bram = resourcecount;
+      }
+    }
+  }
+}
+
 
 std::string QLDeviceManager::DeviceString(std::string family,
                                           std::string foundry,
@@ -1574,17 +1644,23 @@ bool QLDeviceManager::DeviceExists(QLDeviceTarget device_target) {
 
   // loop through the device_list and check if a matching device exists.
 
-  for (QLDeviceType device: device_list) {
-    for (QLDeviceVariant device_variant: device.device_variants) {
-      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
-        if(device_target.device_variant.family            == device_variant.family &&
-           device_target.device_variant.foundry           == device_variant.foundry &&
-           device_target.device_variant.node              == device_variant.node &&
-           device_target.device_variant.devicename        == device_variant.devicename &&
-           device_target.device_variant.voltage_threshold == device_variant.voltage_threshold &&
-           device_target.device_variant.p_v_t_corner      == device_variant.p_v_t_corner &&
-           device_target.device_variant_layout.name       == device_variant_layout.name) {
+  for (QLDeviceType& device: device_list) {
+    for (QLDeviceVariant& device_variant: device.device_variants) {
 
+      // Compare the device identity first. The layout name was the last of seven
+      // conditions, so every variant in the install used to be resolved - and
+      // resolving one decrypts its arch - to answer about a single device.
+      if(device_target.device_variant.family            != device_variant.family ||
+         device_target.device_variant.foundry           != device_variant.foundry ||
+         device_target.device_variant.node              != device_variant.node ||
+         device_target.device_variant.devicename        != device_variant.devicename ||
+         device_target.device_variant.voltage_threshold != device_variant.voltage_threshold ||
+         device_target.device_variant.p_v_t_corner      != device_variant.p_v_t_corner) {
+        continue;
+      }
+
+      for (const QLDeviceVariantLayout& device_variant_layout: resolvedVariantLayouts(device_variant)) {
+        if(device_target.device_variant_layout.name == device_variant_layout.name) {
           return true;
         }
       }
@@ -1617,9 +1693,24 @@ QLDeviceTarget QLDeviceManager::convertToDeviceTarget(std::string device_string)
 
   // loop through the device_list and check if a matching device exists.
 
-  for (QLDeviceType device: device_list) {
-    for (QLDeviceVariant device_variant: device.device_variants) {
-      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
+  for (QLDeviceType& device: device_list) {
+    for (QLDeviceVariant& device_variant: device.device_variants) {
+
+      // DeviceString() appends '_<layout>' to the variant identity, so a string
+      // naming this variant must start with that identity plus '_'. Rejecting on
+      // the identity keeps the arch decrypt to the one variant that can match.
+      std::string variant_prefix = DeviceString(device_variant.family,
+                                                device_variant.foundry,
+                                                device_variant.node,
+                                                device_variant.devicename,
+                                                device_variant.voltage_threshold,
+                                                device_variant.p_v_t_corner,
+                                                std::string()) + "_";
+      if(device_string.rfind(variant_prefix, 0) != 0) {
+        continue;
+      }
+
+      for (const QLDeviceVariantLayout& device_variant_layout: resolvedVariantLayouts(device_variant)) {
         std::string current_device_string = DeviceString(device_variant.family,
                                                          device_variant.foundry,
                                                          device_variant.node,
@@ -1684,6 +1775,11 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
   // std::cout << "newProjectMode: " << newProjectMode << std::endl;
   // std::cout << "device_target: " << convertToDeviceString(device_target) << std::endl;
 
+  // before switching, drop any auto_device.log left by the device being left
+  // behind - it can only describe that device's fabric, not the new one's,
+  // even when both use AUTO/RESOURCES sizing.
+  QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(this->device_target, device_target);
+
   if(isDeviceTargetValid(device_target)) {
 
     this->device_target = device_target;
@@ -1694,6 +1790,12 @@ void QLDeviceManager::setCurrentDeviceTarget(QLDeviceTarget device_target) {
     QLDeviceTarget empty_device_target;
     this->device_target = empty_device_target;
   }
+
+  // The device determines its config.json, and for a FIXED or LAYOUT_MODE: CUSTOM
+  // package that file already states the fabric geometry - so this is the earliest
+  // point device_layout.json can be written. AUTO and RESOURCES have no answer yet
+  // and are picked up again at the end of packing.
+  QLDeviceLayoutInfo::refresh(this->device_target);
 }
 
 
@@ -1971,7 +2073,14 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     else {
       for (QLDeviceVariant variant: device_variants) {
         std::cout << "  variant: " +  variant.family + " " + variant.foundry + " " + variant.node + " " + variant.devicename + " " + variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
-        for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
+        // Read the layouts directly rather than through resolvedVariantLayouts():
+        // this device lives outside device_data, and populateVariantLayoutResources()
+        // would resolve resources.json via the device coordinates, picking up an
+        // installed device's resource counts instead of this one's.
+        for (const QLDeviceVariantLayout& layout: listDeviceVariantLayouts(
+                 variant.family, variant.foundry, variant.node, variant.devicename,
+                 variant.voltage_threshold, variant.p_v_t_corner,
+                 variant.device_data_dir_path)) {
           std::cout <<  "    layout_name:" + layout.name + "\n" +
                         "              w:" + std::to_string(layout.width) + "\n" +
                         "              h:" + std::to_string(layout.height) //+ "\n" +
@@ -2036,6 +2145,19 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
           // and a flag would silently rot the first time a rule is added without it.
           const size_t encrypt_list_size_before = source_device_data_file_list_to_encrypt.size();
           const size_t copy_list_size_before = source_device_data_file_list_to_copy.size();
+
+          // copy everything under 'aurora/IP_Catalog/' (the device-local IP catalog)
+          // as-is, and skip all the rules below for these files. the rules below sort
+          // files by extension, which mishandles catalog content: .eblif netlists match
+          // nothing (dropped), .xml would get encrypted (unreadable by ipgenerate),
+          // .md would be skipped. the catalog must arrive complete and unmodified,
+          // so copy the whole directory and don't let any other rule touch it.
+          if (std::regex_match(dir_entry.path().string(),
+                                std::regex(R"(.+[\/\\]aurora[\/\\]IP_Catalog[\/\\].*)",
+                                std::regex::icase))) {
+            source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
+            continue;
+          }
 
           // skip entries which are in specific directories in device data:
           // skip '/extra/' or '\extra\'
@@ -3962,7 +4084,6 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   std::string major = DEFAULT_MAJOR_VERSION;
   std::string minor = DEFAULT_MINOR_VERSION;
 
-  // loadDeviceConfigJSON() transparently handles the encrypted config.json.en.
   json device_target_config_json;
   if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
 
@@ -4000,6 +4121,68 @@ std::string QLDeviceManager::deviceDSPVersion(QLDeviceTarget device_target) {
   }
 
   return major + "_" + minor;
+}
+
+std::string QLDeviceManager::normalizeVersionString(const std::string& value) {
+
+  static const std::string DEFAULT_MINOR_VERSION = "0";
+
+  // leading non-digits ("v", "DSPV") skipped; group 1 = major, group 2 = optional
+  // minor after a '.' or '_'. "v2.4" -> 2/4, "v2" -> 2/default, "2_4" -> 2/4.
+  static const std::regex version_re(R"(^\D*(\d+)(?:[._](\d+))?)");
+
+  std::smatch m;
+  if( std::regex_search(value, m, version_re) ) {
+    return m[1].str() + "." +
+           (m[2].matched ? m[2].str() : DEFAULT_MINOR_VERSION);
+  }
+
+  return std::string();
+}
+
+bool QLDeviceManager::parseVersionString(const std::string& version, int& major, int& minor) {
+
+  // Strict: this consumes normalizeVersionString() output, so anything else is a
+  // caller error, not something to salvage.
+  static const std::regex parts_re(R"(^(\d+)\.(\d+)$)");
+
+  std::smatch m;
+  if( !std::regex_match(version, m, parts_re) ) {
+    return false;
+  }
+
+  // Digits only, so the sole failure left is overflow. Parsed into locals first so
+  // a throw on the minor cannot leave the caller with a half-written major.
+  int parsed_major = 0;
+  int parsed_minor = 0;
+  try {
+    parsed_major = std::stoi(m[1].str());
+    parsed_minor = std::stoi(m[2].str());
+  }
+  catch(const std::exception&) {
+    return false;
+  }
+
+  major = parsed_major;
+  minor = parsed_minor;
+
+  return true;
+}
+
+std::string QLDeviceManager::deviceCRRVersion(QLDeviceTarget device_target) {
+
+  json device_target_config_json;
+  if(loadDeviceConfigJSON(device_target, device_target_config_json)) {
+
+    if( device_target_config_json.contains("CRR_VERSION") ) {
+      const auto& crr_version = device_target_config_json["CRR_VERSION"];
+      if( crr_version.is_string() ) {
+        return normalizeVersionString(crr_version.get<std::string>());
+      }
+    }
+  }
+
+  return std::string();
 }
 
 // Spelling cleanup shared by both layout-setting normalisers: trim, drop an
@@ -4080,6 +4263,15 @@ static bool normalizeLayoutMode(const std::string& value, std::string& out_layou
   return false;
 }
 
+
+// The config.json keys this file reads. Spelled once here so a rename in the
+// device data contract is a single edit, and a typo is a compile error rather
+// than a key that silently never matches.
+constexpr const char* CONFIG_KEY_DEVICE_TYPE = "DEVICE_TYPE";
+constexpr const char* CONFIG_KEY_DEVICE_TYPE_SETTINGS = "DEVICE_TYPE_SETTINGS";
+constexpr const char* CONFIG_KEY_LAYOUT_MODE = "LAYOUT_MODE";
+
+
 QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget device_target) {
 
   QLDeviceLayoutSettings layout_settings;
@@ -4118,44 +4310,75 @@ QLDeviceLayoutSettings QLDeviceManager::deviceLayoutSettings(QLDeviceTarget devi
   }
   layout_settings.config_found = true;
 
-  if( device_target_config_json.contains("DEVICE_TYPE") ) {
-    const auto& device_type = device_target_config_json["DEVICE_TYPE"];
+  if( device_target_config_json.contains(CONFIG_KEY_DEVICE_TYPE) ) {
+    const auto& device_type = device_target_config_json[CONFIG_KEY_DEVICE_TYPE];
     if( device_type.is_string() &&
         normalizeDeviceType(device_type.get<std::string>(), layout_settings.device_type) ) {
       layout_settings.device_type_present = true;
     }
     else {
       layout_settings.invalid = true;
-      layout_settings.invalid_key = "DEVICE_TYPE";
+      layout_settings.invalid_key = CONFIG_KEY_DEVICE_TYPE;
       layout_settings.invalid_value = device_type.is_string() ? device_type.get<std::string>()
                                                              : device_type.dump();
       return layout_settings;
     }
   }
 
-  if( device_target_config_json.contains("DEVICE_TYPE_SETTINGS") ) {
-    const auto& device_type_settings = device_target_config_json["DEVICE_TYPE_SETTINGS"];
+  if( device_target_config_json.contains(CONFIG_KEY_DEVICE_TYPE_SETTINGS) ) {
+    const auto& device_type_settings = device_target_config_json[CONFIG_KEY_DEVICE_TYPE_SETTINGS];
     if( !device_type_settings.is_object() ) {
       layout_settings.invalid = true;
-      layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS";
+      layout_settings.invalid_key = CONFIG_KEY_DEVICE_TYPE_SETTINGS;
       layout_settings.invalid_value = device_type_settings.dump();
       return layout_settings;
     }
     layout_settings.device_type_settings_present = true;
 
-    if( device_type_settings.contains("LAYOUT_MODE") ) {
-      const auto& layout_mode = device_type_settings["LAYOUT_MODE"];
+    if( device_type_settings.contains(CONFIG_KEY_LAYOUT_MODE) ) {
+      const auto& layout_mode = device_type_settings[CONFIG_KEY_LAYOUT_MODE];
       if( layout_mode.is_string() &&
           normalizeLayoutMode(layout_mode.get<std::string>(), layout_settings.layout_mode) ) {
         layout_settings.layout_mode_present = true;
       }
       else {
         layout_settings.invalid = true;
-        layout_settings.invalid_key = "DEVICE_TYPE_SETTINGS.LAYOUT_MODE";
+        layout_settings.invalid_key =
+            std::string(CONFIG_KEY_DEVICE_TYPE_SETTINGS) + "." + CONFIG_KEY_LAYOUT_MODE;
         layout_settings.invalid_value = layout_mode.is_string() ? layout_mode.get<std::string>()
                                                                : layout_mode.dump();
         return layout_settings;
       }
+    }
+  }
+
+  // the geometry the package records for itself. Read last and never fatally:
+  // these keys describe the fabric, they do not select a code path, so a package
+  // that spells one oddly must still run.
+  struct GeometryKey {
+    const char* name;
+    bool* present;
+    std::string* value;
+  };
+  const GeometryKey geometry_keys[] = {
+    { "DEVICE_SIZE", &layout_settings.device_size_present, &layout_settings.device_size },
+    { "BRAM_COLS",   &layout_settings.bram_cols_present,   &layout_settings.bram_cols   },
+    { "DSP_COLS",    &layout_settings.dsp_cols_present,    &layout_settings.dsp_cols    },
+  };
+  for( const GeometryKey& geometry_key : geometry_keys ) {
+    if( !device_target_config_json.contains(geometry_key.name) ) {
+      continue;
+    }
+    const auto& geometry_value = device_target_config_json[geometry_key.name];
+    // the contract spells these as strings ("BRAM_COLS": "12,25"), but a
+    // single-column package hand-edited to a bare 3 means the same thing.
+    if( geometry_value.is_string() ) {
+      *geometry_key.value = geometry_value.get<std::string>();
+      *geometry_key.present = true;
+    }
+    else if( geometry_value.is_number_unsigned() ) {
+      *geometry_key.value = std::to_string(geometry_value.get<unsigned long long>());
+      *geometry_key.present = true;
     }
   }
 
@@ -4198,51 +4421,253 @@ bool QLDeviceManager::loadDeviceConfigJSON(QLDeviceTarget device_target, json& o
 }
 
 
-std::vector<std::tuple<std::string, int>> QLDeviceManager::deviceResourceInformation(QLDeviceTarget device_target){
+// Trailing junk is rejected: a half-parsed geometry would silently mis-size a device.
+bool QLDeviceManager::parseWholeNumber(const std::string& text, int& out_value) {
 
-  // the resource information for the target device is stored in a "resources.json" in the device_type_dir_path
-  // as the resouces are (must be) the same for all the variants of a device-type.
-  // {
-  //   "layout_1": {
-  //     "resourcename1": resourcecount1,
-  //     "resourcename2": resourcecount2,
-  //     ...
-  //   },
-  //   "layout_2": {
-  //     "resourcename1": resourcecount1,
-  //     "resourcename2": resourcecount2,
-  //     ...
-  //   },
-  //   ...
-  // }
-
-  // we extract the information for specific layout from the json file, and structure it into a vector of tuples.
-  // each tuple has information about a specific resource type and its count, such as clb, dsp, bram etc.
-  // vector for the device target will have tuples like below:
-  // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
-
-  std::vector<std::tuple<std::string, int>> resources_vector;
-
-  std::filesystem::path device_resources_json_filepath = deviceTypeDirPath(device_target) / std::string("resources.json");
-
-  if(FileUtils::FileExists(device_resources_json_filepath)) {
-
-    std::ifstream device_resources_json_path_ifstream(device_resources_json_filepath.string());
-    json device_resources_json = json::parse(device_resources_json_path_ifstream);
-
-    // std::cout << device_resources_json.dump() << std::endl;
-    
-    if( device_resources_json.contains(device_target.device_variant_layout.name) ) {
-      auto layout_resources_json = device_resources_json[device_target.device_variant_layout.name];
-      for (auto [resource_name, resource_count] : layout_resources_json.items()) {
-        // std::cout << "resource_name: " << resource_name << std::endl;
-        // std::cout << "resource_count: " << resource_count << std::endl;
-        resources_vector.push_back(std::make_tuple(resource_name, resource_count));
-      }
+  try {
+    size_t consumed = 0;
+    const int value = std::stoi(text, &consumed);
+    while( (consumed < text.size()) && std::isspace(static_cast<unsigned char>(text[consumed])) ) {
+      consumed++;
     }
+    if(consumed != text.size()) {
+      return false;
+    }
+    // stoi accepts a sign, but nothing config.json spells this way has a
+    // meaningful negative value - a geometry least of all.
+    if(value < 0) {
+      return false;
+    }
+    out_value = value;
+    return true;
+  }
+  catch(const std::exception&) {
+    return false;
+  }
+}
+
+
+bool QLDeviceManager::parseDeviceGeometry(const std::string& text, int& out_x, int& out_y) {
+
+  const size_t separator = text.find_first_of("xX");
+  if(separator == std::string::npos) {
+    return false;
+  }
+
+  return parseWholeNumber(text.substr(0, separator), out_x) &&
+         parseWholeNumber(text.substr(separator + 1), out_y);
+}
+
+
+// Derive the layout's resource counts from its resolved QLDeviceLayoutInfo.
+//
+// This is the only source of resource counts. They were previously read from a
+// resources.json generated by running vpr over the architecture, which a package
+// cut outside the Aurora tree never had; the counts are a pure function of the
+// resolved layout (issue #2257):
+//
+//   bram = <bram columns> * floor(arrayY / <bram tile height>)
+//   dsp  = <dsp columns>  * floor(arrayY / <dsp tile height>)
+//   clb  = (arrayX - <bram columns> - <dsp columns>) * arrayY
+//   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
+//
+// An AUTO/RESOURCES device that has not been through Packing() yet - or one
+// only being previewed, not yet the project's actual device - is expected to
+// be unresolved; deriveDeviceResourceInformation() checks layout_info.resolved()
+// itself to tell that apart from a genuine config.json problem.
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveResourceCounts(
+    const QLDeviceLayoutInfo& layout_info, std::string* out_error) {
+
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector;
+
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = reason;
+    }
+    return resources_vector;
+  };
+
+  if( !layout_info.resolved() ) {
+    return fail("layout is not resolved");
+  }
+
+  const QLDeviceLayout& layout = layout_info.layout();
+
+  int bram_tile_width = 0;
+  int bram_tile_height = 0;
+  int dsp_tile_width = 0;
+  int dsp_tile_height = 0;
+  if( !parseDeviceGeometry(layout.bramSize, bram_tile_width, bram_tile_height) || (bram_tile_height <= 0) ) {
+    return fail("\"BRAM_SIZE\": \"" + layout.bramSize + "\" is not a positive <x>x<y> geometry");
+  }
+  if( !parseDeviceGeometry(layout.dspSize, dsp_tile_width, dsp_tile_height) || (dsp_tile_height <= 0) ) {
+    return fail("\"DSP_SIZE\": \"" + layout.dspSize + "\" is not a positive <x>x<y> geometry");
+  }
+
+  // The clb count subtracts one array column per entry of bramCols/dspCols, so a
+  // block wider than a single tile would leave clb too high and the columns-fit
+  // check too lax. Every QLF_K6N10 package is 1xN today; decline rather than
+  // report a count computed on an assumption the package contradicts, and whoever
+  // ships the first wide block gets this message instead of a wrong number.
+  const std::pair<const char*, int> block_widths[] = {
+      {"BRAM_SIZE", bram_tile_width},
+      {"DSP_SIZE",  dsp_tile_width},
+  };
+  for(const auto& [key, width] : block_widths) {
+    if(width != 1) {
+      return fail(std::string("\"") + key + "\" is " + std::to_string(width) +
+                  " tiles wide, and the clb count assumes one tile per block column");
+    }
+  }
+  if( !layout.ioCapacity.has_value() ) {
+    return fail("config.json has no usable \"IO_CAPACITY\" key");
+  }
+
+  const int array_x = layout.arrayX;
+  const int array_y = layout.arrayY;
+  const int bram_columns = static_cast<int>(layout.bramCols.size());
+  const int dsp_columns = static_cast<int>(layout.dspCols.size());
+  if( (bram_columns + dsp_columns) >= array_x ) {
+    // the column lists do not fit the array: report nothing rather than a
+    // negative clb count.
+    return fail("\"BRAM_COLS\" (" + std::to_string(bram_columns) + ") + \"DSP_COLS\" (" +
+                std::to_string(dsp_columns) + ") do not fit an array " +
+                std::to_string(array_x) + " columns wide");
+  }
+
+  resources_vector.push_back(std::make_tuple(std::string("clb"),
+      std::optional<int>((array_x - bram_columns - dsp_columns) * array_y)));
+  resources_vector.push_back(std::make_tuple(std::string("bram"),
+      std::optional<int>(bram_columns * (array_y / bram_tile_height))));
+  resources_vector.push_back(std::make_tuple(std::string("dsp"),
+      std::optional<int>(dsp_columns * (array_y / dsp_tile_height))));
+  resources_vector.push_back(std::make_tuple(std::string("io"),
+      std::optional<int>(2 * (array_x + array_y) * (*layout.ioCapacity))));
+
+  return resources_vector;
+}
+
+
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveDeviceResourceInformation(
+    QLDeviceTarget device_target, std::string* out_error) {
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  // QLDeviceLayoutInfo is the single gate deciding whether a layout resolves
+  // at all (AUTO/RESOURCES before Packing(), or one only being previewed and
+  // not yet the project's actual device, comes back unresolved) - nothing
+  // here re-derives that decision.
+  const QLDeviceLayoutInfo layout_info(device_target);
+
+  if( !layout_info.error().empty() ) {
+    // config.json is corrupt or invalid - a real problem, not "not yet known".
+    if( out_error ) {
+      *out_error = std::string("cannot derive resource counts for ") +
+                   convertToDeviceTypeString(device_target) + ": layout \"" +
+                   device_target.device_variant_layout.name + "\": " + layout_info.error();
+    }
+    return {};
+  }
+
+  std::string reason;
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+      deriveResourceCounts(layout_info, &reason);
+
+  if( resources_vector.empty() && !layout_info.resolved() ) {
+    // not yet known (e.g. AUTO/RESOURCES before Packing()), not a failure
+    // worth reporting.
+    return resources_vector;
+  }
+
+  if( resources_vector.empty() && !reason.empty() && out_error ) {
+    *out_error = std::string("cannot derive resource counts for ") +
+                 convertToDeviceTypeString(device_target) + ": layout \"" +
+                 device_target.device_variant_layout.name + "\": " + reason;
   }
 
   return resources_vector;
+}
+
+
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deviceResourceInformation(
+    QLDeviceTarget device_target) {
+
+  // vector of tuples, one per resource type and its count - unset when not yet
+  // known (e.g. an AUTO/RESOURCES device before Packing() has run):
+  // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
+
+  std::string derive_error;
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
+      deriveDeviceResourceInformation(device_target, &derive_error);
+
+  // the device is about to be shown with no resources at all, so say why rather
+  // than leaving it unexplained. Silent when derive_error is empty: that means
+  // "not yet known", not a failure.
+  if( resources_vector.empty() && !derive_error.empty() ) {
+    reportDeviceDataError(derive_error);
+  }
+
+  return resources_vector;
+}
+
+
+void QLDeviceManager::reportDeviceDataError(const std::string& message) {
+
+  if( !reported_device_data_error_set.insert(message).second ) {
+    return;
+  }
+
+  if(!GlobalSession) {
+    return;
+  }
+
+  // The GUI walks device_data from the MainWindow constructor, before the console
+  // the compiler's error stream is pointed at exists, so hold the message until
+  // MainWindow has wired it and flushes. A batch run has no console to wait for -
+  // stderr is its output, and nothing would ever flush.
+  const bool gui = GlobalSession->CmdLine() && GlobalSession->CmdLine()->WithQt();
+  if( gui && !device_data_error_console_ready ) {
+    deferred_device_data_error_list.push_back(message);
+    return;
+  }
+
+  CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
+  if(compiler) {
+    // append=false: no Tcl command is in flight while device_data is walked, and
+    // appending would land this in the result of whichever one runs next.
+    compiler->ErrorMessage(message, false);
+  }
+}
+
+
+void QLDeviceManager::flushDeferredDeviceDataErrors() {
+
+  // Check for somewhere to write BEFORE taking the queue: called with no compiler
+  // yet, this has to keep holding the messages and stay un-flushed so that a later
+  // call still delivers them, rather than dropping them on the floor.
+  CompilerOpenFPGA_ql* compiler =
+      GlobalSession ? (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler() : nullptr;
+  if(!compiler) {
+    return;
+  }
+
+  device_data_error_console_ready = true;
+
+  std::vector<std::string> messages;
+  messages.swap(deferred_device_data_error_list);
+
+  // reportDeviceDataError()'s dedupe covers one walk, and parseDeviceData() clears
+  // it at the start of the next one - so a re-parse before this first runs can
+  // queue a message already in the queue. Dedupe again here rather than printing
+  // the same line twice.
+  std::set<std::string> flushed;
+  for(const std::string& message : messages) {
+    if( flushed.insert(message).second ) {
+      compiler->ErrorMessage(message, false);
+    }
+  }
 }
 
 
@@ -4646,7 +5071,9 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGABitstreamAnnotationFile(QLD
 }
 
 
-std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target) {
+std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target,
+                                                                                bool device_only,
+                                                                                bool report_missing) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
 
@@ -4665,14 +5092,19 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
   std::string repack_design_constraint_file_name = "repack_design_constraint.xml";
 
   // 1. project path check
-  std::filesystem::path project_path = std::filesystem::path(compiler->ProjManager()->projectPath());
-  repack_design_constraint_file_path = project_path / repack_design_constraint_file_name;
-  if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
-    repack_design_constraint_file_path.clear();
+  //    Skipped for device_only callers: the generated repack constraints are
+  //    written into the project directory, so looking there for a template
+  //    would pick up this design's own previous output.
+  if(!device_only) {
+    std::filesystem::path project_path = std::filesystem::path(compiler->ProjManager()->projectPath());
+    repack_design_constraint_file_path = project_path / repack_design_constraint_file_name;
+    if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
+      repack_design_constraint_file_path.clear();
+    }
   }
 
   // 2. tcl script dir path check
-  if(repack_design_constraint_file_path.empty()) {
+  if(!device_only && repack_design_constraint_file_path.empty()) {
     if(settings_manager != nullptr) {
       std::filesystem::path tcl_script_dir_path = settings_manager->getTCLScriptDirPath();
         if(!tcl_script_dir_path.empty()) {
@@ -4704,7 +5136,9 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
         repack_design_constraint_file_path += ".en";
         if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          if(report_missing) {
+            compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          }
           return empty_path;
         }
       }
@@ -4720,7 +5154,9 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
         repack_design_constraint_file_path += ".en";
         if(!FileUtils::FileExists(repack_design_constraint_file_path)) {
 
-          compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          if(report_missing) {
+            compiler->ErrorMessage("Cannot find device repack design contraint file: " + repack_design_constraint_file_path.string());
+          }
           return empty_path;
         }
       }
@@ -5666,9 +6102,22 @@ QLDeviceType QLDeviceManager::deviceTypeTreeElement(QLDeviceTarget device_target
 
   std::string device_string = convertToDeviceString(device_target);
 
-  for (QLDeviceType device: device_list) {
-    for (QLDeviceVariant device_variant: device.device_variants) {
-      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
+  for (QLDeviceType& device: device_list) {
+    for (QLDeviceVariant& device_variant: device.device_variants) {
+
+      // identity prefix first, so only the matching variant's arch is decrypted.
+      std::string variant_prefix = DeviceString(device_variant.family,
+                                                device_variant.foundry,
+                                                device_variant.node,
+                                                device_variant.devicename,
+                                                device_variant.voltage_threshold,
+                                                device_variant.p_v_t_corner,
+                                                std::string()) + "_";
+      if(device_string.rfind(variant_prefix, 0) != 0) {
+        continue;
+      }
+
+      for (const QLDeviceVariantLayout& device_variant_layout: resolvedVariantLayouts(device_variant)) {
         std::string current_device_string = DeviceString(device_variant.family,
                                                          device_variant.foundry,
                                                          device_variant.node,
@@ -5821,6 +6270,139 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceYosysModulesPathList(Q
   std::sort(yosys_modules_pathlist.begin(),yosys_modules_pathlist.end());
 
   return yosys_modules_pathlist;
+}
+
+// Split a resource column list into its numbers. add_layout.py's split_cols()
+// separates on commas AND whitespace, so '12,25', '12, 25' and '12 25' all name
+// the same two columns - a comparison has to be on the numbers, never on the
+// spelling. A set, because a column list is a set of positions and not an order.
+// Returns false on anything that is not a whole number.
+bool QLDeviceManager::parseLayoutColumnList(const std::string& value, std::set<long>& out_columns) {
+
+  out_columns.clear();
+
+  std::string entry;
+  // the trailing ',' flushes the last entry without repeating the body below.
+  for(std::size_t i = 0; i <= value.size(); i++) {
+    const char c = (i < value.size()) ? value[i] : ',';
+    if((c >= '0') && (c <= '9')) {
+      entry += c;
+      // bounded so the conversion below cannot overflow; no fabric has a column
+      // index anywhere near nine digits.
+      if(entry.size() > 9) {
+        return false;
+      }
+      continue;
+    }
+    if((c != ',') && (c != ' ') && (c != '\t')) {
+      return false;
+    }
+    if(!entry.empty()) {
+      out_columns.insert(std::stol(entry));
+      entry.clear();
+    }
+  }
+
+  return true;
+}
+
+
+// One bounded whole number, for the dimension keys.
+bool QLDeviceManager::parseLayoutDimension(const std::string& value, long& out_value) {
+
+  std::set<long> numbers;
+  if(!parseLayoutColumnList(value, numbers) || (numbers.size() != 1)) {
+    return false;
+  }
+  out_value = *numbers.begin();
+  return true;
+}
+
+
+// Does the override ask for the fabric the device ALREADY HAS?
+//
+// REQ-005 refuses a re-shape that was actually requested. An override naming the
+// geometry already in the package requests nothing, and that is not a corner
+// case: the flow stamps every device it generates 'DEVICE_TYPE': 'FIXED', so on
+// the next run the very custom_layout.yml that shaped it is still beside the
+// project and lands on the gate (aurora2#2291).
+//
+// Compared in the DEVICE CONFIG's space on both sides. The yml's keys and the
+// config's keys are the same keys - add_layout.py reads 'ARRAY_X' / 'BRAM_COLS'
+// out of either and writes the architecture from them - so nothing here needs
+// the arch file's '+1' column offset or its 'width = ARRAY_X + 4' IO ring.
+//
+// EQUAL means all four values are present on both sides and match. A yml that
+// OMITS a column key is deliberately NOT equal: omitting it does not mean 'keep
+// what the device has', it resolves against add_layout.py's own module default
+// ('BRAM_COLS' = '3'), so we cannot tell whether that default is the fabric in
+// front of us - and on hard silicon the safe answer to 'cannot tell' is the
+// refusal that is already there. Same for a package that records no geometry.
+bool QLDeviceManager::customLayoutMatchesDeviceGeometry(const json& custom_layout_json,
+                                                        const QLDeviceLayoutSettings& layout_settings,
+                                                        std::string& out_geometry) {
+
+  if(!layout_settings.device_size_present ||
+     !layout_settings.bram_cols_present ||
+     !layout_settings.dsp_cols_present) {
+    return false;
+  }
+
+  // 'DEVICE_SIZE' is '<ARRAY_X>x<ARRAY_Y>'.
+  const QRegularExpression device_size_regex("^\\s*(\\d+)\\s*[xX]\\s*(\\d+)\\s*$");
+  const QRegularExpressionMatch device_size_match =
+      device_size_regex.match(QString::fromStdString(layout_settings.device_size));
+  if(!device_size_match.hasMatch()) {
+    return false;
+  }
+  bool array_x_ok = false;
+  bool array_y_ok = false;
+  const long device_array_x = device_size_match.captured(1).toLong(&array_x_ok);
+  const long device_array_y = device_size_match.captured(2).toLong(&array_y_ok);
+  if(!array_x_ok || !array_y_ok) {
+    return false;
+  }
+
+  const struct { const char* key; long device_value; } dimensions[] = {
+    { "ARRAY_X", device_array_x },
+    { "ARRAY_Y", device_array_y },
+  };
+  for(const auto& dimension : dimensions) {
+    if(!custom_layout_json.contains(dimension.key) ||
+       !custom_layout_json[dimension.key].is_string()) {
+      return false;
+    }
+    long requested_value = 0;
+    if(!parseLayoutDimension(custom_layout_json[dimension.key].get<std::string>(),
+                             requested_value) ||
+       (requested_value != dimension.device_value)) {
+      return false;
+    }
+  }
+
+  const struct { const char* key; const std::string* device_value; } column_keys[] = {
+    { "BRAM_COLS", &layout_settings.bram_cols },
+    { "DSP_COLS",  &layout_settings.dsp_cols  },
+  };
+  for(const auto& column_key : column_keys) {
+    if(!custom_layout_json.contains(column_key.key) ||
+       !custom_layout_json[column_key.key].is_string()) {
+      return false;
+    }
+    std::set<long> requested_columns;
+    std::set<long> device_columns;
+    if(!parseLayoutColumnList(custom_layout_json[column_key.key].get<std::string>(),
+                              requested_columns) ||
+       !parseLayoutColumnList(*column_key.device_value, device_columns) ||
+       (requested_columns != device_columns)) {
+      return false;
+    }
+  }
+
+  out_geometry = std::to_string(device_array_x) + "x" + std::to_string(device_array_y) +
+                 ", 'BRAM_COLS': '" + layout_settings.bram_cols +
+                 "', 'DSP_COLS': '" + layout_settings.dsp_cols + "'";
+  return true;
 }
 
 } // namespace FOEDAG

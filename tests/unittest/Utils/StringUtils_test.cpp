@@ -88,6 +88,19 @@ TEST_F(MultiLineTest, tokenizeNoSeparator) {
   EXPECT_EQ(*tokenized_lines.rbegin(), "test0test1test2");
 }
 
+TEST_F(MultiLineTest, tokenizeEmptySeparator) {
+  // an empty separator used to spin forever rather than return
+  std::string testStr{"test0test1test2"};
+  auto tokenized_lines = StringUtils::tokenize(testStr, "");
+  ASSERT_EQ(tokenized_lines.size(), 1);
+  EXPECT_EQ(*tokenized_lines.begin(), "test0test1test2");
+}
+
+TEST_F(MultiLineTest, tokenizeEmptySeparatorEmptyInput) {
+  auto tokenized_lines = StringUtils::tokenize("", "");
+  EXPECT_EQ(tokenized_lines.size(), 0);
+}
+
 TEST_F(MultiLineTest, tokenizeLongSeparator_0) {
   std::string testStr{"test0SEPARATORtest1SEPARATORtest2"};
   auto tokenized_lines = StringUtils::tokenize(testStr, "SEPARATOR");
