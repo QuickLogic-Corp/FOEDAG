@@ -148,6 +148,19 @@ class CompilerOpenFPGA_ql : public Compiler {
                          const std::filesystem::path& deviceTypeDir,
                          const std::string& deviceTypeString);
 
+  /// Decrypt a device `.en` file into `out_plaintext` instead of to disk, using
+  /// the same key database as decryptDeviceFile(). For data this process parses
+  /// itself: staging a ~12MB architecture in /tmp to read it back costs the
+  /// write, leaves the plaintext world-readable, and strands the file if the run
+  /// is killed. Files handed to vpr/openfpga still need decryptDeviceFile(),
+  /// because those are separate processes that take a path.
+  /// On failure logs via ErrorMessage() and returns false; `out_plaintext` is
+  /// then unspecified.
+  bool decryptDeviceFileToString(const std::filesystem::path& src_en,
+                                 const std::filesystem::path& deviceTypeDir,
+                                 const std::string& deviceTypeString,
+                                 std::string& out_plaintext);
+
   /// Encrypt each file in `paths` in place (produces `<path>.en`) using a
   /// key DB at `<deviceTypeDir>/<deviceTypeString>_Supp.db`. If the key DB
   /// does not exist, one is generated and saved to that path.

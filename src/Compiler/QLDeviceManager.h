@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <mutex>
 #include <filesystem>
 
 #include "nlohmann_json/json.hpp"
@@ -50,6 +51,17 @@ class QLDeviceVariant {
     std::string devicename;
     std::string voltage_threshold;
     std::string p_v_t_corner;
+
+    // Where this variant's device package lives. Kept so the layouts can be
+    // resolved later instead of during discovery: the arch is decrypted with the
+    // _Supp.db sitting beside it, and the device may live in an external root, so
+    // the path cannot be re-derived from a global root.
+    std::filesystem::path device_data_dir_path;
+
+    // device_variant_layouts is filled on first use, not at discovery. Read it
+    // through QLDeviceManager::resolvedVariantLayouts(); straight after discovery
+    // it is legitimately empty.
+    bool layouts_resolved = false;
     std::vector<QLDeviceVariantLayout> device_variant_layouts;
 };
 
@@ -169,6 +181,29 @@ class QLDeviceManager : public QObject {
                                                             std::string voltage_threshold,
                                                             std::string p_v_t_corner,
                                                             std::filesystem::path device_data_dir_path = std::filesystem::path());
+
+  // The layouts of one variant, parsed on first use and then remembered.
+  //
+  // Reading them decrypts that variant's ~12MB arch. Discovery used to do it for
+  // every variant of every installed device - 62 archs to answer a question about
+  // one - and the count grows as generated AUTO/CUSTOM devices accumulate in
+  // device_data, so the cost climbed over a benchmark run. Only 'list_devices'
+  // wants them all, and it asks via resolveAllVariantLayouts().
+  //
+  // 'device_variant' MUST be an element of device_list (or of a vector returned by
+  // listDeviceVariantsInDeviceDirectory()). A QLDeviceTarget holds a *copy* of a
+  // variant, so resolving through that copy would memoise into the copy and go
+  // stale against a later parseDeviceData().
+  const std::vector<QLDeviceVariantLayout>& resolvedVariantLayouts(
+      QLDeviceVariant& device_variant);
+
+  // Resolve every variant in device_list. For callers that genuinely enumerate
+  // the whole catalogue - one arch decrypt per installed variant.
+  void resolveAllVariantLayouts();
+
+  // Fill clb/io/dsp/bram on a variant's layouts from the device's plaintext
+  // resources.json. Runs when the variant's layouts are resolved.
+  void populateVariantLayoutResources(QLDeviceVariant& device_variant);
   std::string DeviceString(std::string family,
                            std::string foundry,
                            std::string node,
@@ -396,6 +431,14 @@ class QLDeviceManager : public QObject {
 
   // hieracrchical list of all devices available in the installation
   std::vector <QLDeviceType> device_list;
+
+  // Guards lazy layout resolution. Discovery used to be the only writer of
+  // device_variant_layouts and it ran on one thread; resolving on first use makes
+  // every reader a potential writer, and the device-selection dialog is modeless
+  // (show(), not exec()) so the GUI thread can resolve a variant while a compile
+  // worker thread resolves one for STA. Recursive because resolvedVariantLayouts()
+  // calls populateVariantLayoutResources() under the same lock.
+  std::recursive_mutex layout_resolution_mutex;
 
   // flat list of all device targets (future?)
   //std::vector <QLDeviceTarget> device_target_list;
