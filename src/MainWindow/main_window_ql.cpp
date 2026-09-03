@@ -2308,9 +2308,8 @@ void MainWindow::floorPlanningActionTriggered()
                 ? QString("This device uses AUTO/RESOURCES layout sizing, so its fabric "
                           "geometry is only known after Packing succeeds. Run Packing "
                           "first, then start Floor Planning again.")
-                : QString("device_layout.json not found in: %1")
-                      .arg(QString::fromStdString(
-                          device_manager->deviceTypeDirPath().string()));
+                : QString("device_layout.json not found: %1")
+                      .arg(QString::fromStdString(deviceLayoutFile.string()));
         QMessageBox::critical(this, "Floor Planning cannot be started.", message);
         cleanFloorPlanningUI();
         return;
