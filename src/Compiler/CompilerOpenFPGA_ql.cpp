@@ -8594,8 +8594,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
                      "Floor Plan Generation until then.");
       return true;
     }
-    const std::filesystem::path deviceDir = device_manager->deviceTypeDirPath();
-    ErrorMessage("device_layout.json not found in: " + deviceDir.string() +
+    ErrorMessage("device_layout.json not found: " + deviceLayoutFile.string() +
                  "; it is the only source of floorplanning geometry. "
                  "IO Floor Plan Generation Failed!");
     return false;
