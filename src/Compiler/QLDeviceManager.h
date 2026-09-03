@@ -10,6 +10,7 @@
 #include <set>
 #include <mutex>
 #include <filesystem>
+#include <optional>
 
 #include "nlohmann_json/json.hpp"
 
@@ -21,6 +22,7 @@ using json = nlohmann::ordered_json;
 namespace FOEDAG {
 
 class QLSettingsManager;
+class QLDeviceLayoutInfo;
 
 
 struct LayoutInfoHelper {
@@ -37,10 +39,12 @@ class QLDeviceVariantLayout {
     std::string name;
     int width = 0;
     int height = 0;
-    int bram = 0;
-    int dsp = 0;
-    int clb = 0;
-    int io = 0;
+    // unset means "not yet resolved" (e.g. an AUTO/RESOURCES device before
+    // Packing() has run), distinct from a genuine zero count.
+    std::optional<int> bram;
+    std::optional<int> dsp;
+    std::optional<int> clb;
+    std::optional<int> io;
 };
 
 class QLDeviceVariant {
@@ -155,6 +159,18 @@ class QLDeviceManager : public QObject {
   QWidget* createDeviceSelectionWidget(bool newProjectMode);
   void giveupDeviceSelectionWidget();
   void parseDeviceData();
+
+  // parseDeviceData() first runs from the MainWindow constructor, before the Tcl
+  // console exists and while the compiler still writes its errors to stderr, so
+  // errors found while walking device_data are held rather than reported. Called
+  // by MainWindow once it has pointed the compiler at the console.
+  void flushDeferredDeviceDataErrors();
+
+  // Report a device_data parsing error to the Aurora console, deferring it while
+  // there is no console yet. A message repeated within one parse is dropped:
+  // config.json belongs to the device type but is read once per variant and
+  // layout, so a bad key would otherwise be reported once per corner.
+  void reportDeviceDataError(const std::string& message);
   int addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                 std::string device_data_source, bool force);
   int encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
@@ -346,6 +362,22 @@ class QLDeviceManager : public QObject {
   // "<major>.<minor>" -> numeric parts. False, outputs untouched, on anything else.
   static bool parseVersionString(const std::string& version, int& major, int& minor);
 
+  // config.json geometry parsing. Pure, and static for the same reason as the
+  // version helpers above: testable without a device on disk.
+  //
+  // Parse a whole decimal number. Surrounding whitespace is allowed, trailing
+  // junk and a negative value are not.
+  static bool parseWholeNumber(const std::string& text, int& out_value);
+
+  // Parse a "<x>x<y>" geometry - the spelling of "BRAM_SIZE" ("1x6") and
+  // "DSP_SIZE" ("1x3") in config.json.
+  static bool parseDeviceGeometry(const std::string& text, int& out_x, int& out_y);
+
+  // An architecture counts the IO ring in its layout size and a device config does
+  // not: add_layout.py's 'WIDTH = ARRAY_X + 4' (two tiles per side). A fabric of
+  // this size or smaller is all ring and no core.
+  static constexpr int kLayoutIORingTiles = 4;
+
   // Split a resource column list into its numbers, matching add_layout.py's
   // split_cols(): commas and/or whitespace. False on anything not a whole number.
   static bool parseLayoutColumnList(const std::string& value, std::set<long>& out_columns);
@@ -364,7 +396,26 @@ class QLDeviceManager : public QObject {
   // invalid - never defaulted, because a wrong default here silently re-shapes
   // a device.
   QLDeviceLayoutSettings deviceLayoutSettings(QLDeviceTarget device_target = QLDeviceTarget());
-  std::vector<std::tuple<std::string, int>> deviceResourceInformation(QLDeviceTarget device_target = QLDeviceTarget());
+  // Empty vectors are ambiguous by design: with out_error empty, the layout is
+  // simply not resolved yet (e.g. AUTO/RESOURCES before Packing()), not a
+  // failure; with out_error set, config.json genuinely cannot answer.
+  std::vector<std::tuple<std::string, std::optional<int>>> deviceResourceInformation(
+      QLDeviceTarget device_target = QLDeviceTarget());
+  std::vector<std::tuple<std::string, std::optional<int>>> deriveDeviceResourceInformation(
+      QLDeviceTarget device_target = QLDeviceTarget(), std::string* out_error = nullptr);
+
+  // The formulas themselves: resource counts implied by the resolved layout's
+  // geometry. Always empty with a reason when the layout is not resolved or is
+  // missing a key the formulas need (a package predating
+  // BRAM_SIZE/DSP_SIZE/IO_CAPACITY) - callers filter out the expected
+  // not-yet-known case before reaching here, see deriveDeviceResourceInformation().
+  //
+  //   bram = <bram columns> * floor(arrayY / <bram tile height>)
+  //   dsp  = <dsp columns>  * floor(arrayY / <dsp tile height>)
+  //   clb  = (arrayX - <bram columns> - <dsp columns>) * arrayY
+  //   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
+  static std::vector<std::tuple<std::string, std::optional<int>>> deriveResourceCounts(
+      const QLDeviceLayoutInfo& layout_info, std::string* out_error = nullptr);
   
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
@@ -422,6 +473,15 @@ class QLDeviceManager : public QObject {
  void resetButtonClicked();
  void applyButtonClicked();
 
+ private:
+ // refreshes m_device_resources_label from device_target_selected's current
+ // QLDeviceLayoutInfo - the single gate for whether its clb/bram/dsp/io are
+ // known yet. Called from every combo-box change handler so a selection is
+ // reflected immediately, not only once 'Apply' is clicked.
+ void updateDeviceResourcesLabel();
+
+ public:
+
  public:
   // singleton instance of ourself
   static QLDeviceManager* instance;
@@ -431,6 +491,12 @@ class QLDeviceManager : public QObject {
 
   // hieracrchical list of all devices available in the installation
   std::vector <QLDeviceType> device_list;
+
+  // device_data parse errors waiting for a console, and the ones already
+  // reported in this parse - see reportDeviceDataError().
+  std::vector<std::string> deferred_device_data_error_list;
+  std::set<std::string> reported_device_data_error_set;
+  bool device_data_error_console_ready = false;
 
   // Guards lazy layout resolution. Discovery used to be the only writer of
   // device_variant_layouts and it ran on one thread; resolving on first use makes

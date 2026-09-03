@@ -41,6 +41,7 @@
 #include <QTemporaryFile>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <regex>
@@ -9557,13 +9558,13 @@ std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDevic
 
   int total_brams_num = 0;
   int total_dsps_num = 0;
-  std::vector<std::tuple<std::string, int>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
+  std::vector<std::tuple<std::string, std::optional<int>>> resources = QLDeviceManager::getInstance()->deviceResourceInformation(device);
   for (const auto& [resource, value]: resources) {
     if (resource == "bram") {
-      total_brams_num = value;
+      total_brams_num = value.value_or(0);
     }
     if (resource == "dsp") {
-      total_dsps_num = value;
+      total_dsps_num = value.value_or(0);
     }
   }
 
