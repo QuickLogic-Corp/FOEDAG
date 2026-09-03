@@ -12510,12 +12510,44 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   const std::string top_module_name = ProjManager()->DesignTopModule();
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
 
-  // [aurora2#1725 stage P3] The instance list from instances.json (P0b) can now be handed
-  // to floorplanning_atomsets.tcl as a named `set ::fp_instances`, which positional argv
-  // made impossible before. Not wired yet: P4 does not need it, because
-  // floorplanning_validate_instances.py's --instances flag already overrides the graded
-  // universe with instances.json's full list, so a deleted (zero-atom) instance absent
-  // from atomsets.json is still correctly graded "deleted".
+  // [aurora2#1725 stage P3] Hand P3 the instance list stage P0b elaborated instead of
+  // letting it rediscover one from cell names. Discovery reads an instance path as
+  // "everything before the last dot" of a cell name, so it cannot see a scope that owns no
+  // cells directly; hierarchy_closure() reconstructs the ancestors of what it did find, but
+  // it cannot invent an instance synthesis deleted outright.
+  //
+  // The top instance is deliberately NOT in this list. floorplanning_atomsets.tcl gives it
+  // an entry of its own from --top -- every atom in the netlist, which is what a
+  // whole-design region needs -- but only when the top is not already an instance key
+  // (see its --top handling). Listing it here would create that key with the near-zero
+  // atoms `c:<top>.*` matches, suppress the whole-design entry, and reintroduce the very
+  // failure the --top flag exists to prevent.
+  std::string fp_instances;
+  {
+    std::ifstream in(FloorplanningArtifact("instances.json"));
+    if (in.is_open()) {
+      try {
+        json doc = json::parse(in);
+        std::string top = doc.value("top_instance", std::string{});
+        if (top.empty()) top = doc.value("top", std::string{});
+        for (const auto& entry : doc.value("instances", json::array())) {
+          const std::string path = entry.value("path", std::string{});
+          // Braced as one Tcl list below, so anything that would break that quoting is
+          // dropped rather than emitted -- an instance path never legitimately has it.
+          if (path.empty() || path == top ||
+              path.find_first_of("{}\\ \t\n\"") != std::string::npos) {
+            continue;
+          }
+          if (!fp_instances.empty()) fp_instances += " ";
+          fp_instances += path;
+        }
+      } catch (const json::exception&) {
+        // A malformed instances.json is stage P0b's to report; leave the list empty and
+        // let P3 fall back to discovery rather than failing synthesis over it.
+        fp_instances.clear();
+      }
+    }
+  }
 
   // Parameters for the payloads: data, not program text. Braced values so a Windows path's
   // backslashes are not read as Tcl escapes.
@@ -12528,7 +12560,8 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
         << "set ::fp_prefix {" << FloorplanningPrefix() << "}\n"
         << "set ::fp_blif {" << output_blif_filepath.string() << "}\n"
         << "set ::fp_atomsets_script {" << aurora_atomsets_script_path.string() << "}\n"
-        << "set ::fp_rehier_script {" << aurora_rehier_script_path.string() << "}\n";
+        << "set ::fp_rehier_script {" << aurora_rehier_script_path.string() << "}\n"
+        << "set ::fp_instances {" << fp_instances << "}\n";
   }
 
   yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}",
