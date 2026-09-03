@@ -7,20 +7,62 @@
 
 #include <QPoint>
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <random>
 
 #include "gtest/gtest.h"
 
+fp::DeviceGridDescriptorPtr descriptorFromJson(const std::string& deviceLayoutJson)
+{
+    // A fixed name in the shared temp dir can collide with a leftover file
+    // from another user/run on a multi-user build box; a random suffix keeps
+    // this path ours alone.
+    static std::mt19937_64 rng(std::random_device{}());
+    const std::string testName =
+        ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    const std::filesystem::path layoutPath =
+        std::filesystem::temp_directory_path() /
+        ("fp_unittest_device_layout_" + testName + "_" +
+         std::to_string(rng()) + ".json");
+
+    bool wroteOk = false;
+    {
+        std::ofstream out(layoutPath);
+        out << deviceLayoutJson;
+        wroteOk = out.good();
+    }
+    if (!wroteOk) {
+        ADD_FAILURE() << "failed to write test device_layout.json to " << layoutPath;
+        return nullptr;
+    }
+
+    fp::DeviceGridDescriptorPtr descriptor =
+        std::make_shared<fp::DeviceGridDescriptor>(layoutPath);
+
+    std::filesystem::remove(layoutPath);
+
+    return descriptor;
+}
+
 fp::DeviceGridDescriptorPtr genTestDescriptor()
 {
-    int deviceCols = 32;
-    int deviceRows = 32;
-    std::set<int> dspColumns = {7, 20};
-    std::set<int> bramColumns = {13, 26};
-    fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceCols, deviceRows,
-                                                                                dspColumns, bramColumns,
-                                                                                QSize{1, 3}, QSize{1, 6});
-    return descriptor;
+    // Minimal device_layout.json: a 30x30 core (-> 32x32 grid) with DSP columns
+    // at grid {7,20} and BRAM columns at grid {13,26}. dsp_cols/bram_cols are
+    // 1-based core columns (grid column minus the IO border) -- already
+    // resolved by QLDeviceLayoutInfo, so there is no CUSTOM-vs-flat spelling
+    // left to choose between here.
+    const std::string deviceLayoutJson = R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "1x3",
+    "bram_size": "1x6",
+    "dsp_cols": "6,19",
+    "bram_cols": "12,25"
+})";
+
+    return descriptorFromJson(deviceLayoutJson);
 }
 
 std::string toString(const fp::HierarhyElements& elements)
@@ -204,6 +246,40 @@ bool test_partition(const fp::Tile::Index& bottomLeftIndex, const fp::Tile::Inde
     }
 
     return true;
+}
+
+TEST(FloorPlanning, resolvesFromDeviceLayoutJson)
+{
+    fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
+
+    ASSERT_FALSE(descriptor->hasError()) << descriptor->error().toStdString();
+
+    EXPECT_EQ(descriptor->columns(), 32);
+    EXPECT_EQ(descriptor->rows(), 32);
+    EXPECT_EQ(descriptor->dspSize(), QSize(1, 3));
+    EXPECT_EQ(descriptor->bramSize(), QSize(1, 6));
+    EXPECT_TRUE(descriptor->isDspColumn(7));
+    EXPECT_TRUE(descriptor->isDspColumn(20));
+    EXPECT_TRUE(descriptor->isBramColumn(13));
+    EXPECT_TRUE(descriptor->isBramColumn(26));
+}
+
+// A present-but-incomplete device_layout.json is malformed, not merely
+// unresolved: it must be reported, naming the key, rather than silently
+// producing a wrong-sized grid.
+TEST(FloorPlanning, missingKeyIsReported)
+{
+    fp::DeviceGridDescriptorPtr descriptor = descriptorFromJson(R"({
+    "array_x": 30,
+    "dsp_size": "1x3",
+    "bram_size": "1x6",
+    "dsp_cols": "6,19",
+    "bram_cols": "12,25"
+})");
+
+    ASSERT_TRUE(descriptor->hasError());
+    EXPECT_NE(descriptor->error().indexOf("array_y"), -1)
+        << descriptor->error().toStdString();
 }
 
 TEST(FloorPlanning, saveLoadPartition)

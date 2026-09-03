@@ -3,7 +3,7 @@
 #include "Tile.h"
 
 #include <QSize>
-#include <QDomDocument>
+#include <QString>
 
 #include <set>
 #include <memory>
@@ -14,19 +14,7 @@ namespace fp {
 
 class DeviceGridDescriptor {
 public:
-    DeviceGridDescriptor(const std::filesystem::path& architectureFile, const std::string& layoutName);
-    DeviceGridDescriptor(int columns, int rows, const std::set<int>& dspColumns, const std::set<int>& bramColumns, const QSize& dspSize, const QSize& bramSize)
-        :
-        m_columns(columns)
-        , m_rows(rows)
-        , m_dspColumns(dspColumns)
-        , m_bramColumns(bramColumns)
-        , m_dspSize(dspSize)
-        , m_bramSize(bramSize)
-    {
-        Tile::setDeviceRowsNum(m_rows);
-        validateFit();
-    }
+    DeviceGridDescriptor(const std::filesystem::path& deviceLayoutFile);
 
     bool hasError() const { return !m_error.isEmpty(); }
     const QString& error() const { return m_error; }
@@ -54,8 +42,17 @@ public:
 
     bool validateFit();
 
+    // Number of border (IO) cells the displayed grid adds around the device
+    // core on each side. device_layout.json's array_x/array_y are the core
+    // grid; the grid wraps it with one IO ring, so columns()/rows() = core +
+    // 2*kBorder and the 1-based bram_cols/dsp_cols core columns are shifted by
+    // kBorder into grid coordinates.
+    static constexpr int kBorder = 1;
+
 private:
     QString m_error;
+    // Path of the parsed device_layout.json, so validateFit() can name it too.
+    QString m_layoutPath;
     int m_columns = -1;
     int m_rows = -1;
     std::set<int> m_dspColumns;
@@ -63,11 +60,10 @@ private:
     QSize m_dspSize;
     QSize m_bramSize;
 
-    bool parse(const std::filesystem::path& architectureFile, const std::string& targetLayoutName);
-    bool parseLayout(const QDomDocument&, const std::string& targetLayoutName);
-    bool parseTileSizes(const QDomDocument&);
+    bool parse(const std::filesystem::path& deviceLayoutFile);
 
-    std::optional<QSize> parseSize(const QString&, const QString&);
+    std::optional<QSize> parseSize(const QString& sizeStr, const QString& key);
+    std::optional<std::set<int>> parseColumns(const QString& csv, const QString& key);
 };
 using DeviceGridDescriptorPtr = std::shared_ptr<DeviceGridDescriptor>;
 

@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/CompilerDefines.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/QLDeviceLayoutInfo.h"
 #include "Compiler/TaskManager.h"
 #include "Compiler/TaskModel.h"
 #include "Console/DummyParser.h"
@@ -2279,8 +2280,44 @@ void MainWindow::floorPlanningActionTriggered()
         return;
       }
 
-      const std::string layoutName = QLSettingsManager::getStringValue("general", "device", "layout");
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(archFileProviderPtr->get(), layoutName);
+      // device_layout.json (QLDeviceLayoutInfo) is the only source of
+      // floorplanning geometry now. Anything wrong with its contents is
+      // reported by DeviceGridDescriptor below, which names the key it could
+      // not read.
+      const std::filesystem::path deviceLayoutFile =
+          QLDeviceLayoutInfo::deviceLayoutJSONPath();
+      QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+      const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
+      const QLDeviceLayoutSettings layout_settings =
+          device_manager->deviceLayoutSettings(current_device);
+      const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+          layout_settings, current_device);
+
+      // For AUTO/RESOURCES, the file existing is not enough on its own: it
+      // only ever gets removed the next time refresh() runs (a device
+      // reselect, or Packing itself), so one left over from an earlier,
+      // now-invalidated Packing run would otherwise be read as current. The
+      // Packing task's own status is what actually says whether this run's
+      // geometry is still good.
+      Task* packingTask = compiler->GetTaskManager()
+                              ? compiler->GetTaskManager()->task(PACKING)
+                              : nullptr;
+      const bool packingIsGreen =
+          (packingTask != nullptr) && (packingTask->status() == TaskStatus::Success);
+
+      if (!FileUtils::FileExists(deviceLayoutFile) || (deferred && !packingIsGreen)) {
+        const QString message =
+            deferred
+                ? QString("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                          "geometry is only known after Packing succeeds. Run Packing "
+                          "first, then start Floor Planning again.")
+                : QString("device_layout.json not found: %1")
+                      .arg(QString::fromStdString(deviceLayoutFile.string()));
+        QMessageBox::critical(this, "Floor Planning cannot be started.", message);
+        cleanFloorPlanningUI();
+        return;
+      }
+      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceLayoutFile);
 
       if (descriptor->hasError()) {
         QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());

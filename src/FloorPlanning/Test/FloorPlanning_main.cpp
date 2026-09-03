@@ -5,6 +5,10 @@
 
 #include "SynthResourceExtractor.h"
 
+#include <filesystem>
+#include <fstream>
+#include <random>
+
 std::set<std::string> genTestElements()
 {
   std::set<std::string> elements = {"dut.prism.el00.sub001",
@@ -21,19 +25,43 @@ std::set<std::string> genTestElements()
 
 fp::DeviceGridDescriptorPtr genTestDeviceDescriptor()
 {
-  const int columns = 32;
-  const int rows = 32;
-  const std::set<int> dspColumns{6,19};
-  const std::set<int> bramColumns{12,25};
-  const QSize dspSize{1, 3};
-  const QSize bramSize{1, 6};
+  // Minimal device_layout.json: a 30x30 core (-> 32x32 grid) with the DSP/BRAM
+  // layout this test used to hard-code. dsp_cols/bram_cols are 1-based core
+  // columns (grid column minus the IO border); already resolved by
+  // QLDeviceLayoutInfo, so there is no CUSTOM-vs-flat spelling to choose here.
+  const std::string deviceLayoutJson = R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "1x3",
+    "bram_size": "1x6",
+    "dsp_cols": "5,18",
+    "bram_cols": "11,24"
+})";
 
-  fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(columns,
-                                                                                      rows,
-                                                                                      dspColumns,
-                                                                                      bramColumns,
-                                                                                      dspSize,
-                                                                                      bramSize);
+  // A fixed name in the shared temp dir can collide with a leftover file
+  // from another user/run; a random suffix keeps this path ours alone.
+  static std::mt19937_64 rng(std::random_device{}());
+  const std::filesystem::path layoutPath =
+      std::filesystem::temp_directory_path() /
+      ("fp_test_device_layout_" + std::to_string(rng()) + ".json");
+
+  bool wroteOk = false;
+  {
+    std::ofstream out(layoutPath);
+    out << deviceLayoutJson;
+    wroteOk = out.good();
+  }
+  if (!wroteOk) {
+    qCritical() << "failed to write test device_layout.json to"
+                << QString::fromStdString(layoutPath.string());
+    return nullptr;
+  }
+
+  fp::DeviceGridDescriptorPtr descriptor =
+      std::make_shared<fp::DeviceGridDescriptor>(layoutPath);
+
+  std::filesystem::remove(layoutPath);
+
   return descriptor;
 }
 
@@ -54,6 +82,9 @@ int main(int argc, char** argv) {
 
     fp::DeviceGridDescriptorPtr descriptor = genTestDeviceDescriptor();
 
+    if (!descriptor) {
+        return 1;
+    }
     if (descriptor->hasError()) {
         qCritical() << descriptor->error();
         return 1;

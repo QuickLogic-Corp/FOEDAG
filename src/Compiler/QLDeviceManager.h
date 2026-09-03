@@ -378,23 +378,12 @@ class QLDeviceManager : public QObject {
   // this size or smaller is all ring and no core.
   static constexpr int kLayoutIORingTiles = 4;
 
-  // A resource column list as a device config spells it: ascending, comma
-  // separated, no spaces.
-  static std::string joinLayoutColumnList(const std::set<long>& columns);
-
   // Split a resource column list into its numbers, matching add_layout.py's
   // split_cols(): commas and/or whitespace. False on anything not a whole number.
   static bool parseLayoutColumnList(const std::string& value, std::set<long>& out_columns);
 
   // One bounded whole number, for the dimension keys.
   static bool parseLayoutDimension(const std::string& value, long& out_value);
-
-  // The BRAM/DSP columns a generated architecture actually placed, read back out
-  // of its <fixed_layout>, in device-config spelling.
-  static bool readGeneratedLayoutResourceColumns(const std::filesystem::path& vpr_xml_filepath,
-                                                 const std::string& layout_name,
-                                                 std::string& out_bram_cols,
-                                                 std::string& out_dsp_cols);
 
   // Does the override ask for the fabric the device already has? Equal means all
   // four values are present on both sides and match; an omitted key is not equal.

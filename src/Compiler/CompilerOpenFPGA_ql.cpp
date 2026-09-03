@@ -4458,41 +4458,6 @@ bool CompilerOpenFPGA_ql::Packing() {
       FileUtils::findAndReplaceInFile(generated_vpr_xml_path, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
     }
 
-    // The geometry the generated device's own config.json has to record, taken
-    // from the fabric that was just built. The clone below starts from a copy of
-    // the SEED package, so without this a device generated at 30x30 still claims
-    // the seed's 'DEVICE_SIZE' ("8x6") and the seed's resource columns - a
-    // package describing a fabric that is not the one it ships. Read here, while
-    // the plaintext architecture file still exists: it is encrypted and deleted
-    // further down.
-    std::string generated_device_size;
-    std::string generated_device_bram_cols;
-    std::string generated_device_dsp_cols;
-    bool generated_device_columns_known = false;
-
-    // the arch file counts the IO ring and the device config does not:
-    // add_layout.py's 'WIDTH = ARRAY_X + 4'. A fabric that is all ring has no
-    // core to describe, so leave the size unset rather than record 0x0.
-    constexpr int io_ring = QLDeviceManager::kLayoutIORingTiles;
-    if((generated_layout_width > io_ring) && (generated_layout_height > io_ring)) {
-      generated_device_size = std::to_string(generated_layout_width - io_ring) + "x" +
-                              std::to_string(generated_layout_height - io_ring);
-    }
-
-    generated_device_columns_known =
-        QLDeviceManager::readGeneratedLayoutResourceColumns(generated_vpr_xml_path,
-                                                            m_autoLayoutGeneratedLayoutName,
-                                                            generated_device_bram_cols,
-                                                            generated_device_dsp_cols);
-    if(!generated_device_columns_known) {
-      // not fatal - the fabric is built and usable either way - but the columns
-      // must then be dropped rather than inherited, see step 5b.
-      Message("[WARNING] Could not read the resource columns of layout '" +
-              m_autoLayoutGeneratedLayoutName + "' from " + generated_vpr_xml_path.string() +
-              "; the generated device's config.json will not record them.\n");
-    }
-
-
 #if GENERATE_RR_GRAPH_FPGA_AUTO
     // using the generated vpr xml file, we should generate the rr_graph.bin and router_lookahead.bin
     // so that the next stages can be run quicker.
@@ -4907,21 +4872,47 @@ bool CompilerOpenFPGA_ql::Packing() {
           }
 
           if(target_device_config_json.is_object()) {
-            if(!generated_device_size.empty()) {
-              target_device_config_json["DEVICE_SIZE"] = generated_device_size;
-              target_device_config_json_modified = true;
-            }
-            if(generated_device_columns_known) {
+            // The geometry the generated device's own config.json has to
+            // record, taken from the fabric that was just built. The clone
+            // above starts from a copy of the SEED package, so without this a
+            // device generated at 30x30 still claims the seed's 'DEVICE_SIZE'
+            // ("8x6") and the seed's resource columns - a package describing a
+            // fabric that is not the one it ships. Read from the
+            // already-resolved current-run layout - the same resize event
+            // QLDeviceLayoutInfo has just observed via auto_device.log.
+            const QLDeviceLayoutInfo generated_layout_info(
+                QLDeviceManager::getInstance()->getCurrentDeviceTarget());
+            if(generated_layout_info.resolved()) {
+              const QLDeviceLayout& generated_layout = generated_layout_info.layout();
+              target_device_config_json["DEVICE_SIZE"] =
+                  std::to_string(generated_layout.arrayX) + "x" +
+                  std::to_string(generated_layout.arrayY);
               // written even when empty: no BRAM column is a fact about this
               // fabric, and an absent key would read as 'unknown'.
-              target_device_config_json["BRAM_COLS"] = generated_device_bram_cols;
-              target_device_config_json["DSP_COLS"] = generated_device_dsp_cols;
+              std::string bram_cols_text;
+              for(int col : generated_layout_info.bramCols()) {
+                bram_cols_text += (bram_cols_text.empty() ? "" : ",") + std::to_string(col);
+              }
+              std::string dsp_cols_text;
+              for(int col : generated_layout_info.dspCols()) {
+                dsp_cols_text += (dsp_cols_text.empty() ? "" : ",") + std::to_string(col);
+              }
+              target_device_config_json["BRAM_COLS"] = bram_cols_text;
+              target_device_config_json["DSP_COLS"] = dsp_cols_text;
               target_device_config_json_modified = true;
             }
             else {
-              // absent beats inherited-and-wrong: the seed's column lists say
-              // nothing about this device, and anything reading them as its own
-              // would be reading a lie.
+              // not fatal - the fabric is built and usable either way - but
+              // absent beats inherited-and-wrong: the seed's geometry and
+              // column lists say nothing about this device, and anything
+              // reading them as its own would be reading a lie.
+              Message("[WARNING] Could not resolve the layout of '" +
+                      m_autoLayoutGeneratedLayoutName +
+                      "'; the generated device's config.json will not record "
+                      "its geometry or resource columns.\n");
+              if(target_device_config_json.erase("DEVICE_SIZE") > 0) {
+                target_device_config_json_modified = true;
+              }
               if(target_device_config_json.erase("BRAM_COLS") > 0) {
                 target_device_config_json_modified = true;
               }
@@ -8410,7 +8401,8 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(QLDeviceManager::getInstance()->getCurrentDeviceTarget()) ) {
+  auto current_device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  if( !QLDeviceManager::getInstance()->isDeviceTargetValid(current_device_target) ) {
     ErrorMessage("Invalid Device set in Settings JSON! Please check if the target device is correct/available. ");
     std::string family              = QLSettingsManager::getStringValue("general", "device", "family");
     std::string foundry             = QLSettingsManager::getStringValue("general", "device", "foundry");
@@ -8429,7 +8421,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) / 
+  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) /
                                       std::string(ProjManager()->projectName() + "_post_synth.blif");
 
   if (!fs::exists(netlist_path)){
@@ -8582,10 +8574,39 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     args.push_back("--clocks_file");
     args.push_back(clocksFile.string());
   }
-  args.push_back("--arch_file");
-  args.push_back(m_architectureFile.string());
-  args.push_back("--fpga_layout");
-  args.push_back(QLSettingsManager::getStringValue("general", "device", "layout"));
+  // No resolved layout, no geometry: the script would have to guess the device
+  // it is constraining.
+  const std::filesystem::path deviceLayoutFile = QLDeviceLayoutInfo::deviceLayoutJSONPath();
+  if (!FileUtils::FileExists(deviceLayoutFile)) {
+    QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+    const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
+    const QLDeviceLayoutSettings layout_settings =
+        device_manager->deviceLayoutSettings(current_device);
+    const bool deferred =
+        QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(layout_settings, current_device);
+    if (deferred) {
+      // This path is also reached from FinishSynthesisScript() and
+      // onQdcFileSaved()/onPcfFileSaved() - all of which run before Packing()
+      // has ever resolved an AUTO/RESOURCES device's geometry. Failing here
+      // would make Packing() itself unreachable whenever a QDC/PCF file is
+      // already present: Synthesis calls this on every run, this would always
+      // fail for a device that has never been packed, and "run Packing first"
+      // is not something the user can do if Synthesis can never complete.
+      // Skip instead - the caller already tolerates no constraints file being
+      // written (see the pcf 'no set_clock' case above), and floorplanning
+      // constraints simply regenerate once Packing has resolved the geometry.
+      WarningMessage("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                     "geometry is only known after Packing succeeds. Skipping IO "
+                     "Floor Plan Generation until then.");
+      return true;
+    }
+    ErrorMessage("device_layout.json not found: " + deviceLayoutFile.string() +
+                 "; it is the only source of floorplanning geometry. "
+                 "IO Floor Plan Generation Failed!");
+    return false;
+  }
+  args.push_back("--device_layout_file");
+  args.push_back(deviceLayoutFile.string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
 
