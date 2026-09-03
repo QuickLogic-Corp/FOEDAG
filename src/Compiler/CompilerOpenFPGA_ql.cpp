@@ -1335,6 +1335,11 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
 
   QLDeviceManager* device_manager = QLDeviceManager::getInstance(true);
 
+  // This command enumerates the whole catalogue, so it is the one caller that
+  // must pay for every variant's layouts - one arch decrypt each. Everything
+  // else resolves only the variant it is asking about.
+  device_manager->resolveAllVariantLayouts();
+
   std::vector <QLDeviceType>device_list = device_manager->device_list;
 
   // devices can now come from more than one device data root (the installation plus any

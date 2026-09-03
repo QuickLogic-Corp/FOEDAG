@@ -642,15 +642,17 @@ void QLDeviceManager::p_v_t_cornerChanged(const QString& p_v_t_corner_qstring)
   m_combobox_layout->blockSignals(true);
   m_combobox_layout->clear();
 
-  for (QLDeviceType device: this->device_list) {
+  for (QLDeviceType& device: this->device_list) {
     if (device.family == family) {
       std::string _foundrynode = convertToFoundryNode(device.foundry, device.node);
       if (_foundrynode == foundrynode) {
         if (device.devicename == devicename) {
-          for (QLDeviceVariant variant : device.device_variants) {
+          for (QLDeviceVariant& variant : device.device_variants) {
             if (variant.voltage_threshold == voltage_threshold) {
               if(variant.p_v_t_corner == p_v_t_corner) {
-                for(QLDeviceVariantLayout _layout : variant.device_variant_layouts) {
+                // the dropdown only shows the corner the user selected, so this
+                // resolves one variant's arch, not the whole install.
+                for(const QLDeviceVariantLayout& _layout : resolvedVariantLayouts(variant)) {
                   // ensure that the item being added has not been added before using std::set
                   // for performance reasons, keeping a vector as final container for future need of sorting.
                   if(singularity.insert(_layout.name).second == true) {
@@ -1101,47 +1103,9 @@ void QLDeviceManager::parseDeviceData() {
   } // for each device_data root
 
 
-  // parse resources information for each device variant in the device_list:
-  for (QLDeviceType &device: device_list) {
-
-    for (QLDeviceVariant &device_variant: device.device_variants) {
-
-      for (QLDeviceVariantLayout &device_variant_layout: device_variant.device_variant_layouts) {
-
-        QLDeviceTarget _device_target = convertToDeviceTarget(device.family,
-                                                              device.foundry,
-                                                              device.node,
-                                                              device.devicename,
-                                                              device_variant.voltage_threshold,
-                                                              device_variant.p_v_t_corner,
-                                                              device_variant_layout.name);
-
-        std::vector<std::tuple<std::string, int>> resources_vector = deviceResourceInformation(_device_target);
-
-        for (const auto& resource_tuple : resources_vector) {
-          
-          std::string resourcename = std::get<0>(resource_tuple);
-          int resourcecount = std::get<1>(resource_tuple);
-
-          // this part is a carry-over, we should make the layout resource structure
-          // in c++ code generic, so we don't need to have these ifs ? TODO future
-          if(resourcename == "clb") {
-            device_variant_layout.clb = resourcecount;
-          }
-          if(resourcename == "io") {
-            device_variant_layout.io = resourcecount;
-          }
-          if(resourcename == "dsp") {
-            device_variant_layout.dsp = resourcecount;
-          }
-          if(resourcename == "bram") {
-            device_variant_layout.bram = resourcecount;
-          }
-        }
-      }
-      // collectDeviceVariantAvailableResources(device_variant);
-    }
-  }
+  // Resource counts are filled per variant by populateVariantLayoutResources()
+  // when that variant's layouts are resolved - they are keyed by layout name, so
+  // there is nothing to fill until the layouts exist.
 
 
   // DEBUG
@@ -1341,16 +1305,11 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
     device_variant.voltage_threshold = voltage_threshold;
     device_variant.p_v_t_corner = p_v_t_corner;
 
-    // list and store all the layouts available in this device_variant:
-    // pass the device dir we were given: this device may live in an external root, and its
-    // encrypted vpr.xml can only be decrypted with the _Supp.db sitting beside it.
-    device_variant.device_variant_layouts = listDeviceVariantLayouts(family,
-                                                                     foundry,
-                                                                     node,
-                                                                     devicename,
-                                                                     voltage_threshold,
-                                                                     p_v_t_corner,
-                                                                     device_data_dir_path_c);
+    // Record the device dir rather than reading the layouts now. Resolving them
+    // decrypts the arch, and discovery has no idea which variant the caller wants.
+    // The dir has to be remembered: this device may live in an external root, and
+    // its encrypted vpr.xml can only be decrypted with the _Supp.db beside it.
+    device_variant.device_data_dir_path = device_data_dir_path_c;
 
     // add the variant to the list
     device_variants.push_back(device_variant);
@@ -1501,6 +1460,81 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
   return device_variant_layouts;
 }
 
+
+const std::vector<QLDeviceVariantLayout>& QLDeviceManager::resolvedVariantLayouts(
+    QLDeviceVariant& device_variant) {
+
+  std::lock_guard<std::recursive_mutex> resolution_lock(layout_resolution_mutex);
+
+  if (device_variant.layouts_resolved) {
+    return device_variant.device_variant_layouts;
+  }
+
+  // Mark resolved first: a device whose arch is missing or unparseable yields no
+  // layouts, and retrying that decrypt on every lookup would be the old sweep.
+  device_variant.layouts_resolved = true;
+
+  device_variant.device_variant_layouts = listDeviceVariantLayouts(
+      device_variant.family, device_variant.foundry, device_variant.node,
+      device_variant.devicename, device_variant.voltage_threshold,
+      device_variant.p_v_t_corner, device_variant.device_data_dir_path);
+
+  populateVariantLayoutResources(device_variant);
+
+  return device_variant.device_variant_layouts;
+}
+
+
+void QLDeviceManager::resolveAllVariantLayouts() {
+
+  for (QLDeviceType& device : device_list) {
+    for (QLDeviceVariant& device_variant : device.device_variants) {
+      resolvedVariantLayouts(device_variant);
+    }
+  }
+}
+
+
+void QLDeviceManager::populateVariantLayoutResources(QLDeviceVariant& device_variant) {
+
+  // Built once: only the layout changes per iteration, and copying the variant
+  // (which owns the layouts vector) inside the loop is quadratic.
+  QLDeviceTarget device_target;
+  device_target.device_variant = device_variant;
+
+  for (QLDeviceVariantLayout& device_variant_layout: device_variant.device_variant_layouts) {
+
+    // convertToDeviceTarget() searches device_list by layout name, which would
+    // resolve every other variant to answer what we already hold.
+    device_target.device_variant_layout = device_variant_layout;
+
+    std::vector<std::tuple<std::string, int>> resources_vector =
+        deviceResourceInformation(device_target);
+
+    for (const auto& resource_tuple : resources_vector) {
+
+      std::string resourcename = std::get<0>(resource_tuple);
+      int resourcecount = std::get<1>(resource_tuple);
+
+      // this part is a carry-over, we should make the layout resource structure
+      // in c++ code generic, so we don't need to have these ifs ? TODO future
+      if(resourcename == "clb") {
+        device_variant_layout.clb = resourcecount;
+      }
+      if(resourcename == "io") {
+        device_variant_layout.io = resourcecount;
+      }
+      if(resourcename == "dsp") {
+        device_variant_layout.dsp = resourcecount;
+      }
+      if(resourcename == "bram") {
+        device_variant_layout.bram = resourcecount;
+      }
+    }
+  }
+}
+
+
 std::string QLDeviceManager::DeviceString(std::string family,
                                           std::string foundry,
                                           std::string node,
@@ -1567,17 +1601,23 @@ bool QLDeviceManager::DeviceExists(QLDeviceTarget device_target) {
 
   // loop through the device_list and check if a matching device exists.
 
-  for (QLDeviceType device: device_list) {
-    for (QLDeviceVariant device_variant: device.device_variants) {
-      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
-        if(device_target.device_variant.family            == device_variant.family &&
-           device_target.device_variant.foundry           == device_variant.foundry &&
-           device_target.device_variant.node              == device_variant.node &&
-           device_target.device_variant.devicename        == device_variant.devicename &&
-           device_target.device_variant.voltage_threshold == device_variant.voltage_threshold &&
-           device_target.device_variant.p_v_t_corner      == device_variant.p_v_t_corner &&
-           device_target.device_variant_layout.name       == device_variant_layout.name) {
+  for (QLDeviceType& device: device_list) {
+    for (QLDeviceVariant& device_variant: device.device_variants) {
 
+      // Compare the device identity first. The layout name was the last of seven
+      // conditions, so every variant in the install used to be resolved - and
+      // resolving one decrypts its arch - to answer about a single device.
+      if(device_target.device_variant.family            != device_variant.family ||
+         device_target.device_variant.foundry           != device_variant.foundry ||
+         device_target.device_variant.node              != device_variant.node ||
+         device_target.device_variant.devicename        != device_variant.devicename ||
+         device_target.device_variant.voltage_threshold != device_variant.voltage_threshold ||
+         device_target.device_variant.p_v_t_corner      != device_variant.p_v_t_corner) {
+        continue;
+      }
+
+      for (const QLDeviceVariantLayout& device_variant_layout: resolvedVariantLayouts(device_variant)) {
+        if(device_target.device_variant_layout.name == device_variant_layout.name) {
           return true;
         }
       }
@@ -1610,9 +1650,24 @@ QLDeviceTarget QLDeviceManager::convertToDeviceTarget(std::string device_string)
 
   // loop through the device_list and check if a matching device exists.
 
-  for (QLDeviceType device: device_list) {
-    for (QLDeviceVariant device_variant: device.device_variants) {
-      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
+  for (QLDeviceType& device: device_list) {
+    for (QLDeviceVariant& device_variant: device.device_variants) {
+
+      // DeviceString() appends '_<layout>' to the variant identity, so a string
+      // naming this variant must start with that identity plus '_'. Rejecting on
+      // the identity keeps the arch decrypt to the one variant that can match.
+      std::string variant_prefix = DeviceString(device_variant.family,
+                                                device_variant.foundry,
+                                                device_variant.node,
+                                                device_variant.devicename,
+                                                device_variant.voltage_threshold,
+                                                device_variant.p_v_t_corner,
+                                                std::string()) + "_";
+      if(device_string.rfind(variant_prefix, 0) != 0) {
+        continue;
+      }
+
+      for (const QLDeviceVariantLayout& device_variant_layout: resolvedVariantLayouts(device_variant)) {
         std::string current_device_string = DeviceString(device_variant.family,
                                                          device_variant.foundry,
                                                          device_variant.node,
@@ -1970,7 +2025,14 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
     else {
       for (QLDeviceVariant variant: device_variants) {
         std::cout << "  variant: " +  variant.family + " " + variant.foundry + " " + variant.node + " " + variant.devicename + " " + variant.voltage_threshold + " " + variant.p_v_t_corner << std::endl;
-        for (QLDeviceVariantLayout layout: variant.device_variant_layouts) {
+        // Read the layouts directly rather than through resolvedVariantLayouts():
+        // this device lives outside device_data, and populateVariantLayoutResources()
+        // would resolve resources.json via the device coordinates, picking up an
+        // installed device's resource counts instead of this one's.
+        for (const QLDeviceVariantLayout& layout: listDeviceVariantLayouts(
+                 variant.family, variant.foundry, variant.node, variant.devicename,
+                 variant.voltage_threshold, variant.p_v_t_corner,
+                 variant.device_data_dir_path)) {
           std::cout <<  "    layout_name:" + layout.name + "\n" +
                         "              w:" + std::to_string(layout.width) + "\n" +
                         "              h:" + std::to_string(layout.height) //+ "\n" +
@@ -5780,9 +5842,22 @@ QLDeviceType QLDeviceManager::deviceTypeTreeElement(QLDeviceTarget device_target
 
   std::string device_string = convertToDeviceString(device_target);
 
-  for (QLDeviceType device: device_list) {
-    for (QLDeviceVariant device_variant: device.device_variants) {
-      for (QLDeviceVariantLayout device_variant_layout: device_variant.device_variant_layouts) {
+  for (QLDeviceType& device: device_list) {
+    for (QLDeviceVariant& device_variant: device.device_variants) {
+
+      // identity prefix first, so only the matching variant's arch is decrypted.
+      std::string variant_prefix = DeviceString(device_variant.family,
+                                                device_variant.foundry,
+                                                device_variant.node,
+                                                device_variant.devicename,
+                                                device_variant.voltage_threshold,
+                                                device_variant.p_v_t_corner,
+                                                std::string()) + "_";
+      if(device_string.rfind(variant_prefix, 0) != 0) {
+        continue;
+      }
+
+      for (const QLDeviceVariantLayout& device_variant_layout: resolvedVariantLayouts(device_variant)) {
         std::string current_device_string = DeviceString(device_variant.family,
                                                          device_variant.foundry,
                                                          device_variant.node,
