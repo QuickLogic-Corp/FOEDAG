@@ -1403,7 +1403,10 @@ std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std
     vpr_xml_contents = QByteArray::fromStdString(plaintext);
   }
 
-  // parse as XML with Qt
+  // parse as XML with Qt.
+  // Keep the argument a QByteArray: setContent(const QString&) is also viable for
+  // a single-argument call, so passing a QString compiles silently and parses the
+  // arch through QString conversion instead of honouring its XML declaration.
   QDomDocument doc;
   if (!doc.setContent(vpr_xml_contents)) {
     std::cout << "Incorrect file: " + source_vpr_xml_filepath.string() << std::endl;
