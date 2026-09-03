@@ -475,6 +475,14 @@ private:
   // synthesis failed, so `tee -q` cannot hide the reason it failed.
   void ReportFloorplanningYosysErrors();
 
+  // [aurora2#1725 review F1] RunValidateInstances()/RunDesignResources()/
+  // RunConstraintCompliance() each skip quietly when atomsets.json is absent -- a device
+  // template without the P2/P3 floorplanning hooks, not a failure. That used to mean total
+  // silence; say it once instead, as a warning (this is expected on a hookless device, not
+  // broken), rather than repeating it from every stage that hits the same missing file.
+  bool m_floorplanningVerificationWarned = false;
+  void WarnFloorplanningVerificationUnavailable();
+
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
   // scripts/floorplanning_design_resources.py. Best-effort like RunValidateInstances()

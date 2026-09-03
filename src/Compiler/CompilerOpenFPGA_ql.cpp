@@ -2660,6 +2660,20 @@ void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
   }
 }
 
+// [aurora2#1725 review F1] Once per compiler instance, not once per stage: all three
+// callers hit the same missing atomsets.json for the same reason (this device template
+// has no P2/P3 floorplanning hooks yet), so saying it three times would look like three
+// different problems.
+void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
+  if (m_floorplanningVerificationWarned) return;
+  m_floorplanningVerificationWarned = true;
+  WarningMessage(
+      "Floorplanning verification unavailable on this device: its template does not "
+      "carry the floorplanning atom-set hooks yet, so instance validation, resource "
+      "reporting and constraint-compliance checking are skipped. This does not affect "
+      "the build.");
+}
+
 // [aurora2#1725 stage P4] validation gate -- see scripts/floorplanning_validate_instances.py's
 // docstring and docs/specs/region-based-placement-synthesis-integration/pipeline.md
 // (A.P4). Called from Synthesize() after the Yosys tool has actually run (Synplify
@@ -2676,6 +2690,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   // the current device -- skip quietly rather than treating it as a failure.
   std::filesystem::path atomsets_path = FloorplanningAtomsets();
   if (!FileUtils::FileExists(atomsets_path)) {
+    WarnFloorplanningVerificationUnavailable();
     return true;
   }
 
@@ -2748,7 +2763,12 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
                             FileUtils::FileExists(place_path);
 
   if (!useAtomsets) {
-    // No atom sets on disk yet. Nothing to report, and nothing has gone wrong.
+    // No atom sets on disk yet. Nothing to report, and nothing has gone wrong --
+    // unless maxTier is already >=1 (post-synthesis), in which case atomsets_path
+    // itself is what's missing: this device template has no P2/P3 hooks.
+    if (maxTier >= 1) {
+      WarnFloorplanningVerificationUnavailable();
+    }
     return true;
   }
 
@@ -2809,10 +2829,13 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
   std::filesystem::path atomsets_path = FloorplanningAtomsets();
-  if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path) ||
-      !FileUtils::FileExists(atomsets_path)) {
-    // Nothing placed yet, or this device template has no P2/P3 blocks -- not an error,
-    // see RunDesignResources() for the same reasoning.
+  if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path)) {
+    // Nothing placed yet -- not an error, see RunDesignResources() for the same reasoning.
+    return true;
+  }
+  if (!FileUtils::FileExists(atomsets_path)) {
+    // Placed successfully, but this device template has no P2/P3 hooks.
+    WarnFloorplanningVerificationUnavailable();
     return true;
   }
 
