@@ -164,8 +164,7 @@ bool QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
   return false;
 }
 
-QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target,
-                                       bool packing_just_succeeded) {
+QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
   QLDeviceManager* device_manager = QLDeviceManager::getInstance();
   if (device_manager == nullptr) {
     return;
@@ -208,7 +207,7 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target,
     return;
   }
 
-  const bool ok = deferred ? resolveFromAutoDeviceLog(packing_just_succeeded)
+  const bool ok = deferred ? resolveFromAutoDeviceLog()
                            : resolveFromDeviceConfig(layout_settings, device_target);
   if (!ok) {
     return;
@@ -373,28 +372,20 @@ bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
   return true;
 }
 
-bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog(bool packing_just_succeeded) {
+bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
   // auto_device.log outlives the run that wrote it - a prior session's
   // Packing(), or a design change since, leaves it on disk describing a
   // fabric this session has not actually rebuilt. Trust it only while this
   // session's own Packing task is still green: TaskStatus::Success is the run
   // that just wrote it, and any other status (None on a fresh launch before
   // Packing has been run this session, Dirty once something upstream
-  // invalidates it, Fail) means the log's contents are not backed by a
-  // Packing run this session can vouch for.
-  //
-  // packing_just_succeeded bypasses this: it is set only by the call from
-  // Packing()'s own tail, made after add_layout.py has run but before
-  // Compile() has had a chance to mark the task Success (that only happens
-  // once Packing() itself returns), so the task still reads InProgress at
-  // that exact point despite the log being the freshest it will ever be.
-  if (!packing_just_succeeded) {
-    Compiler* c = compiler();
-    TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
-    Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
-    if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {
-      return false;
-    }
+  // invalidates it, Fail, InProgress) means the log's contents are not backed
+  // by a Packing run this session can vouch for.
+  Compiler* c = compiler();
+  TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
+  Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
+  if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {
+    return false;
   }
 
   const std::filesystem::path project_path = projectPath();
@@ -514,13 +505,13 @@ void QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(
   std::filesystem::remove(project_path / "auto_device.log", ec);
 }
 
-void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target, bool packing_just_succeeded) {
+void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
   if (projectPath().empty()) {
     // No project: device selection in the new-project wizard has nowhere to write
     // and nothing to invalidate.
     return;
   }
-  QLDeviceLayoutInfo layout_info(device_target, packing_just_succeeded);
+  QLDeviceLayoutInfo layout_info(device_target);
   if (!layout_info.resolved()) {
     // AUTO/RESOURCES before packing, or a package that states no geometry. Either
     // way the previous run's file must not be left behind to be read as current.

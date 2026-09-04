@@ -79,7 +79,7 @@ target_link_libraries(unittest PRIVATE
   gmock
   gtest_main
   pinassignment
-  floorplanningui
+  floorplanning
   newproject
   foedag
   foedagcore

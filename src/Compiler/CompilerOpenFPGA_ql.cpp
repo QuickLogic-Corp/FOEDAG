@@ -2473,12 +2473,27 @@ bool CompilerOpenFPGA_ql::RunElabInstances() {
     return false;
   }
 
-  FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_elab_instances.py", "Instance-tree derivation",
-      MissingPython::Fatal);
-  if (!tool.ready) return tool.result;
-  const std::filesystem::path& elab_instances_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
+  std::filesystem::path elab_instances_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_elab_instances.py"));
+  if (elab_instances_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_elab_instances.py in the "
+                 "installation. Instance-tree derivation failed!");
+    return false;
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found, Please install " + python_exec.string() +
+                 " and make sure it's in the PATH variable."
+                 " Instance-tree derivation (floorplanning_elab_instances.py) failed!");
+    return false;
+  }
 
   std::filesystem::path instances_json_path =
       FloorplanningArtifact("instances.json");
@@ -2604,45 +2619,6 @@ int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
   return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).realCode;
 }
 
-// [aurora2#1725] The prelude every floorplanning helper stage shared verbatim: resolve
-// the installed script, resolve python, and decide what an absent one means. Only the
-// last decision ever differed between the stages, so it is the single parameter.
-CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanningTool(
-    const std::string& scriptName, const std::string& label, MissingPython policy,
-    const std::string& skipPhrase) {
-  FloorplanningTool tool;
-
-  tool.script = InstalledScript(std::filesystem::path(scriptName));
-  if (tool.script.empty()) {
-    ErrorMessage("Cannot locate scripts/" + scriptName + " in the installation. " +
-                 label + " failed!");
-    return tool;  // ready=false, result=false: a broken installation is an error
-  }
-
-#ifdef _WIN32
-  tool.python = std::filesystem::path{"python.exe"};
-#else // _WIN32
-  tool.python = std::filesystem::path{"python3"};
-#endif // _WIN32
-
-  if (!FileUtils::IsSystemCommandAvailable(tool.python.string())) {
-    if (policy == MissingPython::Fatal) {
-      ErrorMessage("System " + tool.python.string() + " is not found, Please install " +
-                   tool.python.string() +
-                   " and make sure it's in the PATH variable. " + label + " (" +
-                   scriptName + ") failed!");
-    } else {
-      ErrorMessage("System " + tool.python.string() + " is not found; skipping " +
-                   skipPhrase + " (" + scriptName + ").");
-      tool.result = true;
-    }
-    return tool;
-  }
-
-  tool.ready = true;
-  return tool;
-}
-
 // [aurora2#1725] Running the in-session tcl scripts under `tee -q` means a hard Yosys error
 // inside one goes only to that script's artifact log, so <top>_synth.log would just stop
 // after synth_ql with no reason given. Quiet on success is the point; quiet on failure is a
@@ -2661,18 +2637,102 @@ void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
   }
 }
 
-// [aurora2#1725 review F1] Once per compiler instance, not once per stage: all three
-// callers hit the same missing atomsets.json for the same reason (this device template
-// has no P2/P3 floorplanning hooks yet), so saying it three times would look like three
-// different problems.
-void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
-  if (m_floorplanningVerificationWarned) return;
-  m_floorplanningVerificationWarned = true;
-  WarningMessage(
-      "Floorplanning verification unavailable on this device: its template does not "
-      "carry the floorplanning atom-set hooks yet, so instance validation, resource "
-      "reporting and constraint-compliance checking are skipped. This does not affect "
-      "the build.");
+// [aurora2#1725 stage P2b] AURORA_P2B_AUDIT_ENABLED (CMakeLists.txt) gates this stage
+// entirely, defaulting to on for now to gather P2b-redundancy evidence across the whole
+// test suite before removing it; flip the default, or delete RunNetlistNamemap() outright,
+// once CI confirms P2b is safe to remove. [6] namemap_hier.csv, which the stage was
+// specified around, is produced nowhere; [5] namemap.csv is what this actually generates,
+// from the debug JSON stage P4 already consumes.
+bool CompilerOpenFPGA_ql::RunNetlistNamemap() {
+#if !AURORA_P2B_AUDIT_ENABLED
+  return true;
+#endif
+  const std::string topModule = ProjManager()->DesignTopModule();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+  std::filesystem::path debug_json_path = projectPath / (topModule + "_post_synth_debug.json");
+  if (!FileUtils::FileExists(debug_json_path)) {
+    return true;  // device template has no P2/P3 blocks; nothing to map
+  }
+
+  std::filesystem::path namemap_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_netlist_namemap.py"));
+  if (namemap_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_netlist_namemap.py in the "
+                 "installation. Name-map generation failed!");
+    return false;
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping name maps (floorplanning_netlist_namemap.py).");
+    return true;  // best-effort, like every other stage this feature adds
+  }
+
+  std::vector<std::string> args;
+  args.push_back(namemap_script_path.string());
+  args.push_back(debug_json_path.string());
+  args.push_back("-o");
+  args.push_back((FloorplanningArtifact("namemap.csv")).string());
+
+  int status = RunFloorplanningStage(python_exec.string(), args);
+  if (status != 0) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " name map generation (floorplanning_netlist_namemap.py) failed, see " +
+                 FloorplanningStageLog().string());
+    return true;  // no namemap.csv to audit
+  }
+
+  // The only consumer of namemap.csv: does it know any instance->atom pair that stage P3's
+  // atomsets.json does not? An empty p2b.log across the suite is the argument for deleting
+  // this stage. Its exit code IS checked, deliberately: a real finding means P2b is not
+  // (yet) provably redundant, so this hard-fails the build rather than logging and moving
+  // on. See docs/specs/p2b-namemap-redundancy/spec.md.
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
+  if (!FileUtils::FileExists(atomsets_path)) {
+    return true;  // no P3 output to compare against
+  }
+
+  std::filesystem::path p2b_audit_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_p2b_audit.py"));
+  if (p2b_audit_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_p2b_audit.py in the "
+                 "installation. Name-map audit failed!");
+    return false;
+  }
+
+  // Inputs are named explicitly rather than left to the script to guess from --project:
+  // the artifact prefix is this class's convention, and one place should own it.
+  std::vector<std::string> audit_args;
+  audit_args.push_back(p2b_audit_script_path.string());
+  audit_args.push_back("--project");
+  audit_args.push_back(projectPath.string());
+  audit_args.push_back("--atomsets");
+  audit_args.push_back(atomsets_path.string());
+  audit_args.push_back("--namemap");
+  audit_args.push_back(FloorplanningArtifact("namemap.csv").string());
+  audit_args.push_back("-o");
+  std::filesystem::path p2b_log_path = FloorplanningArtifact("p2b.log");
+  audit_args.push_back(p2b_log_path.string());
+
+  int audit_status = RunFloorplanningStage(python_exec.string(), audit_args);
+  if (audit_status != 0) {
+    ErrorMessage(
+        "Design " + ProjManager()->projectName() +
+        ": stage P2b (floorplanning_p2b_audit.py) found an RTL instance -> atom pair "
+        "that stage P3's atomsets.json does not know about -- see " +
+        p2b_log_path.string() +
+        ". This means P2b is not (yet) provably safe to remove "
+        "(docs/specs/p2b-namemap-redundancy/spec.md); failing the build so this is "
+        "investigated rather than silently ignored.");
+    return false;
+  }
+  return true;
 }
 
 // [aurora2#1725 stage P4] validation gate -- see scripts/floorplanning_validate_instances.py's
@@ -2691,7 +2751,6 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   // the current device -- skip quietly rather than treating it as a failure.
   std::filesystem::path atomsets_path = FloorplanningAtomsets();
   if (!FileUtils::FileExists(atomsets_path)) {
-    WarnFloorplanningVerificationUnavailable();
     return true;
   }
 
@@ -2701,16 +2760,32 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
     return true;
   }
 
-  // Best-effort: synthesis has already succeeded by the time this runs.
-  FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_validate_instances.py", "Instance validation",
-      MissingPython::Skip, "instance validation");
-  if (!tool.ready) return tool.result;
-  const std::filesystem::path& validate_instances_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
+  std::filesystem::path validate_instances_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_validate_instances.py"));
+  if (validate_instances_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_validate_instances.py in the "
+                 "installation. Instance validation failed!");
+    return false;
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping instance validation "
+                 "(floorplanning_validate_instances.py).");
+    return true;  // best-effort: not required for synthesis to have succeeded
+  }
 
   std::filesystem::path instances_json_path = FloorplanningArtifact("instances.json");
   std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
+  // [aurora2#1725 stage P2b] optional; floorplanning_validate_instances.py records check 3 as
+  // "unknown" and grades on the rest when this is absent.
+  std::filesystem::path namemap_hier_path = FloorplanningArtifact("namemap.hier.csv");
   std::filesystem::path validation_json_path = FloorplanningArtifact("validation.json");
 
   std::vector<std::string> args;
@@ -2728,6 +2803,17 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   if (FileUtils::FileExists(synth_log_path)) {
     args.push_back("--synth-log");
     args.push_back(synth_log_path.string());
+  }
+  // [5], generated by RunNetlistNamemap() when the option is on. floorplanning_validate_instances.py
+  // prefers [6] when it exists and falls back to this.
+  std::filesystem::path namemap_path = FloorplanningArtifact("namemap.csv");
+  if (FileUtils::FileExists(namemap_path)) {
+    args.push_back("--namemap");
+    args.push_back(namemap_path.string());
+  }
+  if (FileUtils::FileExists(namemap_hier_path)) {
+    args.push_back("--namemap-hier");
+    args.push_back(namemap_hier_path.string());
   }
   args.push_back("-o");
   args.push_back(validation_json_path.string());
@@ -2764,22 +2850,30 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
                             FileUtils::FileExists(place_path);
 
   if (!useAtomsets) {
-    // No atom sets on disk yet. Nothing to report, and nothing has gone wrong --
-    // unless maxTier is already >=1 (post-synthesis), in which case atomsets_path
-    // itself is what's missing: this device template has no P2/P3 hooks.
-    if (maxTier >= 1) {
-      WarnFloorplanningVerificationUnavailable();
-    }
+    // No atom sets on disk yet. Nothing to report, and nothing has gone wrong.
     return true;
   }
 
-  // Best-effort: the compile stage itself has already succeeded.
-  FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_design_resources.py", "Design-resource extraction",
-      MissingPython::Skip, "resource reporting");
-  if (!tool.ready) return tool.result;
-  const std::filesystem::path& design_resources_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
+  std::filesystem::path design_resources_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_design_resources.py"));
+  if (design_resources_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_design_resources.py in the "
+                 "installation. Design-resource extraction failed!");
+    return false;
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping resource reporting "
+                 "(floorplanning_design_resources.py).");
+    return true;  // best-effort: the compile stage itself has already succeeded
+  }
 
   std::filesystem::path design_resources_path = FloorplanningArtifact("design_resources.json");
   // Persists across tier 1 and tier 2's separate invocations, unlike design_resources_path
@@ -2830,23 +2924,33 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
   std::filesystem::path atomsets_path = FloorplanningAtomsets();
-  if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path)) {
-    // Nothing placed yet -- not an error, see RunDesignResources() for the same reasoning.
-    return true;
-  }
-  if (!FileUtils::FileExists(atomsets_path)) {
-    // Placed successfully, but this device template has no P2/P3 hooks.
-    WarnFloorplanningVerificationUnavailable();
+  if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path) ||
+      !FileUtils::FileExists(atomsets_path)) {
+    // Nothing placed yet, or this device template has no P2/P3 blocks -- not an error,
+    // see RunDesignResources() for the same reasoning.
     return true;
   }
 
-  // Best-effort: placement has already succeeded.
-  FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_constraint_compliance.py", "Constraint-compliance check",
-      MissingPython::Skip, "constraint compliance");
-  if (!tool.ready) return tool.result;
-  const std::filesystem::path& constraint_compliance_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
+  std::filesystem::path constraint_compliance_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_constraint_compliance.py"));
+  if (constraint_compliance_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_constraint_compliance.py in the "
+                 "installation. Constraint-compliance check failed!");
+    return false;
+  }
+
+#ifdef _WIN32
+  std::filesystem::path python_exec{"python.exe"};
+#else // _WIN32
+  std::filesystem::path python_exec{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+    ErrorMessage("System " + python_exec.string() +
+                 " is not found; skipping constraint compliance "
+                 "(floorplanning_constraint_compliance.py).");
+    return true;  // best-effort: placement has already succeeded
+  }
 
   std::filesystem::path manifest_path =
       FloorplanningArtifact("constraints.manifest.json");
@@ -2982,7 +3086,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
             ", skipping synthesis.");
     // [aurora2#1725 stage P4] re-run even on a skip: instances.json may have changed
     // (see EnsureElaborated() above) since the last time this ran, and validation.json
-    // should reflect it. Best-effort, like every stage this feature adds.
+    // should reflect it. RunValidateInstances() itself stays best-effort; RunNetlistNamemap()
+    // does not -- a real P2b finding hard-fails the build, see its own comment.
+    if (!RunNetlistNamemap()) {
+      return false;
+    }
     RunValidateInstances();
     RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
@@ -3010,6 +3118,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
     // still runs even though synthesis itself didn't.
+    if (!RunNetlistNamemap()) {
+      return false;
+    }
     RunValidateInstances();
     RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
@@ -3036,7 +3147,11 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     // [aurora2#1725 stage P4] validation gate -- grade every instance against the
-    // synthesis output just produced. Best-effort.
+    // synthesis output just produced. RunValidateInstances() stays best-effort;
+    // RunNetlistNamemap() hard-fails on a real P2b finding, see its own comment.
+    if (!RunNetlistNamemap()) {
+      return false;
+    }
     RunValidateInstances();
     // [aurora2#1725 stage P7] tier 2 -- exact per-instance primitive counts, now that
     // atomsets.json describes the netlist just written.
@@ -5755,12 +5870,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   m_state = State::Packed;
   // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
-  // packing_just_succeeded=true: Compile() only marks PACKING's task Success
-  // after this function returns, so without it refresh() would see the task
-  // still InProgress and refuse to trust the auto_device.log this very call
-  // just wrote.
-  QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget(),
-                             /*packing_just_succeeded=*/true);
+  QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
 }
@@ -12533,113 +12643,114 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // ---------------------------------------------------------------- synth_sdc_file --
 
   // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
-  // [aurora2#1725] Two generic insertion points around the synth_ql call -- one before it,
-  // one after -- instead of one named placeholder per stage. The Yosys commands themselves
-  // live in scripts/floorplanning_{pre,post}_synth.tcl, so changing what runs around
-  // synthesis is a script edit, not a FOEDAG rebuild and a submodule pin bump.
-  //
-  // Both hooks resolve to a single `tcl <path>` line, matching ${CALL_TCL_IMPORT_SCRIPT}
-  // above. Parameters reach the post-synth payload through a generated env.tcl rather than
-  // positional argv: yosys' `tcl` sets argc/argv as globals in one process-wide interpreter
-  // (kernel/yosys.cc TclPass), so the nested `tcl` calls that payload makes would clobber
-  // its own arguments.
-  auto resolveFloorplanningScript =
-      [this](const std::string& name, const std::string& what) -> std::filesystem::path {
-    std::filesystem::path resolved = InstalledScript(std::filesystem::path(name));
-    if (resolved.empty()) {
-      ErrorMessage("Cannot locate scripts/" + name + " in the installation; " + what +
-                   " will fail.");
-      // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a bare
-      // `tcl` would be a yosys syntax error rather than a missing-file one.
-      resolved = (GetSession()->Context()->DataPath() /
-                  std::filesystem::path("..") /
-                  std::filesystem::path("scripts") /
-                  std::filesystem::path(name)).lexically_normal();
-    }
-    return resolved;
-  };
-
-  const std::filesystem::path aurora_rehier_script_path =
-      resolveFloorplanningScript("aurora_rehier.tcl",
-                                 "floorplanning rehierarchisation");
-  const std::filesystem::path aurora_atomsets_script_path =
-      resolveFloorplanningScript("floorplanning_atomsets.tcl",
-                                 "floorplanning atom-set extraction");
-  const std::filesystem::path floorplanning_pre_synth_script_path =
-      resolveFloorplanningScript("floorplanning_pre_synth.tcl",
-                                 "floorplanning scope tagging");
-  const std::filesystem::path floorplanning_post_synth_script_path =
-      resolveFloorplanningScript("floorplanning_post_synth.tcl",
-                                 "floorplanning scope tagging and atom-set extraction");
-
+  // [aurora2#1725] Two generic insertion points around the synth_ql call -- one before
+  // it, one after -- instead of one named placeholder per stage. Adding a floorplanning
+  // step to the flow only needs a change here, not an edit to all 24 device templates.
+  // Built from already-resolved values rather than nested ${...} tokens: render()
+  // substitutes from an unordered_map, so a placeholder embedded inside another
+  // placeholder's value is not reliably re-resolved.
+  std::filesystem::path aurora_rehier_script_path =
+      InstalledScript(std::filesystem::path("aurora_rehier.tcl"));
+  if (aurora_rehier_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/aurora_rehier.tcl in the installation; "
+                 "floorplanning stage P2 rehierarchisation will fail.");
+    // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a
+    // bare `tcl` would be a yosys syntax error rather than a missing-file one.
+    aurora_rehier_script_path =
+        (GetSession()->Context()->DataPath() /
+         std::filesystem::path("..") /
+         std::filesystem::path("scripts") /
+         std::filesystem::path("aurora_rehier.tcl")).lexically_normal();
+  }
   yosysScript->addFile(aurora_rehier_script_path);
+
+  std::filesystem::path aurora_atomsets_script_path =
+      InstalledScript(std::filesystem::path("floorplanning_atomsets.tcl"));
+  if (aurora_atomsets_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning_atomsets.tcl in the installation; "
+                 "floorplanning stage P3 atom-set extraction will fail.");
+    // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a
+    // bare `tcl` would be a yosys syntax error rather than a missing-file one.
+    aurora_atomsets_script_path =
+        (GetSession()->Context()->DataPath() /
+         std::filesystem::path("..") /
+         std::filesystem::path("scripts") /
+         std::filesystem::path("floorplanning_atomsets.tcl")).lexically_normal();
+  }
   yosysScript->addFile(aurora_atomsets_script_path);
-  yosysScript->addFile(floorplanning_pre_synth_script_path);
-  yosysScript->addFile(floorplanning_post_synth_script_path);
+
+  // [aurora2#1725 stage P3] NOT wired to pass the instance list from instances.json
+  // (P0b), despite that being the documented intent (floorplanning_atomsets.tcl's own
+  // header). floorplanning_atomsets.tcl parses argv positionally and the call below
+  // already supplies its two fixed positional arguments, so any list this code appended
+  // would either duplicate them or corrupt their parsing. Fixing this for real needs
+  // either a third positional argument here or reworking floorplanning_atomsets.tcl to
+  // take the list some other way (e.g. a file). The top module IS passed, as the named
+  // --top flag rather than positionally, which is what that rework would look like.
+  //
+  // Not required for P4 in practice: floorplanning_validate_instances.py's own --instances
+  // flag (see RunValidateInstances()) already overrides the graded universe with
+  // instances.json's full list, so a deleted (zero-atom) instance absent from
+  // atomsets.json is still correctly graded "deleted".
 
   const std::string top_module_name = ProjManager()->DesignTopModule();
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
 
-  // [aurora2#1725 stage P3] Hand P3 the instance list stage P0b elaborated instead of
-  // letting it rediscover one from cell names. Discovery reads an instance path as
-  // "everything before the last dot" of a cell name, so it cannot see a scope that owns no
-  // cells directly; hierarchy_closure() reconstructs the ancestors of what it did find, but
-  // it cannot invent an instance synthesis deleted outright.
-  //
-  // The top instance is deliberately NOT in this list. floorplanning_atomsets.tcl gives it
-  // an entry of its own from --top -- every atom in the netlist, which is what a
-  // whole-design region needs -- but only when the top is not already an instance key
-  // (see its --top handling). Listing it here would create that key with the near-zero
-  // atoms `c:<top>.*` matches, suppress the whole-design entry, and reintroduce the very
-  // failure the --top flag exists to prevent.
-  std::string fp_instances;
-  {
-    std::ifstream in(FloorplanningArtifact("instances.json"));
-    if (in.is_open()) {
-      try {
-        json doc = json::parse(in);
-        std::string top = doc.value("top_instance", std::string{});
-        if (top.empty()) top = doc.value("top", std::string{});
-        for (const auto& entry : doc.value("instances", json::array())) {
-          const std::string path = entry.value("path", std::string{});
-          // Braced as one Tcl list below, so anything that would break that quoting is
-          // dropped rather than emitted -- an instance path never legitimately has it.
-          if (path.empty() || path == top ||
-              path.find_first_of("{}\\ \t\n\"") != std::string::npos) {
-            continue;
-          }
-          if (!fp_instances.empty()) fp_instances += " ";
-          fp_instances += path;
-        }
-      } catch (const json::exception&) {
-        // A malformed instances.json is stage P0b's to report; leave the list empty and
-        // let P3 fall back to discovery rather than failing synthesis over it.
-        fp_instances.clear();
-      }
-    }
-  }
-
-  // Parameters for the payloads: data, not program text. Braced values so a Windows path's
-  // backslashes are not read as Tcl escapes.
-  const std::filesystem::path floorplanning_env_path = FloorplanningArtifact("env.tcl");
-  {
-    std::ofstream env(floorplanning_env_path);
-    env << "# Generated by FOEDAG for " << ProjManager()->projectName()
-        << " -- floorplanning parameters (aurora2#1725). Do not edit.\n"
-        << "set ::fp_top {" << top_module_name << "}\n"
-        << "set ::fp_prefix {" << FloorplanningPrefix() << "}\n"
-        << "set ::fp_blif {" << output_blif_filepath.string() << "}\n"
-        << "set ::fp_atomsets_script {" << aurora_atomsets_script_path.string() << "}\n"
-        << "set ::fp_rehier_script {" << aurora_rehier_script_path.string() << "}\n"
-        << "set ::fp_instances {" << fp_instances << "}\n";
-  }
-
   yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}",
-                     "tcl " + floorplanning_pre_synth_script_path.string());
+      "# [aurora2#1725 stage P2] Tag every object with its enclosing RTL scope before\n"
+      "# synth_ql's own flatten runs, so the post-synth debug JSON below can attribute a\n"
+      "# cell whose flattened name lost its i_<inst>. prefix. Pre-flattening makes\n"
+      "# synth_ql's own flatten a no-op, so the netlist stays a single flat module and\n"
+      "# QoR is unchanged.\n"
+      "flatten -scopename");
 
   yosysScript->apply("${FLOORPLANNING_POST_SYNTH}",
-                     "tcl " + floorplanning_post_synth_script_path.string() + " " +
-                         floorplanning_env_path.string());
+      "# [aurora2#1725 stage P2] Name-traceability debug JSON: the input for stage P3\n"
+      "# atom extraction and stage P4 checks 2/2b/4. Runs after synth_ql, which has\n"
+      "# already written the BLIF and Verilog the flow consumes, so this cannot affect\n"
+      "# QoR.\n"
+      "#\n"
+      "# `-selected` is REQUIRED, not an optimisation: a bare `write_json` aborts with\n"
+      "#   ERROR: Module lut6_2 contains processes, which are not supported by JSON backend\n"
+      "# because cells_sim.v library modules read via `read_verilog -lib` still carry\n"
+      "# processes. Restricting to the top module also keeps the file proportional to\n"
+      "# the design (tens-to-hundreds of KB, not tens of MB).\n"
+      "#\n"
+      "# Do NOT add -noattr: it strips the src / hdlname / scopename attributes that\n"
+      "# are the entire point of this output.\n"
+      "select " + top_module_name + "\n" +
+      "write_json -selected " + top_module_name + "_post_synth_debug.json\n" +
+      "select -clear\n"
+      "\n"
+      "# [aurora2#1725 stage P3] Atom-set extraction: the exact set of netlist atoms\n"
+      "# belonging to each RTL instance, consumed by stages P4/P5/P7. Membership is the\n"
+      "# union of the i_<inst>. name prefix and the scopename attribute that\n"
+      "# `flatten -scopename` above added -- prefix alone silently drops the cells whose\n"
+      "# name lost it. --blif binds the result to the netlist it describes, so a stale\n"
+      "# set is detectable.\n"
+      "#\n"
+      "# Wrapped in `tee -q -o`: `select -list` narrates one line per atom, which\n"
+      "# belongs in atomsets.json rather than the console or <top>_synth.log.\n"
+      "# --top gives the top module an atom set of its own -- every atom in the\n"
+      "# netlist -- matching the root instance stage P0b records in instances.json.\n"
+      "# It cannot be discovered: an instance path is 'everything before the last dot'\n"
+      "# of a cell name, and the top module's own cells have no dot at all. Without it a\n"
+      "# region drawn on the whole design sizes at zero, grades 'deleted' in P4 and\n"
+      "# emits nothing in P5.\n"
+      "tee -q -o " + FloorplanningPrefix() + "_atomsets.log" +
+      " tcl " + aurora_atomsets_script_path.string() +
+      " atomsets.json --blif " + output_blif_filepath.string() +
+      " --top " + top_module_name + "\n"
+      "\n"
+      "# [aurora2#1725 stage P2] Review-only hierarchical netlist: regroups the\n"
+      "# flattened cells back into nested modules for human inspection. NEVER read by\n"
+      "# packing / placement / routing / bitstream. Wrapped in `tee -q -o`, which is\n"
+      "# what keeps the synthesis log the size it is on master -- rebuilding the\n"
+      "# hierarchy runs `submod` once per level of it, and submod narrates every cell\n"
+      "# it moves.\n"
+      "tee -q -o " + FloorplanningPrefix() + "_rehier.log" +
+      " tcl " + aurora_rehier_script_path.string() +
+      " " + top_module_name + "_post_synth_hier.v");
   // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
 
   // -- floorplanning_prefix ---------------------------------------------------------

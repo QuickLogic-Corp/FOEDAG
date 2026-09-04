@@ -152,10 +152,9 @@ add_library(compiler STATIC
 )
 
 # [aurora2#1725 REQ-004] The compiler runs the headless floorplan check before
-# generate_floorplanning.py, so it genuinely depends on the floorplanning core now.
-# Declared rather than left to link order: their other symbols happened to resolve
+# generate_floorplanning.py, so it genuinely depends on floorplanning now. Declared
+# rather than left to link order: floorplanning's other symbols happened to resolve
 # because libfoedag pulls them in first, which would not have covered this one.
-# floorplanning, not floorplanningui: the check needs the core model, not the panel.
 target_link_libraries(compiler PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::Xml qlcrypt::qlcrypt floorplanning)
 target_compile_definitions(compiler PRIVATE COMPILER_LIBRARY)
 if(HAS_POWER_CALC_RESOURCE)
