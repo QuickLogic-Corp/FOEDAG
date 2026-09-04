@@ -2342,9 +2342,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
-          // include openfpga template script for copy (aurora_template_script.openfpga)
+          // include openfpga template scripts for copy (aurora_template_script.openfpga,
+          // and variants such as aurora_template_script_pack.openfpga). regex_match is a
+          // full-string match, so a name-suffixed variant needs the wildcard: without it
+          // the variant matches no encrypt/copy/exclude rule at all and device kit
+          // generation refuses the device outright.
           if (std::regex_match(dir_entry.path().filename().string(),
-                                std::regex("aurora_template_script\\.openfpga",
+                                std::regex("aurora_template_script.*\\.openfpga",
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
