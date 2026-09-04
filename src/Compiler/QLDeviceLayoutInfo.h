@@ -47,7 +47,14 @@ class QLDeviceLayout {
 // stays false and nothing is written. Nothing here can fail a compile.
 class QLDeviceLayoutInfo {
  public:
-  explicit QLDeviceLayoutInfo(QLDeviceTarget device_target = QLDeviceTarget());
+  // packing_just_succeeded: set only by Packing()'s own tail call, right after
+  // add_layout.py has run and before Compile() has had a chance to mark the
+  // PACKING task Success - the task still reads InProgress at that point, so
+  // without this the constructor would refuse to trust the auto_device.log it
+  // is itself the source of. Every other caller leaves it false and relies on
+  // the task's real status, e.g. after a project reopen.
+  explicit QLDeviceLayoutInfo(QLDeviceTarget device_target = QLDeviceTarget(),
+                              bool packing_just_succeeded = false);
   // Wrap an already-resolved layout. Lets the pure parsers below be exercised
   // through the same accessors the flow uses.
   explicit QLDeviceLayoutInfo(const QLDeviceLayout& layout) : m_layout(layout) {}
@@ -72,7 +79,9 @@ class QLDeviceLayoutInfo {
 
   // Resolve for the current device and write device_layout.json when the answer
   // exists; otherwise remove any stale file. The whole feature's entry point.
-  static void refresh(QLDeviceTarget device_target = QLDeviceTarget());
+  // See the constructor for packing_just_succeeded.
+  static void refresh(QLDeviceTarget device_target = QLDeviceTarget(),
+                      bool packing_just_succeeded = false);
 
   // auto_device.log names no device - it is just whatever Packing() last ran
   // add_layout.py for. Call before switching the current device: if the
@@ -102,7 +111,7 @@ class QLDeviceLayoutInfo {
  private:
   bool resolveFromDeviceConfig(const QLDeviceLayoutSettings& layout_settings,
                                QLDeviceTarget device_target);
-  bool resolveFromAutoDeviceLog();
+  bool resolveFromAutoDeviceLog(bool packing_just_succeeded);
   // bramSize/dspSize/ioCapacity are static properties of the package, not the
   // layout, so AUTO/RESOURCES devices - whose geometry comes from
   // auto_device.log, not config.json - still need this separate fetch to

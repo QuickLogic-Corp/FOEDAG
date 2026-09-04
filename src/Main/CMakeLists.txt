@@ -145,7 +145,7 @@ target_link_libraries(foedagcore PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::Xml
 if (USE_IPA)
   target_link_libraries(foedagcore PUBLIC interactive_path_analysis)
 endif()
-target_link_libraries(foedagcore PUBLIC floorplanning)
+target_link_libraries(foedagcore PUBLIC floorplanningui)
 target_compile_definitions(foedagcore PUBLIC FOEDAG_CORE_LIBRARY)
 
 set(FOEDAG_CORE_STATIC_LIB libfoedagcore.a)

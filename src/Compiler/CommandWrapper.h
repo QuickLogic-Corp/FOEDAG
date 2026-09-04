@@ -163,7 +163,7 @@ ScriptRenderer()=default;
     if (script.find("${") != std::string::npos) {
       std::unordered_set<std::string> varNames = StringUtils::findShellVariableNames(script);
       for (const std::string& varName: varNames) {
-        m_errors.push_back("varaible ${" + varName + "} is not paramerized in script");
+        m_errors.push_back("variable ${" + varName + "} is not parameterized in script");
       }
     }
     return script;

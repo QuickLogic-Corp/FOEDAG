@@ -8,6 +8,18 @@ namespace fp {
 
 int Partition::s_idGenerator = 0;
 
+// atomsets.json's own default (spec A.13.3). Overridden by setAtomsPerTile() once the
+// project's atomsets.json has been read.
+int Partition::s_atomsPerTile = 14;
+
+// [aurora2#1725 stage P7] Empty until design_resources.json is read; tier 0 means "no file",
+// so addElement()'s estimate path stays off until a tier-1 file actually arrives.
+DesignResources Partition::s_designResources{};
+
+// [aurora2#2377] Empty until <top>_post_synth_debug.json is read; addElement() falls back
+// to classifyAtomType()'s name-substring guess for any atom with no entry here.
+AtomTypeMap Partition::s_atomTypes{};
+
 Partition::Partition(const std::string& name): m_name(name) {
   m_id = s_idGenerator++;
   setColor(colorFromIndex(m_id));
@@ -25,6 +37,28 @@ void Partition::setColor(const QColor& color)
 
 std::unordered_set<std::string> Partition::collectOverlappedElements(const Partition& partition) const
 {
+    // [aurora2#1725] An element covers its whole subtree, so "the same element in two
+    // partitions" is not only an identical path: an instance here and something nested
+    // inside it there claim the same atoms just as surely. Exact-path comparison alone
+    // missed that, which is how partition1 could hold dut.instPerm20009 while partition2
+    // held dut.instPerm20009.in_sw_0_0 with nothing reported -- and VPR cannot honour it,
+    // a cluster sitting in one region only. The nested path is the one named, since that
+    // is the narrower claim and the one to drop to resolve it.
+    auto collectNested = [](const HierarhyElements& inner, const HierarhyElements& outer,
+                            std::unordered_set<std::string>& into) {
+        for (const HierarhyElement& element: inner) {
+            std::size_t dot = element.path.rfind('.');
+            while (dot != std::string::npos) {
+                const std::string ancestor = element.path.substr(0, dot);
+                if (outer.contains(ancestor)) {
+                    into.insert(element.path);
+                    break;
+                }
+                dot = ancestor.rfind('.');
+            }
+        }
+    };
+
     std::unordered_set<std::string> elements;
     for (const HierarhyElement& element: partition.elements()) {
         if (m_elements.contains(element.path)) {
@@ -36,6 +70,8 @@ std::unordered_set<std::string> Partition::collectOverlappedElements(const Parti
             elements.insert(element.path);
         }
     }
+    collectNested(partition.elements(), m_elements, elements);
+    collectNested(m_elements, partition.elements(), elements);
     return elements;
 }
 

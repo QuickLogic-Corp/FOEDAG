@@ -6,6 +6,10 @@
 
 #include <QDebug>
 
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 namespace fp {
 
 bool QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
@@ -26,15 +30,19 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             continue;
         }
 
-        // collect netlist elements
+        // [aurora2#1725 stage P1] RTL names only -- never element.vprNames, and never a
+        // pattern derived from the tree's shape. Writing resolved VPR atom names is what
+        // produced the defect this feature fixes: an enumerated .qdc can never be complete,
+        // and those names are in a different namespace from the atoms VPR places (A.P3).
+        //
+        // A whole-instance selection is written as the plain RTL path -- "dut.instPerm20009",
+        // not "dut.instPerm20009.*". REQ-003 reserves that ".*" wildcard for
+        // _constraints.xml generation; GenerateIOFloorPlanConstraints() appends it itself for
+        // the tokens it recognises as instances, so writing it here loses nothing.
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
-            if (element.isLeaf) {
-                elementsStr += element.path;
-            } else {
-                elementsStr += element.path + ".*";
-            }
+            elementsStr += element.path;
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {
                 elementsStr += ",";
@@ -97,6 +105,11 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
 
         line += partition->name();
 
+        if (!partition->comment().empty()) {
+            line += "  ";
+            line += partition->comment();
+        }
+
         line += "\n\n";
 
         // add line to context
@@ -152,57 +165,106 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
 
     for (const std::string& line: lines) {
         if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
-            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(line, " ");
+            // Split any trailing comment off BEFORE tokenizing: its words would otherwise
+            // count as command tokens, and the partition name -- taken only when there are
+            // exactly four -- would be silently lost.
+            std::string commandPart = line;
+            std::string trailingComment;
+            if (auto hash = line.find('#'); hash != std::string::npos) {
+                trailingComment = line.substr(hash);
+                trailingComment = FOEDAG::StringUtils::trim(trailingComment);
+                commandPart = line.substr(0, hash);
+                commandPart = FOEDAG::StringUtils::trim(commandPart);
+            }
+
+            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(commandPart, " ");
             // extract partition name [optionally]
             std::string partitionName = "";
             if (cmdTokens.size() == 4) {
                 partitionName = cmdTokens[3];
             }
 
-            PartitionPtr partition = std::make_shared<Partition>(partitionName);
-            device.addPartition(partition);
+            // [aurora2#1725] Parse every region BEFORE anything reaches the device. The
+            // partition used to be added first and each region restored as it parsed, so one
+            // bad coordinate left a partition holding elements and no region; serialize()
+            // skips only partitions with no ELEMENTS, so the next save rewrote it without the
+            // region and a typo in a hand-edited .qdc silently destroyed the constraint it
+            // was in.
+            //
+            // A line we cannot fully parse is kept in m_reservedContent instead, which save()
+            // writes back, so the file survives the round trip untouched and the user can fix
+            // the typo by hand. The partition is not created: a half-loaded one is exactly
+            // what caused the loss.
+            std::vector<std::pair<Tile::Index, Tile::Index>> parsedRegions;
+            bool regionsOk = true;
 
             if (cmdTokens.size() >= 3) {
-                // extract elements
-                std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
-                for (std::string path: pathesDirtyTokens) {
-                    if (FOEDAG::StringUtils::endsWith(path, ".*")) {
-                        FOEDAG::StringUtils::removeSuffix(path, ".*");
-                        partition->addElement(HierarhyElement{path, false});
-                    } else {
-                        partition->addElement(HierarhyElement{path, true});
-                    }
-                }
-
-                // extract regions
                 std::vector<std::string> regionsStr = splitRegionsIgnoringParens(cmdTokens[2], ',');
                 for (const std::string& regionStr: regionsStr) {
                     std::vector<std::string> regionTokens = FOEDAG::StringUtils::tokenize(regionStr, ":");
+                    std::optional<TileDescriptor> bottomLeftOpt;
+                    std::optional<TileDescriptor> topRightOpt;
+
                     if (regionTokens.size() == 1) {
-                        // special case
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
-                        if (bottomLeftGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftIndex = device.toBottomLeftGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            Tile::Index topRightIndex = device.toTopRightGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
-                        } else {
+                        // special case: a single tile is its own bottom-left and top-right
+                        bottomLeftOpt = extractGridCoord(regionTokens[0]);
+                        topRightOpt = bottomLeftOpt;
+                        if (!bottomLeftOpt) {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract start and end points";
                         }
                     } else if (regionTokens.size() == 2) {
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
-                        std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[1]);
-
-                        if (bottomLeftGridCoordTileDescriptorOpt && topRightGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftIndex = device.toBottomLeftGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            Tile::Index topRightIndex = device.toTopRightGridIndex(topRightGridCoordTileDescriptorOpt.value());
-                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
-                        } else {
+                        bottomLeftOpt = extractGridCoord(regionTokens[0]);
+                        topRightOpt = extractGridCoord(regionTokens[1]);
+                        if (!bottomLeftOpt || !topRightOpt) {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract bottomLeft or topRight indexes";
                         }
                     } else {
                         qCritical() << "syntax error for regions" << QString::fromStdString(regionStr);
                     }
+
+                    if (!bottomLeftOpt || !topRightOpt) {
+                        regionsOk = false;
+                        break;
+                    }
+                    parsedRegions.emplace_back(device.toBottomLeftGridIndex(bottomLeftOpt.value()),
+                                               device.toTopRightGridIndex(topRightOpt.value()));
                 }
+            } else {
+                regionsOk = false;
+            }
+
+            if (!regionsOk) {
+                qCritical() << "keeping the unparsable line as-is so saving cannot discard it:"
+                            << QString::fromStdString(line);
+                m_reservedContent += line + "\n";
+                continue;
+            }
+
+            PartitionPtr partition = std::make_shared<Partition>(partitionName);
+            partition->setComment(trailingComment);
+            device.addPartition(partition);
+
+            // extract elements
+            std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
+            // A ".*" suffix is still accepted: serialize() wrote one for every non-leaf
+            // element until stage P1, and the testcase .qdc files are hand-written in that
+            // form. It is stripped rather than kept, so the path stored here is the RTL name
+            // in both cases and a load/save round trip normalises the older form to it.
+            //
+            // isLeaf is a note about the tree, not about the file, and a bare path cannot say
+            // which it was -- so it never decides anything outside the panel, which recomputes
+            // it from the rows it actually has (see fillPartitionWithSelectedElements()).
+            for (std::string path: pathesDirtyTokens) {
+                if (FOEDAG::StringUtils::endsWith(path, ".*")) {
+                    FOEDAG::StringUtils::removeSuffix(path, ".*");
+                    partition->addElement(HierarhyElement{path, false});
+                } else {
+                    partition->addElement(HierarhyElement{path, true});
+                }
+            }
+
+            for (const auto& [bottomLeftIndex, topRightIndex]: parsedRegions) {
+                device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
             }
         } else {
             m_reservedContent += line + "\n";
@@ -228,15 +290,19 @@ std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path
     for (std::string line: lines) {
       line = FOEDAG::StringUtils::trim(line);
 
-      // drop comment part
-      if (auto pos = line.find("#"); pos != std::string::npos) {
-        line = line.substr(0, pos); // drop commented part of line
-      }
-
       if (line.empty()){
         continue; // Skip empty line
       }
 
+      // [aurora2#1725] Comments are user content and are returned intact -- whole-line ones
+      // for load() to keep in m_reservedContent, trailing ones for it to carry on the
+      // partition they annotate. They used to be stripped here and dropped, and since
+      // m_reservedContent is filled only from the lines load() receives, every comment in
+      // the .qdc was destroyed by the next save. The testcase .qdc files carry their entire
+      // rationale in such headers.
+      //
+      // Consumers therefore have to expect them: see GenerateIOFloorPlanConstraints(),
+      // which would otherwise read a comment's first word as a command name.
       commands.push_back(line);
     }
 
@@ -248,9 +314,20 @@ std::optional<TileDescriptor> QdcSerializer::extractGridCoord(const std::string&
     static auto extractGridCoord = [](const std::string& idxStr, Tile::Type type)->std::optional<TileDescriptor> {
         std::vector<std::string> tokens = FOEDAG::StringUtils::tokenize(idxStr, ",");
         if (tokens.size() == 2) {
-            int col = std::stoi(tokens[0]);
-            int row = std::stoi(tokens[1]);
-            return TileDescriptor{Tile::Index(col, row), type};
+            // [aurora2#1725] The .qdc is user-editable, so these tokens are untrusted:
+            // "clb(abc,2)" makes std::stoi throw invalid_argument and a large value makes it
+            // throw out_of_range. Nothing anywhere in the load path catches -- not
+            // QdcSerializer, not DeviceGrid, not FloorPlanningWidget -- and load() runs from
+            // a Qt slot on panel open and on the Load button, so the throw took the IDE down
+            // over a typo. Reported as a syntax error instead, which is what every other
+            // malformed-region path here already does.
+            try {
+                int col = std::stoi(tokens[0]);
+                int row = std::stoi(tokens[1]);
+                return TileDescriptor{Tile::Index(col, row), type};
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
         }
         return std::nullopt;
     };

@@ -80,8 +80,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "foedag_version.h"
 #include "Compiler/QLSettingsManager.h"
 
+#include "FloorPlanning/AtomSets.h"
 #include "FloorPlanning/FloorPlanningWidget.h"
-#include "FloorPlanning/SynthResourceExtractor.h"
+#include "FloorPlanning/FloorplanningPaths.h"
+#include "FloorPlanning/RtlInstanceModel.h"
+#include "nlohmann_json/json.hpp"
 
 using namespace FOEDAG;
 extern const char* foedag_version_number;
@@ -301,7 +304,16 @@ void MainWindow::ProgressVisible(bool visible) {
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (confirmExitProgram()) {
     if (m_floorPlanningWidget) {
-      m_floorPlanningWidget->close();
+      // [aurora2#1725] Destroy the panel here and now rather than close()ing it. close()
+      // goes through the closed() handler, which disposes of the widget with deleteLater();
+      // on this path the event loop never runs again -- accepting this event closes the
+      // last window, which sends Qt's lastWindowClosed straight into Tcl's "exit" -- so
+      // that deferred delete is only serviced from an atexit handler, by which point Qt's
+      // GUI state is half torn down and destroying a widget segfaults. Nothing here is
+      // running inside the panel's own code, so deleting it outright is safe.
+      fp::FloorPlanningWidget* floorPlanningWidget = m_floorPlanningWidget;
+      m_floorPlanningWidget = nullptr;
+      delete floorPlanningWidget;
     }
     forceStopCompilation();
     event->accept();
@@ -1898,6 +1910,11 @@ void MainWindow::ReShowWindow(QString strProject) {
     m_compiler->finish();
     showMessagesTab();
     showReportsTab();
+    // [aurora2#1725 stage P7] A compile advances design_resources.json (tier 1 -> 2) and
+    // rewrites atomsets.json / validation.json. Without this an open panel keeps showing
+    // whatever was on disk when it was opened -- post-synthesis counts that a later
+    // placement has already improved on. No-op when the panel is closed.
+    refreshFloorPlanningData();
   });
 
   connect(m_taskManager, &TaskManager::started, this,
@@ -2256,11 +2273,294 @@ void MainWindow::ipConfiguratorActionTriggered() {
   }
 }
 
-//#define UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
+
+// [aurora2#1725 stage P7] see the declaration in main_window.h.
+bool MainWindow::loadFloorPlanningData(QString& error)
+{
+  if (!m_floorPlanningWidget) {
+    error = tr("The Floor Planning panel is not open.");
+    return false;
+  }
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+  // [aurora2#1725 stage P0] instances.json is produced by RunElabInstances() during the
+  // SYNTHESIS task, and floorPlanningActionTriggered() will not open this panel until that
+  // task has produced a netlist -- so the file is already on disk and there is nothing to
+  // (re)derive here. The on-demand EnsureElaborated() call this replaces existed only to
+  // support opening the panel before synthesis, which is no longer allowed.
+
+  // [aurora2#1725 stage P1] instances.json (RtlInstanceModel) is the sole source of the
+  // tree below, pre- or post-synthesis alike -- a real Yosys/Verific elaboration,
+  // language-agnostic unlike the RTL-source text scrapers this replaced (which only
+  // understood Verilog and found nothing at all for a VHDL design like fpu_single).
+  std::filesystem::path instancesJsonPath =
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "instances.json");
+  fp::RtlInstanceModel rtlModel;
+  if (!rtlModel.loadInstances(instancesJsonPath)) {
+    error = QString::fromStdString(rtlModel.error());
+    return false;
+  }
+
+  // [aurora2#1725 stage P4] Merge the verdicts. Written by RunValidateInstances() at the
+  // end of the SYNTHESIS task -- including its "skipped, not required" paths -- so it is
+  // already there by the time this panel opens, on any project that has been synthesised.
+  // Still optional rather than required: a device whose template carries no P2/P3 blocks
+  // produces no validation.json even after a successful synthesis, and every instance then
+  // stays "unknown", rendering exactly as the tree did before this was wired up. Failure
+  // isn't checked for the same reason -- a stale verdict must not stop the user
+  // floorplanning.
+  std::filesystem::path validationJsonPath =
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "validation.json");
+  rtlModel.mergeVerdicts(validationJsonPath);
+
+  // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
+  // atoms belonging to it, straight from atomsets.json (floorplanning_atomsets.tcl,
+  // in-session, stage P3). Absent on a device whose template carries no P2/P3 blocks, in
+  // which case setAtomNames() is simply not called and every leaf stays visible (see
+  // SynthResourceHierarchyWidget::populateAtomColumns()'s early-return on
+  // !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
+  // populateAtomColumns() itself, so the atom-name map has to already be set.
+  std::filesystem::path atomsetsJsonPath =
+      fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "atomsets.json");
+  {
+    // Shared with the batch checker (REQ-004), so the panel and a headless run read the
+    // same file the same way -- including atoms_per_tile, which is the divisor behind every
+    // required-clb figure. Two readers of that would mean the two paths could report
+    // different tile counts for the same .qdc.
+    fp::AtomNameMap atomNames;
+    fp::AtomResourceMap atomResources;
+    int atomsPerTile = fp::Partition::atomsPerTile();  // A.13.3 default unless the file says
+    if (fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile)) {
+      m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
+      m_floorPlanningWidget->setAtomNames(std::move(atomNames));
+      // The same file's "resources" map: the cell types behind those atoms, which the
+      // Atoms tab of "Selected RTL Resources" reports.
+      m_floorPlanningWidget->setAtomResources(std::move(atomResources));
+    }
+  }
+
+  // [aurora2#2377] Each atom's real Yosys cell type, from the write_json dump
+  // floorplanning_post_synth.tcl produces alongside atomsets.json. Ground truth for the
+  // Type column and Partition's clb/dsp/bram counts, instead of classifyAtomType()'s
+  // name-substring guess, which misclassifies a hard macro that keeps its RTL instance
+  // name (a BRAM, say) as CLB.
+  //
+  // Called unconditionally, empty map and all: Partition holds this statically (like
+  // s_designResources), so skipping the call on a project with no debug json would leave
+  // the PREVIOUS project's types in place and classify this one's atoms against them.
+  {
+    fp::AtomTypeMap atomTypes;
+    std::filesystem::path debugJsonPath =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) /
+        (compiler->ProjManager()->DesignTopModule() + "_post_synth_debug.json");
+    fp::loadAtomTypes(debugJsonPath, atomTypes);
+    m_floorPlanningWidget->setAtomTypes(std::move(atomTypes));
+  }
+
+  // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
+  // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
+  // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be
+  // set before loadNetList() below, which builds the trees and populates every partition:
+  // Partition::addElement() reads it as it goes. Absent for a project that has never been
+  // compiled, and for devices whose template has no P2/P3 blocks -- both leave the panel
+  // exactly as it was before this stage existed, so a missing file is not an error.
+  //
+  // Cleared up front rather than only on success: Partition holds these statically, so a
+  // project with no design_resources.json -- or an unreadable one -- would otherwise keep
+  // sizing its partitions from whichever project was open last.
+  m_floorPlanningWidget->setDesignResources(fp::DesignResources{});
+
+  std::filesystem::path designResourcesPath =
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "design_resources.json");
+  if (FileUtils::FileExists(designResourcesPath)) {
+    std::ifstream designResourcesStream(designResourcesPath);
+    nlohmann::json designResourcesDoc;
+    bool parsedOk = true;
+    try {
+      designResourcesStream >> designResourcesDoc;
+    } catch (const std::exception&) {
+      parsedOk = false;
+    }
+    if (parsedOk && designResourcesDoc.contains("tier") &&
+        designResourcesDoc["tier"].is_number_integer()) {
+      fp::DesignResources resources;
+      resources.tier = designResourcesDoc["tier"].get<int>();
+      if (designResourcesDoc.contains("tier_name") &&
+          designResourcesDoc["tier_name"].is_string()) {
+        resources.tierName = designResourcesDoc["tier_name"].get<std::string>();
+      }
+      if (designResourcesDoc.contains("instances") &&
+          designResourcesDoc["instances"].is_object()) {
+        const auto& instances = designResourcesDoc["instances"];
+        for (auto it = instances.begin(); it != instances.end(); ++it) {
+          const auto& entry = it.value();
+          if (!entry.is_object()) continue;
+          // Read what the tier actually provides and leave the rest at 0: only tier 2
+          // has clb_actual.
+          fp::DesignResourceEntry resourceEntry;
+          auto readInt = [&entry](const char* key, int& target) {
+            if (entry.contains(key) && entry[key].is_number_integer()) {
+              target = entry[key].get<int>();
+            }
+          };
+          readInt("clb_est", resourceEntry.clbEst);
+          readInt("dsp", resourceEntry.dsp);
+          readInt("bram", resourceEntry.bram);
+          // Tier 2 only. The flag is explicit rather than a sentinel so "not measured"
+          // cannot be read as "measured zero" -- before placement, CLBs do not exist yet.
+          if (entry.contains("clb_actual") && entry["clb_actual"].is_number_integer()) {
+            resourceEntry.clbActual = entry["clb_actual"].get<int>();
+            resourceEntry.hasClbActual = true;
+          }
+          resourceEntry.clbActualShared =
+              entry.value("clb_actual_is_shared_count", false);
+          resources.instances[it.key()] = resourceEntry;
+        }
+      }
+      m_floorPlanningWidget->setDesignResources(std::move(resources));
+    }
+  }
+
+  // [aurora2#1725 stage P4] Hand the verdicts to the trees before loadNetList(), which is
+  // what builds them: build() grades each row as it goes.
+  std::map<std::string, fp::InstanceVerdict> verdicts;
+  for (const fp::RtlInstance& instance : rtlModel.instances()) {
+    verdicts[instance.path] = fp::InstanceVerdict{instance.status, instance.statusReason};
+  }
+  m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
+
+  // [aurora2#1725 stage P7] Measured placement, when a placement exists. Written by the
+  // constraint-compliance stage, so it appears after place and is refreshed by the same
+  // reload path as everything else here; absent before then, which leaves every row without
+  // a status icon rather than with a wrong one.
+  m_floorPlanningWidget->setPlacementVerdicts(fp::loadPlacementVerdicts(
+      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "placement.json")));
+
+  // [aurora2#1725 stage P1] instances.json -> flat path set for the tree. Every instance,
+  // deleted ones included: they are shown greyed out and unselectable rather than dropped,
+  // because whether an instance survives synthesis depends on generics and constant
+  // folding, and an instance that silently vanishes from the tree is indistinguishable
+  // from a mistyped hierarchy path (A.P4). toHierarhyElements() is the element set a
+  // PARTITION may hold, and it still excludes them -- there are no atoms to constrain.
+  fp::NaturalStringSet paths;
+  for (const fp::RtlInstance& instance : rtlModel.instances()) {
+    paths.insert(instance.path);
+  }
+  // [aurora2#1725 stage P1] Root the tree at the top module. Before loadNetList(), which is
+  // what builds it. Without this the top is just another top-level row sitting BESIDE
+  // "dut"/"core" -- the same design drawn one way on a flat design (where the top is the
+  // only row, so it reads as the root) and another way on a hierarchical one. Empty on an
+  // instances.json with no top entry, which leaves the tree exactly as it was.
+  m_floorPlanningWidget->setTopInstance(rtlModel.topInstance());
+  m_floorPlanningWidget->loadNetList(paths);
+
+  // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
+  // so we construct path based on json settings location file.
+  std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc");
+
+  m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
+
+  return true;
+}
+
+// [aurora2#1725 stage P7] see the declaration in main_window.h.
+void MainWindow::refreshFloorPlanningData()
+{
+  // Never opens the panel. A compile finishing is not a reason to put a window on screen;
+  // this only offers to bring an ALREADY-OPEN one up to date.
+  if (!m_floorPlanningWidget) {
+    return;
+  }
+  CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
+
+  // Only ask when there is genuinely better data to load. The panel keeps the tier it was
+  // populated with, so comparing it against what is now on disk answers that directly:
+  // tier 1 arriving after a synthesis, or tier 2 after a placement, is worth interrupting
+  // for; another compile that produced nothing newer is not.
+  const int loadedTier = fp::Partition::designResources().tier;
+  int diskTier = 0;
+  {
+    std::filesystem::path path =
+        fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                compiler->ProjManager()->projectName(), "design_resources.json");
+    if (FileUtils::FileExists(path)) {
+      std::ifstream stream(path);
+      nlohmann::json doc;
+      try {
+        stream >> doc;
+        if (doc.contains("tier") && doc["tier"].is_number_integer()) {
+          diskTier = doc["tier"].get<int>();
+        }
+      } catch (const std::exception&) {
+        diskTier = 0;
+      }
+    }
+  }
+  if (diskTier <= loadedTier) {
+    return;
+  }
+
+  // Reloading repopulates the partitions from the .qdc on disk, so the choice differs by
+  // whether there is anything of the user's to lose. Two buttons either way: saving is
+  // offered only when there is something to save, rather than presenting a Save that would
+  // write nothing and a Discard that would discard nothing.
+  const bool dirty = m_floorPlanningWidget->hasUnsavedChanges();
+
+  QMessageBox box(this);
+  box.setIcon(QMessageBox::Question);
+  box.setWindowTitle(tr("Floor Planning"));
+  // [aurora2#1725 stage P7] Name the source that arrived rather than its level number.
+  // The reason to interrupt is that the figures got better, which "tier 2" only conveys to
+  // someone who already knows the ladder.
+  const QString arrived = (diskTier >= 2)
+                              ? tr("measured from the placement")
+                              : tr("counted from the post-synthesis netlist");
+  box.setText(tr("More accurate resource data is available: %1.").arg(arrived));
+  box.setInformativeText(
+      dirty ? tr("Restarting floorplanning reloads the panel from the .qdc on disk, so your "
+                 "unsaved changes must be saved first.\n\n"
+                 "Saving a .qdc invalidates the compiled stages, so the run that just "
+                 "finished will be marked out of date.")
+            : tr("Restarting floorplanning reloads the panel so the partitions are measured "
+                 "against the design that was just compiled."));
+
+  QPushButton* proceed = box.addButton(
+      dirty ? tr("Save QDC and restart floorplanning") : tr("Restart floorplanning"),
+      QMessageBox::AcceptRole);
+  box.addButton(tr("Cancel"), QMessageBox::RejectRole);
+  box.setDefaultButton(proceed);
+  box.exec();
+
+  if (box.clickedButton() != proceed) {
+    compiler->Message(
+        "Floor Planning: keeping the current view. Its resource figures are from before "
+        "this compile -- restart floorplanning to refresh them.");
+    return;
+  }
+
+  if (dirty) {
+    m_floorPlanningWidget->saveUnsavedChanges();
+  }
+
+  QString error;
+  if (!loadFloorPlanningData(error)) {
+    // Best-effort: the compile itself succeeded, so a failure to refresh the panel is
+    // reported but must not raise a second modal over it.
+    compiler->ErrorMessage("Floor Planning: could not restart floorplanning after the "
+                           "compile: " + error.toStdString());
+  }
+}
+
 void MainWindow::floorPlanningActionTriggered()
 {
   auto cleanFloorPlanningUI = [this]() {
       if (m_floorPlanningWidget) {
+        m_floorPlanningWidget->hide();
         m_floorPlanningWidget->deleteLater();
         m_floorPlanningWidget = nullptr;
       }
@@ -2270,168 +2570,117 @@ void MainWindow::floorPlanningActionTriggered()
 
   if (floorPlanningAction->isChecked()) {
     CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
-    std::filesystem::path postSynthBlifFilePath = compiler->getPostSynthBlifFilePath();
-    if (FileUtils::FileExists(postSynthBlifFilePath)) {
 
-      std::shared_ptr<VprArchitectureFileProfider> archFileProviderPtr = std::make_shared<VprArchitectureFileProfider>(compiler);
-      if(archFileProviderPtr->get().empty()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", "Cannot proceed without VPR Architecture file.");
-        cleanFloorPlanningUI();
-        return;
-      }
-
-      // device_layout.json (QLDeviceLayoutInfo) is the only source of
-      // floorplanning geometry now. Anything wrong with its contents is
-      // reported by DeviceGridDescriptor below, which names the key it could
-      // not read.
-      const std::filesystem::path deviceLayoutFile =
-          QLDeviceLayoutInfo::deviceLayoutJSONPath();
-      QLDeviceManager* device_manager = QLDeviceManager::getInstance();
-      const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
-      const QLDeviceLayoutSettings layout_settings =
-          device_manager->deviceLayoutSettings(current_device);
-      const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
-          layout_settings, current_device);
-
-      // For AUTO/RESOURCES, the file existing is not enough on its own: it
-      // only ever gets removed the next time refresh() runs (a device
-      // reselect, or Packing itself), so one left over from an earlier,
-      // now-invalidated Packing run would otherwise be read as current. The
-      // Packing task's own status is what actually says whether this run's
-      // geometry is still good.
-      Task* packingTask = compiler->GetTaskManager()
-                              ? compiler->GetTaskManager()->task(PACKING)
-                              : nullptr;
-      const bool packingIsGreen =
-          (packingTask != nullptr) && (packingTask->status() == TaskStatus::Success);
-
-      if (!FileUtils::FileExists(deviceLayoutFile) || (deferred && !packingIsGreen)) {
-        const QString message =
-            deferred
-                ? QString("This device uses AUTO/RESOURCES layout sizing, so its fabric "
-                          "geometry is only known after Packing succeeds. Run Packing "
-                          "first, then start Floor Planning again.")
-                : QString("device_layout.json not found: %1")
-                      .arg(QString::fromStdString(deviceLayoutFile.string()));
-        QMessageBox::critical(this, "Floor Planning cannot be started.", message);
-        cleanFloorPlanningUI();
-        return;
-      }
-      fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceLayoutFile);
-
-      if (descriptor->hasError()) {
-        QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
-        cleanFloorPlanningUI();
-        return;
-      }
-      
-      if (!m_floorPlanningWidget) {
-        m_floorPlanningWidget = new fp::FloorPlanningWidget(compiler->ProjManager()->getProjectName());
-
-        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
-          cleanFloorPlanningUI();
-        });
-        connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::qdcFileSaved, this, [this, compiler](){
-          compiler->onQdcFileSaved();
-          updateSourceTree();
-        });
-      
-        m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
-
-        // vpr proc
-        QString vpr_program = "vpr";
-        QList<QString> args;
-        args.append(QString::fromStdString(archFileProviderPtr->get().string()));
-        args.append(QString::fromStdString(postSynthBlifFilePath.string()));
-        args.append("--circuit_format");
-        args.append("eblif");
-        args.append("--timing_analysis");
-        args.append("off");
-        args.append("--show_arch_resources");
-
-        QProcess* process = new QProcess;
-        const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
-        std::filesystem::current_path(projectPath);
-        process->start(vpr_program, args);
-        //qDebug() << "run" << vpr_program << args.join(" ");
-
-        // non-blocking: once the command executes, use the result and update the device_data structure to store the layout details:
-        QObject::connect(process, qOverload<int, QProcess::ExitStatus>(&QProcess::finished), [this, compiler, process, projectPath, cleanFloorPlanningUI, archFileProviderPtr](int exitCode) {
-          //QDebug() << "vpr netlist dump proc finished" << exitCode;
-          if (exitCode == 0) {
-            if (m_floorPlanningWidget) {
-              fp::SynthResourceExtractor resourceExtractor;
-              std::filesystem::path vprEchoBlifFilePath(projectPath / "atom_netlist.cleaned.echo.blif");
-              resourceExtractor.loadAtomNamesFromBlifFile(vprEchoBlifFilePath);
-#ifdef UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
-              qDebug() << "\n\n~~~ COMPARE BLIF AND NET";
-              if (std::filesystem::exists(compiler->getPostSynthNetFilePath())) {
-                fp::SynthResourceExtractor resourceExtractorNet;
-                resourceExtractorNet.loadAtomNamesFromNetFile(compiler->getPostSynthNetFilePath());
-                const auto& netElements = resourceExtractorNet.elements();
-                const auto& blifElements = resourceExtractor.elements();
-                std::set<std::string> missingInBlif;
-                for (const std::string& netElement: netElements) {
-                  if (blifElements.find(netElement) == blifElements.end()) {
-                    missingInBlif.insert(netElement);
-                  }
-                }
-                std::set<std::string> missingInNet;
-                for (const std::string& blifElement: blifElements) {
-                  if (netElements.find(blifElement) == netElements.end()) {
-                    missingInNet.insert(blifElement);
-                  }
-                }
-
-                if (!missingInBlif.empty()) {
-                  for (const std::string& element: missingInBlif) {
-                    qDebug() << "~~~ missingInBlif element=" << element.c_str();
-                  }
-                } else {
-                  qDebug() << "~~~ missingInBlif is empty [expected]";
-                }
-
-                if (!missingInNet.empty()) {
-                  for (const std::string& element: missingInNet) {
-                    qDebug() << "~~~ missingInNet element=" << element.c_str();
-                  }
-                } else {
-                  qDebug() << "~~~ missingInNet is empty [expected]";
-                }
-                //m_floorPlanningWidget->loadNetList(resourceExtractorNet.elements());
-              }
-#endif // UI_FLOORPLANNING_ENABLE_ATOM_LIST_BLIF_VS_NET_COMPARISON
-              if (!resourceExtractor.elements().empty()) {
-                m_floorPlanningWidget->loadNetList(resourceExtractor.elements());
-                // QLSettingsManager::getInstance()->getQDCFilePath() returns empty if file doesn't exists, that's why we cannot use it,
-                // so we construct path based on json settings location file.
-                std::filesystem::path qdcFilePath = StringUtils::replaceAll(QLSettingsManager::getInstance()->settings_json_filepath.string(), ".json", ".qdc"); 
-      
-                m_floorPlanningWidget->setQdcFilePath(qdcFilePath, /*load*/true);
-              } else {
-                QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Net list elements are empty. Something wrong with %1?").arg(QString::fromStdString(vprEchoBlifFilePath.string())));
-                cleanFloorPlanningUI();
-              }
-            } else {
-              // normally never shouldn't go here
-              QMessageBox::critical(this, "Floor Planning cannot be started.", QString("Unknown error"));
-              cleanFloorPlanningUI();
-            }
-          } else {
-            QMessageBox::critical(this, "Floor Planning cannot be started.", "VPR cannot dump netlist file");
-            cleanFloorPlanningUI();
-          }
-          process->deleteLater();
-        });
-      }
-      
-      m_floorPlanningWidget->show();
-    } else {
-      QMessageBox::critical(this, "Floor Planning cannot be started.", 
-        QString("%1 file is missing.\nPlease run SYNTHESIS task first and then activate Floor Planning again.")
-        .arg(QString::fromStdString(postSynthBlifFilePath.string())));
+    // [aurora2#1725] Floorplanning is a post-synthesis activity. Every figure the panel
+    // shows -- the atom counts per instance, the resource tiers, each instance's
+    // complete/partial/deleted verdict -- is derived from the synthesised netlist, and
+    // none of it exists before synthesis has run. Opening earlier used to show an RTL
+    // tree with empty columns and an estimate the user could not act on.
+    //
+    // Gated on the artifact rather than the SYNTHESIS task's in-memory status, matching
+    // how Pin Planner gates itself above: a project reopened in a later session has a
+    // netlist on disk but no task history, and refusing there would be wrong.
+    if (!FileUtils::FileExists(compiler->getPostSynthBlifFilePath())) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.",
+                            "The post-synthesis netlist is missing. Please run the "
+                            "SYNTHESIS task, then open Floorplanning again.");
       cleanFloorPlanningUI();
+      return;
     }
+
+    // [aurora2#1725 stage P7] Everything read from disk now lives in
+    // loadFloorPlanningData(), called once the widget below exists, so the post-compile
+    // refresh path runs exactly the same load.
+
+    // device_layout.json (QLDeviceLayoutInfo) is the only source of
+    // floorplanning geometry now. Anything wrong with its contents is
+    // reported by DeviceGridDescriptor below, which names the key it could
+    // not read.
+    const std::filesystem::path deviceLayoutFile =
+        QLDeviceLayoutInfo::deviceLayoutJSONPath();
+    QLDeviceManager* device_manager = QLDeviceManager::getInstance();
+    const QLDeviceTarget current_device = device_manager->getCurrentDeviceTarget();
+    const QLDeviceLayoutSettings layout_settings =
+        device_manager->deviceLayoutSettings(current_device);
+    const bool deferred = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+        layout_settings, current_device);
+
+    // For AUTO/RESOURCES, the file existing is not enough on its own: it
+    // only ever gets removed the next time refresh() runs (a device
+    // reselect, or Packing itself), so one left over from an earlier,
+    // now-invalidated Packing run would otherwise be read as current. The
+    // Packing task's own status is what actually says whether this run's
+    // geometry is still good.
+    Task* packingTask = compiler->GetTaskManager()
+                            ? compiler->GetTaskManager()->task(PACKING)
+                            : nullptr;
+    const bool packingIsGreen =
+        (packingTask != nullptr) && (packingTask->status() == TaskStatus::Success);
+
+    if (!FileUtils::FileExists(deviceLayoutFile) || (deferred && !packingIsGreen)) {
+      const QString message =
+          deferred
+              ? QString("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                        "geometry is only known after Packing succeeds. Run Packing "
+                        "first, then start Floor Planning again.")
+              : QString("device_layout.json not found: %1")
+                    .arg(QString::fromStdString(deviceLayoutFile.string()));
+      QMessageBox::critical(this, "Floor Planning cannot be started.", message);
+      cleanFloorPlanningUI();
+      return;
+    }
+
+    // device descriptor
+    fp::DeviceGridDescriptorPtr descriptor = std::make_shared<fp::DeviceGridDescriptor>(deviceLayoutFile);
+
+    if (descriptor->hasError()) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.", descriptor->error());
+      cleanFloorPlanningUI();
+      return;
+    }
+
+    if (m_floorPlanningWidget) {
+      m_floorPlanningWidget->hide();
+      m_floorPlanningWidget->deleteLater();
+      m_floorPlanningWidget = nullptr;
+    }
+
+    // create new floorplanning widget
+    m_floorPlanningWidget = new fp::FloorPlanningWidget(compiler->ProjManager()->getProjectName());
+
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
+      cleanFloorPlanningUI();
+    });
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::qdcFileSaved, this, [this, compiler](){
+      compiler->onQdcFileSaved();
+      updateSourceTree();
+    });
+
+    // [aurora2#1725] What the panel finds goes to the compiler log, alongside the rest of the
+    // flow's output, rather than to the terminal where a GUI user never sees it.
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::logMessage, this,
+            [compiler](const QString& message){
+      compiler->Message(message.toStdString());
+    });
+    // [aurora2#2377] Same destination, warning severity: for findings the user should
+    // notice rather than merely have on record.
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::warningMessage, this,
+            [compiler](const QString& message){
+      compiler->WarningMessage(message.toStdString());
+    });
+
+    m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
+
+    QString loadError;
+    if (!loadFloorPlanningData(loadError)) {
+      QMessageBox::critical(this, "Floor Planning cannot be started.", loadError);
+      cleanFloorPlanningUI();
+      return;
+    }
+
+
+    m_floorPlanningWidget->show();
+
   } else {
     if (m_floorPlanningWidget) {
       cleanFloorPlanningUI();

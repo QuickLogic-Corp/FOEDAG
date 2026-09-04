@@ -5,6 +5,16 @@
 
 namespace fp {
 
+namespace {
+
+// [aurora2#1725] How much room above the estimated clb requirement counts as comfortable.
+// The clb estimate runs optimistic, so a region that only just meets it can still fail to
+// pack; 25% keeps that case flagged while not nagging about regions with real room. A
+// heuristic on top of a heuristic -- the packer remains the only authority.
+constexpr int kClbHeadroomPercent = 25;
+
+}  // namespace
+
 DeviceGrid::DeviceGrid()
 : m_issues(std::make_shared<DeviceGrid::Issues>())
 {
@@ -121,6 +131,13 @@ void DeviceGrid::refreshPartition(const PartitionPtr& partition)
     for (const auto& [id, region]: partition->regions()) {
         region->rebuildHandles();
         region->setTiles(findTiles(region->rect()));
+    }
+}
+
+void DeviceGrid::refreshPartitions()
+{
+    for (const auto& [id, partition]: m_partitions) {
+        refreshPartition(partition);
     }
 }
 
@@ -248,6 +265,23 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
     m_overlappedConflictingIndexes.clear();
     m_overlappedNonConflictingIndexes.clear();
 
+    // [aurora2#1725] Every path any partition constrains, so the ancestor check below can
+    // tell "this instance is assigned somewhere" from "nobody constrains it".
+    std::unordered_set<std::string> constrainedPaths;
+    for (const auto& [partitionId, partition]: m_partitions) {
+        for (const HierarhyElement& element: partition->elements()) {
+            constrainedPaths.insert(element.path);
+        }
+    }
+
+    // Instance whose own logic nothing constrains -> how many instances inside it are
+    // constrained, and by which partitions. Filled in the loop below, reported after it.
+    struct OwnLogicGap {
+        int nestedConstrained = 0;
+        std::set<std::string> partitionNames;
+    };
+    std::map<std::string, OwnLogicGap> unassignedOwnLogic;
+
     for (const auto& [partitionId, partition]: m_partitions) {
         // element presence
         if (partition->elements().empty()) {
@@ -263,6 +297,133 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
+        // [aurora2#1725] required vs. available resources. ERRORS, like the presence checks
+        // above: a region too small to hold what its partition constrains leaves the packer
+        // nowhere to put the surplus, so this blocks saving the .qdc in the panel and is
+        // reported as an error by the batch check rather than left for the flow to discover.
+        //
+        // The clb figure is an ESTIMATE and it is not a safe minimum. It divides the atom
+        // count by atomsets.json's atoms_per_tile hint, but real packing density varies with
+        // the logic: carry chains want consecutive slots, and the packer caps cluster
+        // input-pin use, so a small pin-heavy instance packs far less densely than a whole
+        // design's average. The tip still says the number is approximate -- but short by an
+        // estimate that runs optimistic is short in the direction that fails, and the remedy
+        // does not depend on the exact figure: a bigger region, or fewer elements. dsp/bram
+        // carry no such uncertainty -- one atom occupies one whole tile.
+        auto checkResource = [&](const std::string& label, int required, int available) {
+            if (required <= available) {
+                return;
+            }
+            const std::string tip = (label == "clb")
+                ? "Estimated from this partition's clb atoms at "
+                  + std::to_string(Partition::atomsPerTile())
+                  + " atoms per tile. Real density varies with the logic, so the shortfall is "
+                    "approximate -- but the region has to cover more clb tiles, or some "
+                    "elements belong in another partition."
+                : "One " + label + " atom occupies one " + label + " tile, so the region has to "
+                  "cover more of them, or some elements belong in another partition.";
+            m_issues->errors.insert({"Partition '" + partition->name() + "' needs " +
+                                     std::to_string(required) + " " + label + " tiles but only " +
+                                     std::to_string(available) + " available", tip});
+        };
+        checkResource("clb", partition->clbRequiredCount(), partition->clbAvailableCount());
+        checkResource("dsp", partition->dspRequiredCount(), partition->dspAvailableCount());
+        checkResource("bram", partition->bramRequiredCount(), partition->bramAvailableCount());
+
+        // [aurora2#1725] Enough clb tiles by the estimate, but only just -- which is where
+        // packing actually breaks, precisely because the estimate can sit below what the
+        // packer needs, and a region filled to the last tile leaves it no room to be wrong.
+        //
+        // An ERROR, like the outright shortfall above. It was a warning on the grounds that
+        // the region is not actually short and only the packer could settle it; but the
+        // estimate it is measured against runs optimistic, so "not short by the estimate"
+        // does not mean "not short", and letting a region this tight through only moves the
+        // failure to VPR, where it arrives without the partition's name or these numbers.
+        // clb only: dsp/bram are exact, one atom to one tile, and need no packing slack.
+        const int clbRequired = partition->clbRequiredCount();
+        const int clbAvailable = partition->clbAvailableCount();
+        if ((clbRequired > 0) && (clbAvailable >= clbRequired)
+            && (clbAvailable < clbRequired + (clbRequired * kClbHeadroomPercent + 99) / 100)) {
+            m_issues->errors.insert({"Partition '" + partition->name() + "' has " +
+                                     std::to_string(clbAvailable) +
+                                     " clb tiles for an estimated " +
+                                     std::to_string(clbRequired) + " -- little packing slack",
+                                     "The estimate can be lower than what the packer needs, so a "
+                                     "region this tight may fail to pack even though it looks "
+                                     "big enough. Allow roughly "
+                                     + std::to_string(kClbHeadroomPercent)
+                                     + "% more clb tiles than the estimate."});
+        }
+
+        // [aurora2#1725 stage P4] Elements the .qdc names that synthesis deleted. Loading such
+        // a .qdc is normal -- it may predate the deletion, and whether an instance survives
+        // depends on generics and constant folding -- but the constraint matches no atom, and
+        // the tree cannot show it as checked because the row is not checkable. So report it:
+        // otherwise the entry looks constrained while doing nothing, and disappears without
+        // explanation the next time the partition is edited and saved.
+        int deletedElements = 0;
+        for (const HierarhyElement& element: partition->elements()) {
+            if (m_deletedInstances.count(element.path) != 0) {
+                ++deletedElements;
+            }
+        }
+        if (deletedElements > 0) {
+            m_issues->warnings.insert({"Partition '" + partition->name() + "' names " +
+                                       std::to_string(deletedElements) +
+                                       " instance(s) that synthesis deleted",
+                                       "Those instances have no atoms, so the constraint has no "
+                                       "effect and VPR reports them as 'was not found, skipping "
+                                       "atom'. They are shown greyed out in the tree and cannot "
+                                       "be checked; editing this partition and saving the .qdc "
+                                       "drops them."});
+        }
+
+        // [aurora2#1725] Collect instances whose sub-instances are constrained while they
+        // themselves are not -- see the warning emitted after this loop.
+        for (const HierarhyElement& element: partition->elements()) {
+            std::size_t dot = element.path.rfind('.');
+            while (dot != std::string::npos) {
+                const std::string ancestor = element.path.substr(0, dot);
+                dot = ancestor.rfind('.');
+                if (constrainedPaths.count(ancestor) != 0) {
+                    continue;   // assigned in its own right, so its logic is accounted for
+                }
+                const auto own = m_ownAtomCounts.find(ancestor);
+                if ((own == m_ownAtomCounts.end()) || (own->second <= 0)) {
+                    continue;   // pure hierarchy, no logic of its own to lose
+                }
+                ++unassignedOwnLogic[ancestor].nestedConstrained;
+                unassignedOwnLogic[ancestor].partitionNames.insert(partition->name());
+            }
+        }
+    }
+
+    // [aurora2#1725] Constraining sub-instances of X without constraining X leaves X's OWN
+    // logic -- the cells sitting directly in it, not in any sub-instance -- assigned to
+    // nothing, free for the packer to place anywhere. Nothing downstream catches it: stage P7
+    // grades the instances that were constrained, and an unconstrained one is in no partition
+    // to grade.
+    //
+    // Reported per instance rather than per partition -- with the sub-instances split across
+    // p1 and p2 the same gap would otherwise be announced twice -- and only reported: which
+    // partition should absorb the instance is the user's call, and guessing would silently
+    // redraw their floorplan.
+    for (const auto& [instance, gap]: unassignedOwnLogic) {
+        std::string partitions;
+        for (const std::string& name: gap.partitionNames) {
+            partitions += (partitions.empty() ? "'" : ", '") + name + "'";
+        }
+        m_issues->warnings.insert({"Instance '" + instance + "' is in no partition while " +
+                                   std::to_string(gap.nestedConstrained) +
+                                   " instance(s) inside it are constrained -- its own " +
+                                   std::to_string(m_ownAtomCounts.at(instance)) +
+                                   " atoms are unconstrained",
+                                   "Those atoms sit directly in '" + instance + "' rather than "
+                                   "in one of its sub-instances, so no region holds them and the "
+                                   "packer may place them anywhere. The nested instances are "
+                                   "constrained by " + partitions + ". Assign the whole instance "
+                                   "to one partition, or move its remaining sub-instances into "
+                                   "the same one."});
     }
 
     // tiles overlapping between different partitions
@@ -326,6 +487,15 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
             }
         }
     }
+
+    // [aurora2#1725] Promote every advisory once all of them have been collected, rather
+    // than at each insertion point, so the option cannot be forgotten by a check added later.
+    // The issues list then shows them as errors and hasErrors() blocks saving the .qdc.
+    if (m_treatWarningsAsErrors) {
+        m_issues->errors.insert(m_issues->warnings.begin(), m_issues->warnings.end());
+        m_issues->warnings.clear();
+    }
+
     return m_issues;
 }
 

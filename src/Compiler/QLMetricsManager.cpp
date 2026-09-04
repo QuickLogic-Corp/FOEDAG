@@ -484,7 +484,7 @@ void QLMetricsManager::parseRoutingReportForDetailedUtilization() {
   
   // if log file does not exist, skip:
   if(!FileUtils::FileExists(filepath)) {
-    std::cout << "[warning] file not found: " << filepath << std::endl;
+    // std::cout << "[warning] file not found: " << filepath << std::endl;
     return;
   }
 

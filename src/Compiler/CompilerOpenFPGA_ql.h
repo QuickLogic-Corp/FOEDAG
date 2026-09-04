@@ -30,7 +30,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 #include "Compiler/Compiler.h"
-#include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
 #include "QLDeviceManager.h"
@@ -82,6 +81,7 @@ class CompilerOpenFPGA_ql : public Compiler {
     m_architectureFile = path;
   }
 
+  std::filesystem::path getPostSynthVerilogFilePath() const;
   std::filesystem::path getPostSynthNetFilePath() const;
   std::filesystem::path getPostSynthBlifFilePath() const;
 
@@ -193,6 +193,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   
   void onQdcFileSaved();
   void onPcfFileSaved();
+
+ public:
+  virtual bool EnsureElaborated();
 
   /// Register an annotated relative-placement IP netlist (via the
   /// `ip_add_to_design` Tcl command, either as an explicit .eblif/.blif path
@@ -394,8 +397,107 @@ private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
 
-  BlifParser m_blifParser;
   TaskCompilationStateManager m_taskCompilationStateManager;
+
+  std::string BuildElaborationScript(const std::string& topModule);
+  bool RunElaboration();
+  bool RunElabInstances();
+
+  // [aurora2#1725 stage P4] validation gate -- grades every instance elaboration found
+  // (complete/partial/deleted/failed) against the just-written synthesis outputs, via
+  // scripts/floorplanning_validate_instances.py, producing validation.json. Best-effort: atomsets.json
+  // only exists for devices whose template already has the P2/P3 blocks (not all of them
+  // yet), so a missing input here just skips this stage rather than failing synthesis,
+  // which has already succeeded by the time this runs.
+  // See docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P4).
+  bool RunValidateInstances();
+
+  // [aurora2#1725] "<project>_floorplanning" -- the stem every artifact this feature
+  // generates is named after, so a project directory shows at a glance which files the
+  // floorplanning flow owns. Use this rather than rebuilding the string at each call
+  // site; the device template gets it as ${FLOORPLANNING_PREFIX}.
+  std::string FloorplanningPrefix();
+
+  // Path to "<project>_floorplanning_<suffix>" inside the project directory.
+  std::filesystem::path FloorplanningArtifact(const std::string& suffix);
+
+  // atomsets.json, resolved to the name the device template actually wrote.
+  std::filesystem::path FloorplanningAtomsets();
+
+  // [aurora2#1725] Absolute path to a script shipped under <install>/scripts, or an
+  // empty path when it is not installed. DataPath() is NOT at a fixed depth below the
+  // install root -- Foedag_ql.cpp takes <install>/device_data when that exists (one
+  // level) and only falls back to <install>/share/aurora (two) -- so the hardcoded
+  // "../.." this replaces resolved outside the installation in every packaged build,
+  // leaving python3 to report a bare "No such file or directory".
+  std::filesystem::path InstalledScript(const std::filesystem::path& rel_path);
+
+  // [aurora2#1725] "<project>_floorplanning_stages.log" -- where the helper stages this
+  // feature adds write what they have to say. They are diagnostics, not compile stages the
+  // user asked for, so their chatter belongs in an artifact rather than in the console and
+  // aurora.log, which is where it went at first and where master has nothing like it.
+  std::filesystem::path FloorplanningStageLog();
+
+  // Truncate the stage log, so it describes the run in progress and not the whole session.
+  void ResetFloorplanningStageLog();
+
+  // Run one helper script with its output appended to the stage log instead of echoed.
+  // Returns the script's exit code.
+  int RunFloorplanningStage(const std::string& command,
+                            const std::vector<std::string>& args);
+
+  // [aurora2#1725] What a floorplanning helper stage needs before it can run, and what
+  // its caller should return when it cannot. `ready` false means "stop now and return
+  // `result`" -- which is false for a missing script (a broken installation) and, for a
+  // missing python, whichever the stage's policy says.
+  struct FloorplanningTool {
+    std::filesystem::path script;
+    std::filesystem::path python;
+    bool ready = false;
+    bool result = false;
+  };
+
+  // Absent python is fatal for the stage that gates the GUI's instance tree, and merely
+  // a skip for the post-synthesis stages, which run after their compile step already
+  // succeeded. That is the only way the four preludes differed.
+  enum class MissingPython { Fatal, Skip };
+
+  // Locate one floorplanning helper script and the interpreter to run it with.
+  // `label` names the stage in the error text ("Instance validation"); `skipPhrase` is
+  // the wording used when python is absent and the stage is a Skip ("instance
+  // validation"), unused for Fatal.
+  FloorplanningTool ResolveFloorplanningTool(const std::string& scriptName,
+                                             const std::string& label,
+                                             MissingPython policy,
+                                             const std::string& skipPhrase = {});
+
+  // Echo any ERROR the in-session tcl scripts recorded in their own logs. Called only when
+  // synthesis failed, so `tee -q` cannot hide the reason it failed.
+  void ReportFloorplanningYosysErrors();
+
+  // [aurora2#1725 review F1] RunValidateInstances()/RunDesignResources()/
+  // RunConstraintCompliance() each skip quietly when atomsets.json is absent -- a device
+  // template without the P2/P3 floorplanning hooks, not a failure. That used to mean total
+  // silence; say it once instead, as a warning (this is expected on a hookless device, not
+  // broken), rather than repeating it from every stage that hits the same missing file.
+  bool m_floorplanningVerificationWarned = false;
+  void WarnFloorplanningVerificationUnavailable();
+
+  // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
+  // schema the FloorPlanning UI sizes regions against, via
+  // scripts/floorplanning_design_resources.py. Best-effort like RunValidateInstances()
+  // above: a missing input skips the stage rather than failing an already-succeeded compile.
+  //
+  // maxTier caps what a given call may produce -- P0b elaboration passes 1, P3 synthesis 2,
+  // P6 placement 3 -- and the tier actually written is the highest the inputs on disk
+  // support, never above the cap. That is what makes re-elaboration after an RTL edit
+  // rewrite the file as tier 1 instead of leaving a stale tier-2 one describing a netlist
+  // the sources no longer produce. See pipeline_appendix.md (A.13.5).
+  bool RunDesignResources(int maxTier);
+
+  // [aurora2#1725 stage P7] see the definition in CompilerOpenFPGA_ql.cpp for why this
+  // is a soft constraint (--mode warning) and never fails the build.
+  bool RunConstraintCompliance();
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();

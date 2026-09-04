@@ -429,6 +429,8 @@ static int openRunProjectImpl(void* clientData, Tcl_Interp* interp, int argc,
   }
   auto mainWindowImpl = qobject_cast<FOEDAG::MainWindow*>(mainWindow);
   mainWindowImpl->openProject(QString::fromStdString(expandedFile), false, run);
+  compiler->MarkDesignDirty();
+  compiler->EnsureElaborated();
   if (run) {
     // Wait till project run is finished
     while (mainWindowImpl->isRunning())
@@ -525,6 +527,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     }
     compiler->GetOutput().clear();
     bool ok = compiler->CreateDesign(name, type);
+    compiler->MarkDesignDirty();
     if (!compiler->m_output.empty())
       Tcl_AppendResult(interp, compiler->m_output.c_str(), nullptr);
     if (!FileUtils::FileExists(name)) {
@@ -567,6 +570,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       compiler->ErrorMessage(out.str());
       return TCL_ERROR;
     }
+    compiler->MarkDesignDirty();
     return TCL_OK;
   };
   interp->registerCmd("set_top_module", set_top_module, this, 0);
@@ -601,6 +605,7 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
           "type.");
       return TCL_ERROR;
     }
+    compiler->MarkDesignDirty();
     return compiler->add_files(compiler, interp, argc, argv, Design);
   };
   interp->registerCmd("add_design_file", add_design_file, this, nullptr);
@@ -2688,7 +2693,7 @@ void Compiler::SetEnvironmentVariable(const std::string variable,
 
 int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                                              const std::string logFile,
-                                             bool appendLog) {
+                                             bool appendLog, bool quiet) {
   auto start = Time::now();
   PERF_LOG("Command: " + command);
   (*m_out) << "Command: " << command << std::endl;
@@ -2717,36 +2722,40 @@ int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
     std::ios_base::openmode openMode{std::ios_base::out};
     if (appendLog) openMode = std::ios_base::out | std::ios_base::app;
     ofs.open(logFile, openMode);
+    if (!quiet) {
+      QObject::connect(m_process, &QProcess::readyReadStandardOutput,
+                       [this, &ofs]() {
+                         qint64 bytes = m_process->bytesAvailable();
+                         QByteArray bufout = m_process->readAllStandardOutput();
+                         ofs.write(bufout, bytes);
+                         m_out->write(bufout, bytes);
+                       });
+      QObject::connect(m_process, &QProcess::readyReadStandardError,
+                       [this, &ofs]() {
+                         QByteArray data = m_process->readAllStandardError();
+                         QString errorstring{QString::fromUtf8(data)};
+                         if (errorstring.contains("gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed")) {
+                           // we skip reporting this specific error because it is not under our control,
+                           // and it can be ignored! [VPR P&R Viewer]
+                         }
+                         else if (m_autoLayoutGenerationMode &&
+                                  (errorstring.contains("Failed to find device which satisfies resource requirements required"))){
+                          // we skip reporting this specific error because it is not under our control,
+                          // and it can be ignored! [VPR P&R Viewer]
+                         }
+                         else {
+                          int bytes = data.size();
+                          ofs.write(data, bytes);
+                          m_err->write(data, bytes);
+                         }
+                       });
+    }
+  } else if (!quiet) {
     QObject::connect(m_process, &QProcess::readyReadStandardOutput,
-                     [this, &ofs]() {
-                       qint64 bytes = m_process->bytesAvailable();
-                       QByteArray bufout = m_process->readAllStandardOutput();
-                       ofs.write(bufout, bytes);
-                       m_out->write(bufout, bytes);
-                     });
-    QObject::connect(m_process, &QProcess::readyReadStandardError,
-                     [this, &ofs]() {
-                       QByteArray data = m_process->readAllStandardError();
-                       QString errorstring{QString::fromUtf8(data)};
-                       if (errorstring.contains("gtk_label_set_text: assertion 'GTK_IS_LABEL (label)' failed")) {
-                         // we skip reporting this specific error because it is not under our control,
-                         // and it can be ignored! [VPR P&R Viewer]
-                       }
-                       else if (m_autoLayoutGenerationMode &&
-                                (errorstring.contains("Failed to find device which satisfies resource requirements required"))){
-                        // we skip reporting this specific error because it is not under our control,
-                        // and it can be ignored! [VPR P&R Viewer]
-                       }
-                       else {
-                        int bytes = data.size();
-                        ofs.write(data, bytes);
-                        m_err->write(data, bytes);
-                       }
-                     });
-  } else {
-    QObject::connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
-      m_out->write(m_process->readAllStandardOutput(),
-                   m_process->bytesAvailable());
+                     [this]() {
+      qint64 bytes = m_process->bytesAvailable();
+      QByteArray data = m_process->readAllStandardOutput();
+      m_out->write(data, bytes);
     });
     QObject::connect(m_process, &QProcess::readyReadStandardError, [this]() {
       QByteArray data = m_process->readAllStandardError();

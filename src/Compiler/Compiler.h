@@ -169,6 +169,10 @@ class Compiler {
   std::string GetMessagePrefix() const;
   void SetUseVerific(bool on) { m_useVerific = on; }
 
+  void MarkDesignDirty() { m_designDirty = true; }
+
+  virtual bool EnsureElaborated() { return true; }
+
   void SetIPGenerator(IPGenerator* generator);
   IPGenerator* GetIPGenerator() { return m_IPGenerator; }
   void SetSimulator(Simulator* simulator) { m_simulator = simulator; }
@@ -318,7 +322,7 @@ class Compiler {
                               const std::string value);
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
-      bool appendLog = false);
+      bool appendLog = false, bool quiet = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
@@ -353,6 +357,7 @@ class Compiler {
   Constraints* m_constraints = nullptr;
   std::string m_output;
   bool m_useVerific = false;
+  bool m_designDirty = true;
   // on calling 'add_file' from TCL, should we copy them into the project dir?
   // default is set to false, so they will be copied only when user want to do this.
   // call 'copy_files_on_add on' to enable this feature.

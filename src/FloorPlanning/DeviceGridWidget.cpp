@@ -66,8 +66,14 @@ QSize DeviceGridWidget::sizeHint() const {
   return QSize(800, 600);
 }
 
+// [aurora2#1725] No floor of its own. The grid is drawn scaled to whatever room it gets, so
+// there is no width below which it stops working -- and inside FloorPlanningWidget's splitter
+// a floor here is width the other two panes cannot borrow, which on a low-resolution screen
+// is the difference between a hierarchy pane the user can widen and one they cannot. The
+// splitter keeps the pane from vanishing entirely (setChildrenCollapsible(false)) and the
+// toolbar above the grid supplies what little minimum the pane has left.
 QSize DeviceGridWidget::minimumSizeHint() const {
-  return QSize(200, 200);
+  return QSize(0, 0);
 }
 
 void DeviceGridWidget::constructTiles(const DeviceGridDescriptorPtr& descriptor)
@@ -304,7 +310,11 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
           }
           // even if there is no m_newRegion, we still could move existed regions, so we need refresh
           m_device.alignRegions();
-          checkIssues();
+          // [aurora2#1725] was checkIssues() alone -- a resize/move drag never
+          // called reportPartitionChanges(), so PartitionsListWidget's CLB/DSP/BRAM
+          // columns (and anything else listening to partitionsChanged) never heard
+          // about it. reportPartitionChanges() already calls checkIssues() too.
+          reportPartitionChanges();
           update();
 
         }
@@ -794,6 +804,22 @@ void DeviceGridWidget::removeSelected()
   }
 }
 
+void DeviceGridWidget::removePartitionById(int id)
+{
+    const auto& partitions = m_device.partitions();
+    const auto found = partitions.find(id);
+    if (found == partitions.end()) return;
+
+    // Clear the selection when it is the partition being removed, so the grid does not keep
+    // a dangling pointer to it; a selection on some other partition is left alone.
+    if (m_selectedPartition && (m_selectedPartition->id() == id)) {
+        unselect();
+    }
+    m_device.removePartition(found->second);
+    reportPartitionChanges();
+    update();
+}
+
 void DeviceGridWidget::removeSelectedPartition()
 {
     if (m_selectedPartition) {
@@ -860,6 +886,15 @@ void DeviceGridWidget::checkIssues()
 
 void DeviceGridWidget::reportPartitionChanges()
 {
+  // [aurora2#1725] Refresh every region's tile set before anything downstream reads
+  // it: a region's tiles are computed lazily (findTiles() against its current rect,
+  // see refreshPartition()), not kept live as the rect changes, so a caller that
+  // moved/resized a region or loaded one from a .qdc (QdcSerializer only restores
+  // geometry, never tiles) would otherwise report clb/dsp/bram *AvailableCount() as
+  // 0 -- correct for the rect it forgot to look at, wrong for the one it's actually
+  // sitting on. Doing it here, once, means every reportPartitionChanges() call site
+  // gets this for free instead of each one having to remember to.
+  m_device.refreshPartitions();
   checkIssues();
   emit partitionsChanged(m_device.partitions());
 }

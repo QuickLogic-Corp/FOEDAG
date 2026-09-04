@@ -42,6 +42,7 @@ public:
     void removePartition(const PartitionPtr&);
     const PartitionPtr& partition(int partitionId) const;
     void refreshPartition(const PartitionPtr&);
+    void refreshPartitions();
 
     bool removeRegion(const RegionPtr&);
 
@@ -70,6 +71,28 @@ public:
     const IssuesPtr& checkIssues();
     bool hasErrors() const { return !m_issues->errors.empty(); }
 
+    // [aurora2#1725] RTL path -> how many atoms belong to that instance DIRECTLY, i.e. sit
+    // in it rather than in one of its sub-instances. Counted from atomsets.json by
+    // FloorPlanningWidget::setAtomNames(). Only the counts, not the names: checkIssues()
+    // needs to know whether an instance has own logic at stake, not what it is.
+    void setOwnAtomCounts(std::map<std::string, int> ownAtomCounts) {
+        m_ownAtomCounts = std::move(ownAtomCounts);
+    }
+
+    // [aurora2#1725 stage P4] Instances graded "deleted" in validation.json. A .qdc may
+    // still name one; checkIssues() says so, because such a constraint matches no atom.
+    void setDeletedInstances(std::unordered_set<std::string> deletedInstances) {
+        m_deletedInstances = std::move(deletedInstances);
+    }
+
+    // [aurora2#1725] "Treat warnings as errors" from the Options menu. Every advisory then
+    // counts as an error, which is what makes it block saving the .qdc -- hasErrors() is the
+    // gate. Off by default: the advisories are estimates and the packer is the authority.
+    void setTreatWarningsAsErrors(bool treatWarningsAsErrors) {
+        m_treatWarningsAsErrors = treatWarningsAsErrors;
+    }
+    bool treatWarningsAsErrors() const { return m_treatWarningsAsErrors; }
+
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
 
@@ -84,6 +107,10 @@ private:
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;
 
     std::map<int, PartitionPtr> m_partitions;
+
+    std::map<std::string, int> m_ownAtomCounts;
+    std::unordered_set<std::string> m_deletedInstances;
+    bool m_treatWarningsAsErrors = false;
 
     std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;
     std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;
