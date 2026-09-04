@@ -1,19 +1,20 @@
-# When a PR merges into develop, open a reviewed PR in aurora2 that bumps the
-# foedag submodule pin on master. Human-merged — aurora2's own CI (and, for
-# platform-specific breaks like macOS, manual verification) gates the merge;
-# this workflow only proposes the bump.
+# Manual-only helper that opens an aurora2 PR bumping the foedag submodule pin
+# to the current develop HEAD.
 #
-# Re-running (e.g. several merges to develop before the aurora2 PR lands) does
-# not pile up duplicate PRs: it force-pushes the same branch, which refreshes
-# the existing open PR to the latest SHA instead of opening a new one.
+# Deliberately NOT triggered by merges into develop. A FOEDAG change almost
+# always needs matching aurora2 changes, so the pin bump belongs in the
+# developer's aurora2 PR, next to the code that requires it; an independent bot
+# bump races that PR and can land a foedag SHA on master ahead of its companion
+# changes. Dispatch this only for a FOEDAG change that is genuinely standalone
+# (GUI-only fix, macOS build fix).
+#
+# Re-running does not pile up duplicate PRs: it force-pushes the same branch,
+# which refreshes the existing open PR to the latest SHA.
 
 name: bump-aurora-pin
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [develop]
-  workflow_dispatch: # manual (bumps to the current develop HEAD)
+  workflow_dispatch:
 
 concurrency:
   group: bump-aurora-pin
@@ -21,19 +22,9 @@ concurrency:
 
 jobs:
   bump:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
 
     steps:
-      - name: Resolve merged SHA
-        id: sha
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=${{ github.event.pull_request.merge_commit_sha }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Generate app token (QL-Proprietary)
         id: app-token
         uses: actions/create-github-app-token@v1
@@ -55,7 +46,7 @@ jobs:
       - name: Bump foedag pin + open/update PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          NEW: ${{ steps.sha.outputs.sha }}
+          NEW: ${{ github.sha }}
         run: |
           set -euo pipefail
           cd aurora2
@@ -78,5 +69,5 @@ jobs:
           else
             gh pr create --repo QL-Proprietary/aurora2 --base master --head "$pr_branch" \
               --title "Bump foedag submodule to ${NEW:0:8}" \
-              --body "Automated: FOEDAG \`develop\` advanced to \`${NEW}\`. Bumps aurora2 \`master\` foedag pin. Merge after CI and, for platform-specific changes, manual verification (aurora2 CI does not cover macOS)."
+              --body "Manually requested bump of aurora2's foedag pin to \`${NEW}\` (FOEDAG \`develop\` HEAD). Only correct for a standalone FOEDAG change — if this change needs aurora2-side changes, close this and bump the pin in that aurora2 PR instead. Merge after CI and, for platform-specific changes, manual verification (aurora2 CI does not cover macOS)."
           fi
