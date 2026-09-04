@@ -152,7 +152,7 @@ add_library(compiler STATIC
 )
 
 # [aurora2#1725 REQ-004] The compiler runs the headless floorplan check before
-# generate_floorplanning.py, so it genuinely depends on the floorplanning rules now.
+# generate_floorplanning.py, so it genuinely depends on the floorplanning core now.
 # Declared rather than left to link order: their other symbols happened to resolve
 # because libfoedag pulls them in first, which would not have covered this one.
 # floorplanning, not floorplanningui: the check needs the core model, not the panel.

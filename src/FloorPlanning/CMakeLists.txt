@@ -26,11 +26,11 @@ include_directories(${PROJECT_SOURCE_DIR}/../../src ${CMAKE_CURRENT_BINARY_DIR}/
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../lib)
 
-# [aurora2#1725] Two targets, not one. The rules half carries no QWidget and no
+# [aurora2#1725] Two targets, not one. The core half carries no QWidget and no
 # Q_OBJECT, so anything that only needs to read a .qdc or run the headless check --
-# the compiler does both -- links it without dragging in the panel. The widgets
-# depend on the rules; nothing depends the other way.
-set (RULES_SRC_LIST
+# the compiler does both -- links it without dragging in the panel. The UI
+# depends on the core; nothing depends the other way.
+set (FLOORPLANNING_SRC_LIST
   DeviceGridDescriptor.cpp
   AtomSets.cpp
   FloorplanChecker.cpp
@@ -42,7 +42,7 @@ set (RULES_SRC_LIST
   Region.cpp
 )
 
-set (RULES_HDR_LIST
+set (FLOORPLANNING_HDR_LIST
   DeviceGridDescriptor.h
   AtomSets.h
   FloorplanChecker.h
@@ -58,7 +58,7 @@ set (RULES_HDR_LIST
   NaturalSort.h
 )
 
-set (SRC_LIST
+set (FLOORPLANNINGUI_SRC_LIST
   FloorPlanningWidget.cpp
   DeviceGridWidget.cpp
   SynthResourceHierarchyWidget.cpp
@@ -70,7 +70,7 @@ set (SRC_LIST
   PointAnimation.cpp
 )
 
-set (HDR_LIST
+set (FLOORPLANNINGUI_HDR_LIST
   FloorPlanningWidget.h
   DeviceGridWidget.h
   SynthResourceHierarchyWidget.h
@@ -87,8 +87,8 @@ set(QRC_LIST
 )
 
 add_library(floorplanning STATIC
-  ${RULES_SRC_LIST}
-  ${RULES_HDR_LIST}
+  ${FLOORPLANNING_SRC_LIST}
+  ${FLOORPLANNING_HDR_LIST}
 )
 
 # No Qt6::Widgets: QColor pulls in Gui and the .qdc parser needs Xml, but nothing
@@ -97,8 +97,8 @@ add_library(floorplanning STATIC
 target_link_libraries(floorplanning PUBLIC Qt6::Core Qt6::Gui Qt6::Xml)
 
 add_library(floorplanningui STATIC
-  ${SRC_LIST}
-  ${HDR_LIST}
+  ${FLOORPLANNINGUI_SRC_LIST}
+  ${FLOORPLANNINGUI_HDR_LIST}
   ${QRC_LIST}
 )
 
