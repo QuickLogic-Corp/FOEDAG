@@ -2342,6 +2342,24 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     }
   }
 
+  // [aurora2#2377] Each atom's real Yosys cell type, from the write_json dump
+  // floorplanning_post_synth.tcl produces alongside atomsets.json. Ground truth for the
+  // Type column and Partition's clb/dsp/bram counts, instead of classifyAtomType()'s
+  // name-substring guess, which misclassifies a hard macro that keeps its RTL instance
+  // name (a BRAM, say) as CLB.
+  //
+  // Called unconditionally, empty map and all: Partition holds this statically (like
+  // s_designResources), so skipping the call on a project with no debug json would leave
+  // the PREVIOUS project's types in place and classify this one's atoms against them.
+  {
+    fp::AtomTypeMap atomTypes;
+    std::filesystem::path debugJsonPath =
+        std::filesystem::path(compiler->ProjManager()->projectPath()) /
+        (compiler->ProjManager()->DesignTopModule() + "_post_synth_debug.json");
+    fp::loadAtomTypes(debugJsonPath, atomTypes);
+    m_floorPlanningWidget->setAtomTypes(std::move(atomTypes));
+  }
+
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
   // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
   // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be
@@ -2643,6 +2661,12 @@ void MainWindow::floorPlanningActionTriggered()
     connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::logMessage, this,
             [compiler](const QString& message){
       compiler->Message(message.toStdString());
+    });
+    // [aurora2#2377] Same destination, warning severity: for findings the user should
+    // notice rather than merely have on record.
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::warningMessage, this,
+            [compiler](const QString& message){
+      compiler->WarningMessage(message.toStdString());
     });
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);

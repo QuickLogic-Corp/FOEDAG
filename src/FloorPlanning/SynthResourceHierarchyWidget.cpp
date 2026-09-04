@@ -64,6 +64,32 @@ bool isVprDisplayRow(const QStandardItem* item) {
     return item && item->data(kVprDisplayRowRole).toBool();
 }
 
+// Best-effort: identify the specific hard-block primitive an atom's auto-generated name
+// was derived from, using its enclosing instance's own atomsets.json resource tally
+// (m_atomResources) as the set of names to look for -- so this can never report a type
+// the instance does not actually contain.
+//
+// Yosys often chains an earlier cell's name into a later one it drives, e.g.
+// "count_dffre_Q_10_D_$lut_Y" is itself a LUT, not the dffre it reads -- the true type is
+// always the LAST such name embedded, so of every candidate that matches, the one ending
+// furthest right wins. A tie (e.g. "dffre" is a substring of "sdffre", and both end at the
+// same position when the atom is really an sdffre) goes to the longer candidate.
+QString findAtomPrimitiveType(const std::string& atomName,
+                              const std::map<std::string, int>& resourceTypes) {
+    std::string best;
+    std::size_t bestEnd = 0;
+    for (const auto& [type, count] : resourceTypes) {
+        const std::size_t pos = atomName.rfind(type);
+        if (pos == std::string::npos) continue;
+        const std::size_t end = pos + type.size();
+        if ((end > bestEnd) || ((end == bestEnd) && (type.size() > best.size()))) {
+            best = type;
+            bestEnd = end;
+        }
+    }
+    return best.empty() ? QString() : QString::fromStdString(best);
+}
+
 // [aurora2#1725 stage P7] Paints the Why cell as a push button, so it looks pressable and
 // lights up under the pointer, instead of a bare "?" glyph that reads as text. Drawn through
 // the style's own CE_PushButton, so the background and the hover state match every other
@@ -826,6 +852,11 @@ void SynthResourceHierarchyWidget::setAtomResources(AtomResourceMap atomResource
     updateSelectedResources();
 }
 
+void SynthResourceHierarchyWidget::setAtomTypes(AtomTypeMap atomTypes)
+{
+    m_atomTypes = std::move(atomTypes);
+}
+
 // [aurora2#1725] Tally the selected rows into the "Selected RTL Resources" table.
 //
 // The union of the selected instances' atom sets, not the sum of their tallies: an
@@ -857,7 +888,7 @@ void SynthResourceHierarchyWidget::updateSelectedResources()
     // Tiles from the atom set, cell types from the counts: two routes to the same selection,
     // both of which drop what a parent and its child name in common.
     m_selectedResourcesWidget->setSelectedResources(
-        tallyResources(atoms, Partition::atomsPerTile()),
+        tallyResources(atoms, Partition::atomsPerTile(), Partition::atomTypes()),
         tallyAtomResources(m_atomResources, paths),
         instances);
 }
@@ -1123,9 +1154,36 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     // [aurora2#1725] Leaves with no atoms are tallied here, not logged: FloorPlanningWidget
     // reads the tally back and reports it once, rather than once per tree.
     m_atomMappingReport = AtomMappingReport{};
+    // [aurora2#2377] Same reasoning, for atoms describeAtomType() below could not find any
+    // type at all for -- see untypedAtoms().
+    m_untypedAtoms.clear();
+
+    // [aurora2#2377] Full "<tile-type>/<primitive>" text for one atom. m_atomTypes (this
+    // atom's real Yosys cell type, from <top>_post_synth_debug.json) is ground truth and
+    // wins when present; a project with no debug json falls back to the pre-2377 guess --
+    // classifyAtomType()'s name-substring check for the tile type, and a search of the
+    // enclosing scope's atomsets.json resource tally for the primitive suffix. Neither
+    // signal finding anything is worth surfacing: it means this atom's own name and its
+    // scope's resource tally agree on nothing, which the "clb" fallback quietly hides.
+    const auto describeAtomType = [this](const std::string& name,
+                                          const std::map<std::string, int>& resourceTypes) {
+        const auto typeIt = m_atomTypes.find(name);
+        if (typeIt != m_atomTypes.end()) {
+            const std::string& realType = typeIt->second;
+            return classifyAtomType(name, realType) + "/" + QString::fromStdString(realType);
+        }
+        QString typeText = classifyAtomType(name);
+        const QString primitive = findAtomPrimitiveType(name, resourceTypes);
+        if (!primitive.isEmpty()) {
+            typeText += "/" + primitive;
+        } else {
+            m_untypedAtoms.push_back(name);
+        }
+        return typeText;
+    };
 
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this](QStandardItem* item, const std::string& prefix)
+        [&populateRecursive, this, &describeAtomType](QStandardItem* item, const std::string& prefix)
     {
         if (!item) return;
         const int rows = item->rowCount();
@@ -1138,6 +1196,14 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
             const auto it = m_atomNames.find(path);
             const std::vector<std::string> names = (it != m_atomNames.end()) ? it->second : std::vector<std::string>{};
             const bool isLeaf = (child->rowCount() == 0);
+
+            // Same scope's resource tally, describeAtomType()'s fallback when this atom has
+            // no entry in m_atomTypes -- absent on an older atomsets.json with no
+            // "resources" field either, in which case the Type column stays tile-type-only.
+            static const std::map<std::string, int> kNoResources;
+            const auto resIt = m_atomResources.find(path);
+            const std::map<std::string, int>& resourceTypes =
+                (resIt != m_atomResources.end()) ? resIt->second : kNoResources;
 
             if (isLeaf && names.empty()) {
                 // This RTL leaf has no matching VPR atom — it exists in the source but was
@@ -1162,7 +1228,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                         if (QStandardItem* atomItem = item->child(row, Column::AtomList))
                             atomItem->setText(QString::fromStdString(name));
                         if (QStandardItem* typeItem = item->child(row, Column::AtomType))
-                            typeItem->setText(classifyAtomType(name));
+                            typeItem->setText(describeAtomType(name, resourceTypes));
                     } else {
                         // Multiple atoms: one child row each so each can be selected and copied
                         for (const auto& n : names) {
@@ -1171,7 +1237,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                             col0->setData(true, kVprDisplayRowRole);
                             auto* col1 = new QStandardItem(QString::fromStdString(n));
                             col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            auto* col2 = new QStandardItem(classifyAtomType(n));
+                            auto* col2 = new QStandardItem(describeAtomType(n, resourceTypes));
                             col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                             child->appendRow({col0, col1, col2, new QStandardItem(),
                                               new QStandardItem()});

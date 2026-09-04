@@ -45,6 +45,11 @@ public:
     // Resources". Only the netlist tree has that table, so only it is told.
     void setAtomResources(AtomResourceMap atomResources);
 
+    // [aurora2#2377] Feeds the "Type" column ground truth: each atom's real Yosys cell
+    // type, from <top>_post_synth_debug.json. Both trees show the Type column, so both
+    // are told, same as setAtomNames().
+    void setAtomTypes(AtomTypeMap atomTypes);
+
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
     // one tile, so a partition's required clb can be reported in the same unit as what its
     // regions have available.
@@ -88,6 +93,11 @@ signals:
     // [aurora2#1725] Goes to the compiler log rather than the terminal, so what the panel
     // found is recorded where the rest of the flow's output is. Connected in main_window_ql.
     void logMessage(QString message);
+
+    // [aurora2#2377] Same destination as logMessage(), but at warning severity: for
+    // findings the user should notice rather than merely have on record (an atom with no
+    // identifiable type today, e.g.). Connected in main_window_ql.
+    void warningMessage(QString message);
 
 protected:
     void resizeEvent(QResizeEvent* event) override final;

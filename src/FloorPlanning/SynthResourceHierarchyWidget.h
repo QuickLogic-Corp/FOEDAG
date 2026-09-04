@@ -74,6 +74,12 @@ public:
     // leaves that tab empty and everything else working.
     void setAtomResources(AtomResourceMap atomResources);
 
+    // [aurora2#2377] Each atom's real Yosys cell type, from <top>_post_synth_debug.json
+    // (AtomSets::loadAtomTypes()). Independent of the two setters above: a project with no
+    // debug json falls back to classifyAtomType()'s name-substring guess, same as before
+    // this existed.
+    void setAtomTypes(AtomTypeMap atomTypes);
+
     // [aurora2#1725] "Show Atom List and Type columns" from the Options menu. Off by
     // default: the atom names are long and mostly of interest when debugging a mapping.
     void setAtomColumnsVisible(bool visible);
@@ -90,6 +96,13 @@ public:
         }
     };
     const AtomMappingReport& atomMappingReport() const { return m_atomMappingReport; }
+
+    // [aurora2#2377] Atoms populateAtomColumns() could not identify a type for at all --
+    // no entry in m_atomTypes, and none of the enclosing scope's atomsets.json resource
+    // names matches its own name either. Reported by FloorPlanningWidget for the same
+    // reason as AtomMappingReport above: it owns two of these trees, and logging from each
+    // would say the same thing twice.
+    const std::vector<std::string>& untypedAtoms() const { return m_untypedAtoms; }
 
     // [aurora2#1725 stage P4] Grades the tree: a deleted instance is shown greyed and cannot be checked, a partial
     // one stays selectable but is flagged. Optional -- without it every instance renders as
@@ -131,11 +144,13 @@ private:
     bool m_hasAtomNames = false;
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
     AtomResourceMap m_atomResources;
+    AtomTypeMap m_atomTypes;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
     std::map<std::string, InstancePlacement> m_placements;
     bool m_atomColumnsVisible = false;
     AtomMappingReport m_atomMappingReport;
+    std::vector<std::string> m_untypedAtoms;
 
     // [aurora2#1725] Atoms covered by an RTL path -- its own atomsets.json entry when it
     // has one, else the union of the descendant entries that do (see the .cpp).

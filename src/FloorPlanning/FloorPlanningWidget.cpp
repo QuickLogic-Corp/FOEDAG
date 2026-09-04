@@ -517,6 +517,28 @@ void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
                                 .arg(report.unexplained.size() - kMaxListed));
         }
     }
+
+    // [aurora2#2377] Same one-report-not-two reasoning as above: atoms neither
+    // <top>_post_synth_debug.json nor the enclosing scope's atomsets.json resource tally
+    // could name a type for, so the Type column shows the bare tile-type fallback for them
+    // with no way to tell from the UI alone that it is a fallback.
+    const auto& untyped = m_synthResourcesWidget->untypedAtoms();
+    if (!untyped.empty()) {
+        emit warningMessage(tr("Floor Planning: %1 atom(s) have no identifiable type; the Type "
+                               "column shows the tile-type fallback for them")
+                                .arg(untyped.size()));
+
+        constexpr std::size_t kMaxListed = 10;
+        for (std::size_t i = 0; (i < untyped.size()) && (i < kMaxListed); ++i) {
+            emit warningMessage(tr("Floor Planning: no identifiable type for atom '%1'")
+                                    .arg(QString::fromStdString(untyped[i])));
+        }
+        if (untyped.size() > kMaxListed) {
+            emit warningMessage(tr("Floor Planning: ... and %1 more atom(s) with no "
+                                   "identifiable type, not listed")
+                                    .arg(untyped.size() - kMaxListed));
+        }
+    }
 }
 
 void FloorPlanningWidget::setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames)
@@ -534,6 +556,16 @@ void FloorPlanningWidget::setAtomNames(std::map<std::string, std::vector<std::st
 void FloorPlanningWidget::setAtomResources(AtomResourceMap atomResources)
 {
     m_synthResourcesWidget->setAtomResources(std::move(atomResources));
+}
+
+void FloorPlanningWidget::setAtomTypes(AtomTypeMap atomTypes)
+{
+    m_synthResourcesWidget->setAtomTypes(atomTypes);
+    m_partitionResourcesWidget->setAtomTypes(atomTypes);
+    // [aurora2#2377] Partition holds this statically like s_designResources/s_atomsPerTile:
+    // it describes the netlist every partition's clb/dsp/bram counts are classified
+    // against, not one partition.
+    Partition::setAtomTypes(std::move(atomTypes));
 }
 
 void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
