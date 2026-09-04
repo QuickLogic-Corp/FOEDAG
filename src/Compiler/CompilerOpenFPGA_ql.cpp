@@ -5754,6 +5754,15 @@ bool CompilerOpenFPGA_ql::Packing() {
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
+  // Compile() only marks this task Success after RunCompileTask() (and therefore
+  // this function) returns, but resolveFromAutoDeviceLog() gates on the task
+  // already reading Success this session - so without this, refresh() below
+  // always sees PACKING still InProgress and never resolves an AUTO/RESOURCES
+  // device's freshly-generated geometry. Compile() will set the same status
+  // again once we return; that is redundant, not wrong.
+  if (Task* packing_task = GetTaskManager() ? GetTaskManager()->task(PACKING) : nullptr) {
+    packing_task->setStatus(TaskStatus::Success);
+  }
   // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
   QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   Message("Design " + ProjManager()->projectName() + " is packed");
