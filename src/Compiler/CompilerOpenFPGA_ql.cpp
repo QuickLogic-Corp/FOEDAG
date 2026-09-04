@@ -9462,16 +9462,13 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // failing at the point it is read names the offending partition far more usefully than
   // whatever the packer does with it later. Warnings are advisory and let it proceed.
   if (fs::exists(floor_planning_constraint_filepath)) {
-    std::shared_ptr<VprArchitectureFileProfider> archProvider =
-        std::make_shared<VprArchitectureFileProfider>(this);
     fp::DeviceGrid::Issues issues;
     std::string checkError;
     const bool checked = fp::FloorplanChecker::check(
         std::filesystem::path(ProjManager()->projectPath()),
         ProjManager()->projectName(),
         floor_planning_constraint_filepath,
-        archProvider->get(),
-        QLSettingsManager::getStringValue("general", "device", "layout"),
+        QLDeviceLayoutInfo::deviceLayoutJSONPath(),
         issues, checkError);
 
     if (!checkError.empty()) {
