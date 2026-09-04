@@ -87,7 +87,14 @@ struct ResourceTally {
 
 // Counts by type. Pass atoms as a set: an atom named by two selected instances -- a parent
 // and its child, say -- must be paid for once.
-ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile);
+//
+// [aurora2#2377] atomTypes, when given, wins over classifyAtomType()'s name-substring
+// guess for any atom it names -- see classifyAtomType()'s own realType parameter. Empty by
+// default: the "Selected RTL Resources" tally and Partition's running counts must agree on
+// what an atom is, so the caller passes Partition::atomTypes() rather than this defaulting
+// to some second, independent source of the same map.
+ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
+                             const AtomTypeMap& atomTypes = {});
 
 // [aurora2#1725] Cell type -> count over everything `paths` covers.
 //

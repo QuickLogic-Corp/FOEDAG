@@ -103,11 +103,15 @@ std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames)
     return counts;
 }
 
-ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile)
+ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
+                             const AtomTypeMap& atomTypes)
 {
     ResourceTally tally;
     for (const std::string& atom : atomNames) {
-        const QString type = classifyAtomType(atom);
+        const auto typeIt = atomTypes.find(atom);
+        const QString type = (typeIt != atomTypes.end())
+            ? classifyAtomType(atom, typeIt->second)
+            : classifyAtomType(atom);
         if (type == "dsp") {
             ++tally.dsp;
         } else if (type == "bram") {

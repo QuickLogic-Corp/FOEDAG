@@ -2,6 +2,7 @@
 
 #include "Region.h"
 #include "HierarhyElement.h"
+#include "AtomSets.h"
 
 #include <QPoint>
 #include <QRect>
@@ -16,6 +17,7 @@ class Partition {
     static int s_idGenerator;
     static int s_atomsPerTile;
     static DesignResources s_designResources;
+    static AtomTypeMap s_atomTypes;
 public:
     static void resetIdGenerator() { s_idGenerator = 0; }
 
@@ -36,6 +38,15 @@ public:
         s_atomsPerTile = (atomsPerTile > 0) ? atomsPerTile : 1;
     }
     static int atomsPerTile() { return s_atomsPerTile; }
+
+    // [aurora2#2377] Each atom's real Yosys cell type, from <top>_post_synth_debug.json
+    // (AtomSets::loadAtomTypes()). Static for the same reason s_atomsPerTile is: it
+    // describes the netlist every partition's atoms are classified against, not one
+    // partition. Empty leaves addElement() on classifyAtomType()'s pre-2377
+    // name-substring guess, which silently miscounts a hard macro that keeps its RTL
+    // instance name (a BRAM, say) as CLB.
+    static void setAtomTypes(AtomTypeMap atomTypes) { s_atomTypes = std::move(atomTypes); }
+    static const AtomTypeMap& atomTypes() { return s_atomTypes; }
 
     Partition(const std::string& name = "");
 
@@ -73,7 +84,10 @@ public:
         // what the design needs -- as opposed to *Available*Count() below, which is
         // what the partition's regions physically have room for.
         for (const std::string& atomName : element.vprNames) {
-            const QString type = classifyAtomType(atomName);
+            const auto typeIt = s_atomTypes.find(atomName);
+            const QString type = (typeIt != s_atomTypes.end())
+                ? classifyAtomType(atomName, typeIt->second)
+                : classifyAtomType(atomName);
             if (type == "dsp") ++m_dspRequiredCount;
             else if (type == "bram") ++m_bramRequiredCount;
             else ++m_clbAtomCount;

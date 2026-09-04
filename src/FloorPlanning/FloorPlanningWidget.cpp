@@ -561,7 +561,11 @@ void FloorPlanningWidget::setAtomResources(AtomResourceMap atomResources)
 void FloorPlanningWidget::setAtomTypes(AtomTypeMap atomTypes)
 {
     m_synthResourcesWidget->setAtomTypes(atomTypes);
-    m_partitionResourcesWidget->setAtomTypes(std::move(atomTypes));
+    m_partitionResourcesWidget->setAtomTypes(atomTypes);
+    // [aurora2#2377] Partition holds this statically like s_designResources/s_atomsPerTile:
+    // it describes the netlist every partition's clb/dsp/bram counts are classified
+    // against, not one partition.
+    Partition::setAtomTypes(std::move(atomTypes));
 }
 
 void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
