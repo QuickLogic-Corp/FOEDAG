@@ -16,11 +16,20 @@ namespace fp {
 // techmaps down to "TDP_ECC36K". Anything else (luts, adder_carry, sdffre, ...) packs
 // into ordinary CLB fabric.
 //
+// [aurora2#2377] realType, when known, is checked instead of atomName: a hard macro
+// instance (a BRAM, say) keeps its original RTL instance name through synthesis rather
+// than getting a name Yosys derives from its type, so the name-substring check below
+// silently misclassifies it as CLB. realType is the atom's actual Yosys cell type (see
+// AtomSets::loadAtomTypes()) and is never wrong the way a name guess can be; omit it
+// (or pass "") for a caller with no <top>_post_synth_debug.json to read it from, and the
+// name-substring guess is exactly what ran before this parameter existed.
+//
 // Shared between the Atom List column (SynthResourceHierarchyWidget) and Partition's
 // running clb/dsp/bram counts, so the two can never disagree on what an atom is.
-inline QString classifyAtomType(const std::string& atomName) {
-    if (atomName.find("QL_DSPV") != std::string::npos) return "dsp";
-    if (atomName.find("TDP_ECC36K") != std::string::npos) return "bram";
+inline QString classifyAtomType(const std::string& atomName, const std::string& realType = "") {
+    const std::string& probe = !realType.empty() ? realType : atomName;
+    if (probe.find("QL_DSPV") != std::string::npos) return "dsp";
+    if (probe.find("TDP_ECC36K") != std::string::npos) return "bram";
     return "clb";
 }
 

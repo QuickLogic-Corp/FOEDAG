@@ -852,6 +852,11 @@ void SynthResourceHierarchyWidget::setAtomResources(AtomResourceMap atomResource
     updateSelectedResources();
 }
 
+void SynthResourceHierarchyWidget::setAtomTypes(AtomTypeMap atomTypes)
+{
+    m_atomTypes = std::move(atomTypes);
+}
+
 // [aurora2#1725] Tally the selected rows into the "Selected RTL Resources" table.
 //
 // The union of the selected instances' atom sets, not the sum of their tallies: an
@@ -1150,8 +1155,26 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     // reads the tally back and reports it once, rather than once per tree.
     m_atomMappingReport = AtomMappingReport{};
 
+    // [aurora2#2377] Full "<tile-type>/<primitive>" text for one atom. m_atomTypes (this
+    // atom's real Yosys cell type, from <top>_post_synth_debug.json) is ground truth and
+    // wins when present; a project with no debug json falls back to the pre-2377 guess --
+    // classifyAtomType()'s name-substring check for the tile type, and a search of the
+    // enclosing scope's atomsets.json resource tally for the primitive suffix.
+    const auto describeAtomType = [this](const std::string& name,
+                                          const std::map<std::string, int>& resourceTypes) {
+        const auto typeIt = m_atomTypes.find(name);
+        if (typeIt != m_atomTypes.end()) {
+            const std::string& realType = typeIt->second;
+            return classifyAtomType(name, realType) + "/" + QString::fromStdString(realType);
+        }
+        QString typeText = classifyAtomType(name);
+        const QString primitive = findAtomPrimitiveType(name, resourceTypes);
+        if (!primitive.isEmpty()) typeText += "/" + primitive;
+        return typeText;
+    };
+
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this](QStandardItem* item, const std::string& prefix)
+        [&populateRecursive, this, &describeAtomType](QStandardItem* item, const std::string& prefix)
     {
         if (!item) return;
         const int rows = item->rowCount();
@@ -1165,9 +1188,9 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
             const std::vector<std::string> names = (it != m_atomNames.end()) ? it->second : std::vector<std::string>{};
             const bool isLeaf = (child->rowCount() == 0);
 
-            // Same scope's resource tally, for identifying each atom's own primitive
-            // below (findAtomPrimitiveType) -- absent on an older atomsets.json with no
-            // "resources" field, in which case the Type column stays tile-type-only.
+            // Same scope's resource tally, describeAtomType()'s fallback when this atom has
+            // no entry in m_atomTypes -- absent on an older atomsets.json with no
+            // "resources" field either, in which case the Type column stays tile-type-only.
             static const std::map<std::string, int> kNoResources;
             const auto resIt = m_atomResources.find(path);
             const std::map<std::string, int>& resourceTypes =
@@ -1195,12 +1218,8 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                         const std::string& name = *names.begin();
                         if (QStandardItem* atomItem = item->child(row, Column::AtomList))
                             atomItem->setText(QString::fromStdString(name));
-                        if (QStandardItem* typeItem = item->child(row, Column::AtomType)) {
-                            QString typeText = classifyAtomType(name);
-                            const QString primitive = findAtomPrimitiveType(name, resourceTypes);
-                            if (!primitive.isEmpty()) typeText += "/" + primitive;
-                            typeItem->setText(typeText);
-                        }
+                        if (QStandardItem* typeItem = item->child(row, Column::AtomType))
+                            typeItem->setText(describeAtomType(name, resourceTypes));
                     } else {
                         // Multiple atoms: one child row each so each can be selected and copied
                         for (const auto& n : names) {
@@ -1209,10 +1228,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                             col0->setData(true, kVprDisplayRowRole);
                             auto* col1 = new QStandardItem(QString::fromStdString(n));
                             col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            QString typeText = classifyAtomType(n);
-                            const QString primitive = findAtomPrimitiveType(n, resourceTypes);
-                            if (!primitive.isEmpty()) typeText += "/" + primitive;
-                            auto* col2 = new QStandardItem(typeText);
+                            auto* col2 = new QStandardItem(describeAtomType(n, resourceTypes));
                             col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
                             child->appendRow({col0, col1, col2, new QStandardItem(),
                                               new QStandardItem()});

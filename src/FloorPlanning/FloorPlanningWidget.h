@@ -45,6 +45,11 @@ public:
     // Resources". Only the netlist tree has that table, so only it is told.
     void setAtomResources(AtomResourceMap atomResources);
 
+    // [aurora2#2377] Feeds the "Type" column ground truth: each atom's real Yosys cell
+    // type, from <top>_post_synth_debug.json. Both trees show the Type column, so both
+    // are told, same as setAtomNames().
+    void setAtomTypes(AtomTypeMap atomTypes);
+
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
     // one tile, so a partition's required clb can be reported in the same unit as what its
     // regions have available.

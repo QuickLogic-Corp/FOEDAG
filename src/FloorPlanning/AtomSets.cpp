@@ -160,4 +160,36 @@ std::map<std::string, int> tallyAtomResources(const AtomResourceMap& atomResourc
     return totals;
 }
 
+bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes)
+{
+    std::ifstream stream(debugJsonPath);
+    if (!stream) {
+        return false;
+    }
+    nlohmann::json doc;
+    try {
+        stream >> doc;
+    } catch (const std::exception&) {
+        return false;
+    }
+
+    if (!doc.contains("modules") || !doc["modules"].is_object()) {
+        return false;
+    }
+    // write_json emits one top-level module per invocation here (floorplanning_post_synth.tcl
+    // passes -selected, restricting it to the flattened design), but iterate rather than
+    // assume a single key: a differently-configured write_json is still just more cells.
+    for (const auto& module : doc["modules"]) {
+        if (!module.contains("cells") || !module["cells"].is_object()) {
+            continue;
+        }
+        for (auto cell = module["cells"].begin(); cell != module["cells"].end(); ++cell) {
+            if (cell.value().contains("type") && cell.value()["type"].is_string()) {
+                outTypes[cell.key()] = cell.value()["type"].get<std::string>();
+            }
+        }
+    }
+    return true;
+}
+
 }  // namespace fp

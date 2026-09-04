@@ -38,6 +38,24 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
                   AtomResourceMap& atomResources, int& atomsPerTile);
 
+// [aurora2#2377] Atom name -> its real Yosys cell type ("sdffre", "$lut",
+// "TDP_ECC36K_FIFO_ASYNC_...", ...), read from <top>_post_synth_debug.json -- the full
+// write_json netlist dump floorplanning_post_synth.tcl produces alongside atomsets.json.
+//
+// classifyAtomType() otherwise has only the atom's own auto-generated NAME to go on, and
+// that is not always the atom's own type: a hard macro instance (a BRAM, say) keeps its
+// original RTL instance name through synthesis rather than getting a name Yosys derives
+// from its type, so name-substring matching silently misclassifies it as CLB. This map is
+// ground truth instead of a guess, verified byte-for-byte against real atomsets.json atom
+// names.
+using AtomTypeMap = std::map<std::string, std::string>;
+
+// Reads <top>_post_synth_debug.json's modules.*.cells map. Returns false if the file is
+// missing or unreadable -- not a failure a caller need report, since it only means the type
+// column falls back to the atom-name heuristic, same as an atomsets.json with no
+// "resources" field today.
+bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes);
+
 // Every atom belonging to `path`, its sub-instances included.
 //
 // An instance with no entry of its own does NOT mean no atoms: floorplanning_atomsets.tcl derives

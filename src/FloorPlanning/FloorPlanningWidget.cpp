@@ -536,6 +536,12 @@ void FloorPlanningWidget::setAtomResources(AtomResourceMap atomResources)
     m_synthResourcesWidget->setAtomResources(std::move(atomResources));
 }
 
+void FloorPlanningWidget::setAtomTypes(AtomTypeMap atomTypes)
+{
+    m_synthResourcesWidget->setAtomTypes(atomTypes);
+    m_partitionResourcesWidget->setAtomTypes(std::move(atomTypes));
+}
+
 void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
 {
     // The grid only needs to know which instances are dead, to flag a .qdc that still
