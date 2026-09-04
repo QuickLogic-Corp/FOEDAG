@@ -155,17 +155,8 @@ if(NOT AURORA_YOSYS_SYNTH_PASS_NAME)
       CACHE STRING "" FORCE)
 endif(NOT AURORA_YOSYS_SYNTH_PASS_NAME)
 
-# [aurora2#1725 stage P2b] Set to 0 (-DAURORA_P2B_AUDIT_ENABLED=0) to skip the namemap audit
-# entirely. Defaults to 1 for now to gather P2b-redundancy evidence across the whole test
-# suite before removing the stage; flip the default, or delete RunNetlistNamemap() outright,
-# once CI confirms P2b is safe to remove.
-if(NOT DEFINED AURORA_P2B_AUDIT_ENABLED)
-    set(AURORA_P2B_AUDIT_ENABLED 1 CACHE STRING "" FORCE)
-endif(NOT DEFINED AURORA_P2B_AUDIT_ENABLED)
-
 target_compile_definitions(compiler PUBLIC AURORA_USE_TABBYCAD=${AURORA_USE_TABBYCAD})
 target_compile_definitions(compiler PUBLIC AURORA_YOSYS_SYNTH_PASS_NAME=${AURORA_YOSYS_SYNTH_PASS_NAME})
-target_compile_definitions(compiler PUBLIC AURORA_P2B_AUDIT_ENABLED=${AURORA_P2B_AUDIT_ENABLED})
 
 
 

@@ -26,17 +26,11 @@ include_directories(${PROJECT_SOURCE_DIR}/../../src ${CMAKE_CURRENT_BINARY_DIR}/
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../lib)
 
-set (SRC_LIST
-  # widgets
-  FloorPlanningWidget.cpp
-  DeviceGridWidget.cpp
-  SynthResourceHierarchyWidget.cpp
-  PartitionsListWidget.cpp
-  NewUniqueNameDialog.cpp
-  IssuesListWidget.cpp
-  SelectedResourcesWidget.cpp
-  CheckableButton.cpp
-  # widgets
+# [aurora2#1725] Two targets, not one. The core half carries no QWidget and no
+# Q_OBJECT, so anything that only needs to read a .qdc or run the headless check --
+# the compiler does both -- links it without dragging in the panel. The UI
+# depends on the core; nothing depends the other way.
+set (FLOORPLANNING_SRC_LIST
   DeviceGridDescriptor.cpp
   AtomSets.cpp
   FloorplanChecker.cpp
@@ -46,20 +40,9 @@ set (SRC_LIST
   Tile.cpp
   Partition.cpp
   Region.cpp
-  PointAnimation.cpp
 )
 
-set (HDR_LIST
-  # widgets
-  FloorPlanningWidget.h
-  DeviceGridWidget.h
-  SynthResourceHierarchyWidget.h
-  PartitionsListWidget.h
-  NewUniqueNameDialog.h
-  IssuesListWidget.h
-  SelectedResourcesWidget.h
-  CheckableButton.h
-  # widgets
+set (FLOORPLANNING_HDR_LIST
   DeviceGridDescriptor.h
   AtomSets.h
   FloorplanChecker.h
@@ -73,6 +56,29 @@ set (HDR_LIST
   Region.h
   HierarhyElement.h
   NaturalSort.h
+)
+
+set (FLOORPLANNINGUI_SRC_LIST
+  FloorPlanningWidget.cpp
+  DeviceGridWidget.cpp
+  SynthResourceHierarchyWidget.cpp
+  PartitionsListWidget.cpp
+  NewUniqueNameDialog.cpp
+  IssuesListWidget.cpp
+  SelectedResourcesWidget.cpp
+  CheckableButton.cpp
+  PointAnimation.cpp
+)
+
+set (FLOORPLANNINGUI_HDR_LIST
+  FloorPlanningWidget.h
+  DeviceGridWidget.h
+  SynthResourceHierarchyWidget.h
+  PartitionsListWidget.h
+  NewUniqueNameDialog.h
+  IssuesListWidget.h
+  SelectedResourcesWidget.h
+  CheckableButton.h
   PointAnimation.h
 )
 
@@ -81,17 +87,28 @@ set(QRC_LIST
 )
 
 add_library(floorplanning STATIC
-  ${SRC_LIST}
-  ${HDR_LIST}
+  ${FLOORPLANNING_SRC_LIST}
+  ${FLOORPLANNING_HDR_LIST}
+)
+
+# No Qt6::Widgets: QColor pulls in Gui and the .qdc parser needs Xml, but nothing
+# here draws. Keep it that way -- a QWidget include here silently re-links the
+# panel into every consumer.
+target_link_libraries(floorplanning PUBLIC Qt6::Core Qt6::Gui Qt6::Xml)
+
+add_library(floorplanningui STATIC
+  ${FLOORPLANNINGUI_SRC_LIST}
+  ${FLOORPLANNINGUI_HDR_LIST}
   ${QRC_LIST}
 )
 
-target_link_libraries(floorplanning PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
+target_link_libraries(floorplanningui PUBLIC floorplanning Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
 
-target_compile_definitions(floorplanning PRIVATE FP_UI_MARGIN=0)
+target_compile_definitions(floorplanningui PRIVATE FP_UI_MARGIN=0)
 
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanning>
+        ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanningui>
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag)
 
 set (HEADER_INSTALL_LIST "")
@@ -114,7 +131,7 @@ if (STANDALONE_FP_APP)
         ../Utils/FileUtils.h
         ../Widgets/RoundProgressWidget.h
     )
-    target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
+    target_link_libraries(floorplanning_bin PUBLIC floorplanningui Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
 
     target_compile_definitions(floorplanning_bin PRIVATE FP_UI_MARGIN=0)
 endif()
