@@ -30,8 +30,7 @@ public:
                       // not bare files in projectPath.
                       const std::string& projectName,
                       const std::filesystem::path& qdcPath,
-                      const std::filesystem::path& archFile,
-                      const std::string& layoutName,
+                      const std::filesystem::path& deviceLayoutFile,
                       DeviceGrid::Issues& issues,
                       std::string& error);
 };

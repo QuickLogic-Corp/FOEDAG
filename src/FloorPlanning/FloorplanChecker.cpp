@@ -14,8 +14,7 @@ namespace fp {
 bool FloorplanChecker::check(const std::filesystem::path& projectPath,
                              const std::string& projectName,
                              const std::filesystem::path& qdcPath,
-                             const std::filesystem::path& archFile,
-                             const std::string& layoutName,
+                             const std::filesystem::path& deviceLayoutFile,
                              DeviceGrid::Issues& issues,
                              std::string& error)
 {
@@ -24,13 +23,12 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     if (!std::filesystem::exists(qdcPath)) {
         return false;  // nothing constrained; not a failure
     }
-    if (archFile.empty() || !std::filesystem::exists(archFile)) {
-        error = "no VPR architecture file, cannot check the floorplan";
-        return false;
+    if (deviceLayoutFile.empty() || !std::filesystem::exists(deviceLayoutFile)) {
+        return false;  // no resolved layout yet (e.g. AUTO/RESOURCES before Packing); not a failure
     }
 
     DeviceGridDescriptorPtr descriptor =
-        std::make_shared<DeviceGridDescriptor>(archFile.string(), layoutName);
+        std::make_shared<DeviceGridDescriptor>(deviceLayoutFile);
     if (descriptor->hasError()) {
         error = descriptor->error().toStdString();
         return false;
