@@ -155,8 +155,8 @@ add_library(compiler STATIC
 # generate_floorplanning.py, so it genuinely depends on the floorplanning rules now.
 # Declared rather than left to link order: their other symbols happened to resolve
 # because libfoedag pulls them in first, which would not have covered this one.
-# floorplan_rules, not floorplanning: the check needs the rules, not the panel.
-target_link_libraries(compiler PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::Xml qlcrypt::qlcrypt floorplan_rules)
+# floorplanning, not floorplanningui: the check needs the core model, not the panel.
+target_link_libraries(compiler PUBLIC Qt6::Widgets Qt6::Core Qt6::Gui Qt6::Xml qlcrypt::qlcrypt floorplanning)
 target_compile_definitions(compiler PRIVATE COMPILER_LIBRARY)
 if(HAS_POWER_CALC_RESOURCE)
   target_compile_definitions(compiler PUBLIC HAS_POWER_CALC_RESOURCE)

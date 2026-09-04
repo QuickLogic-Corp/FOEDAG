@@ -86,7 +86,7 @@ set(QRC_LIST
     data/floorplanning_resource.qrc
 )
 
-add_library(floorplan_rules STATIC
+add_library(floorplanning STATIC
   ${RULES_SRC_LIST}
   ${RULES_HDR_LIST}
 )
@@ -94,21 +94,21 @@ add_library(floorplan_rules STATIC
 # No Qt6::Widgets: QColor pulls in Gui and the .qdc parser needs Xml, but nothing
 # here draws. Keep it that way -- a QWidget include here silently re-links the
 # panel into every consumer.
-target_link_libraries(floorplan_rules PUBLIC Qt6::Core Qt6::Gui Qt6::Xml)
+target_link_libraries(floorplanning PUBLIC Qt6::Core Qt6::Gui Qt6::Xml)
 
-add_library(floorplanning STATIC
+add_library(floorplanningui STATIC
   ${SRC_LIST}
   ${HDR_LIST}
   ${QRC_LIST}
 )
 
-target_link_libraries(floorplanning PUBLIC floorplan_rules Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
+target_link_libraries(floorplanningui PUBLIC floorplanning Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
 
-target_compile_definitions(floorplanning PRIVATE FP_UI_MARGIN=0)
+target_compile_definitions(floorplanningui PRIVATE FP_UI_MARGIN=0)
 
 install (
-  FILES ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplan_rules>
-        ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanning>
+  FILES ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanning>
+        ${CMAKE_CURRENT_BINARY_DIR}/../../lib/$<TARGET_FILE_NAME:floorplanningui>
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag)
 
 set (HEADER_INSTALL_LIST "")
@@ -131,7 +131,7 @@ if (STANDALONE_FP_APP)
         ../Utils/FileUtils.h
         ../Widgets/RoundProgressWidget.h
     )
-    target_link_libraries(floorplanning_bin PUBLIC floorplanning Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
+    target_link_libraries(floorplanning_bin PUBLIC floorplanningui Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Xml)
 
     target_compile_definitions(floorplanning_bin PRIVATE FP_UI_MARGIN=0)
 endif()
