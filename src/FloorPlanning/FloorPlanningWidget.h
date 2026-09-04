@@ -94,6 +94,11 @@ signals:
     // found is recorded where the rest of the flow's output is. Connected in main_window_ql.
     void logMessage(QString message);
 
+    // [aurora2#2377] Same destination as logMessage(), but at warning severity: for
+    // findings the user should notice rather than merely have on record (an atom with no
+    // identifiable type today, e.g.). Connected in main_window_ql.
+    void warningMessage(QString message);
+
 protected:
     void resizeEvent(QResizeEvent* event) override final;
     void closeEvent(QCloseEvent* event) override final;

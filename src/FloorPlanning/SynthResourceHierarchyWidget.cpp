@@ -1154,12 +1154,17 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     // [aurora2#1725] Leaves with no atoms are tallied here, not logged: FloorPlanningWidget
     // reads the tally back and reports it once, rather than once per tree.
     m_atomMappingReport = AtomMappingReport{};
+    // [aurora2#2377] Same reasoning, for atoms describeAtomType() below could not find any
+    // type at all for -- see untypedAtoms().
+    m_untypedAtoms.clear();
 
     // [aurora2#2377] Full "<tile-type>/<primitive>" text for one atom. m_atomTypes (this
     // atom's real Yosys cell type, from <top>_post_synth_debug.json) is ground truth and
     // wins when present; a project with no debug json falls back to the pre-2377 guess --
     // classifyAtomType()'s name-substring check for the tile type, and a search of the
-    // enclosing scope's atomsets.json resource tally for the primitive suffix.
+    // enclosing scope's atomsets.json resource tally for the primitive suffix. Neither
+    // signal finding anything is worth surfacing: it means this atom's own name and its
+    // scope's resource tally agree on nothing, which the "clb" fallback quietly hides.
     const auto describeAtomType = [this](const std::string& name,
                                           const std::map<std::string, int>& resourceTypes) {
         const auto typeIt = m_atomTypes.find(name);
@@ -1169,7 +1174,11 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         }
         QString typeText = classifyAtomType(name);
         const QString primitive = findAtomPrimitiveType(name, resourceTypes);
-        if (!primitive.isEmpty()) typeText += "/" + primitive;
+        if (!primitive.isEmpty()) {
+            typeText += "/" + primitive;
+        } else {
+            m_untypedAtoms.push_back(name);
+        }
         return typeText;
     };
 

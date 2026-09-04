@@ -2660,6 +2660,12 @@ void MainWindow::floorPlanningActionTriggered()
             [compiler](const QString& message){
       compiler->Message(message.toStdString());
     });
+    // [aurora2#2377] Same destination, warning severity: for findings the user should
+    // notice rather than merely have on record.
+    connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::warningMessage, this,
+            [compiler](const QString& message){
+      compiler->WarningMessage(message.toStdString());
+    });
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
