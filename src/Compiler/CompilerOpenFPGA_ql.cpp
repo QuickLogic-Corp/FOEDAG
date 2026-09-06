@@ -12031,6 +12031,16 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
   }
 
+  // `--routing_failure_predictor off`
+  // by default, vpr uses the "safe" predictor, which aborts routing early when it
+  // predicts the routing is unlikely to succeed. we route at a fixed channel width,
+  // so we want the router to keep trying until max_router_iterations is reached
+  // instead of giving up early on a design that may still converge.
+  std::size_t found_routing_failure_predictor = command->string().find("routing_failure_predictor");
+  if(found_routing_failure_predictor == std::string::npos) {
+    command->append("--routing_failure_predictor", "off");
+  }
+
   command->append("--skip_sync_clustering_and_routing_results on");
   command->append("--analysis");
   command->append("--route");
