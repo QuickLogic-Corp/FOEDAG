@@ -4675,6 +4675,15 @@ bool CompilerOpenFPGA_ql::Packing() {
       command_rerun = ReplaceAll(command_rerun, m_SBMapsFile.string(), m_autoLayoutGeneratedSBMapsYMLPath.string());
     }
 
+    // Final device size: pack with retries allowed again, so a first pass that
+    // does not fit the generated device still gets the denser repacks before
+    // failing. The size search above forced '--disable_pack_retries on' on its
+    // own copy of the command only; here the flag is set to 'off' unless the pack
+    // custom vpr options carry a value, which is kept.
+    if(command_rerun.find("--disable_pack_retries") == std::string::npos) {
+      command_rerun = setVprOnOffOption(command_rerun, "--disable_pack_retries", false);
+    }
+
     std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
                       std::string(ProjManager()->projectName() + "_pack.cmd"))
                           .string());
