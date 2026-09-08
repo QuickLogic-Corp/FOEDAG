@@ -353,3 +353,59 @@ TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
   EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_number)), "io"), 280);
   EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_string)), "io"), 280);
 }
+
+// ---- OPENFPGA_GROUP_ROUTING / OPENFPGA_UNUSED_MUX_CONFIG (issue #2378) -----
+//
+// Newer/larger switchbox architectures can need '--group_routing' on build_fabric
+// and a non-default '--unused_mux_config' on build_architecture_bitstream to keep
+// openfpga's up-front bitstream block-count estimate consistent with what actually
+// gets decoded. Both keys are optional and independent; absence means "use
+// openfpga's own defaults", not an error.
+
+TEST(QLDeviceManager, ParseOpenfpgaBitstreamOptionsDefaultsToOff) {
+  const auto options = QLDeviceManager::parseOpenfpgaBitstreamOptions(json::parse("{}"));
+  EXPECT_FALSE(options.group_routing);
+  EXPECT_TRUE(options.unused_mux_config.empty());
+  EXPECT_FALSE(options.invalid);
+}
+
+TEST(QLDeviceManager, ParseOpenfpgaBitstreamOptionsReadsGroupRouting) {
+  const auto options = QLDeviceManager::parseOpenfpgaBitstreamOptions(
+      json::parse(R"({"OPENFPGA_GROUP_ROUTING": true})"));
+  EXPECT_TRUE(options.group_routing);
+}
+
+TEST(QLDeviceManager, ParseOpenfpgaBitstreamOptionsIgnoresNonBooleanGroupRouting) {
+  // a malformed 'true'-as-string must not be silently coerced -- it reads as
+  // "not set" rather than guessing what the author meant.
+  const auto options = QLDeviceManager::parseOpenfpgaBitstreamOptions(
+      json::parse(R"({"OPENFPGA_GROUP_ROUTING": "true"})"));
+  EXPECT_FALSE(options.group_routing);
+  EXPECT_FALSE(options.invalid);
+}
+
+TEST(QLDeviceManager, ParseOpenfpgaBitstreamOptionsAcceptsEveryOpenfpgaMuxConfigValue) {
+  // must track openfpga's own accepted set (openfpga_bitstream_template.h) exactly.
+  for (const std::string value : {"auto", "first", "last", "unused_input"}) {
+    const auto options = QLDeviceManager::parseOpenfpgaBitstreamOptions(
+        json{{"OPENFPGA_UNUSED_MUX_CONFIG", value}});
+    EXPECT_EQ(options.unused_mux_config, value);
+    EXPECT_FALSE(options.invalid);
+  }
+}
+
+TEST(QLDeviceManager, ParseOpenfpgaBitstreamOptionsRejectsUnknownMuxConfig) {
+  const auto options = QLDeviceManager::parseOpenfpgaBitstreamOptions(
+      json::parse(R"({"OPENFPGA_UNUSED_MUX_CONFIG": "bogus"})"));
+  EXPECT_TRUE(options.invalid);
+  EXPECT_EQ(options.invalid_value, "bogus");
+  // a rejected value must not also be reported as though it were usable.
+  EXPECT_TRUE(options.unused_mux_config.empty());
+}
+
+TEST(QLDeviceManager, ParseOpenfpgaBitstreamOptionsRejectsNonStringMuxConfig) {
+  const auto options = QLDeviceManager::parseOpenfpgaBitstreamOptions(
+      json::parse(R"({"OPENFPGA_UNUSED_MUX_CONFIG": 42})"));
+  EXPECT_TRUE(options.invalid);
+  EXPECT_TRUE(options.unused_mux_config.empty());
+}

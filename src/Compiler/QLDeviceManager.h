@@ -135,6 +135,28 @@ class QLDeviceLayoutSettings {
 };
 
 
+// device-declared knobs for how openfpga's bitstream generator decodes the fabric,
+// read from config.json:
+//   "OPENFPGA_GROUP_ROUTING": true        -- pass --group_routing to build_fabric
+//   "OPENFPGA_UNUSED_MUX_CONFIG": "last"  -- pass --unused_mux_config <value>
+// Both are optional and independent: newer/larger switchbox architectures can need
+// them to keep openfpga's up-front bitstream block-count estimate consistent with
+// what actually gets decoded (see build_device_bitstream.cpp's
+// VTR_ASSERT(num_blocks_to_reserve == bitstream_manager.num_blocks())). Older/smaller
+// fabrics carry neither key and get openfpga's own defaults (no grouping, "auto").
+class QLDeviceOpenfpgaBitstreamOptions {
+  public:
+    bool group_routing = false;
+    // empty means "not set" -- the caller omits --unused_mux_config entirely
+    // rather than pass a value that just duplicates openfpga's own "auto" default.
+    std::string unused_mux_config;
+    // "OPENFPGA_UNUSED_MUX_CONFIG" was present but not one of openfpga's own
+    // accepted values ("auto", "first", "last", "unused_input").
+    bool invalid = false;
+    std::string invalid_value;
+};
+
+
 class QLDeviceManager : public QObject {
   Q_OBJECT
  public:
@@ -448,6 +470,10 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceOpenFPGAFixedSimFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAFabricKeyFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamRemappingFile(QLDeviceTarget device_target = QLDeviceTarget());
+  QLDeviceOpenfpgaBitstreamOptions deviceOpenFPGABitstreamOptions(QLDeviceTarget device_target = QLDeviceTarget());
+  // pure parser, factored out of deviceOpenFPGABitstreamOptions() so it is testable
+  // without a resolved device on disk.
+  static QLDeviceOpenfpgaBitstreamOptions parseOpenfpgaBitstreamOptions(const json& config_json);
 
   std::filesystem::path deviceOpenFPGAPinTableFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAIOMapFile(QLDeviceTarget device_target = QLDeviceTarget());

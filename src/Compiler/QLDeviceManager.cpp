@@ -5380,6 +5380,56 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGABitstreamRemappingFile(QLDe
 }
 
 
+QLDeviceOpenfpgaBitstreamOptions QLDeviceManager::parseOpenfpgaBitstreamOptions(const json& config_json) {
+
+  QLDeviceOpenfpgaBitstreamOptions options;
+
+  // both keys are optional: a device package predating this contract, or one whose
+  // fabric does not need either knob, simply has neither and 'options' keeps its
+  // all-off defaults.
+  if( config_json.contains("OPENFPGA_GROUP_ROUTING") &&
+      config_json["OPENFPGA_GROUP_ROUTING"].is_boolean() ) {
+
+    options.group_routing = config_json["OPENFPGA_GROUP_ROUTING"].get<bool>();
+  }
+
+  if( config_json.contains("OPENFPGA_UNUSED_MUX_CONFIG") ) {
+
+    const auto& raw_value = config_json["OPENFPGA_UNUSED_MUX_CONFIG"];
+    const std::string value = raw_value.is_string() ? raw_value.get<std::string>() : raw_value.dump();
+    // must match openfpga's own accepted set (openfpga_bitstream_template.h) -- an
+    // unrecognised value here would otherwise surface as a much more confusing
+    // "Invalid unused_mux_config" error out of the openfpga shell itself, far from
+    // the config.json that actually caused it.
+    if( raw_value.is_string() &&
+        (value == "auto" || value == "first" || value == "last" || value == "unused_input") ) {
+      options.unused_mux_config = value;
+    }
+    else {
+      options.invalid = true;
+      options.invalid_value = value;
+    }
+  }
+
+  return options;
+}
+
+
+QLDeviceOpenfpgaBitstreamOptions QLDeviceManager::deviceOpenFPGABitstreamOptions(QLDeviceTarget device_target) {
+
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
+  json device_target_config_json;
+  if(!loadDeviceConfigJSON(device_target, device_target_config_json)) {
+    return QLDeviceOpenfpgaBitstreamOptions();
+  }
+
+  return parseOpenfpgaBitstreamOptions(device_target_config_json);
+}
+
+
 std::filesystem::path QLDeviceManager::deviceOpenFPGAPinTableFile(QLDeviceTarget device_target) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
