@@ -3550,6 +3550,35 @@ static std::string removeVprOption(const std::string& options, const std::string
 }
 
 
+// Set a "--flag on|off" pair in a whitespace-separated option string. An existing
+// occurrence has its value rewritten in place, otherwise the pair is appended.
+// Token-exact like removeVprOption(), so the flag does not match a value or a
+// differently named flag that merely contains the same text.
+static std::string setVprOnOffOption(const std::string& options, const std::string& flag, bool on) {
+  const std::string value = on ? "on" : "off";
+  std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  bool found = false;
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] != flag) {
+      continue;
+    }
+    found = true;
+    if(i + 1 < tokens.size() && tokens[i + 1].rfind("--", 0) != 0) {
+      tokens[i + 1] = value;  // rewrite the flag's value
+    }
+    else {
+      tokens.insert(tokens.begin() + i + 1, value);  // flag had no value
+    }
+    ++i;  // the value is settled, do not look at it as a flag
+  }
+  if(!found) {
+    tokens.push_back(flag);
+    tokens.push_back(value);
+  }
+  return StringUtils::join(tokens, " ");
+}
+
+
 // Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'. The 'x' is
 // load-bearing: plain concatenation makes 12x10 read as 'AUTOFPGA1210', equally 1x210
 // and 121x0. Every construction site goes through here so they cannot drift apart.
@@ -4243,6 +4272,32 @@ bool CompilerOpenFPGA_ql::Packing() {
   {
     // don't run packing command, we need to run the python script
     // to generate the device first.
+  }
+  else if(m_autoLayoutGenerationMode) {
+    // Device size search. This run packs the design against the template layout
+    // only so that add_layout.py can size a device from the resource requirements
+    // vpr reports in vpr_stdout.log. Those counts must come from the pack options
+    // as given: left to itself, the packer repacks a design that does not fit with
+    // progressively denser settings (unrelated clustering, balanced block type
+    // utilization, full external pin utilization) and reports the counts of that
+    // denser clustering, which sizes a device the re-run below - packing with the
+    // options as given - then may not fit at its first pass.
+    // '--disable_pack_retries on' makes the packer stop after the first pass, so
+    // the counts it reports are the ones the generated device has to hold. It is
+    // forced even over a value from the pack custom vpr options, because this run
+    // has no other purpose than sizing; the user's value still applies to the
+    // re-run against the generated device.
+    if(command->string().find("--disable_pack_retries") != std::string::npos) {
+      Message("[WARNING] The device size search forces '--disable_pack_retries on'; the value from "
+              "the pack custom vpr options applies to the re-run against the generated device.\n");
+    }
+    std::string command_size_search =
+        setVprOnOffOption(command->string(), "--disable_pack_retries", true);
+
+    FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command_size_search);
+
+    Message("Packing is running in Auto Layout Generation Mode: searching the device size with '--disable_pack_retries on'\n");
+    status = ExecuteAndMonitorSystemCommand(command_size_search);
   }
   else {
     status = ExecuteAndMonitorSystemCommand(command->string());
