@@ -171,9 +171,6 @@ class QLDeviceManager : public QObject {
   // config.json belongs to the device type but is read once per variant and
   // layout, so a bad key would otherwise be reported once per corner.
   void reportDeviceDataError(const std::string& message);
-  // Same, for something the device is still usable despite - a package with no
-  // IO_CAPACITY still reports clb/bram/dsp.
-  void reportDeviceDataWarning(const std::string& message);
   int addDevice(std::string family, std::string foundry, std::string node, std::string devicename,
                 std::string device_data_source, bool force);
   int encryptDevice(std::string family, std::string foundry, std::string node, std::string devicename,
@@ -509,11 +506,9 @@ class QLDeviceManager : public QObject {
   // hieracrchical list of all devices available in the installation
   std::vector <QLDeviceType> device_list;
 
-  void reportDeviceDataMessage(const std::string& message, bool is_error);
-
-  // device_data parse messages waiting for a console - <text, is_error> - and
-  // the ones already reported in this parse. See reportDeviceDataError().
-  std::vector<std::pair<std::string, bool>> deferred_device_data_message_list;
+  // device_data parse errors waiting for a console, and the ones already
+  // reported in this parse - see reportDeviceDataError().
+  std::vector<std::string> deferred_device_data_error_list;
   std::set<std::string> reported_device_data_error_set;
   bool device_data_error_console_ready = false;
 
