@@ -22,19 +22,29 @@ public:
     int columns() const { return m_columns; }
     int rows() const { return m_rows; }
 
-    const QSize& dspSize() const { return m_dspSize; }
-    const QSize& bramSize() const { return m_bramSize; }
+    // Unset when the device carries no such block: the package states no
+    // footprint for a block that is not there.
+    const std::optional<QSize>& dspSize() const { return m_dspSize; }
+    const std::optional<QSize>& bramSize() const { return m_bramSize; }
 
     bool isDspColumn(int column) const { return m_dspColumns.find(column) != m_dspColumns.end(); }
     bool isBramColumn(int column) const { return m_bramColumns.find(column) != m_bramColumns.end(); }
+
+    // Whether the fabric carries the block at all. Check before reading its
+    // footprint: the size is known only for a block that is there.
+    bool isDspSupported() const { return m_dspSize.has_value(); }
+    bool isBramSupported() const { return m_bramSize.has_value(); }
 
     QSize elementSize(Tile::Type type) const {
         QSize minSize(1,1);
         switch(type) {
         case Tile::Type::Io: return minSize;
         case Tile::Type::Clb: return minSize;
-        case Tile::Type::Bram: return m_bramSize;
-        case Tile::Type::Dsp: return m_dspSize;
+        // Only ever asked for a block the device has - callers gate on
+        // isBramSupported()/isDspSupported() - so the fallback is unreachable
+        // rather than a size claim.
+        case Tile::Type::Bram: return m_bramSize.value_or(minSize);
+        case Tile::Type::Dsp: return m_dspSize.value_or(minSize);
         default: return minSize;
         }
         return minSize;
@@ -57,8 +67,8 @@ private:
     int m_rows = -1;
     std::set<int> m_dspColumns;
     std::set<int> m_bramColumns;
-    QSize m_dspSize;
-    QSize m_bramSize;
+    std::optional<QSize> m_dspSize;
+    std::optional<QSize> m_bramSize;
 
     bool parse(const std::filesystem::path& deviceLayoutFile);
 

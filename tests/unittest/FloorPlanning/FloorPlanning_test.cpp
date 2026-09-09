@@ -282,6 +282,83 @@ TEST(FloorPlanning, missingKeyIsReported)
         << descriptor->error().toStdString();
 }
 
+// TSMC12nm/EPSON carries neither bram nor dsp, so its package states no columns
+// and no footprint for either block. That is a complete answer, not a malformed
+// file: floorplanning must open instead of refusing (issue #2424).
+TEST(FloorPlanning, emptyBlockSizeIsAcceptedWithoutColumns)
+{
+    fp::DeviceGridDescriptorPtr descriptor = descriptorFromJson(R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "",
+    "bram_size": "",
+    "dsp_cols": "",
+    "bram_cols": ""
+})");
+
+    ASSERT_FALSE(descriptor->hasError()) << descriptor->error().toStdString();
+
+    EXPECT_EQ(descriptor->columns(), 32);
+    EXPECT_EQ(descriptor->rows(), 32);
+    EXPECT_FALSE(descriptor->isDspColumn(7));
+    EXPECT_FALSE(descriptor->isBramColumn(13));
+    // no footprint was stated and none is invented - 1x1 would be a size this
+    // device does not have
+    EXPECT_FALSE(descriptor->isDspSupported());
+    EXPECT_FALSE(descriptor->isBramSupported());
+    EXPECT_FALSE(descriptor->dspSize().has_value());
+    EXPECT_FALSE(descriptor->bramSize().has_value());
+}
+
+// A fabric can carry one block kind and not the other: dsp stated in full, bram
+// absent. The dsp footprint must survive intact while bram stays unsupported.
+TEST(FloorPlanning, oneBlockKindMayBeAbsent)
+{
+    fp::DeviceGridDescriptorPtr descriptor = descriptorFromJson(R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "1x3",
+    "bram_size": "",
+    "dsp_cols": "6,19",
+    "bram_cols": ""
+})");
+
+    ASSERT_FALSE(descriptor->hasError()) << descriptor->error().toStdString();
+
+    EXPECT_TRUE(descriptor->isDspSupported());
+    EXPECT_EQ(descriptor->dspSize(), QSize(1, 3));
+    EXPECT_TRUE(descriptor->isDspColumn(7));
+    EXPECT_TRUE(descriptor->isDspColumn(20));
+
+    EXPECT_FALSE(descriptor->isBramSupported());
+    EXPECT_FALSE(descriptor->bramSize().has_value());
+    EXPECT_FALSE(descriptor->isBramColumn(13));
+
+    // the dsp column still builds 3-cell dsp tiles, and every other core column
+    // is clb - nothing became a bram tile of unknown height
+    fp::DeviceGrid device(descriptor);
+    EXPECT_EQ(device.tile(fp::Tile::Index{7, 2})->type(), fp::Tile::Type::Dsp);
+    EXPECT_EQ(device.tile(fp::Tile::Index{13, 2})->type(), fp::Tile::Type::Clb);
+}
+
+// The footprint is only optional because the block is absent. Columns without
+// one would size every block in them wrong, so that stays reported.
+TEST(FloorPlanning, emptyBlockSizeIsReportedWhenColumnsExist)
+{
+    fp::DeviceGridDescriptorPtr descriptor = descriptorFromJson(R"({
+    "array_x": 30,
+    "array_y": 30,
+    "dsp_size": "1x3",
+    "bram_size": "",
+    "dsp_cols": "6,19",
+    "bram_cols": "12,25"
+})");
+
+    ASSERT_TRUE(descriptor->hasError());
+    EXPECT_NE(descriptor->error().indexOf("bram_size"), -1)
+        << descriptor->error().toStdString();
+}
+
 TEST(FloorPlanning, saveLoadPartition)
 {
     // clb
