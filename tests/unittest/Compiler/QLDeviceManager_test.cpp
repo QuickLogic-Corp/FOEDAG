@@ -330,14 +330,37 @@ TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsMissingLayout) {
   EXPECT_NE(error.find("FPGA_AUTO"), std::string::npos) << error;
 }
 
-TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsIncompleteEntry) {
-  // missing "io"
-  const json resources_json = json::parse(R"({"FPGA126126": {"clb": 1, "bram": 1, "dsp": 1}})");
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonReturnsTheKeysThatArePresent) {
+  // EPSON-2024Q2-1209 ships no "bram" key - that fabric has none. Refusing the
+  // whole entry over it would leave exactly the device this fallback exists for
+  // reporting nothing at all.
+  const json resources_json = json::parse(R"({
+    "FPGA1209": {
+      "io_top": 220, "io_right": 180, "io_bottom": 220, "io_left": 180,
+      "empty_dsp_top": 20, "empty_dsp_bottom": 20,
+      "clb": 99, "dsp": 3, "io": 800
+    }
+  })");
+
+  std::string error;
+  const auto resources =
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA1209", &error);
+
+  ASSERT_EQ(resources.size(), 3u) << error;
+  EXPECT_EQ(countOf(resources, "clb"), 99);
+  EXPECT_EQ(countOf(resources, "dsp"), 3);
+  EXPECT_EQ(countOf(resources, "io"), 800);
+  EXPECT_EQ(countOf(resources, "bram"), -1);  // absent, not reported as zero
+  EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsEntryWithNoneOfTheFour) {
+  const json resources_json = json::parse(R"({"FPGA1209": {"io_top": 220, "corner_left_top": 20}})");
 
   std::string error;
   EXPECT_TRUE(
-      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
-  EXPECT_NE(error.find("\"io\""), std::string::npos) << error;
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA1209", &error).empty());
+  EXPECT_NE(error.find("none of"), std::string::npos) << error;
 }
 
 TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsNonIntegerValue) {
@@ -369,6 +392,30 @@ TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsOutOfRangeValue) {
   EXPECT_TRUE(
       QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
   EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsValueAboveInt64Max) {
+  // json stores this as number_unsigned, where get<int64_t>() wraps to -1 and
+  // would pass a signed-only bounds check.
+  const json resources_json = json::parse(
+      R"({"FPGA126126": {"clb": 18446744073709551615, "bram": 210, "dsp": 420, "io": 10080}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsAnInvalidKeyAmongValidOnes) {
+  // a bad key refuses the whole entry even when earlier keys already parsed -
+  // the partly-filled vector must not reach the caller as a success.
+  const json resources_json =
+      json::parse(R"({"FPGA1209": {"clb": 99, "dsp": "three", "io": 800}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA1209", &error).empty());
+  EXPECT_NE(error.find("\"dsp\""), std::string::npos) << error;
 }
 
 TEST(QLDeviceManager, DeriveResourceCountsRejectsUnresolvedLayout) {

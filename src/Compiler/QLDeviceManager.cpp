@@ -4557,7 +4557,7 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
 // resources.json document - the fallback for a package deriveResourceCounts()
 // cannot answer (issue #2370). Declines rather than guessing on anything
 // json's own exceptions would otherwise throw through: a missing layout
-// entry, a non-object entry, or a key that is not an integer.
+// entry, a non-object entry, or a key that is present but not a usable count.
 std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resourceCountsFromResourcesJson(
     const json& resources_json, const std::string& layout_name, std::string* out_error) {
 
@@ -4567,6 +4567,8 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resour
     if(out_error) {
       *out_error = reason;
     }
+    // a partly-filled vector would read as success to the caller
+    resources_vector.clear();
     return resources_vector;
   };
 
@@ -4579,22 +4581,41 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resour
     return fail("resources.json entry for layout \"" + layout_name + "\" is not an object");
   }
 
+  // A package lists only the resources it has - EPSON-2024Q2-1209 ships no
+  // "bram" key because that fabric has none - so an absent key is omitted
+  // rather than refused; callers already treat a resource missing from the
+  // vector as unknown. A key that IS present has to be a usable count.
   static const char* const kResourceKeys[] = {"clb", "bram", "dsp", "io"};
   for(const char* key : kResourceKeys) {
-    // int64_t first: get<int>() on an out-of-range value silently narrows
-    // instead of rejecting it, the same overflow parseWholeNumber() guards
-    // against elsewhere in this file.
-    if( !layout_entry.contains(key) || !layout_entry[key].is_number_integer() ||
-        (layout_entry[key].get<int64_t>() < std::numeric_limits<int>::min()) ||
-        (layout_entry[key].get<int64_t>() > std::numeric_limits<int>::max()) ) {
+
+    if( !layout_entry.contains(key) ) {
+      continue;
+    }
+
+    const json& value = layout_entry[key];
+
+    // Range-check before narrowing: get<int>() on an out-of-range value wraps
+    // rather than refusing it, and json stores anything above INT64_MAX as
+    // unsigned, where get<int64_t>() would itself wrap back into range and
+    // slip past a signed bounds check.
+    const bool usable_count =
+        value.is_number_integer() &&
+        (value.is_number_unsigned()
+             ? (value.get<uint64_t>() <= static_cast<uint64_t>(std::numeric_limits<int>::max()))
+             : ((value.get<int64_t>() >= std::numeric_limits<int>::min()) &&
+                (value.get<int64_t>() <= std::numeric_limits<int>::max())));
+    if( !usable_count ) {
       return fail("resources.json entry for layout \"" + layout_name + "\" has no usable \"" +
                   std::string(key) + "\" key");
     }
+
+    resources_vector.push_back(std::make_tuple(std::string(key),
+        std::optional<int>(value.get<int>())));
   }
 
-  for(const char* key : kResourceKeys) {
-    resources_vector.push_back(std::make_tuple(std::string(key),
-        std::optional<int>(static_cast<int>(layout_entry[key].get<int64_t>()))));
+  if( resources_vector.empty() ) {
+    return fail("resources.json entry for layout \"" + layout_name +
+                "\" has none of \"clb\", \"bram\", \"dsp\", \"io\"");
   }
 
   return resources_vector;
@@ -4650,6 +4671,14 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::device
   // vector of tuples, one per resource type and its count - unset when not yet
   // known (e.g. an AUTO/RESOURCES device before Packing() has run):
   // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
+
+  // Resolve the default argument here rather than leaving each callee to do it:
+  // the fallback below reads the layout NAME off this target while
+  // deviceTypeDirPath() would resolve the directory off the current device, and
+  // the two must describe the same device.
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
 
   std::string derive_error;
   std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
