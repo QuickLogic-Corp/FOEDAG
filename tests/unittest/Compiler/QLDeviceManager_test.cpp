@@ -359,6 +359,18 @@ TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsNonObjectEntry) {
   EXPECT_NE(error.find("not an object"), std::string::npos) << error;
 }
 
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsOutOfRangeValue) {
+  // is_number_integer() alone accepts this - get<int>() would silently
+  // narrow it to a wrong value instead of rejecting it.
+  const json resources_json = json::parse(
+      R"({"FPGA126126": {"clb": 9999999999999, "bram": 210, "dsp": 420, "io": 10080}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
 TEST(QLDeviceManager, DeriveResourceCountsRejectsUnresolvedLayout) {
   // an unresolved layout reaching deriveResourceCounts() is always a genuine
   // problem by the time it gets here - the expected "not yet known" case
