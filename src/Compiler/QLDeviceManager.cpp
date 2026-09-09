@@ -2,6 +2,7 @@
 
 #include <cstdlib>   // std::getenv
 #include <cctype>    // std::isspace
+#include <limits>    // std::numeric_limits
 
 #include <QObject>
 #include <QWidget>
@@ -4580,7 +4581,12 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resour
 
   static const char* const kResourceKeys[] = {"clb", "bram", "dsp", "io"};
   for(const char* key : kResourceKeys) {
-    if( !layout_entry.contains(key) || !layout_entry[key].is_number_integer() ) {
+    // int64_t first: get<int>() on an out-of-range value silently narrows
+    // instead of rejecting it, the same overflow parseWholeNumber() guards
+    // against elsewhere in this file.
+    if( !layout_entry.contains(key) || !layout_entry[key].is_number_integer() ||
+        (layout_entry[key].get<int64_t>() < std::numeric_limits<int>::min()) ||
+        (layout_entry[key].get<int64_t>() > std::numeric_limits<int>::max()) ) {
       return fail("resources.json entry for layout \"" + layout_name + "\" has no usable \"" +
                   std::string(key) + "\" key");
     }
@@ -4588,7 +4594,7 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resour
 
   for(const char* key : kResourceKeys) {
     resources_vector.push_back(std::make_tuple(std::string(key),
-        std::optional<int>(layout_entry[key].get<int>())));
+        std::optional<int>(static_cast<int>(layout_entry[key].get<int64_t>()))));
   }
 
   return resources_vector;
