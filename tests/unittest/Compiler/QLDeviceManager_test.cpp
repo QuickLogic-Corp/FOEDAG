@@ -463,16 +463,32 @@ TEST(QLDeviceManager, DeriveResourceCountsRefusesABlockWiderThanOneTile) {
   EXPECT_NE(error.find("DSP_SIZE"), std::string::npos) << error;
 }
 
-TEST(QLDeviceManager, DeriveResourceCountsRequiresIOCapacity) {
-  // it used to default to 20 per tile when absent, which silently halved or
-  // doubled the io count for any device not built that way
+TEST(QLDeviceManager, DeriveResourceCountsLeavesIOUnsetWithoutIOCapacity) {
+  // IO_CAPACITY is the one geometry key whose absence costs only the io count.
+  // It is not defaulted - 20 per tile used to be assumed, which silently halved
+  // or doubled io for any device not built that way - but it no longer refuses
+  // the counts config.json CAN answer. IDAHO-FPGA0806_WLBL is shaped like this.
   const char* const without =
       R"({"DEVICE_SIZE": "8x6", "BRAM_SIZE": "1x6", "DSP_SIZE": "1x3",
           "BRAM_COLS": "3", "DSP_COLS": "6"})";
   std::string error;
+  const auto resources = QLDeviceManager::deriveResourceCounts(resolve(without), &error);
 
-  EXPECT_TRUE(QLDeviceManager::deriveResourceCounts(resolve(without), &error).empty());
-  EXPECT_NE(error.find("IO_CAPACITY"), std::string::npos) << error;
+  ASSERT_EQ(resources.size(), 4u) << error;
+  EXPECT_TRUE(error.empty()) << error;
+  EXPECT_EQ(countOf(resources, "clb"), 36);
+  EXPECT_EQ(countOf(resources, "bram"), 1);
+  EXPECT_EQ(countOf(resources, "dsp"), 2);
+
+  // io is reported as present-but-unknown, which the device list renders "-"
+  bool io_seen = false;
+  for(const auto& [resource_name, resource_count] : resources) {
+    if(resource_name == "io") {
+      io_seen = true;
+      EXPECT_FALSE(resource_count.has_value());
+    }
+  }
+  EXPECT_TRUE(io_seen);
 }
 
 TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
