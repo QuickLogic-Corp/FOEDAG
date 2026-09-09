@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QApplication>
 #include <QTextStream>
+#include <QTimer>
 #include <QtWidgets>
 #include <fstream>
 
@@ -1673,8 +1674,12 @@ QObject::connect(m_EULADialogNextButton, &QPushButton::released,
   else if(dialogCode == QDialog::Rejected) {
     m_EULADialog->deleteLater();
     forceStopCompilation();
-    Command cmd("gui_stop; exit");
-    GlobalSession->CmdStack()->push_and_exec(&cmd);
+    // Defer past QApplication::exec() starting: this runs inside Tcl_AppInit,
+    // before it, so exiting synchronously here would crash mid Qt startup.
+    QTimer::singleShot(0, []() {
+      Command cmd("gui_stop; exit");
+      GlobalSession->CmdStack()->push_and_exec(&cmd);
+    });
   }
 
 }
