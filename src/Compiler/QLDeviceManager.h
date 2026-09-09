@@ -416,7 +416,18 @@ class QLDeviceManager : public QObject {
   //   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
   static std::vector<std::tuple<std::string, std::optional<int>>> deriveResourceCounts(
       const QLDeviceLayoutInfo& layout_info, std::string* out_error = nullptr);
-  
+
+  // Fallback for a package whose config.json cannot answer deriveResourceCounts():
+  // clb/bram/dsp/io read verbatim from an already-parsed resources.json, the
+  // vpr-generated file deviceResourceInformation() used to read before it
+  // became formula-only (issue #2257). Other keys the file may carry
+  // (io_top, io_right, ...) are ignored - no caller consumes them. Pure and
+  // public for the same reason deriveResourceCounts() is: every edge case
+  // (missing layout entry, wrong value type) is exercised here, not through a
+  // real device_data package.
+  static std::vector<std::tuple<std::string, std::optional<int>>> resourceCountsFromResourcesJson(
+      const json& resources_json, const std::string& layout_name, std::string* out_error = nullptr);
+
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   

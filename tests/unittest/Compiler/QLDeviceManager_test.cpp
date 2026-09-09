@@ -286,6 +286,79 @@ TEST(QLDeviceManager, DeriveResourceCountsMatchesShippedResourcesJSON) {
   }
 }
 
+// ---- resources.json fallback -----------------------------------------------
+//
+// deviceResourceInformation() falls back to a device's resources.json when
+// deriveResourceCounts() cannot answer (issue #2370). resourceCountsFromResourcesJson()
+// is the pure lookup/validation piece of that: given an already-parsed
+// resources.json document and a layout name, return its clb/bram/dsp/io.
+//
+// The values below are TURNKEY-FPGA126126's "FPGA126126" entry, the same
+// package and the same clb/bram/dsp/io numbers already verified above in
+// DeriveResourceCountsMatchesShippedResourcesJSON - reusing an already-established
+// ground truth rather than introducing a new one.
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonUsesShippedValues) {
+  const json resources_json = json::parse(R"({
+    "FPGA126126": {
+      "io_top": 2120, "io_right": 2520, "io_bottom": 2120, "io_left": 2520,
+      "io_bram_top": 200, "io_bram_bottom": 200, "io_dsp_top": 200, "io_dsp_bottom": 200,
+      "corner_left_top": 20, "corner_left_bottom": 20,
+      "corner_right_top": 20, "corner_right_bottom": 20,
+      "clb": 13356, "bram": 210, "dsp": 420, "io": 10080
+    }
+  })");
+
+  std::string error;
+  const auto resources =
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error);
+
+  ASSERT_FALSE(resources.empty()) << error;
+  EXPECT_EQ(resources.size(), 4u);
+  EXPECT_EQ(countOf(resources, "clb"), 13356);
+  EXPECT_EQ(countOf(resources, "bram"), 210);
+  EXPECT_EQ(countOf(resources, "dsp"), 420);
+  EXPECT_EQ(countOf(resources, "io"), 10080);
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsMissingLayout) {
+  const json resources_json = json::parse(R"({"FPGA126126": {"clb": 1, "bram": 1, "dsp": 1, "io": 1}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA_AUTO", &error).empty());
+  EXPECT_NE(error.find("FPGA_AUTO"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsIncompleteEntry) {
+  // missing "io"
+  const json resources_json = json::parse(R"({"FPGA126126": {"clb": 1, "bram": 1, "dsp": 1}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"io\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsNonIntegerValue) {
+  const json resources_json =
+      json::parse(R"({"FPGA126126": {"clb": "13356", "bram": 210, "dsp": 420, "io": 10080}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsNonObjectEntry) {
+  const json resources_json = json::parse(R"({"FPGA126126": 13356})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("not an object"), std::string::npos) << error;
+}
+
 TEST(QLDeviceManager, DeriveResourceCountsRejectsUnresolvedLayout) {
   // an unresolved layout reaching deriveResourceCounts() is always a genuine
   // problem by the time it gets here - the expected "not yet known" case

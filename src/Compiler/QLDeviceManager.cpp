@@ -4552,6 +4552,49 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
 }
 
 
+// clb/bram/dsp/io for one layout, read verbatim from an already-parsed
+// resources.json document - the fallback for a package deriveResourceCounts()
+// cannot answer (issue #2370). Declines rather than guessing on anything
+// json's own exceptions would otherwise throw through: a missing layout
+// entry, a non-object entry, or a key that is not an integer.
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resourceCountsFromResourcesJson(
+    const json& resources_json, const std::string& layout_name, std::string* out_error) {
+
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector;
+
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = reason;
+    }
+    return resources_vector;
+  };
+
+  if( !resources_json.contains(layout_name) ) {
+    return fail("resources.json has no entry for layout \"" + layout_name + "\"");
+  }
+
+  const json& layout_entry = resources_json[layout_name];
+  if( !layout_entry.is_object() ) {
+    return fail("resources.json entry for layout \"" + layout_name + "\" is not an object");
+  }
+
+  static const char* const kResourceKeys[] = {"clb", "bram", "dsp", "io"};
+  for(const char* key : kResourceKeys) {
+    if( !layout_entry.contains(key) || !layout_entry[key].is_number_integer() ) {
+      return fail("resources.json entry for layout \"" + layout_name + "\" has no usable \"" +
+                  std::string(key) + "\" key");
+    }
+  }
+
+  for(const char* key : kResourceKeys) {
+    resources_vector.push_back(std::make_tuple(std::string(key),
+        std::optional<int>(layout_entry[key].get<int>())));
+  }
+
+  return resources_vector;
+}
+
+
 std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveDeviceResourceInformation(
     QLDeviceTarget device_target, std::string* out_error) {
 
@@ -4605,6 +4648,32 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::device
   std::string derive_error;
   std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
       deriveDeviceResourceInformation(device_target, &derive_error);
+
+  // config.json could not answer (not the "not yet known" case): fall back to
+  // this device type's resources.json, the vpr-generated file it shipped
+  // before deriveResourceCounts() replaced it (issue #2370) - old packages
+  // still missing a key the formula needs can still report what they always
+  // reported. config.json stays the primary source: this is only ever
+  // consulted after it has already failed.
+  if( resources_vector.empty() && !derive_error.empty() ) {
+
+    std::filesystem::path resources_json_path =
+        deviceTypeDirPath(device_target) / std::string("resources.json");
+
+    if(FileUtils::FileExists(resources_json_path)) {
+      try {
+        std::ifstream ifs(resources_json_path.string());
+        json resources_json = json::parse(ifs);
+        std::string fallback_error;
+        resources_vector = resourceCountsFromResourcesJson(
+            resources_json, device_target.device_variant_layout.name, &fallback_error);
+      }
+      catch(const std::exception&) {
+        // malformed resources.json: fall through and report the original
+        // config.json error below, same as if the file were absent.
+      }
+    }
+  }
 
   // the device is about to be shown with no resources at all, so say why rather
   // than leaving it unexplained. Silent when derive_error is empty: that means
