@@ -421,10 +421,11 @@ class QLDeviceManager : public QObject {
   // clb/bram/dsp/io read verbatim from an already-parsed resources.json, the
   // vpr-generated file deviceResourceInformation() used to read before it
   // became formula-only (issue #2257). Other keys the file may carry
-  // (io_top, io_right, ...) are ignored - no caller consumes them. Returns
-  // whichever of the four the entry carries: a package lists only the
-  // resources it has. Empty, with a reason, when the entry is missing,
-  // unusable, or carries none of them. Pure and public for the same reason
+  // (io_top, io_right, ...) are ignored - no caller consumes them. A key the
+  // entry omits is reported as 0: the file is generated and lists every
+  // resource type the fabric carries, so its absence means the device has
+  // none. Empty, with a reason, when the entry is missing, unusable, or
+  // carries none of the four. Pure and public for the same reason
   // deriveResourceCounts() is: every edge case (missing layout entry, wrong
   // value type) is exercised here, not through a real device_data package.
   static std::vector<std::tuple<std::string, std::optional<int>>> resourceCountsFromResourcesJson(

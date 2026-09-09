@@ -4581,16 +4581,20 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resour
     return fail("resources.json entry for layout \"" + layout_name + "\" is not an object");
   }
 
-  // A package lists only the resources it has - EPSON-2024Q2-1209 ships no
-  // "bram" key because that fabric has none - so an absent key is omitted
-  // rather than refused; callers already treat a resource missing from the
-  // vector as unknown. A key that IS present has to be a usable count.
+  // resources.json is generated, and lists every resource type the fabric
+  // carries, so a key it omits means the device has none of that resource -
+  // a count of zero, not an unknown. EPSON-2024Q2-1209 ships no "bram" key
+  // because that fabric has no BRAM. A key that IS present has to be a
+  // usable count.
   static const char* const kResourceKeys[] = {"clb", "bram", "dsp", "io"};
+  int keys_present = 0;
   for(const char* key : kResourceKeys) {
 
     if( !layout_entry.contains(key) ) {
+      resources_vector.push_back(std::make_tuple(std::string(key), std::optional<int>(0)));
       continue;
     }
+    ++keys_present;
 
     const json& value = layout_entry[key];
 
@@ -4613,7 +4617,9 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resour
         std::optional<int>(value.get<int>())));
   }
 
-  if( resources_vector.empty() ) {
+  // An entry carrying none of the four is not a resource entry at all - say so
+  // rather than claiming a device with no clbs and no io.
+  if( keys_present == 0 ) {
     return fail("resources.json entry for layout \"" + layout_name +
                 "\" has none of \"clb\", \"bram\", \"dsp\", \"io\"");
   }
