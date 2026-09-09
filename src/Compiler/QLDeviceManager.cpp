@@ -4524,10 +4524,6 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
                   " tiles wide, and the clb count assumes one tile per block column");
     }
   }
-  if( !layout.ioCapacity.has_value() ) {
-    return fail("config.json has no usable \"IO_CAPACITY\" key");
-  }
-
   const int array_x = layout.arrayX;
   const int array_y = layout.arrayY;
   const int bram_columns = static_cast<int>(layout.bramCols.size());
@@ -4546,8 +4542,13 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
       std::optional<int>(bram_columns * (array_y / bram_tile_height))));
   resources_vector.push_back(std::make_tuple(std::string("dsp"),
       std::optional<int>(dsp_columns * (array_y / dsp_tile_height))));
+  // IO_CAPACITY is the one geometry key a package can lack without costing
+  // anything else: only io is computed from it. Leave io unset - the device
+  // shows "-" for it - rather than refusing counts the config CAN answer.
   resources_vector.push_back(std::make_tuple(std::string("io"),
-      std::optional<int>(2 * (array_x + array_y) * (*layout.ioCapacity))));
+      layout.ioCapacity.has_value()
+          ? std::optional<int>(2 * (array_x + array_y) * (*layout.ioCapacity))
+          : std::nullopt));
 
   return resources_vector;
 }
@@ -4729,11 +4730,32 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::device
     reportDeviceDataError(derive_error);
   }
 
+  // The device is usable and its other counts are right; only io could not be
+  // computed. Warn rather than error, and point at the key to add.
+  for(const auto& [resource_name, resource_count] : resources_vector) {
+    if( (resource_name == "io") && !resource_count.has_value() ) {
+      reportDeviceDataWarning(convertToDeviceTypeString(device_target) +
+                              ": config.json has no \"IO_CAPACITY\" key, so the io count is"
+                              " unknown; clb, bram and dsp are unaffected");
+      break;
+    }
+  }
+
   return resources_vector;
 }
 
 
 void QLDeviceManager::reportDeviceDataError(const std::string& message) {
+  reportDeviceDataMessage(message, true);
+}
+
+
+void QLDeviceManager::reportDeviceDataWarning(const std::string& message) {
+  reportDeviceDataMessage(message, false);
+}
+
+
+void QLDeviceManager::reportDeviceDataMessage(const std::string& message, bool is_error) {
 
   if( !reported_device_data_error_set.insert(message).second ) {
     return;
@@ -4749,15 +4771,20 @@ void QLDeviceManager::reportDeviceDataError(const std::string& message) {
   // stderr is its output, and nothing would ever flush.
   const bool gui = GlobalSession->CmdLine() && GlobalSession->CmdLine()->WithQt();
   if( gui && !device_data_error_console_ready ) {
-    deferred_device_data_error_list.push_back(message);
+    deferred_device_data_message_list.push_back(std::make_pair(message, is_error));
     return;
   }
 
   CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)GlobalSession->GetCompiler();
   if(compiler) {
-    // append=false: no Tcl command is in flight while device_data is walked, and
-    // appending would land this in the result of whichever one runs next.
-    compiler->ErrorMessage(message, false);
+    if(is_error) {
+      // append=false: no Tcl command is in flight while device_data is walked, and
+      // appending would land this in the result of whichever one runs next.
+      compiler->ErrorMessage(message, false);
+    }
+    else {
+      compiler->WarningMessage(message);
+    }
   }
 }
 
@@ -4775,17 +4802,22 @@ void QLDeviceManager::flushDeferredDeviceDataErrors() {
 
   device_data_error_console_ready = true;
 
-  std::vector<std::string> messages;
-  messages.swap(deferred_device_data_error_list);
+  std::vector<std::pair<std::string, bool>> messages;
+  messages.swap(deferred_device_data_message_list);
 
   // reportDeviceDataError()'s dedupe covers one walk, and parseDeviceData() clears
   // it at the start of the next one - so a re-parse before this first runs can
   // queue a message already in the queue. Dedupe again here rather than printing
   // the same line twice.
   std::set<std::string> flushed;
-  for(const std::string& message : messages) {
+  for(const auto& [message, is_error] : messages) {
     if( flushed.insert(message).second ) {
-      compiler->ErrorMessage(message, false);
+      if(is_error) {
+        compiler->ErrorMessage(message, false);
+      }
+      else {
+        compiler->WarningMessage(message);
+      }
     }
   }
 }
