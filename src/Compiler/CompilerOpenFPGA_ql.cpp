@@ -7099,7 +7099,7 @@ write_gsb_to_xml --file gsb
 repack
 
 # Build bitstream database and save to file
-build_architecture_bitstream --write_file fabric_independent_bitstream.xml
+build_architecture_bitstream ${OPENFPGA_UNUSED_MUX_CONFIG_OPTION} --write_file fabric_independent_bitstream.xml
 
 # Build fabric bitstream
 build_fabric_bitstream
@@ -7396,6 +7396,23 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   }
 
 
+  // [optional] bitstream-generation options (grouped routing / unused mux config).
+  // Newer/larger switchbox architectures can need these to keep openfpga's up-front
+  // bitstream block-count estimate consistent with what actually gets decoded; see
+  // build_device_bitstream.cpp's block-count assertion.
+  {
+    QLDeviceOpenfpgaBitstreamOptions openfpga_bitstream_options =
+        QLDeviceManager::getInstance()->deviceOpenFPGABitstreamOptions();
+    if(openfpga_bitstream_options.invalid) {
+      ErrorMessage("Invalid OPENFPGA_UNUSED_MUX_CONFIG '" + openfpga_bitstream_options.invalid_value +
+                   "' in device config.json. Must be 'auto', 'first', 'last', or 'unused_input'.");
+      return std::string("");
+    }
+    m_OpenFpgaGroupRouting = openfpga_bitstream_options.group_routing;
+    m_OpenFpgaUnusedMuxConfig = openfpga_bitstream_options.unused_mux_config;
+  }
+
+
   Message( std::string("Using openfpga.xml for: ") + QLDeviceManager::getInstance()->getCurrentDeviceTargetString() );
 
   // call vpr to execute analysis
@@ -7613,17 +7630,31 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
                       openfpga_repack_constraints_command);
 
-  // fabric_key is optional
+  // fabric_key and group_routing are independent, both-optional device settings, so
+  // they combine into the single ${OPENFPGA_BUILD_FABRIC_OPTION} placeholder rather
+  // than each needing their own.
+  std::string openfpga_build_fabric_option;
   if (m_OpenFpgaFabricKeyFile.empty()) {
-    result = ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}", "");
     Message("<warning> EXTERNAL_FABRIC_KEY_FILE is not found in the device.\n");
   } else {
-    result =
-        ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}",
-                   "--load_fabric_key " + m_OpenFpgaFabricKeyFile.string());
+    openfpga_build_fabric_option = "--load_fabric_key " + m_OpenFpgaFabricKeyFile.string();
     result = ReplaceAll(result, "${EXTERNAL_FABRIC_KEY_FILE}",
                       m_OpenFpgaFabricKeyFile.string());
   }
+  if (m_OpenFpgaGroupRouting) {
+    if (!openfpga_build_fabric_option.empty()) {
+      openfpga_build_fabric_option += " ";
+    }
+    openfpga_build_fabric_option += "--group_routing";
+  }
+  result = ReplaceAll(result, "${OPENFPGA_BUILD_FABRIC_OPTION}", openfpga_build_fabric_option);
+
+  // unused_mux_config is optional; empty defers to openfpga's own default ("auto").
+  std::string openfpga_unused_mux_config_option;
+  if (!m_OpenFpgaUnusedMuxConfig.empty()) {
+    openfpga_unused_mux_config_option = "--unused_mux_config " + m_OpenFpgaUnusedMuxConfig;
+  }
+  result = ReplaceAll(result, "${OPENFPGA_UNUSED_MUX_CONFIG_OPTION}", openfpga_unused_mux_config_option);
 
   // bitstream_remapping is optional. and if it exists:
   // build_reordered_fabric_bitstream --reorder_map bitstream_remapping.xml --file reordered_bitstream.bin
