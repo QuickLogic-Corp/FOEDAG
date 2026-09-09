@@ -35,6 +35,15 @@ reuses a value set already established as correct rather than introducing a new 
 | T-004 | REQ-004 | Layout entry present with a non-integer value for one key (e.g. a string or float). | same | Returns empty vector, `out_error` set, no exception propagates. |
 | T-005 | REQ-004 | Document is valid JSON but the layout entry is not an object (e.g. a number or array). | same | Returns empty vector, `out_error` set, no exception propagates. |
 | T-006 | REQ-001 | Existing `DeriveResourceCountsMatchesShippedResourcesJSON` and the other `DeriveResourceCounts*` tests are unmodified and still pass. | same | `ctest`/unit test binary: 0 regressions. |
+| T-007 | REQ-004 | Layout entry has a value outside `int` range for one key (e.g. `9999999999999`). | same | Returns empty vector, `out_error` set — not silently narrowed to a wrong in-range value. |
+
+REQ-005 (combining the formula's and the fallback's error text in `deviceResourceInformation()`
+when `resources.json` exists but is unusable) is the one requirement this test plan does not cover
+directly: it lives in the wiring `resourceCountsFromResourcesJson()` unit tests deliberately don't
+reach (same limitation noted in §1 for the wiring generally). It is small enough — string
+concatenation gated on `fallback_error` being non-empty — to verify by code inspection; T-001–T-005
+and T-007 already establish that `fallback_error` is set exactly when the fallback should be
+considered "tried and failed" rather than "not present."
 
 ## 3. Regression scope
 FOEDAG unit test suite (wherever `tests/unittest/Compiler/QLDeviceManager_test.cpp` runs in CI —
@@ -51,4 +60,4 @@ those remain the responsibility of the eventual pin-bump PR if it wants extra co
 
 ## 5. Entry / exit criteria
 - Entry: design approved, build green.
-- Exit: T-001–T-006 pass, full `QLDeviceManager_test.cpp` suite green, no open Sev-1 issues.
+- Exit: T-001–T-007 pass, full `QLDeviceManager_test.cpp` suite green, no open Sev-1 issues.
