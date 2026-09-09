@@ -4667,16 +4667,22 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::device
         deviceTypeDirPath(device_target) / std::string("resources.json");
 
     if(FileUtils::FileExists(resources_json_path)) {
+      std::string fallback_error;
       try {
         std::ifstream ifs(resources_json_path.string());
         json resources_json = json::parse(ifs);
-        std::string fallback_error;
         resources_vector = resourceCountsFromResourcesJson(
             resources_json, device_target.device_variant_layout.name, &fallback_error);
       }
-      catch(const std::exception&) {
-        // malformed resources.json: fall through and report the original
-        // config.json error below, same as if the file were absent.
+      catch(const std::exception& e) {
+        fallback_error = std::string("resources.json is not valid JSON: ") + e.what();
+      }
+
+      // the file is present, so its own problem is worth telling apart from
+      // "config.json can't answer and there was nothing else to try" - unlike
+      // a genuinely absent resources.json, this is something to go fix.
+      if( resources_vector.empty() && !fallback_error.empty() ) {
+        derive_error += "; resources.json fallback also failed: " + fallback_error;
       }
     }
   }
