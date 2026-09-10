@@ -178,6 +178,14 @@ std::filesystem::path FileUtils::Basename(const std::filesystem::path& path) {
   return path.filename();
 }
 
+std::filesystem::path FileUtils::RelativeTo(const std::filesystem::path& path,
+                                            const std::filesystem::path& base) {
+  std::error_code ec;
+  const std::filesystem::path relative = std::filesystem::relative(path, base, ec);
+  if (ec || relative.empty()) return path;
+  return relative;
+}
+
 std::filesystem::path FileUtils::GetPreferredPath(
     const std::filesystem::path& path) {
   return std::filesystem::path(path).make_preferred();
@@ -265,6 +273,17 @@ std::vector<std::filesystem::path> FileUtils::FindAbsoluteFilePathsRecursively(
 
 // This will search the given paths (non-recursively) for a child file.
 // All matches will be returned in a vector
+std::filesystem::path FileUtils::ResolveInDirs(
+    const std::filesystem::path& file,
+    const std::vector<std::filesystem::path>& searchPaths) {
+  if (file.is_absolute()) return file;
+  for (const std::filesystem::path& base : searchPaths) {
+    const std::filesystem::path candidate = base / file;
+    if (FileExists(candidate)) return candidate;
+  }
+  return {};
+}
+
 std::vector<std::filesystem::path> FileUtils::FindFileInDirs(
     const std::string& filename,
     const std::vector<std::filesystem::path>& searchPaths,

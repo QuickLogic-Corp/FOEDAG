@@ -92,35 +92,6 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
-namespace {
-// DesignFiles() hands back the compilation-unit path, which may be absolute,
-// project-relative (when copy_files_on_add is set) or relative to the directory
-// the project sits in. Resolve it to an absolute path, or {} if no anchor fits.
-std::filesystem::path resolveDesignFilePath(
-    const std::filesystem::path& file,
-    const std::filesystem::path& projectPath) {
-  if (file.is_absolute()) return file;
-  for (const auto& base : {projectPath, projectPath.parent_path()}) {
-    std::error_code ec;
-    const std::filesystem::path candidate = base / file;
-    if (std::filesystem::exists(candidate, ec)) return candidate;
-  }
-  return {};
-}
-
-// Path as VPR/OpenFPGA should see it: they run with the project directory as
-// their working directory, so keep it relative to that and fall back to the
-// absolute path when no relative form exists.
-std::string netlistPathForTool(const std::filesystem::path& netlist,
-                               const std::filesystem::path& projectPath) {
-  std::error_code ec;
-  const std::filesystem::path relative =
-      std::filesystem::relative(netlist, projectPath, ec);
-  if (ec || relative.empty()) return netlist.string();
-  return relative.string();
-}
-}  // namespace
-
 
 #ifdef HAS_POWER_CALC_RESOURCE
 static inline void initPowerCalcResource() {
@@ -2909,7 +2880,9 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
   if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
       !designNetlist.empty()) {
-    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -3308,7 +3281,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
       !designNetlist.empty()) {
-    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -5303,7 +5278,9 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
       !designNetlist.empty()) {
-    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 
   std::string command = BaseVprCommand() + " --place";
@@ -7489,7 +7466,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   }
   if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
       !designNetlist.empty()) {
-    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
   result = ReplaceAll(result, "${VPR_TESTBENCH_BLIF}", netlistFile);
 
@@ -8286,7 +8265,9 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
   if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
       !designNetlist.empty()) {
-    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
   ///////////////////////////////////////////////////////////////// NETLIST --
 
@@ -8409,8 +8390,11 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
       if (lang_file.first.language != Design::Language::BLIF &&
           lang_file.first.language != Design::Language::EBLIF)
         continue;
-      const std::filesystem::path resolved =
-          resolveDesignFilePath(lang_file.second, projectPath);
+      // DesignFiles() hands back the compilation-unit path: project-relative
+      // when copy_files_on_add is set, otherwise relative to the directory the
+      // project sits in.
+      const std::filesystem::path resolved = FileUtils::ResolveInDirs(
+          lang_file.second, {projectPath, projectPath.parent_path()});
       if (!resolved.empty()) return resolved;
     }
   }
@@ -8434,8 +8418,8 @@ std::filesystem::path CompilerOpenFPGA_ql::getDesignSourceNetlistPath() const {
       default:
         continue;
     }
-    const std::filesystem::path resolved =
-        resolveDesignFilePath(lang_file.second, projectPath);
+    const std::filesystem::path resolved = FileUtils::ResolveInDirs(
+        lang_file.second, {projectPath, projectPath.parent_path()});
     if (!resolved.empty()) return resolved;
   }
   return {};
