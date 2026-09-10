@@ -30,10 +30,12 @@ public:
     bool isDspColumn(int column) const { return m_dspColumns.find(column) != m_dspColumns.end(); }
     bool isBramColumn(int column) const { return m_bramColumns.find(column) != m_bramColumns.end(); }
 
-    // Whether the fabric carries the block at all. Check before reading its
-    // footprint: the size is known only for a block that is there.
-    bool isDspSupported() const { return m_dspSize.has_value(); }
-    bool isBramSupported() const { return m_bramSize.has_value(); }
+    // Whether the fabric carries the block at all. A block counts as present
+    // only when the package gives both its footprint and its columns; parse()
+    // rejects a layout that gives one without the other. Check before reading
+    // its footprint: the size is known only for a block that is there.
+    bool isDspSupported() const { return m_dspSize.has_value() && !m_dspColumns.empty(); }
+    bool isBramSupported() const { return m_bramSize.has_value() && !m_bramColumns.empty(); }
 
     QSize elementSize(Tile::Type type) const {
         QSize minSize(1,1);

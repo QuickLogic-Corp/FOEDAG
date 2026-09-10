@@ -103,6 +103,19 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceLayoutFile)
     m_columns = kBorder + arrayX + kBorder;
     m_rows = kBorder + arrayY + kBorder;
 
+    // A block is described by a footprint and the columns it sits in. Neither
+    // means the fabric carries no such block; one without the other describes
+    // no grid we can draw, so say which pair disagrees and stop.
+    auto requireBothOrNeither = [&](const QString& sizeStr, const QString& colsStr,
+                                    const QString& sizeKey, const QString& colsKey) {
+        if (sizeStr.trimmed().isEmpty() == colsStr.trimmed().isEmpty()) return true;
+        m_error = QString("%1: `%2` and `%3` must both be set or both be empty")
+                      .arg(m_layoutPath, sizeKey, colsKey);
+        return false;
+    };
+    if (!requireBothOrNeither(dspSizeStr, dspColsStr, kDspSize, kDspCols)) return false;
+    if (!requireBothOrNeither(bramSizeStr, bramColsStr, kBramSize, kBramCols)) return false;
+
     // No columns and no footprint means the fabric carries no such block at
     // all: leave the size unset rather than inventing one, and let
     // floorplanning open on the blocks it does have.
