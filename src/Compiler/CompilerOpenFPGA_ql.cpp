@@ -8439,7 +8439,31 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
-  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
+  const std::filesystem::path projectPath{ProjManager()->projectPath()};
+  const std::filesystem::path synthesisOutput =
+      projectPath / std::string(ProjManager()->projectName() + "_post_synth.blif");
+
+  // Only a post-synthesis project supplies the netlist as a design source. An
+  // RTL project may carry a BLIF too, but there the synthesis output is what
+  // the flow must use. Issue #2354.
+  if (ProjManager()->projectType() == PostSynth) {
+    // The stored path may be absolute, project-relative (when copy_files_on_add
+    // is set) or relative to the project's parent.
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      if (lang_file.first.language != Design::Language::BLIF &&
+          lang_file.first.language != Design::Language::EBLIF)
+        continue;
+      const std::filesystem::path netlist{lang_file.second};
+      if (netlist.is_absolute()) return netlist;
+      for (const auto& base : {projectPath, projectPath.parent_path()}) {
+        std::error_code ec;
+        const std::filesystem::path candidate = base / netlist;
+        if (std::filesystem::exists(candidate, ec)) return candidate;
+      }
+    }
+  }
+
+  return synthesisOutput;
 }
 
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
@@ -8485,8 +8509,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) /
-                                      std::string(ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path netlist_path = getPostSynthBlifFilePath();
 
   if (!fs::exists(netlist_path)){
     ErrorMessage("Post Synthesis blif Was Not Found!\n");
@@ -8608,7 +8631,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path netlistFile = getPostSynthBlifFilePath();
   std::filesystem::path clocksFile  = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + ".clocks");
   std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
@@ -12324,6 +12347,10 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
 bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 {
+  // A post-synthesis project has no synthesis stage to track, and building its
+  // commands errors out on the netlist design source. See issue #2354.
+  if (ProjManager() && ProjManager()->projectType() == PostSynth) return true;
+
   std::unordered_map<int, CommandWrapperPtr> commands = getSynthesisCommands();
   for (const auto& [id, command]: commands) {
     if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
