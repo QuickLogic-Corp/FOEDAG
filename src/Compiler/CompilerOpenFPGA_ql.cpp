@@ -92,6 +92,36 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
+namespace {
+// DesignFiles() hands back the compilation-unit path, which may be absolute,
+// project-relative (when copy_files_on_add is set) or relative to the directory
+// the project sits in. Resolve it to an absolute path, or {} if no anchor fits.
+std::filesystem::path resolveDesignFilePath(
+    const std::filesystem::path& file,
+    const std::filesystem::path& projectPath) {
+  if (file.is_absolute()) return file;
+  for (const auto& base : {projectPath, projectPath.parent_path()}) {
+    std::error_code ec;
+    const std::filesystem::path candidate = base / file;
+    if (std::filesystem::exists(candidate, ec)) return candidate;
+  }
+  return {};
+}
+
+// Path as VPR/OpenFPGA should see it: they run with the project directory as
+// their working directory, so keep it relative to that and fall back to the
+// absolute path when no relative form exists.
+std::string netlistPathForTool(const std::filesystem::path& netlist,
+                               const std::filesystem::path& projectPath) {
+  std::error_code ec;
+  const std::filesystem::path relative =
+      std::filesystem::relative(netlist, projectPath, ec);
+  if (ec || relative.empty()) return netlist.string();
+  return relative.string();
+}
+}  // namespace
+
+
 #ifdef HAS_POWER_CALC_RESOURCE
 static inline void initPowerCalcResource() {
   Q_INIT_RESOURCE(compiler_power_calc_resources);
@@ -2877,23 +2907,9 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       break;
   }
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -3290,23 +3306,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       break;
   }
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -5299,23 +5301,9 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
   }
 
   std::string command = BaseVprCommand() + " --place";
@@ -7499,23 +7487,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       netlistFile = ProjManager()->projectName() + "_post_synth.blif";
       break;
   }
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
   }
   result = ReplaceAll(result, "${VPR_TESTBENCH_BLIF}", netlistFile);
 
@@ -8310,23 +8284,9 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
 
   ///////////////////////////////////////////////////////////////// NETLIST ++
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    netlistFile = netlistPathForTool(designNetlist, ProjManager()->projectPath());
   }
   ///////////////////////////////////////////////////////////////// NETLIST --
 
@@ -8440,30 +8400,45 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
 
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
   const std::filesystem::path projectPath{ProjManager()->projectPath()};
-  const std::filesystem::path synthesisOutput =
-      projectPath / std::string(ProjManager()->projectName() + "_post_synth.blif");
 
   // Only a post-synthesis project supplies the netlist as a design source. An
   // RTL project may carry a BLIF too, but there the synthesis output is what
   // the flow must use. Issue #2354.
   if (ProjManager()->projectType() == PostSynth) {
-    // The stored path may be absolute, project-relative (when copy_files_on_add
-    // is set) or relative to the project's parent.
     for (const auto& lang_file : ProjManager()->DesignFiles()) {
       if (lang_file.first.language != Design::Language::BLIF &&
           lang_file.first.language != Design::Language::EBLIF)
         continue;
-      const std::filesystem::path netlist{lang_file.second};
-      if (netlist.is_absolute()) return netlist;
-      for (const auto& base : {projectPath, projectPath.parent_path()}) {
-        std::error_code ec;
-        const std::filesystem::path candidate = base / netlist;
-        if (std::filesystem::exists(candidate, ec)) return candidate;
-      }
+      const std::filesystem::path resolved =
+          resolveDesignFilePath(lang_file.second, projectPath);
+      if (!resolved.empty()) return resolved;
     }
   }
 
-  return synthesisOutput;
+  return projectPath / std::string(ProjManager()->projectName() + "_post_synth.blif");
+}
+
+// Netlist a post-synthesis project feeds to VPR and OpenFPGA, absolute so it
+// does not depend on the working directory the tool is launched in. Empty for
+// any other project type, which uses the synthesis output instead.
+std::filesystem::path CompilerOpenFPGA_ql::getDesignSourceNetlistPath() const {
+  if (ProjManager()->projectType() != PostSynth) return {};
+
+  const std::filesystem::path projectPath{ProjManager()->projectPath()};
+  for (const auto& lang_file : ProjManager()->DesignFiles()) {
+    switch (lang_file.first.language) {
+      case Design::Language::VERILOG_NETLIST:
+      case Design::Language::BLIF:
+      case Design::Language::EBLIF:
+        break;
+      default:
+        continue;
+    }
+    const std::filesystem::path resolved =
+        resolveDesignFilePath(lang_file.second, projectPath);
+    if (!resolved.empty()) return resolved;
+  }
+  return {};
 }
 
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
