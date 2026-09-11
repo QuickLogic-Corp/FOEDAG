@@ -87,7 +87,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path getDesignSourceNetlistPath() const;
 
   void setCustomYosysScript(const std::string& script) { m_customYosysScript = script; }
-  void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }
   void OpenFpgaArchitectureFile(const std::filesystem::path& path) {
     m_OpenFpgaArchitectureFile = path;
   }
@@ -377,7 +376,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_SBTemplatesDir = "";
   std::string m_deviceSize;
   std::string m_customYosysScript;
-  std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
