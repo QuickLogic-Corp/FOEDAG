@@ -2,6 +2,7 @@
 
 #include <cstdlib>   // std::getenv
 #include <cctype>    // std::isspace
+#include <limits>    // std::numeric_limits
 
 #include <QObject>
 #include <QWidget>
@@ -4552,6 +4553,81 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
 }
 
 
+// clb/bram/dsp/io for one layout, read verbatim from an already-parsed
+// resources.json document - the fallback for a package deriveResourceCounts()
+// cannot answer (issue #2370). Declines rather than guessing on anything
+// json's own exceptions would otherwise throw through: a missing layout
+// entry, a non-object entry, or a key that is present but not a usable count.
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resourceCountsFromResourcesJson(
+    const json& resources_json, const std::string& layout_name, std::string* out_error) {
+
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector;
+
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = reason;
+    }
+    // a partly-filled vector would read as success to the caller
+    resources_vector.clear();
+    return resources_vector;
+  };
+
+  if( !resources_json.contains(layout_name) ) {
+    return fail("resources.json has no entry for layout \"" + layout_name + "\"");
+  }
+
+  const json& layout_entry = resources_json[layout_name];
+  if( !layout_entry.is_object() ) {
+    return fail("resources.json entry for layout \"" + layout_name + "\" is not an object");
+  }
+
+  // resources.json is generated, and lists every resource type the fabric
+  // carries, so a key it omits means the device has none of that resource -
+  // a count of zero, not an unknown. EPSON-2024Q2-1209 ships no "bram" key
+  // because that fabric has no BRAM. A key that IS present has to be a
+  // usable count.
+  static const char* const kResourceKeys[] = {"clb", "bram", "dsp", "io"};
+  int keys_present = 0;
+  for(const char* key : kResourceKeys) {
+
+    if( !layout_entry.contains(key) ) {
+      resources_vector.push_back(std::make_tuple(std::string(key), std::optional<int>(0)));
+      continue;
+    }
+    ++keys_present;
+
+    const json& value = layout_entry[key];
+
+    // Range-check before narrowing: get<int>() on an out-of-range value wraps
+    // rather than refusing it, and json stores anything above INT64_MAX as
+    // unsigned, where get<int64_t>() would itself wrap back into range and
+    // slip past a signed bounds check.
+    const bool usable_count =
+        value.is_number_integer() &&
+        (value.is_number_unsigned()
+             ? (value.get<uint64_t>() <= static_cast<uint64_t>(std::numeric_limits<int>::max()))
+             : ((value.get<int64_t>() >= std::numeric_limits<int>::min()) &&
+                (value.get<int64_t>() <= std::numeric_limits<int>::max())));
+    if( !usable_count ) {
+      return fail("resources.json entry for layout \"" + layout_name + "\" has no usable \"" +
+                  std::string(key) + "\" key");
+    }
+
+    resources_vector.push_back(std::make_tuple(std::string(key),
+        std::optional<int>(value.get<int>())));
+  }
+
+  // An entry carrying none of the four is not a resource entry at all - say so
+  // rather than claiming a device with no clbs and no io.
+  if( keys_present == 0 ) {
+    return fail("resources.json entry for layout \"" + layout_name +
+                "\" has none of \"clb\", \"bram\", \"dsp\", \"io\"");
+  }
+
+  return resources_vector;
+}
+
+
 std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveDeviceResourceInformation(
     QLDeviceTarget device_target, std::string* out_error) {
 
@@ -4602,9 +4678,49 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::device
   // known (e.g. an AUTO/RESOURCES device before Packing() has run):
   // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
 
+  // Resolve the default argument here rather than leaving each callee to do it:
+  // the fallback below reads the layout NAME off this target while
+  // deviceTypeDirPath() would resolve the directory off the current device, and
+  // the two must describe the same device.
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
   std::string derive_error;
   std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
       deriveDeviceResourceInformation(device_target, &derive_error);
+
+  // config.json could not answer (not the "not yet known" case): fall back to
+  // this device type's resources.json, the vpr-generated file it shipped
+  // before deriveResourceCounts() replaced it (issue #2370) - old packages
+  // still missing a key the formula needs can still report what they always
+  // reported. config.json stays the primary source: this is only ever
+  // consulted after it has already failed.
+  if( resources_vector.empty() && !derive_error.empty() ) {
+
+    std::filesystem::path resources_json_path =
+        deviceTypeDirPath(device_target) / std::string("resources.json");
+
+    if(FileUtils::FileExists(resources_json_path)) {
+      std::string fallback_error;
+      try {
+        std::ifstream ifs(resources_json_path.string());
+        json resources_json = json::parse(ifs);
+        resources_vector = resourceCountsFromResourcesJson(
+            resources_json, device_target.device_variant_layout.name, &fallback_error);
+      }
+      catch(const std::exception& e) {
+        fallback_error = std::string("resources.json is not valid JSON: ") + e.what();
+      }
+
+      // the file is present, so its own problem is worth telling apart from
+      // "config.json can't answer and there was nothing else to try" - unlike
+      // a genuinely absent resources.json, this is something to go fix.
+      if( resources_vector.empty() && !fallback_error.empty() ) {
+        derive_error += "; resources.json fallback also failed: " + fallback_error;
+      }
+    }
+  }
 
   // the device is about to be shown with no resources at all, so say why rather
   // than leaving it unexplained. Silent when derive_error is empty: that means
