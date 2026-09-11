@@ -103,17 +103,35 @@ bool DeviceGridDescriptor::parse(const std::filesystem::path& deviceLayoutFile)
     m_columns = kBorder + arrayX + kBorder;
     m_rows = kBorder + arrayY + kBorder;
 
-    const std::optional<QSize> dspSize = parseSize(dspSizeStr, kDspSize);
-    if (!dspSize) {
+    // A block is described by a footprint and the columns it sits in. Neither
+    // means the fabric carries no such block; one without the other describes
+    // no grid we can draw, so say which pair disagrees and stop.
+    auto requireBothOrNeither = [&](const QString& sizeStr, const QString& colsStr,
+                                    const QString& sizeKey, const QString& colsKey) {
+        if (sizeStr.trimmed().isEmpty() == colsStr.trimmed().isEmpty()) return true;
+        m_error = QString("%1: `%2` and `%3` must both be set or both be empty")
+                      .arg(m_layoutPath, sizeKey, colsKey);
         return false;
-    }
-    m_dspSize = dspSize.value();
+    };
+    if (!requireBothOrNeither(dspSizeStr, dspColsStr, kDspSize, kDspCols)) return false;
+    if (!requireBothOrNeither(bramSizeStr, bramColsStr, kBramSize, kBramCols)) return false;
 
-    const std::optional<QSize> bramSize = parseSize(bramSizeStr, kBramSize);
-    if (!bramSize) {
-        return false;
+    // No columns and no footprint means the fabric carries no such block at
+    // all: leave the size unset rather than inventing one, and let
+    // floorplanning open on the blocks it does have.
+    if (!dspSizeStr.trimmed().isEmpty() || !dspColsStr.trimmed().isEmpty()) {
+        m_dspSize = parseSize(dspSizeStr, kDspSize);
+        if (!m_dspSize) {
+            return false;
+        }
     }
-    m_bramSize = bramSize.value();
+
+    if (!bramSizeStr.trimmed().isEmpty() || !bramColsStr.trimmed().isEmpty()) {
+        m_bramSize = parseSize(bramSizeStr, kBramSize);
+        if (!m_bramSize) {
+            return false;
+        }
+    }
 
     const std::optional<std::set<int>> dspColumns = parseColumns(dspColsStr, kDspCols);
     if (!dspColumns) {
@@ -192,20 +210,20 @@ bool DeviceGridDescriptor::validateFit()
         return false;
     }
 
-    if (m_dspSize.height() <= 0) {
+    if (m_dspSize && (m_dspSize->height() <= 0)) {
         m_error = QString("%1: dsp height cannot be less than or equal to 0").arg(m_layoutPath);
         return false;
     }
-    if (m_bramSize.height() <= 0) {
+    if (m_bramSize && (m_bramSize->height() <= 0)) {
         m_error = QString("%1: bram height cannot be less than or equal to 0").arg(m_layoutPath);
         return false;
     }
 
-    if (nonIoRows % m_dspSize.height() != 0) {
+    if (m_dspSize && (nonIoRows % m_dspSize->height() != 0)) {
         m_error = QString("%1: cannot fit required number of dsp blocks into a column").arg(m_layoutPath);
         return false;
     }
-    if (nonIoRows % m_bramSize.height() != 0) {
+    if (m_bramSize && (nonIoRows % m_bramSize->height() != 0)) {
         m_error = QString("%1: cannot fit required number of bram blocks into a column").arg(m_layoutPath);
         return false;
     }
