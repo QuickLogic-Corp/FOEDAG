@@ -196,10 +196,6 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
   (*out) << "   custom_synth_script <file> : Uses a custom Yosys templatized "
             "script"
          << std::endl;
-  (*out) << "   custom_openfpga_script <file> : Uses a custom OpenFPGA "
-            "templatized "
-            "script"
-         << std::endl;
   (*out) << "   set_channel_width <int>    : VPR Routing channel setting"
          << std::endl;
   (*out) << "   add_design_file <file list> ?type?   ?-work <libName>?"
@@ -606,45 +602,6 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("bitstream_config_files", set_bitstream_config_files,
                       this, 0);
-
-  auto custom_openfpga_script = [](void* clientData, Tcl_Interp* interp,
-                                   int argc, const char* argv[]) -> int {
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-    std::string name;
-    if (argc != 2) {
-      compiler->ErrorMessage("Specify an OpenFPGA script");
-      return TCL_ERROR;
-    }
-
-    std::string expandedFile = argv[1];
-    bool use_orig_path = false;
-    if (FileUtils::FileExists(expandedFile)) {
-      use_orig_path = true;
-    }
-
-    if ((!use_orig_path) &&
-        (!compiler->GetSession()->CmdLine()->Script().empty())) {
-      std::filesystem::path script =
-          compiler->GetSession()->CmdLine()->Script();
-      std::filesystem::path scriptPath = script.parent_path();
-      std::filesystem::path fullPath = scriptPath;
-      fullPath.append(argv[1]);
-      expandedFile = fullPath.string();
-    }
-    std::ifstream stream(expandedFile);
-    if (!stream.good()) {
-      compiler->ErrorMessage("Cannot find OpenFPGA script: " +
-                             std::string(expandedFile));
-      return TCL_ERROR;
-    }
-    std::string script((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
-    stream.close();
-    compiler->OpenFPGAScript(script);
-    return TCL_OK;
-  };
-  interp->registerCmd("custom_openfpga_script", custom_openfpga_script, this,
-                      0);
 
   auto custom_synth_script = [](void* clientData, Tcl_Interp* interp, int argc,
                                 const char* argv[]) -> int {
@@ -7095,47 +7052,46 @@ exit
 )";
 
 std::string CompilerOpenFPGA_ql::InitOpenFPGAScript() {
-  // Default or custom OpenFPGA script
-  if (m_openFPGAScript.empty()) {
+  // The device's own template script, else the built-in fallback.
+  std::string openFPGAScript;
 #if UPSTREAM_UNUSED
-    if (BitsOpt() == BitstreamOpt::EnableSimulation) {
-      m_openFPGAScript = simulationOpenFPGABitstreamScript;
-    } else {
-    m_openFPGAScript = basicOpenFPGABitstreamScript;
-	}
+  if (BitsOpt() == BitstreamOpt::EnableSimulation) {
+    openFPGAScript = simulationOpenFPGABitstreamScript;
+  } else {
+    openFPGAScript = basicOpenFPGABitstreamScript;
+  }
 #endif // #if UPSTREAM_UNUSED
 
-    bool use_external_template_openfpga = false;
-    std::string aurora_template_script_openfpga;
+  bool use_external_template_openfpga = false;
+  std::string aurora_template_script_openfpga;
 
-    // check if we have the device aurora template script available:
-    if(FileUtils::FileExists(m_aurora_template_script_openfpga_path)) {
-        
-      // get it into a ifstream
-      std::ifstream stream(m_aurora_template_script_openfpga_path.string());
-        
-      if (stream.good()) {
-        aurora_template_script_openfpga = 
-          std::string((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
-          stream.close();
-          use_external_template_openfpga = true;
-        }
-    }
+  // check if we have the device aurora template script available:
+  if(FileUtils::FileExists(m_aurora_template_script_openfpga_path)) {
 
-    if(use_external_template_openfpga) {
-      Message("Using External OpenFPGA Template Script: " +
-                                std::string(m_aurora_template_script_openfpga_path.string()));
-      m_openFPGAScript = aurora_template_script_openfpga;
-    }
-    else {
-      Message("Cannot load OpenFPGA Template Script: " +
-                                std::string(m_aurora_template_script_openfpga_path.string()));
-      Message("Using Internal OpenFPGA Template Script.");
-      m_openFPGAScript = qlOpenFPGABitstreamScript;
-    }
+    // get it into a ifstream
+    std::ifstream stream(m_aurora_template_script_openfpga_path.string());
+
+    if (stream.good()) {
+      aurora_template_script_openfpga =
+        std::string((std::istreambuf_iterator<char>(stream)),
+                     std::istreambuf_iterator<char>());
+        stream.close();
+        use_external_template_openfpga = true;
+      }
   }
-  return m_openFPGAScript;
+
+  if(use_external_template_openfpga) {
+    Message("Using External OpenFPGA Template Script: " +
+                              std::string(m_aurora_template_script_openfpga_path.string()));
+    openFPGAScript = aurora_template_script_openfpga;
+  }
+  else {
+    Message("Cannot load OpenFPGA Template Script: " +
+                              std::string(m_aurora_template_script_openfpga_path.string()));
+    Message("Using Internal OpenFPGA Template Script.");
+    openFPGAScript = qlOpenFPGABitstreamScript;
+  }
+  return openFPGAScript;
 }
 
 std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script) {
@@ -9490,7 +9446,6 @@ int CompilerOpenFPGA_ql::CleanTempFiles() {
 
 void CompilerOpenFPGA_ql::CleanScripts() {
   m_customYosysScript = "";
-  m_openFPGAScript = "";
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDeviceTarget device)
