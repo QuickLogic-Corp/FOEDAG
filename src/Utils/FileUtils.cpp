@@ -338,8 +338,8 @@ int FileUtils::ExecuteSystemCommand(const std::string& command,
 
   QObject::connect(m_process, &QProcess::readyReadStandardOutput,
                    [result, m_process]() {
-                     result->write(m_process->readAllStandardOutput(),
-                                   m_process->bytesAvailable());
+                     QByteArray data = m_process->readAllStandardOutput();
+                     result->write(data, data.size());
                    });
 
   QObject::connect(m_process, &QProcess::readyReadStandardError,
@@ -414,7 +414,8 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   if (out) {
     QObject::connect(
         &process, &QProcess::readyReadStandardOutput, [out, &process]() {
-          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+          QByteArray data = process.readAllStandardOutput();
+          out->write(data, data.size());
         });
   }
 
@@ -486,7 +487,8 @@ Return FileUtils::ExecuteSystemCommand(const std::string& command,
   if (out) {
     QObject::connect(
         &process, &QProcess::readyReadStandardOutput, [out, &process]() {
-          out->write(process.readAllStandardOutput(), process.bytesAvailable());
+          QByteArray data = process.readAllStandardOutput();
+          out->write(data, data.size());
         });
   }
 
