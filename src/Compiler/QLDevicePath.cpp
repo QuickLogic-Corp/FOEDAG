@@ -339,7 +339,11 @@ GeneratedDeviceDestination claimGeneratedDeviceDir(
 
     if(!device_dir_path.empty()) {
       destination.device_dir_path = canonicalOrSelf(device_dir_path);
-      destination.root_dir_path = candidate.root_dir_path;
+      // canonicalised HERE, not when the candidate was built: the root did not exist yet
+      // then, and weakly_canonical leaves a trailing slash on a path it cannot resolve.
+      destination.root_dir_path = candidate.root_dir_path.empty()
+                                      ? std::filesystem::path()
+                                      : canonicalOrSelf(candidate.root_dir_path);
       destination.replaced_existing = replaced_existing;
       return destination;
     }
