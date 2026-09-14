@@ -3546,6 +3546,158 @@ static std::string generatedDeviceRunToken(const std::string& project_path) {
 }
 
 
+// Can this directory actually be written to?
+//
+// Probes by creating and removing a directory rather than reading mode bits: a
+// read-only mount, an NFS squash or a restrictive ACL all deny the write that
+// the mode bits say is allowed, and the probe is exactly what the copy below
+// will attempt. 'token' keeps concurrent runs off each other's probe.
+static bool generatedDeviceDirIsWritable(const std::filesystem::path& dir_path,
+                                         const std::string& token) {
+
+  std::error_code ec;
+  if(!std::filesystem::is_directory(dir_path, ec)) {
+    return false;
+  }
+
+  const std::filesystem::path probe_dir_path =
+      dir_path / (std::string(".aurora_write_probe") + token);
+
+  std::filesystem::remove_all(probe_dir_path, ec);
+  ec.clear();
+
+  if(!std::filesystem::create_directory(probe_dir_path, ec) || ec) {
+    return false;
+  }
+
+  std::filesystem::remove_all(probe_dir_path, ec);
+  return true;
+}
+
+
+// $HOME, or %USERPROFILE% on Windows. Empty when there is none usable - callers
+// degrade rather than fail, the way the device root registry does (NFR-005).
+static std::filesystem::path generatedDeviceHomeDirPath() {
+
+#ifdef _WIN32
+  const char* const home_dir_env_str = std::getenv("USERPROFILE");
+#else
+  const char* const home_dir_env_str = std::getenv("HOME");
+#endif
+
+  if(home_dir_env_str == nullptr || std::string(home_dir_env_str).empty()) {
+    return std::filesystem::path();
+  }
+
+  return std::filesystem::path(home_dir_env_str);
+}
+
+
+// Directory the generated device package is written INTO, i.e. the parent of the
+// generated device directory.
+//
+// A customer installation is normally read-only: Aurora sits under /opt or on a
+// shared mount and its device_data with it. Writing the generated device as a
+// sibling of the source device - which is all this ever did - then fails with
+// EACCES and takes the whole run down *after* pack has already succeeded.
+//
+// The generated package is a deliverable, not scratch: it is the specification of
+// the eFPGA to be built, and nothing deletes it. So it has to land somewhere the
+// user keeps, and the temp dir is a last resort rather than a default.
+//
+// Order, first writable one wins:
+//   1. $AURORA2_GENERATED_DEVICE_DIR - explicit override, honoured even if it has
+//      to be created, so a customer can point this at a project area once.
+//   2. the source device's own root - what a writable installation has always
+//      done, so nothing observable changes where the write already worked.
+//   3. ~/aurora_devices - the documented install_device default (REQ-025).
+//   4. the system temp dir - $HOME unwritable too; warned about by the caller.
+//
+// 'out_fallback_root_dir_path' is set to the ROOT (the dir holding <family>/...)
+// when the result is NOT the source device's own root, so the caller can register
+// it and keep the generated device discoverable. Empty otherwise.
+static std::filesystem::path generatedDeviceParentDirPath(
+    const std::filesystem::path& source_device_dir_path,
+    const std::string& family,
+    const std::string& foundry,
+    const std::string& node,
+    const std::string& token,
+    std::filesystem::path& out_fallback_root_dir_path) {
+
+  out_fallback_root_dir_path.clear();
+
+  std::error_code ec;
+
+  // a root becomes a parent dir by appending the 3 coordinates above devicename,
+  // which is the layout every device root uses.
+  auto parent_dir_path_in_root = [&](const std::filesystem::path& root_dir_path) {
+    return root_dir_path / family / foundry / node;
+  };
+
+  // [1] explicit override. created on demand - asking a user to pre-create a 4-deep
+  //     path before the variable does anything would make it useless in practice.
+  const char* const env_dir_str = std::getenv("AURORA2_GENERATED_DEVICE_DIR");
+  if(env_dir_str != nullptr && std::string(env_dir_str).size() > 0) {
+
+    const std::filesystem::path env_root_dir_path(env_dir_str);
+    const std::filesystem::path env_parent_dir_path = parent_dir_path_in_root(env_root_dir_path);
+
+    std::filesystem::create_directories(env_parent_dir_path, ec);
+    if(!ec && generatedDeviceDirIsWritable(env_parent_dir_path, token)) {
+      out_fallback_root_dir_path = env_root_dir_path;
+      return env_parent_dir_path;
+    }
+
+    // deliberately NOT fatal: a mistyped override should not cost the run a pack
+    // that already succeeded. say so and carry on down the list.
+    std::cout << "WARNING: AURORA2_GENERATED_DEVICE_DIR is not writable, ignoring it: "
+              << env_root_dir_path.string() << std::endl;
+    ec.clear();
+  }
+
+  // [2] the source device's own root: '<root>/<family>/<foundry>/<node>'.
+  const std::filesystem::path source_parent_dir_path = source_device_dir_path.parent_path();
+  if(generatedDeviceDirIsWritable(source_parent_dir_path, token)) {
+    return source_parent_dir_path;
+  }
+
+  // [3] ~/aurora_devices
+  const std::filesystem::path home_dir_path = generatedDeviceHomeDirPath();
+  if(!home_dir_path.empty()) {
+
+    const std::filesystem::path home_root_dir_path = home_dir_path / "aurora_devices";
+    const std::filesystem::path home_parent_dir_path = parent_dir_path_in_root(home_root_dir_path);
+
+    std::filesystem::create_directories(home_parent_dir_path, ec);
+    if(!ec && generatedDeviceDirIsWritable(home_parent_dir_path, token)) {
+      out_fallback_root_dir_path = home_root_dir_path;
+      return home_parent_dir_path;
+    }
+    ec.clear();
+  }
+
+  // [4] temp dir. keyed by token so two runs cannot collide, and named so it is
+  //     recognisable in a directory listing.
+  const std::filesystem::path temp_dir_path = std::filesystem::temp_directory_path(ec);
+  if(!ec && !temp_dir_path.empty()) {
+
+    const std::filesystem::path temp_root_dir_path =
+        temp_dir_path / (std::string("aurora_generated_devices") + token);
+    const std::filesystem::path temp_parent_dir_path = parent_dir_path_in_root(temp_root_dir_path);
+
+    ec.clear();
+    std::filesystem::create_directories(temp_parent_dir_path, ec);
+    if(!ec && generatedDeviceDirIsWritable(temp_parent_dir_path, token)) {
+      out_fallback_root_dir_path = temp_root_dir_path;
+      return temp_parent_dir_path;
+    }
+  }
+
+  // nothing was writable. empty tells the caller to fail with a real message.
+  return std::filesystem::path();
+}
+
+
 // Directory name (== devicename) of the device package generated from a re-shaped
 // layout.
 //
@@ -4655,9 +4807,12 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       // 1 copy the source device directory recursively to create new device.
       //   and derive the new devicename from the generated layoutname.
+      const std::string generated_device_run_token =
+          generatedDeviceRunToken(ProjManager()->projectPath());
+
       std::string target_device_copy_devicename =
           generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName) +
-          generatedDeviceRunToken(ProjManager()->projectPath());
+          generated_device_run_token;
 
       // Backstop. If the derived name did not change, the "new" device directory
       // IS the source device directory, and the code just below deletes an
@@ -4675,10 +4830,29 @@ bool CompilerOpenFPGA_ql::Packing() {
       std::filesystem::path source_device_copy_dirpath = 
           QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
 
-      std::filesystem::path target_device_copy_dirpath = 
-          source_device_copy_dirpath / 
-          std::string("..") / 
-          target_device_copy_devicename;
+      // Where the package can actually be written. The sibling write this always
+      // did fails with EACCES on a read-only installation - the normal customer
+      // deployment - and it fails *after* pack has already succeeded.
+      std::filesystem::path generated_device_fallback_root_dirpath;
+      std::filesystem::path generated_device_parent_dirpath =
+          generatedDeviceParentDirPath(source_device_copy_dirpath,
+                                       current_device_target.device_variant.family,
+                                       current_device_target.device_variant.foundry,
+                                       current_device_target.device_variant.node,
+                                       generated_device_run_token,
+                                       generated_device_fallback_root_dirpath);
+
+      if(generated_device_parent_dirpath.empty()) {
+        ErrorMessage("No writable directory for the generated device '" +
+                     target_device_copy_devicename + "'.\n");
+        ErrorMessage("Tried the device root '" + source_device_copy_dirpath.parent_path().string() +
+                     "', '~/aurora_devices' and the system temp directory.\n");
+        ErrorMessage("Set AURORA2_GENERATED_DEVICE_DIR to a writable directory and re-run.\n");
+        return false;
+      }
+
+      std::filesystem::path target_device_copy_dirpath =
+          generated_device_parent_dirpath / target_device_copy_devicename;
 
       // if the same name device is already generated previously, then we replace that
       // with the new device.
@@ -4700,15 +4874,17 @@ bool CompilerOpenFPGA_ql::Packing() {
                               std::filesystem::copy_options::recursive);
       }
       catch (const fs::filesystem_error& e) {
-        ErrorMessage("Error Copying Device 1\n");
-        // std::cerr << "Filesystem error: " << e.what() << std::endl;
-        // std::cerr << "Path 1: " << e.path1() << std::endl;
-        // std::cerr << "Path 2: " << e.path2() << std::endl;
+        // The path and the errno text are the whole diagnosis here: the common
+        // cause is a read-only device root, and "Error Copying Device 1" said
+        // neither what failed nor where.
+        ErrorMessage("Could not copy the device package to '" +
+                     target_device_copy_dirpath.string() + "': " + e.what() + "\n");
+        ErrorMessage("Set AURORA2_GENERATED_DEVICE_DIR to a writable directory and re-run.\n");
         return false;
       }
       catch (const std::exception& e) {
-          ErrorMessage("Error Copying Device 2\n");
-          // std::cerr << "General error: " << e.what() << std::endl;
+          ErrorMessage("Could not copy the device package to '" +
+                       target_device_copy_dirpath.string() + "': " + e.what() + "\n");
           return false;
       }
 
@@ -5013,11 +5189,30 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
 
+      // A device written outside the installation is only discoverable if its root
+      // is a known one, so register it the way install_device does. Best effort:
+      // an unwritable or absent $HOME leaves the registry unavailable (NFR-005),
+      // and the run has already produced a usable device either way.
+      // Note this does not reach a session that pins AURORA2_DEVICE_DATA_DIR at a
+      // different tree - that variable is an exclusive override and suppresses
+      // registered roots by design.
+      if(!generated_device_fallback_root_dirpath.empty()) {
+        if(QLDeviceManager::getInstance()->registerDeviceRoot(generated_device_fallback_root_dirpath)) {
+          Message(" >> Registered device root: " +
+                  generated_device_fallback_root_dirpath.string() + "\n");
+        }
+        else {
+          Message("[WARNING] Could not register the device root '" +
+                  generated_device_fallback_root_dirpath.string() +
+                  "'. Set AURORA2_DEVICE_DATA_PATH to it to select this device later.\n");
+        }
+      }
+
       // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
       QLDeviceManager::getInstance()->parseDeviceData();
 
       Message("\n\n >> Generating Device ok: " + target_device_copy_devicename +"\n");
-      Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
+      Message(" >> Device at: " + target_device_copy_dirpath.string() +"\n");
     }
     // DEVICE CREATION LOGIC --
 #endif // #if GENERATE_NEW_DEVICE_FPGA_AUTO
