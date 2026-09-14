@@ -46,6 +46,7 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/QLDeviceManager_test.cpp
     Compiler/QLDeviceLayoutInfo_test.cpp
+    Compiler/QLDevicePath_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
