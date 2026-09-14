@@ -82,6 +82,7 @@ set (SRC_CPP_LIST
   Reports/PowerAnalysisReportManager_ql.cpp
   QLDeviceManager.cpp
   QLDeviceLayoutInfo.cpp
+  QLDevicePath.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   BlifParser.cpp
@@ -121,6 +122,7 @@ set (SRC_H_INSTALL_LIST
   TaskGlobal.h
   QLDeviceManager.h
   QLDeviceLayoutInfo.h
+  QLDevicePath.h
   QLSettingsManager.h
   QLMetricsManager.h
   BlifParser.h
