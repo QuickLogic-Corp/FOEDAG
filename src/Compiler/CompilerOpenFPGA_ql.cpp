@@ -3549,6 +3549,26 @@ static std::string generatedDeviceRunToken(const std::string& project_path) {
   return std::string("_") + token.str();
 }
 
+// Remove a partial generated device package, but only while it is still the one this run
+// claimed. The claim marker is dropped into the empty directory at claim time and removed
+// once the copy completes, so its presence means "this tree is mine and unfinished".
+//
+// Without the check a failed copy would delete whatever now sits at that path - and two
+// concurrent runs of the SAME project share a device name, so that could be the other
+// run's finished package.
+static void removePartialGeneratedDevice(const std::filesystem::path& device_dir_path) {
+
+  if(!FileUtils::FileExists(generatedDeviceClaimMarkerPath(device_dir_path))) {
+    return;
+  }
+
+  // Device discovery treats any directory holding a config.json as a device, and
+  // config.json sits at the top of the package - so a half-copied one would otherwise be
+  // found, listed and selectable, then fail much later for no visible reason.
+  FileUtils::RmDirRecursively(device_dir_path);
+}
+
+
 // Directory name (== devicename) of the device package generated from a re-shaped
 // layout.
 //
@@ -4716,22 +4736,21 @@ bool CompilerOpenFPGA_ql::Packing() {
                               std::filesystem::copy_options::recursive);
       }
       catch (const fs::filesystem_error& e) {
-        // Remove the partial copy before returning. Device discovery treats any directory
-        // holding a config.json as a device, and config.json sits at the top of the
-        // package - so a copy that died midway would otherwise be found, listed and
-        // selectable, then fail much later for no visible reason.
-        FileUtils::RmDirRecursively(target_device_copy_dirpath);
+        removePartialGeneratedDevice(target_device_copy_dirpath);
         ErrorMessage("Could not copy the device package to '" +
                      target_device_copy_dirpath.string() + "': " + e.what() + "\n");
         ErrorMessage("Set AURORA2_GENERATED_DEVICE_DIR to a writable directory and re-run.\n");
         return false;
       }
       catch (const std::exception& e) {
-          FileUtils::RmDirRecursively(target_device_copy_dirpath);
+          removePartialGeneratedDevice(target_device_copy_dirpath);
           ErrorMessage("Could not copy the device package to '" +
                        target_device_copy_dirpath.string() + "': " + e.what() + "\n");
           return false;
       }
+
+      // the package is complete: drop the claim marker so it is not part of the device
+      FileUtils::removeFile(generatedDeviceClaimMarkerPath(target_device_copy_dirpath));
 
 
       // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
@@ -5051,7 +5070,13 @@ bool CompilerOpenFPGA_ql::Packing() {
         const char* const device_data_dir_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");
         bool device_root_registry_is_consulted = true;
 
-        if(device_data_dir_env_str != nullptr && *device_data_dir_env_str != '\0') {
+        // A path that does not exist is IGNORED by deviceDataRootDirPathList()
+        // (QLDeviceManager.cpp), which then falls back to the additive list and does
+        // consult the registry. Checking existence here too keeps the two in step; without
+        // it a stale AURORA2_DEVICE_DATA_DIR would suppress the registration that is the
+        // only thing making this device findable again.
+        if(device_data_dir_env_str != nullptr && *device_data_dir_env_str != '\0' &&
+           FileUtils::FileExists(std::filesystem::path(device_data_dir_env_str))) {
 
           std::filesystem::path env_device_data_dirpath =
               std::filesystem::weakly_canonical(std::filesystem::path(device_data_dir_env_str),
@@ -5086,19 +5111,38 @@ bool CompilerOpenFPGA_ql::Packing() {
                   "'. Set AURORA2_DEVICE_DATA_PATH to it to select this device later.\n");
         }
 
-        // A package of the same name in a higher-precedence root wins at lookup time -
-        // the installation root is searched first - so an earlier generation left behind
-        // there would silently be resolved instead of the one just written, and the flow
-        // would continue against that older fabric.
+      }
+
+      // A package of the same name in a higher-precedence root wins at lookup time, so an
+      // earlier generation left behind there is silently resolved instead of the one just
+      // written and the flow continues against that older fabric.
+      //
+      // Not gated on having used a fallback root: a device installed into a registered
+      // root and reshaped there writes back into that same root, which is still lower
+      // precedence than the installation.
+      {
+        // the root holding the package, whichever candidate won: <root>/<fam>/<fnd>/<node>
+        const std::filesystem::path generated_device_root_dirpath =
+            target_device_copy_dirpath.parent_path().parent_path()
+                                      .parent_path().parent_path();
+
         for(const std::filesystem::path& root_dirpath :
             QLDeviceManager::getInstance()->deviceDataRootDirPathList()) {
 
-          if(root_dirpath == generated_device_root_dirpath) {
+          // both sides canonical: the list is canonicalised, and comparing a raw path
+          // against it would never match and would walk past our own root into the
+          // lower-precedence ones - reporting the package we just wrote as shadowing itself.
+          std::error_code shadow_ec;
+          std::filesystem::path root_dirpath_c =
+              std::filesystem::weakly_canonical(root_dirpath, shadow_ec);
+          if(shadow_ec) { root_dirpath_c = root_dirpath; }
+
+          if(root_dirpath_c == generated_device_root_dirpath) {
             break;   // reached our own root: everything after it is lower precedence
           }
 
           const std::filesystem::path shadowing_device_dirpath =
-              root_dirpath / current_device_target.device_variant.family /
+              root_dirpath_c / current_device_target.device_variant.family /
               current_device_target.device_variant.foundry /
               current_device_target.device_variant.node / target_device_copy_devicename;
 
