@@ -88,6 +88,25 @@ inline void initializeResources() {
 
 using namespace FOEDAG;
 
+// Only an X11/Wayland host can lack a window server; macOS and Windows always
+// have one. Qt reports the absence as a platform-plugin abort deep inside
+// QApplication, or -- once a launcher has defaulted QT_QPA_PLATFORM to
+// offscreen -- not at all, as a GUI running with no window. So the environment
+// is checked before Qt starts. QT_QPA_PLATFORM itself is no use here: aurora's
+// setup.sh sets it to offscreen exactly when there is no display.
+static bool displayAvailable() {
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__CYGWIN__) || \
+    defined(__APPLE__)
+  return true;
+#else
+  for (const char* variable : {"DISPLAY", "WAYLAND_DISPLAY"}) {
+    const char* const value = std::getenv(variable);
+    if (value != nullptr && value[0] != '\0') return true;
+  }
+  return false;
+#endif
+}
+
 FOEDAG::GUI_TYPE Foedag::getGuiType(const bool& withQt, const bool& withQml) {
   if (!withQt) return FOEDAG::GUI_TYPE::GT_NONE;
   if (withQml)
@@ -399,6 +418,19 @@ bool Foedag::init(GUI_TYPE guiType) {
   if (m_cmdLine->PrintVersion()) {
     m_compiler->Version(&std::cout);
     return false;
+  }
+  if (guiType != GUI_TYPE::GT_NONE && !displayAvailable()) {
+    const std::string program =
+        std::filesystem::path(m_cmdLine->Argv()[0]).filename().string();
+    std::cerr << "ERROR: no graphical display is available: neither DISPLAY "
+                 "nor WAYLAND_DISPLAY is set."
+              << std::endl;
+    std::cerr << "       Run '" << program
+              << " --batch' for a command line session, or forward a display "
+                 "(for example 'ssh -X') to start the GUI."
+              << std::endl;
+    // main() returns this as the exit status, so true is the failure value.
+    return true;
   }
   bool result;
   switch (guiType) {
