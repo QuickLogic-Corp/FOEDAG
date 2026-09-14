@@ -52,6 +52,21 @@ class QLDeviceLayoutInfo {
   // through the same accessors the flow uses.
   explicit QLDeviceLayoutInfo(const QLDeviceLayout& layout) : m_layout(layout) {}
 
+ private:
+  QLDeviceLayoutInfo(QLDeviceTarget device_target, bool packing_is_running_now);
+
+ public:
+
+  // For use from INSIDE Packing(), once add_layout.py has written auto_device.log
+  // in this run.
+  //
+  // The normal constructor will not resolve a deferred (AUTO/RESOURCES) layout
+  // there: it requires the PACKING task to have reached Success, and that cannot
+  // happen until Packing() returns - Compiler::RunCompileTask()'s caller sets
+  // InProgress before the task body and Success after it. So the generated
+  // device's own config.json was stamped with its geometry erased, every time.
+  static QLDeviceLayoutInfo fromCurrentPackingRun(QLDeviceTarget device_target);
+
   bool resolved() const { return m_layout.resolved; }
   // Non-empty only when unresolved because config.json is corrupt or invalid -
   // a real problem worth reporting, unlike an AUTO/RESOURCES device that is
@@ -102,7 +117,7 @@ class QLDeviceLayoutInfo {
  private:
   bool resolveFromDeviceConfig(const QLDeviceLayoutSettings& layout_settings,
                                QLDeviceTarget device_target);
-  bool resolveFromAutoDeviceLog();
+  bool resolveFromAutoDeviceLog(bool packing_is_running_now);
   // bramSize/dspSize/ioCapacity are static properties of the package, not the
   // layout, so AUTO/RESOURCES devices - whose geometry comes from
   // auto_device.log, not config.json - still need this separate fetch to

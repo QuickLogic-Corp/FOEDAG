@@ -4918,8 +4918,14 @@ bool CompilerOpenFPGA_ql::Packing() {
             // fabric that is not the one it ships. Read from the
             // already-resolved current-run layout - the same resize event
             // QLDeviceLayoutInfo has just observed via auto_device.log.
-            const QLDeviceLayoutInfo generated_layout_info(
-                QLDeviceManager::getInstance()->getCurrentDeviceTarget());
+            // fromCurrentPackingRun(): this IS the packing run that just wrote
+            // auto_device.log, and the plain constructor will not read it until the
+            // PACKING task reports Success - which cannot happen until Packing()
+            // returns. Constructing it plainly here erased the geometry from every
+            // generated device's config.json.
+            const QLDeviceLayoutInfo generated_layout_info =
+                QLDeviceLayoutInfo::fromCurrentPackingRun(
+                    QLDeviceManager::getInstance()->getCurrentDeviceTarget());
             if(generated_layout_info.resolved()) {
               const QLDeviceLayout& generated_layout = generated_layout_info.layout();
               target_device_config_json["DEVICE_SIZE"] =
