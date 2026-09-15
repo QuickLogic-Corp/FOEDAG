@@ -55,6 +55,7 @@
 #include <unordered_map>
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
+#include "Compiler/QLDevicePath.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
@@ -91,6 +92,7 @@ extern const char* foedag_build_type;
 using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
+
 
 #ifdef HAS_POWER_CALC_RESOURCE
 static inline void initPowerCalcResource() {
@@ -2834,23 +2836,11 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       break;
   }
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -3247,23 +3237,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       break;
   }
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -3548,11 +3526,14 @@ static std::string generatedLayoutName(const std::string& prefix, int width, int
 
 // A per-run token for the generated device DIRECTORY, which is what concurrent runs race on.
 //
-// The generated package is written into the SHARED device_data tree as a sibling of the
-// source device. Two runs resolving to the same fabric size targeted one directory and raced
-// on the delete-then-copy that installs it: one run's recursive delete lands in the middle of
+// The generated package is written into a device_data tree shared by every design in a
+// suite. Two runs resolving to the same fabric size targeted one directory and raced on the
+// delete-then-copy that installs it: one run's recursive delete lands in the middle of
 // another's copy. The benchmark suite runs many designs, and several synthesis tools per
 // design, against one device_data, so that is its normal operating condition.
+//
+// It separates PROJECTS, not concurrent runs: two runs of the same project still share a
+// name, and still race, exactly as they did before.
 //
 // The project path is the natural key -- it is exactly what distinguishes one concurrent
 // aurora invocation from another. Hashed because a path cannot go in a directory name, in hex
@@ -3566,6 +3547,25 @@ static std::string generatedDeviceRunToken(const std::string& project_path) {
   std::ostringstream token;
   token << std::hex << std::hash<std::string>{}(project_path);
   return std::string("_") + token.str();
+}
+
+// Remove a partial generated device package, but only while it is still the one this run
+// claimed. The claim marker is dropped into the empty directory at claim time and removed
+// once the copy completes, so its presence means "this tree is mine and unfinished".
+//
+// Without the check a failed copy would delete whatever now sits at that path - and two
+// concurrent runs of the SAME project share a device name, so that could be the other
+// run's finished package.
+static void removePartialGeneratedDevice(const std::filesystem::path& device_dir_path) {
+
+  if(!FileUtils::FileExists(generatedDeviceClaimMarkerPath(device_dir_path))) {
+    return;
+  }
+
+  // Device discovery treats any directory holding a config.json as a device, and
+  // config.json sits at the top of the package - so a half-copied one would otherwise be
+  // found, listed and selectable, then fail much later for no visible reason.
+  FileUtils::RmDirRecursively(device_dir_path);
 }
 
 
@@ -4678,44 +4678,57 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       // 1 copy the source device directory recursively to create new device.
       //   and derive the new devicename from the generated layoutname.
-      std::string target_device_copy_devicename =
-          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName) +
+      const std::string generated_device_run_token =
           generatedDeviceRunToken(ProjManager()->projectPath());
 
-      // Backstop. If the derived name did not change, the "new" device directory
-      // IS the source device directory, and the code just below deletes an
-      // existing target with RmDirRecursively() before copying into it - i.e. it
-      // would delete the installed device package and then copy from a directory
-      // that no longer exists. Never let that fall through.
+      std::string target_device_copy_devicename =
+          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName) +
+          generated_device_run_token;
+
+      // Backstop. A generated device must never carry the source device's own name:
+      // it would resolve back to the source package everywhere a device is looked up
+      // by name. Containment of the target directory is handled separately, by the
+      // resolver below.
       if(target_device_copy_devicename == source_devicename) {
         ErrorMessage("Cannot generate a device for '" + source_devicename + "' (layout '" +
                      source_layout_name + "'): the generated device name is identical to the "
-                     "source device name, and generating it would overwrite the installed "
-                     "device package.\n");
+                     "source device name.\n");
         return false;
       }
 
       std::filesystem::path source_device_copy_dirpath = 
           QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
 
-      std::filesystem::path target_device_copy_dirpath = 
-          source_device_copy_dirpath / 
-          std::string("..") / 
-          target_device_copy_devicename;
+      // Where the package can actually be written. Writing it as a sibling of the source
+      // device - all this ever did - fails with EACCES on a read-only installation, which
+      // is the normal customer deployment, and fails *after* pack has already succeeded.
+      // The project's working directory is the last candidate and is writable by
+      // construction, so this does not realistically run out of places to try.
+      const GeneratedDeviceDestination generated_device_destination =
+          claimGeneratedDeviceDir(source_device_copy_dirpath,
+                                  std::filesystem::path(ProjManager()->projectPath()).parent_path(),
+                                  current_device_target.device_variant.family,
+                                  current_device_target.device_variant.foundry,
+                                  current_device_target.device_variant.node,
+                                  target_device_copy_devicename,
+                                  directoryContentSize(source_device_copy_dirpath));
 
-      // if the same name device is already generated previously, then we replace that
-      // with the new device.
-      // 1. if this is not desirable, we would need to add additional data to the name, and
-      //    that means communicating this with the script, maybe as a parameter?
-      // 2. the other option is prompting user to enter a 'suffix' or 'prefix' for the devicename.
-      //    this is complicated, as we need to handle both batch mode and gui mode for the prompt.
-      // this is a decision for future releases.
-      if(FileUtils::FileExists(target_device_copy_dirpath)) {
+      for(const std::string& warning_text : generated_device_destination.warnings) {
+        Message("[WARNING] " + warning_text + "\n");
+      }
+
+      if(generated_device_destination.device_dir_path.empty()) {
+        ErrorMessage(generated_device_destination.error + "\n");
+        return false;
+      }
+
+      if(generated_device_destination.replaced_existing) {
         Message("[WARNING] Device Already Exists: " + target_device_copy_devicename +"\n");
         Message("[WARNING] Deleting the Existing Device, It will be regenerated.\n");
-
-        FileUtils::RmDirRecursively(target_device_copy_dirpath);
       }
+
+      std::filesystem::path target_device_copy_dirpath =
+          generated_device_destination.device_dir_path;
 
       try {
         std::filesystem::copy(source_device_copy_dirpath,
@@ -4723,17 +4736,21 @@ bool CompilerOpenFPGA_ql::Packing() {
                               std::filesystem::copy_options::recursive);
       }
       catch (const fs::filesystem_error& e) {
-        ErrorMessage("Error Copying Device 1\n");
-        // std::cerr << "Filesystem error: " << e.what() << std::endl;
-        // std::cerr << "Path 1: " << e.path1() << std::endl;
-        // std::cerr << "Path 2: " << e.path2() << std::endl;
+        removePartialGeneratedDevice(target_device_copy_dirpath);
+        ErrorMessage("Could not copy the device package to '" +
+                     target_device_copy_dirpath.string() + "': " + e.what() + "\n");
+        ErrorMessage("Set AURORA2_GENERATED_DEVICE_DIR to a writable directory and re-run.\n");
         return false;
       }
       catch (const std::exception& e) {
-          ErrorMessage("Error Copying Device 2\n");
-          // std::cerr << "General error: " << e.what() << std::endl;
+          removePartialGeneratedDevice(target_device_copy_dirpath);
+          ErrorMessage("Could not copy the device package to '" +
+                       target_device_copy_dirpath.string() + "': " + e.what() + "\n");
           return false;
       }
+
+      // the package is complete: drop the claim marker so it is not part of the device
+      FileUtils::removeFile(generatedDeviceClaimMarkerPath(target_device_copy_dirpath));
 
 
       // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
@@ -4901,8 +4918,14 @@ bool CompilerOpenFPGA_ql::Packing() {
             // fabric that is not the one it ships. Read from the
             // already-resolved current-run layout - the same resize event
             // QLDeviceLayoutInfo has just observed via auto_device.log.
-            const QLDeviceLayoutInfo generated_layout_info(
-                QLDeviceManager::getInstance()->getCurrentDeviceTarget());
+            // fromCurrentPackingRun(): this IS the packing run that just wrote
+            // auto_device.log, and the plain constructor will not read it until the
+            // PACKING task reports Success - which cannot happen until Packing()
+            // returns. Constructing it plainly here erased the geometry from every
+            // generated device's config.json.
+            const QLDeviceLayoutInfo generated_layout_info =
+                QLDeviceLayoutInfo::fromCurrentPackingRun(
+                    QLDeviceManager::getInstance()->getCurrentDeviceTarget());
             if(generated_layout_info.resolved()) {
               const QLDeviceLayout& generated_layout = generated_layout_info.layout();
               target_device_config_json["DEVICE_SIZE"] =
@@ -5036,11 +5059,113 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
 
+      // A device written outside the source device's own root is only discoverable if
+      // that root is a known one, so register it the way install_device does. Best
+      // effort: an unwritable or absent $HOME leaves the registry unavailable
+      // (NFR-005), and the run has already produced a usable device either way.
+      if(!generated_device_destination.root_dir_path.empty()) {
+
+        const std::filesystem::path generated_device_root_dirpath =
+            generated_device_destination.root_dir_path;
+
+        // AURORA2_DEVICE_DATA_DIR pointing anywhere other than the installation is an
+        // EXCLUSIVE override: it suppresses registered roots and AURORA2_DEVICE_DATA_PATH
+        // alike. Registering would succeed and mean nothing, so say so instead of
+        // reporting success - and name the one setting that does work here.
+        std::error_code exclusive_ec;
+        const char* const device_data_dir_env_str = std::getenv("AURORA2_DEVICE_DATA_DIR");
+        bool device_root_registry_is_consulted = true;
+
+        // A path that does not exist is IGNORED by deviceDataRootDirPathList()
+        // (QLDeviceManager.cpp), which then falls back to the additive list and does
+        // consult the registry. Checking existence here too keeps the two in step; without
+        // it a stale AURORA2_DEVICE_DATA_DIR would suppress the registration that is the
+        // only thing making this device findable again.
+        if(device_data_dir_env_str != nullptr && *device_data_dir_env_str != '\0' &&
+           FileUtils::FileExists(std::filesystem::path(device_data_dir_env_str))) {
+
+          std::filesystem::path env_device_data_dirpath =
+              std::filesystem::weakly_canonical(std::filesystem::path(device_data_dir_env_str),
+                                                exclusive_ec);
+          if(exclusive_ec) {
+            env_device_data_dirpath = std::filesystem::path(device_data_dir_env_str);
+            exclusive_ec.clear();
+          }
+
+          std::filesystem::path installation_dirpath =
+              std::filesystem::weakly_canonical(GlobalSession->Context()->DataPath(), exclusive_ec);
+          if(exclusive_ec) {
+            installation_dirpath = GlobalSession->Context()->DataPath();
+            exclusive_ec.clear();
+          }
+
+          device_root_registry_is_consulted = (env_device_data_dirpath == installation_dirpath);
+        }
+
+        if(!device_root_registry_is_consulted) {
+          Message("[WARNING] AURORA2_DEVICE_DATA_DIR is set to a device tree of its own, which "
+                  "suppresses registered device roots. The generated device will not be "
+                  "selectable until it is moved under that tree, or "
+                  "AURORA2_GENERATED_DEVICE_DIR is set to a directory inside it.\n");
+        }
+        else if(QLDeviceManager::getInstance()->registerDeviceRoot(generated_device_root_dirpath)) {
+          Message(" >> Registered device root: " + generated_device_root_dirpath.string() + "\n");
+        }
+        else {
+          Message("[WARNING] Could not register the device root '" +
+                  generated_device_root_dirpath.string() +
+                  "'. Set AURORA2_DEVICE_DATA_PATH to it to select this device later.\n");
+        }
+
+      }
+
+      // A package of the same name in a higher-precedence root wins at lookup time, so an
+      // earlier generation left behind there is silently resolved instead of the one just
+      // written and the flow continues against that older fabric.
+      //
+      // Not gated on having used a fallback root: a device installed into a registered
+      // root and reshaped there writes back into that same root, which is still lower
+      // precedence than the installation.
+      {
+        // the root holding the package, whichever candidate won: <root>/<fam>/<fnd>/<node>
+        const std::filesystem::path generated_device_root_dirpath =
+            target_device_copy_dirpath.parent_path().parent_path()
+                                      .parent_path().parent_path();
+
+        for(const std::filesystem::path& root_dirpath :
+            QLDeviceManager::getInstance()->deviceDataRootDirPathList()) {
+
+          // both sides canonical: the list is canonicalised, and comparing a raw path
+          // against it would never match and would walk past our own root into the
+          // lower-precedence ones - reporting the package we just wrote as shadowing itself.
+          std::error_code shadow_ec;
+          std::filesystem::path root_dirpath_c =
+              std::filesystem::weakly_canonical(root_dirpath, shadow_ec);
+          if(shadow_ec) { root_dirpath_c = root_dirpath; }
+
+          if(root_dirpath_c == generated_device_root_dirpath) {
+            break;   // reached our own root: everything after it is lower precedence
+          }
+
+          const std::filesystem::path shadowing_device_dirpath =
+              root_dirpath_c / current_device_target.device_variant.family /
+              current_device_target.device_variant.foundry /
+              current_device_target.device_variant.node / target_device_copy_devicename;
+
+          if(FileUtils::FileExists(shadowing_device_dirpath)) {
+            Message("[WARNING] An older device of the same name takes precedence and will be "
+                    "used instead of the one just generated: " +
+                    shadowing_device_dirpath.string() + "\n");
+            Message("[WARNING] Delete it to use the generated device.\n");
+          }
+        }
+      }
+
       // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
       QLDeviceManager::getInstance()->parseDeviceData();
 
       Message("\n\n >> Generating Device ok: " + target_device_copy_devicename +"\n");
-      Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
+      Message(" >> Device at: " + target_device_copy_dirpath.string() +"\n");
     }
     // DEVICE CREATION LOGIC --
 #endif // #if GENERATE_NEW_DEVICE_FPGA_AUTO
@@ -5256,23 +5381,11 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 
   std::string command = BaseVprCommand() + " --place";
@@ -7455,23 +7568,11 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       netlistFile = ProjManager()->projectName() + "_post_synth.blif";
       break;
   }
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
   result = ReplaceAll(result, "${VPR_TESTBENCH_BLIF}", netlistFile);
 
@@ -8266,23 +8367,11 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
 
   ///////////////////////////////////////////////////////////////// NETLIST ++
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
   ///////////////////////////////////////////////////////////////// NETLIST --
 
@@ -8395,7 +8484,49 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
-  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
+  const std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  // Only a post-synthesis project supplies the netlist as a design source. An
+  // RTL project may carry a BLIF too, but there the synthesis output is what
+  // the flow must use. Issue #2354.
+  if (ProjManager()->projectType() == PostSynth) {
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      if (lang_file.first.language != Design::Language::BLIF &&
+          lang_file.first.language != Design::Language::EBLIF)
+        continue;
+      // DesignFiles() hands back the compilation-unit path: project-relative
+      // when copy_files_on_add is set, otherwise relative to the directory the
+      // project sits in.
+      const std::filesystem::path resolved = FileUtils::ResolveInDirs(
+          lang_file.second, {projectPath, projectPath.parent_path()});
+      if (!resolved.empty()) return resolved;
+    }
+  }
+
+  return projectPath / std::string(ProjManager()->projectName() + "_post_synth.blif");
+}
+
+// Netlist a post-synthesis project feeds to VPR and OpenFPGA, absolute so it
+// does not depend on the working directory the tool is launched in. Empty for
+// any other project type, which uses the synthesis output instead.
+std::filesystem::path CompilerOpenFPGA_ql::getDesignSourceNetlistPath() const {
+  if (ProjManager()->projectType() != PostSynth) return {};
+
+  const std::filesystem::path projectPath{ProjManager()->projectPath()};
+  for (const auto& lang_file : ProjManager()->DesignFiles()) {
+    switch (lang_file.first.language) {
+      case Design::Language::VERILOG_NETLIST:
+      case Design::Language::BLIF:
+      case Design::Language::EBLIF:
+        break;
+      default:
+        continue;
+    }
+    const std::filesystem::path resolved = FileUtils::ResolveInDirs(
+        lang_file.second, {projectPath, projectPath.parent_path()});
+    if (!resolved.empty()) return resolved;
+  }
+  return {};
 }
 
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
@@ -8441,8 +8572,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     return false;
   }
 
-  std::filesystem::path netlist_path = std::filesystem::path(ProjManager()->projectPath()) /
-                                      std::string(ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path netlist_path = getPostSynthBlifFilePath();
 
   if (!fs::exists(netlist_path)){
     ErrorMessage("Post Synthesis blif Was Not Found!\n");
@@ -8564,7 +8694,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       std::filesystem::path("generate_floorplanning.py");
       
       
-  std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path netlistFile = getPostSynthBlifFilePath();
   std::filesystem::path clocksFile  = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + ".clocks");
   std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
@@ -12279,6 +12409,10 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
 bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 {
+  // A post-synthesis project has no synthesis stage to track, and building its
+  // commands errors out on the netlist design source. See issue #2354.
+  if (ProjManager() && ProjManager()->projectType() == PostSynth) return true;
+
   std::unordered_map<int, CommandWrapperPtr> commands = getSynthesisCommands();
   for (const auto& [id, command]: commands) {
     if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {

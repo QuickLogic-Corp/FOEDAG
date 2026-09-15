@@ -1,4 +1,5 @@
 #include "QLDeviceManager.h"
+#include "QLDevicePath.h"
 
 #include <cstdlib>   // std::getenv
 #include <cctype>    // std::isspace
@@ -2999,64 +3000,6 @@ int compareAuroraVersions(const std::string& lhs, const std::string& rhs) {
   return 0;
 }
 
-// Expand a leading '~' or '~/' to the user's home directory.
-//
-// A Tcl command receives its arguments already word-split, so the shell never expands a tilde
-// inside `aurora --cmd "install_device kit.tar.gz -target ~/devices"` -- bash does not expand
-// '~' inside double quotes unless it starts the word. Without this, that documented form would
-// silently create a directory literally named '~' under the current directory. Only a LEADING
-// tilde is expanded; '~user' is not supported and is left alone.
-std::filesystem::path expandLeadingTilde(const std::filesystem::path& input_path) {
-
-  const std::string input_string = input_path.string();
-  if(input_string.empty() || input_string[0] != '~') {
-    return input_path;
-  }
-  // '~user/...' -- not ours to resolve; leave it untouched rather than guess.
-  if(input_string.size() > 1 && input_string[1] != '/' && input_string[1] != '\\') {
-    return input_path;
-  }
-
-  const char* home_dir = std::getenv("HOME");
-#ifdef _WIN32
-  if(home_dir == nullptr) { home_dir = std::getenv("USERPROFILE"); }
-#endif
-  if(home_dir == nullptr || *home_dir == '\0') {
-    return input_path;                       // no home to expand to: leave it as the user typed it
-  }
-
-  return std::filesystem::path(home_dir) / input_string.substr(input_string.size() > 1 ? 2 : 1);
-}
-
-// true when 'candidate' is inside 'ancestor' (or is it), after resolving symlinks and '..'.
-bool pathIsInside(const std::filesystem::path& candidate, const std::filesystem::path& ancestor) {
-
-  std::error_code ec;
-
-  // resolve as much of the candidate as exists: the target dir may not have been created yet.
-  std::filesystem::path candidate_existing = candidate;
-  while(!candidate_existing.empty() && !std::filesystem::exists(candidate_existing, ec)) {
-    std::filesystem::path parent = candidate_existing.parent_path();
-    if(parent == candidate_existing) {
-      break;
-    }
-    candidate_existing = parent;
-  }
-
-  std::filesystem::path candidate_c = std::filesystem::weakly_canonical(candidate_existing, ec);
-  if(ec) { candidate_c = candidate_existing; ec.clear(); }
-  std::filesystem::path ancestor_c = std::filesystem::weakly_canonical(ancestor, ec);
-  if(ec) { ancestor_c = ancestor; ec.clear(); }
-
-  auto candidate_it = candidate_c.begin();
-  auto ancestor_it = ancestor_c.begin();
-  for(; ancestor_it != ancestor_c.end(); ++ancestor_it, ++candidate_it) {
-    if(candidate_it == candidate_c.end() || *candidate_it != *ancestor_it) {
-      return false;
-    }
-  }
-  return true;
-}
 
 // run a command and return its stdout.
 //

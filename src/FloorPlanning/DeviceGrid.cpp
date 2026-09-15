@@ -46,7 +46,7 @@ void DeviceGrid::constructTiles(const DeviceGridDescriptorPtr& device) {
         for (int row = 1; row <= device->rows(); ++row) {
             if (row == 1 || (row == device->rows()) || col == 1 || (col == device->columns())) {
                 constructTile(Tile::Type::Io, col, row);
-            } else if (device->isBramColumn(col)) {
+            } else if (device->isBramSupported() && device->isBramColumn(col)) {
                 if (!step_on_bram) {
                     constructTile(Tile::Type::Bram, col, row);
                     bottomLeftIndex = Tile::Index(col, row);
@@ -55,14 +55,14 @@ void DeviceGrid::constructTiles(const DeviceGridDescriptorPtr& device) {
                 if (step_on_bram) {
                     constructTileFragment(col, row, bottomLeftIndex);
                     stepCounter++;
-                    if (stepCounter == device->bramSize().height()) {
+                    if (stepCounter == device->bramSize()->height()) {
                         bottomLeftIndex.reset();
                         step_on_bram = false;
                         stepCounter = 0;
                     }
                 }
 
-            } else if (device->isDspColumn(col)) {
+            } else if (device->isDspSupported() && device->isDspColumn(col)) {
                 if (!step_on_dsp) {
                     bottomLeftIndex = Tile::Index(col, row);
                     constructTile(Tile::Type::Dsp, col, row);
@@ -71,7 +71,7 @@ void DeviceGrid::constructTiles(const DeviceGridDescriptorPtr& device) {
                 if (step_on_dsp) {
                     constructTileFragment(col, row, bottomLeftIndex);
                     stepCounter++;
-                    if (stepCounter == device->dspSize().height()) {
+                    if (stepCounter == device->dspSize()->height()) {
                         bottomLeftIndex.reset();
                         step_on_dsp = false;
                         stepCounter = 0;
@@ -202,8 +202,12 @@ Tile::Index DeviceGrid::toTopRightGridIndex(const TileDescriptor& tileDescriptor
 {
     Tile::Index result = tileDescriptor.index;
     switch(tileDescriptor.type) {
-    case Tile::Type::Dsp: result.row += m_descriptor->dspSize().height() - 1; break;
-    case Tile::Type::Bram: result.row += m_descriptor->bramSize().height() - 1; break;
+    case Tile::Type::Dsp:
+        if (m_descriptor->isDspSupported()) result.row += m_descriptor->dspSize()->height() - 1;
+        break;
+    case Tile::Type::Bram:
+        if (m_descriptor->isBramSupported()) result.row += m_descriptor->bramSize()->height() - 1;
+        break;
     default: break;
     }
 
