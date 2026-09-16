@@ -4357,8 +4357,63 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       std::string add_layout_script_generated_layout_name;
 
-      std::string command_auto_device = 
-          std::string("python3") + std::string(" ") +
+      // Pick an interpreter that can actually run add_layout.py.
+      //
+      // The script does `import yaml` and `from lxml import etree`. Running a bare
+      // `python3` off PATH means whichever interpreter the environment happens to
+      // resolve, and on a stock host that one has neither -- the flow then dies here
+      // with "ModuleNotFoundError: No module named 'yaml'", which reads like a broken
+      // device rather than a missing module (aurora2#2409, and what 2026.3-rc1 shipped).
+      //
+      // So probe for the MODULES, not for the interpreter: availability is not
+      // capability, and IsSystemCommandAvailable("python3") passes on exactly the hosts
+      // that fail here. The probe imports for real because lxml.etree is a C extension
+      // that can be present as a file and still refuse to load.
+      //
+      // The fallback is the interpreter aurora2 provisions with these two modules
+      // (envs/python3.8). Located the way the rel-macro script is further down this
+      // file: DataPath() varies with the install layout, so probe both plausible roots.
+      // Deliberately not IPCatalog::getPythonPath() -- that resolves to envs/litex
+      // paired with PYTHONHOME, which imports neither module.
+      std::string add_layout_python_exec{"python3"};
+      {
+        const std::vector<std::string> probe_args{"-c", "import yaml, lxml.etree"};
+        auto can_run = [&probe_args](const std::string& exec) {
+          std::ostringstream sink;
+          return FileUtils::ExecuteSystemCommand(exec, probe_args, &sink, 30000)
+                     .code == 0;
+        };
+        if (!can_run(add_layout_python_exec)) {
+          const std::filesystem::path data_path =
+              GetSession()->Context()->DataPath();
+          const std::filesystem::path bundled_rel =
+              std::filesystem::path("envs") / "python3.8" / "bin" / "python3";
+          for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+            const std::filesystem::path candidate =
+                (root / bundled_rel).lexically_normal();
+            if (!std::filesystem::exists(candidate)) {
+              continue;
+            }
+            if (can_run(candidate.string())) {
+              add_layout_python_exec = candidate.string();
+              Message("Auto Layout Generation: using the bundled python at " +
+                      candidate.string() + "\n");
+            } else {
+              // Both are short. Say so now, naming the modules, rather than letting
+              // the traceback below read like a device problem.
+              ErrorMessage(
+                  "Neither the system python3 nor the bundled python at " +
+                  candidate.string() + " can import 'yaml' and 'lxml.etree', which " +
+                  add_layout_script_path.filename().string() +
+                  " requires. Layout generation will fail.\n");
+            }
+            break;
+          }
+        }
+      }
+
+      std::string command_auto_device =
+          add_layout_python_exec + std::string(" ") +
           add_layout_script_path.string() + std::string(" ") +
           std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
           std::string("--output ") + generated_vpr_xml_path.string() + std::string(" ") +
