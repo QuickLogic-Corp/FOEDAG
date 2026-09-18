@@ -10944,7 +10944,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
       for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
 
-        std::string sim_verilog_pattern = ".*_sim\\.v";
+        std::string sim_verilog_pattern = ".*(_sim|_macros)\\.v";
 
         if (std::regex_match(yosys_module_path.filename().string(),
                             std::regex(sim_verilog_pattern, std::regex::icase))) {
