@@ -1360,26 +1360,6 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
 }
 
 
-std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
-    std::string family,
-    std::string foundry,
-    std::string node,
-    std::string devicename) {
-
-  // get to the device_data dir path of the root that owns THIS device (falls back to the
-  // first root when the device is not in device_list yet)
-  std::filesystem::path root_device_data_dir_path =
-     deviceTypeRootDirPath(family, foundry, node, devicename);
-
-  // calculate the device_data dir path for specified device
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
-  // std::cout << "device_data dir: " + device_data_dir_path.string() << std::endl;
-
-  // query the variants from this path:
-  return listDeviceVariantsInDeviceDirectory(family, foundry, node, devicename, device_data_dir_path);
-
-}
-
 
 std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std::string family,
                                                                              std::string foundry,
@@ -6269,10 +6249,14 @@ bool QLDeviceManager::parseLayoutDimension(const std::string& value, long& out_v
 // Does the override ask for the fabric the device ALREADY HAS?
 //
 // REQ-005 refuses a re-shape that was actually requested. An override naming the
-// geometry already in the package requests nothing, and that is not a corner
-// case: the flow stamps every device it generates 'DEVICE_TYPE': 'FIXED', so on
-// the next run the very custom_layout.yml that shaped it is still beside the
-// project and lands on the gate (aurora2#2291).
+// geometry already in the package requests nothing, so refusing it would fail a
+// run that asked for the fabric it already has.
+//
+// The original driver (aurora2#2291 - the flow stamped its own generated devices
+// 'DEVICE_TYPE': 'FIXED', so the yml that shaped one was still beside the project
+// on the next run) is gone with the generated package (aurora2#2506). What remains
+// is a shipped FIXED part whose config geometry matches the user's yml, which
+// REQ-005's own wording says must not fail.
 //
 // Compared in the DEVICE CONFIG's space on both sides. The yml's keys and the
 // config's keys are the same keys - add_layout.py reads 'ARRAY_X' / 'BRAM_COLS'

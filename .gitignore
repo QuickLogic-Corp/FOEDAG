@@ -88,3 +88,8 @@ third_party/tcl8.6.12/unix/libtcl8.6.dylib
 third_party/zlib/libz.1.2.11.dylib
 third_party/zlib/libz.1.dylib
 third_party/zlib/libz.dylib
+# Unit-test artifacts. The unittest binary writes these into the working
+# directory; three of the generated names carry a ':', which git on Windows
+# refuses to check out, so a swept-in copy breaks the Windows CI checkout.
+/*.qdc
+/cmd.tcl
