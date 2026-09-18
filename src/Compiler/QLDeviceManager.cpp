@@ -1217,15 +1217,31 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
   // [2][a] search for all vpr.xml/openfpga.xml files, and check the dir paths:
   std::vector<std::filesystem::path> vpr_xml_files;
   std::vector<std::filesystem::path> openfpga_xml_files;
-  for (const std::filesystem::directory_entry& dir_entry :
-      std::filesystem::recursive_directory_iterator(device_data_dir_path_c,
-                                                    std::filesystem::directory_options::skip_permission_denied,
-                                                    ec)) {
+  // increment(ec) rather than a range-for: the constructor's error_code overload does not
+  // cover operator++, so a range-for throws filesystem_error the moment an entry vanishes
+  // mid-walk. A concurrent run removing a generated device from the shared device_data root
+  // does exactly that, and the exception reaches no handler -- it terminates the process
+  // after packing has already succeeded.
+  std::filesystem::recursive_directory_iterator dir_it(
+      device_data_dir_path_c,
+      std::filesystem::directory_options::skip_permission_denied,
+      ec);
+  if(ec) {
+    std::cout << std::string("failed listing contents of ") +
+                            device_data_dir_path_c.string() << std::endl;
+    return device_variants;
+  }
+  const std::filesystem::recursive_directory_iterator dir_end;
+  for (; dir_it != dir_end; dir_it.increment(ec)) {
+    // Fail closed. A truncated walk yields a partial XML list, which presents downstream as a
+    // device with corners silently missing rather than as an error.
     if(ec) {
-      std::cout << std::string("failed listing contents of ") +
-                              device_data_dir_path_c.string() << std::endl;
+      std::cout << std::string("failed walking ") + device_data_dir_path_c.string() +
+                              ": " + ec.message() << std::endl;
       return device_variants;
     }
+
+    const std::filesystem::directory_entry& dir_entry = *dir_it;
 
     if(dir_entry.is_regular_file(ec)) {
 

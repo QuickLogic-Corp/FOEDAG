@@ -5114,6 +5114,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       }
 
 
+      // Everything from here to the end of generation is bookkeeping: the device is written
+      // and packing has succeeded, so a filesystem error must not discard that. It can happen
+      // -- parseDeviceData() below walks every device in every root, including directories
+      // that concurrently running designs are removing -- and no frame above this one catches
+      // filesystem_error, so an escaping one terminates the process.
+      try {
+
       // A device written outside the source device's own root is only discoverable if
       // that root is a known one, so register it the way install_device does. Best
       // effort: an unwritable or absent $HOME leaves the registry unavailable
@@ -5218,6 +5225,14 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
       QLDeviceManager::getInstance()->parseDeviceData();
+
+      }
+      catch (const std::filesystem::filesystem_error& e) {
+        // Do not fail Packing(): the device is on disk and usable. The cost is that Aurora
+        // may not list it until the next run re-scans.
+        Message(std::string("\n[WARNING] device generated, but post-generation bookkeeping "
+                            "did not complete: ") + e.what() + "\n");
+      }
 
       Message("\n\n >> Generating Device ok: " + target_device_copy_devicename +"\n");
       Message(" >> Device at: " + target_device_copy_dirpath.string() +"\n");
