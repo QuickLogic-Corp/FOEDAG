@@ -1,9 +1,0 @@
-set_region \
-dut.tri.el0.sub2,\
-dut.tri.el1.*,\
-dut.tri.el2,\
-top.* \
-clb(2,23):clb(6,26) \
-dummy
-
-
