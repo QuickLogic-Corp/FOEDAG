@@ -1,0 +1,9 @@
+set_region \
+dut.tri.el0.sub2,\
+dut.tri.el1.*,\
+dut.tri.el2,\
+top.* \
+dsp(7,2):bram(13,2) \
+dummy
+
+

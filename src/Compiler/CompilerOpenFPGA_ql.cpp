@@ -55,7 +55,6 @@
 #include <unordered_map>
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
-#include "Compiler/QLDevicePath.h"
 #include "Compiler/Constraints.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
@@ -4206,12 +4205,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       Message("Packing is running in Custom Layout Generation Mode!\n");
     }
 
-    // Regardless of the status (whether the design fits into the base auto layout or not)
-    // we generate a device package.
-    // A device that resolved to a generation mode is a template for shaping a
-    // fabric, not something the rest of the flow can target directly, so even
-    // when the design fits we emit a device package with the devicename and
-    // layoutname taken from the generated layout.
+    // Regardless of the status (whether the design fits into the base auto layout or
+    // not) we generate a layout. A device that resolved to a generation mode is a
+    // template for shaping a fabric, not something the rest of the flow can target
+    // directly, so even when the design fits we re-pack against a generated layout.
+    //
+    // The generated fabric is per-run: no device package is written (aurora2#2506).
+    // Only the layout name and the project-local arch outlive this block.
 
     // m_architectureFile -> decrypted vpr.xml of current device target.
     std::filesystem::path generated_vpr_xml_path = 
@@ -4653,7 +4653,10 @@ bool CompilerOpenFPGA_ql::Packing() {
     m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
-  // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
+  // Best effort. add_layout.py has run, but resolving a deferred AUTO/RESOURCES
+  // geometry needs the PACKING task at Success, which cannot happen until this
+  // function returns - so for those devices this clears device_layout.json and the
+  // next stage's setCurrentDeviceTarget() writes it. FIXED/CUSTOM resolve here.
   QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
