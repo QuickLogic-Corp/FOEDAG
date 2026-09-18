@@ -1036,6 +1036,13 @@ void QLDeviceManager::parseDeviceData() {
   // shipped with the installation can never be shadowed by an externally installed one.
   for (const std::filesystem::path& root_device_data_dir_path : root_device_data_dir_path_list) {
 
+  // The four nested walks below take an error_code on construction only, so their operator++
+  // still throws if an entry disappears between readdir and the descend - which is routine
+  // here, since concurrent runs add and remove generated devices in a shared root. Catching
+  // per root gives the same outcome the REQ-007 path below already chooses for an unreadable
+  // root: warn, skip it, carry on. Without it the throw reaches no handler and kills startup.
+  try {
+
   // look at the directories inside the device_data_dir_path for 'family' entries
   // NOTE: the error_code overload is required here - a registered root that has been
   // deleted or made unreadable must warn and be skipped, never abort startup (REQ-007).
@@ -1139,6 +1146,16 @@ void QLDeviceManager::parseDeviceData() {
         }
       }
     }
+  }
+
+  }
+  catch (const std::filesystem::filesystem_error& e) {
+    // Name the root and the error: a root that silently drops out of the scan is the
+    // "why is my flow using the wrong device data?" failure these walks warn about
+    // elsewhere. The next parseDeviceData() picks it up again if the cause was transient.
+    std::cout << "WARNING: skipping device data root after filesystem error: "
+              << root_device_data_dir_path.string() << " (" << e.what() << ")" << std::endl;
+    continue;
   }
 
   } // for each device_data root
