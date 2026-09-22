@@ -2491,6 +2491,38 @@ bool vprOptionValue(const std::string& options, const std::string& flag, std::st
   return false;
 }
 
+// The VPR flags that serialize the proprietary routing resource graph / router
+// lookahead cost map (issue #1649, aurora2#2122). VPR itself rejects these on
+// a release build no matter how they reach its command line — direct
+// invocation, openfpga_shell, or here — so this is a non-blocking, early
+// heads-up rather than a gate: custom_vpr_options_str is also how an internal
+// engineer legitimately requests these on an unstripped VPR for device-arch
+// debugging, and this binary can't tell at compile time which VPR it's paired
+// with. Still forwarded to VPR unchanged either way.
+const std::vector<std::string> kRoutingExportFlags = {
+    "--write_rr_graph", "--write_router_lookahead",
+    "--write_intra_cluster_router_lookahead"};
+
+// Non-empty iff 'options' requests a routing-export flag; the string is a
+// ready-to-log warning naming the offending flag(s).
+std::string routingExportWarningIfAny(const std::string& options) {
+  std::string flags;
+  std::string value;
+  for (const std::string& flag : kRoutingExportFlags) {
+    if (vprOptionValue(options, flag, value)) {
+      if (!flags.empty()) flags += ", ";
+      flags += flag;
+    }
+  }
+  if (flags.empty()) {
+    return std::string();
+  }
+  return "custom_vpr_options_str requests " + flags +
+         ": this exports the proprietary routing resource graph / router "
+         "lookahead cost map. An internal VPR build will honor it; a release "
+         "build will reject it (issue #1649).";
+}
+
 }  // namespace
 
 std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
@@ -2813,6 +2845,11 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    const std::string routingExportWarning =
+        routingExportWarningIfAny(vpr_custom_options_string);
+    if (!routingExportWarning.empty()) {
+      WarningMessage(routingExportWarning);
+    }
     // add the options string to the end of the vpr options with one whitespace separator
     vpr_options += std::string(" ") + vpr_custom_options_string;
   }
@@ -3214,6 +3251,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "custom", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    const std::string routingExportWarning =
+        routingExportWarningIfAny(vpr_custom_options_string);
+    if (!routingExportWarning.empty()) {
+      WarningMessage(routingExportWarning);
+    }
     // add the options string to the end of the vpr options with one whitespace separator
     command->append(vpr_custom_options_string);
   }
@@ -6111,6 +6153,11 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       // first, trim the entire string to eliminate any extra whitespace in the front and the back
       std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
       vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      const std::string routingExportWarning =
+          routingExportWarningIfAny(vpr_custom_options_string);
+      if (!routingExportWarning.empty()) {
+        WarningMessage(routingExportWarning);
+      }
       // add the options string to the end of the vpr options with one whitespace separator
       vpr_options += std::string(" ") + vpr_custom_options_string;
     }
@@ -11547,6 +11594,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "pack", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    const std::string routingExportWarning =
+        routingExportWarningIfAny(vpr_custom_options_string);
+    if (!routingExportWarning.empty()) {
+      WarningMessage(routingExportWarning);
+    }
     // add the options string to the end of the vpr options with one whitespace separator
     command->append(vpr_custom_options_string);
   }
@@ -11592,6 +11644,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "place", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    const std::string routingExportWarning =
+        routingExportWarningIfAny(vpr_custom_options_string);
+    if (!routingExportWarning.empty()) {
+      WarningMessage(routingExportWarning);
+    }
     // add the options string to the end of the vpr options with one whitespace separator
     command->append(vpr_custom_options_string);
   }
@@ -11642,6 +11699,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
     // first, trim the entire string to eliminate any extra whitespace in the front and the back
     std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "route", "custom_vpr_options_str");
     vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+    const std::string routingExportWarning =
+        routingExportWarningIfAny(vpr_custom_options_string);
+    if (!routingExportWarning.empty()) {
+      WarningMessage(routingExportWarning);
+    }
     // add the options string to the end of the vpr options with one whitespace separator
     command->append(vpr_custom_options_string);
   }
@@ -11736,6 +11798,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
       // first, trim the entire string to eliminate any extra whitespace in the front and the back
       std::string vpr_custom_options_string = QLSettingsManager::getStringValue("vpr", "analysis", "custom_vpr_options_str");
       vpr_custom_options_string = StringUtils::trim(vpr_custom_options_string);
+      const std::string routingExportWarning =
+          routingExportWarningIfAny(vpr_custom_options_string);
+      if (!routingExportWarning.empty()) {
+        WarningMessage(routingExportWarning);
+      }
       // add the options string to the end of the vpr options with one whitespace separator
       vpr_options += std::string(" ") + vpr_custom_options_string;
     }
