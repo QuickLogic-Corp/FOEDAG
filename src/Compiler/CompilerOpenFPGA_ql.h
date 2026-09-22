@@ -372,6 +372,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_OpenFpgaFabricKeyFile = "";
   std::filesystem::path m_OpenFpgaPinMapXml = "";
   std::filesystem::path m_OpenFpgaBitstreamRemappingFile = "";
+  // device-declared bitstream-generation options; see QLDeviceOpenfpgaBitstreamOptions.
+  bool m_OpenFpgaGroupRouting = false;
+  std::string m_OpenFpgaUnusedMuxConfig = "";
   std::filesystem::path m_SBMapsFile = "";
   std::filesystem::path m_SBTemplatesDir = "";
   std::string m_deviceSize;
