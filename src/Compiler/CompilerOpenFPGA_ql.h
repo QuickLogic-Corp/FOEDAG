@@ -262,8 +262,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// ?-catalog <dir>?` (a flag orthogonal to -type, which keeps meaning
   /// source kind + synthesis tool) and reset whenever a design is created. While
   /// active: the place stage emits the authoring inputs (--echo_file on,
-  /// --write_flat_place) and re-packages the IP on every success path of
-  /// Placement() except `place clean` (PackageRpmAuthorProject). The IP
+  /// --write_flat_place, --flat_place_verbosity 2) and re-packages the IP on
+  /// every success path of Placement() except `place clean`
+  /// (PackageRpmAuthorProject). The IP
   /// name IS the project name; REL_MACRO_TYPE derives from it. Session-only
   /// state, stamped with its project: a project switch expires it
   /// (RpmAuthorProjectActive), and re-running create_design re-establishes

@@ -8522,9 +8522,10 @@ bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {
   // The authoring inputs — the flat placement with primitive site paths and
   // the echo files — were produced by the place-stage invocation this call
   // rides on (getPlacementCommand() appends --echo_file on /
-  // --write_flat_place for authoring projects): a real run just wrote them,
-  // and a task-cache skip proved them consistent by the same hash-diff that
-  // allowed the skip. A hand-deleted file fails loudly in the driver.
+  // --write_flat_place / --flat_place_verbosity 2 for authoring projects): a
+  // real run just wrote them, and a task-cache skip proved them consistent by
+  // the same hash-diff that allowed the skip. A hand-deleted file fails loudly
+  // in the driver.
   const std::filesystem::path fplace_filepath =
       project_path / (project_name + "_rpm_author.fplace");
   const std::filesystem::path macros_echo_filepath =
@@ -11605,8 +11606,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
 
   // RPM authoring support: an rpm_ip project's placement run must emit the
   // authoring inputs the packaging hook consumes — the flat placement (with
-  // primitive site paths) and the echo files. Skipped when the user already
-  // passed either option through custom_vpr_options_str above.
+  // primitive site paths) and the echo files. VPR writes each atom's site path
+  // into the flat placement only at --flat_place_verbosity 2 or higher; without
+  // it the packaged IP carries no SITE_PATH and cannot be packed when consumed.
+  // Each option is skipped when the user already passed it through
+  // custom_vpr_options_str above.
   if (RpmAuthorProjectActive()) {
     if (command->string().find("--echo_file") == std::string::npos) {
       command->append("--echo_file on");
@@ -11614,6 +11618,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
     if (command->string().find("--write_flat_place") == std::string::npos) {
       command->append("--write_flat_place " + ProjManager()->projectName() +
                       "_rpm_author.fplace");
+    }
+    if (command->string().find("--flat_place_verbosity") == std::string::npos) {
+      command->append("--flat_place_verbosity 2");
     }
   }
 
