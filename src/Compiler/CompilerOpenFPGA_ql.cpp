@@ -4303,7 +4303,11 @@ bool CompilerOpenFPGA_ql::Packing() {
       // file: DataPath() varies with the install layout, so probe both plausible roots.
       // Deliberately not IPCatalog::getPythonPath() -- that resolves to envs/litex
       // paired with PYTHONHOME, which imports neither module.
+#ifdef _WIN32
+      std::string add_layout_python_exec{"python.exe"};
+#else // _WIN32
       std::string add_layout_python_exec{"python3"};
+#endif // _WIN32
       {
         const std::vector<std::string> probe_args{"-c", "import yaml, lxml.etree"};
         auto can_run = [&probe_args](const std::string& exec) {
@@ -4314,8 +4318,13 @@ bool CompilerOpenFPGA_ql::Packing() {
         if (!can_run(add_layout_python_exec)) {
           const std::filesystem::path data_path =
               GetSession()->Context()->DataPath();
+#ifdef _WIN32
+          const std::filesystem::path bundled_rel =
+              std::filesystem::path("envs") / "python.exe";
+#else // _WIN32
           const std::filesystem::path bundled_rel =
               std::filesystem::path("envs") / "python3.8" / "bin" / "python3";
+#endif // _WIN32
           for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
             const std::filesystem::path candidate =
                 (root / bundled_rel).lexically_normal();
@@ -4330,7 +4339,7 @@ bool CompilerOpenFPGA_ql::Packing() {
               // Both are short. Say so now, naming the modules, rather than letting
               // the traceback below read like a device problem.
               ErrorMessage(
-                  "Neither the system python3 nor the bundled python at " +
+                  "Neither the system " + add_layout_python_exec + " nor the bundled python at " +
                   candidate.string() + " can import 'yaml' and 'lxml.etree', which " +
                   add_layout_script_path.filename().string() +
                   " requires. Layout generation will fail.\n");
