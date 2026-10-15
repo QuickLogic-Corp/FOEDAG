@@ -266,6 +266,9 @@ void Editor::InitScintilla(int iFileType) {
                              QsciScintilla::SC_CP_UTF8);
   m_scintilla->setFolding(QsciScintilla::BoxedTreeFoldStyle);
   m_scintilla->setFoldMarginColors(Qt::gray, Qt::lightGray);
+  // Scintilla's fixed 2000px default scroll width cuts off longer lines
+  m_scintilla->SendScintilla(QsciScintilla::SCI_SETSCROLLWIDTH, 1);
+  m_scintilla->SendScintilla(QsciScintilla::SCI_SETSCROLLWIDTHTRACKING, true);
 }
 
 void Editor::SetScintillaText(QString strFileName) {
