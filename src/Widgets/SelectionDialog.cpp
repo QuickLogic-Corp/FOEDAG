@@ -13,6 +13,7 @@ SelectionDialog::SelectionDialog(const QString& title, const std::set<std::strin
     setWindowTitle(title);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setSizeConstraint(QLayout::SetFixedSize); // Qt6 on X11 opens a parentless dialog at 640x480 otherwise
     setLayout(layout);
 
     for (const auto& item: items) {
