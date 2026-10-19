@@ -164,15 +164,7 @@ bool QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
   return false;
 }
 
-QLDeviceLayoutInfo QLDeviceLayoutInfo::fromCurrentPackingRun(QLDeviceTarget device_target) {
-  return QLDeviceLayoutInfo(device_target, /*packing_is_running_now*/ true);
-}
-
-QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target)
-    : QLDeviceLayoutInfo(device_target, /*packing_is_running_now*/ false) {}
-
-QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target,
-                                       bool packing_is_running_now) {
+QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
   QLDeviceManager* device_manager = QLDeviceManager::getInstance();
   if (device_manager == nullptr) {
     return;
@@ -215,7 +207,7 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target,
     return;
   }
 
-  const bool ok = deferred ? resolveFromAutoDeviceLog(packing_is_running_now)
+  const bool ok = deferred ? resolveFromAutoDeviceLog()
                            : resolveFromDeviceConfig(layout_settings, device_target);
   if (!ok) {
     return;
@@ -380,7 +372,7 @@ bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
   return true;
 }
 
-bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog(bool packing_is_running_now) {
+bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
   // auto_device.log outlives the run that wrote it - a prior session's
   // Packing(), or a design change since, leaves it on disk describing a
   // fabric this session has not actually rebuilt. Trust it only while this
@@ -389,11 +381,8 @@ bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog(bool packing_is_running_now) {
   // Packing has been run this session, Dirty once something upstream
   // invalidates it, Fail, InProgress) means the log's contents are not backed
   // by a Packing run this session can vouch for.
-  //
-  // 'packing_is_running_now' is the caller saying it IS that run: it has just
-  // written the log itself, and the task cannot read Success until it returns.
   Compiler* c = compiler();
-  if (!packing_is_running_now) {
+  {
     TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
     Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
     if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {

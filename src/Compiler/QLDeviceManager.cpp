@@ -1037,6 +1037,13 @@ void QLDeviceManager::parseDeviceData() {
   // shipped with the installation can never be shadowed by an externally installed one.
   for (const std::filesystem::path& root_device_data_dir_path : root_device_data_dir_path_list) {
 
+  // The four nested walks below take an error_code on construction only, so their operator++
+  // still throws if an entry disappears between readdir and the descend - reachable whenever
+  // a scan races installDevice or uninstallDevice, both of which remove_all a device tree.
+  // Catching per root gives that the same outcome the REQ-007 path below already chooses for
+  // an unreadable root: warn, skip it, carry on. Without it the throw kills the process.
+  try {
+
   // look at the directories inside the device_data_dir_path for 'family' entries
   // NOTE: the error_code overload is required here - a registered root that has been
   // deleted or made unreadable must warn and be skipped, never abort startup (REQ-007).
@@ -1142,6 +1149,16 @@ void QLDeviceManager::parseDeviceData() {
     }
   }
 
+  }
+  catch (const std::filesystem::filesystem_error& e) {
+    // Name the root and the error: a root that silently drops out of the scan is the
+    // "why is my flow using the wrong device data?" failure these walks warn about
+    // elsewhere. The next parseDeviceData() picks it up again if the cause was transient.
+    std::cout << "WARNING: skipping device data root after filesystem error: "
+              << root_device_data_dir_path.string() << " (" << e.what() << ")" << std::endl;
+    continue;
+  }
+
   } // for each device_data root
 
 
@@ -1218,15 +1235,31 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
   // [2][a] search for all vpr.xml/openfpga.xml files, and check the dir paths:
   std::vector<std::filesystem::path> vpr_xml_files;
   std::vector<std::filesystem::path> openfpga_xml_files;
-  for (const std::filesystem::directory_entry& dir_entry :
-      std::filesystem::recursive_directory_iterator(device_data_dir_path_c,
-                                                    std::filesystem::directory_options::skip_permission_denied,
-                                                    ec)) {
+  // increment(ec) rather than a range-for: the constructor's error_code overload does not
+  // cover operator++, so a range-for throws filesystem_error the moment an entry vanishes
+  // between readdir and the descend. installDevice and uninstallDevice both remove_all a
+  // device tree, and a root can be mutated by anything else on the machine, so a scan racing
+  // a removal is reachable. No frame between here and main() catches filesystem_error.
+  std::filesystem::recursive_directory_iterator dir_it(
+      device_data_dir_path_c,
+      std::filesystem::directory_options::skip_permission_denied,
+      ec);
+  if(ec) {
+    std::cout << std::string("failed listing contents of ") +
+                            device_data_dir_path_c.string() << std::endl;
+    return device_variants;
+  }
+  const std::filesystem::recursive_directory_iterator dir_end;
+  for (; dir_it != dir_end; dir_it.increment(ec)) {
+    // Fail closed. A truncated walk yields a partial XML list, which presents downstream as a
+    // device with corners silently missing rather than as an error.
     if(ec) {
-      std::cout << std::string("failed listing contents of ") +
-                              device_data_dir_path_c.string() << std::endl;
+      std::cout << std::string("failed walking ") + device_data_dir_path_c.string() +
+                              ": " + ec.message() << std::endl;
       return device_variants;
     }
+
+    const std::filesystem::directory_entry& dir_entry = *dir_it;
 
     if(dir_entry.is_regular_file(ec)) {
 
@@ -1360,26 +1393,6 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
   return device_variants;
 }
 
-
-std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
-    std::string family,
-    std::string foundry,
-    std::string node,
-    std::string devicename) {
-
-  // get to the device_data dir path of the root that owns THIS device (falls back to the
-  // first root when the device is not in device_list yet)
-  std::filesystem::path root_device_data_dir_path =
-     deviceTypeRootDirPath(family, foundry, node, devicename);
-
-  // calculate the device_data dir path for specified device
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
-  // std::cout << "device_data dir: " + device_data_dir_path.string() << std::endl;
-
-  // query the variants from this path:
-  return listDeviceVariantsInDeviceDirectory(family, foundry, node, devicename, device_data_dir_path);
-
-}
 
 
 std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std::string family,
@@ -6385,10 +6398,14 @@ bool QLDeviceManager::parseLayoutDimension(const std::string& value, long& out_v
 // Does the override ask for the fabric the device ALREADY HAS?
 //
 // REQ-005 refuses a re-shape that was actually requested. An override naming the
-// geometry already in the package requests nothing, and that is not a corner
-// case: the flow stamps every device it generates 'DEVICE_TYPE': 'FIXED', so on
-// the next run the very custom_layout.yml that shaped it is still beside the
-// project and lands on the gate (aurora2#2291).
+// geometry already in the package requests nothing, so refusing it would fail a
+// run that asked for the fabric it already has.
+//
+// The original driver (aurora2#2291 - the flow stamped its own generated devices
+// 'DEVICE_TYPE': 'FIXED', so the yml that shaped one was still beside the project
+// on the next run) is gone with the generated package (aurora2#2506). What remains
+// is a shipped FIXED part whose config geometry matches the user's yml, which
+// REQ-005's own wording says must not fail.
 //
 // Compared in the DEVICE CONFIG's space on both sides. The yml's keys and the
 // config's keys are the same keys - add_layout.py reads 'ARRAY_X' / 'BRAM_COLS'
