@@ -45,6 +45,7 @@ extern "C" {
 #include "CommandLine.h"
 #include "Compiler/Log.h"
 #include "Foedag.h"
+#include "GuiTestCommands.h"
 #include "IpConfigurator/IpConfigWidget.h"
 #include "Main/Tasks.h"
 #include "Main/WidgetFactory.h"
@@ -218,6 +219,9 @@ void registerBasicGuiCommands(FOEDAG::Session* session) {
 
   session->TclInterp()->registerCmd("show_about", show_about,
                                     GlobalSession->MainWindow(), nullptr);
+
+  if (!session->CmdLine()->GuiTestScript().empty())
+    FOEDAG::registerGuiTestCommands(session->TclInterp());
 }
 
 void registerBasicBatchCommands(FOEDAG::Session* session) {

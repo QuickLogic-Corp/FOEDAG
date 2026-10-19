@@ -76,6 +76,11 @@ test/unittest-coverage: run-cmake-coverage
 	cmake --build coverage-build --target unittest -j $(CPU_CORES)
 	pushd coverage-build && $(XVFB) tests/unittest/unittest && popd
 
+# Device-free GUI scenarios (replay mode, offscreen; no display needed).
+test/gui-scenarios: run-cmake-release
+	cmake --build build --target foedag-bin -j $(CPU_CORES)
+	GUI_SCENARIOS_OUT=$(CURDIR)/build/gui-scenarios tests/GuiScenarios/run_scenarios.sh build/bin/aurora
+
 coverage-build/foedag.coverage: test/unittest-coverage
 	lcov --no-external --exclude "*_test.cpp" --capture --directory coverage-build/CMakeFiles/foedag.dir --base-directory src --output-file coverage-build/foedag.coverage
 

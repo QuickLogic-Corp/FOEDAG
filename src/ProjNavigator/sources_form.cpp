@@ -572,6 +572,7 @@ void SourcesForm::CreateActions() {
           &SourcesForm::SlotWaveForm);
 
   m_actProjectSettings = new QAction(tr("Project settings"), m_treeSrcHierachy);
+  m_actProjectSettings->setObjectName("actionProjectSettings");
   connect(m_actProjectSettings, &QAction::triggered, this,
           &SourcesForm::OpenProjectSettings);
 
