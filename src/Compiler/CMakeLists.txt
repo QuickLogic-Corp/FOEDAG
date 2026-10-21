@@ -83,6 +83,7 @@ set (SRC_CPP_LIST
   QLDeviceManager.cpp
   QLDeviceLayoutInfo.cpp
   QLDevicePath.cpp
+  PrivateTempDir.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   BlifParser.cpp
@@ -122,6 +123,7 @@ set (SRC_H_INSTALL_LIST
   TaskGlobal.h
   QLDeviceManager.h
   QLDeviceLayoutInfo.h
+  PrivateTempDir.h
   QLDevicePath.h
   QLSettingsManager.h
   QLMetricsManager.h
