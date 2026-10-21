@@ -1,12 +1,28 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "aurora --replay", one run dir each.
-# usage: run_scenarios.sh <aurora> [scenario.tcl ...]   (default: all here)
+# usage: [AURORA=<binary>] run_scenarios.sh [--show] [scenario.tcl ...]
+#   AURORA: the aurora to run (default: aurora on PATH); no scenarios: all here
+#   --show: use the platform's own Qt display instead of offscreen, to watch the run
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
 # if aurora exits non-zero and its FAIL line contains every expected text.
 set -u
 
-aurora=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
-shift
+platform=(env QT_QPA_PLATFORM=offscreen)
+if [ "${1:-}" = "--show" ]; then
+  shift
+  if [ "$(uname)" = Linux ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    echo "[error] --show needs a display; DISPLAY and WAYLAND_DISPLAY are unset" >&2
+    exit 1
+  fi
+  platform=(env -u QT_QPA_PLATFORM)
+fi
+
+aurora=${AURORA:-$(command -v aurora)} || {
+  echo "[error] no aurora on PATH; set AURORA=<binary>" >&2
+  exit 1
+}
+aurora=$(cd "$(dirname "$aurora")" && pwd)/$(basename "$aurora")
+echo "aurora: $aurora"
 here=$(cd "$(dirname "$0")" && pwd)
 if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
 out=${GUI_SCENARIOS_OUT:-$PWD/gui-scenarios}
@@ -28,7 +44,7 @@ for scenario in "$@"; do
   : > "$dir/eula/AURORA_EULA_ACCEPTED.txt"
   (cd "$dir" &&
     AURORA_IMAGE_DOCKER_SCRIPTS_DIR="$dir/eula" XDG_CONFIG_HOME="$dir/config" \
-      QT_QPA_PLATFORM=offscreen $limit "$aurora" --replay "$scenario" \
+      "${platform[@]}" $limit "$aurora" --replay "$scenario" \
       > "$dir/replay.log" 2>&1)
   rc=$?
 

@@ -5,8 +5,12 @@ device data, so they run in FOEDAG's own CI.
 
 ```
 make test/gui-scenarios                      # build, then run every scenario
-tests/GuiScenarios/run_scenarios.sh build/bin/aurora console_puts.tcl
+AURORA=build/bin/aurora tests/GuiScenarios/run_scenarios.sh tests/GuiScenarios/console_puts.tcl
+AURORA=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --show   # watch them
 ```
+
+`--show` uses the platform's own display instead of the offscreen one. Sync
+scripts run without delays, so the window passes quickly.
 
 Each scenario runs in its own directory under `build/gui-scenarios/<name>/`,
 with its log in `replay.log`.
