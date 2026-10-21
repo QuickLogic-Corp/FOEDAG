@@ -51,7 +51,7 @@ class Project : public QObject {
   QString m_projectName;
   QString m_projectPath;
 
-  ProjectConfiguration *m_projectConfig;
+  ProjectConfiguration *m_projectConfig{nullptr};
   std::unique_ptr<CompilerConfiguration> m_compilerConfig;
   std::unique_ptr<CompilerConfiguration> m_simulationConfig;
   std::unique_ptr<IpConfiguration> m_ipConfig;

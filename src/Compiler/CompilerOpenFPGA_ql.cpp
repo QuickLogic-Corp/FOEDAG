@@ -56,6 +56,7 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/PrivateTempDir.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -104,8 +105,19 @@ static inline void initPowerCalcResource() {
 
 //#define USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
 
+// Where floorplanning writes the per-design repack constraints when the device's
+// template is encrypted: a fixed name in this process's private directory, so
+// FinishOpenFPGAScript can find it. Empty if that directory cannot be created.
+static std::filesystem::path privateRepackConstraintsPath(const std::string& projectName) {
+  const std::filesystem::path dir = PrivateTempDir::path();
+  return dir.empty() ? dir : dir / (projectName + "_repack_design_constraint.xml");
+}
+
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
 {
+  // Decrypted files of an Aurora that was cancelled or killed outlive it; remove them now.
+  std::error_code tmp_ec;
+  PrivateTempDir::sweepStale(std::filesystem::temp_directory_path(tmp_ec));
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
     std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
     m_taskCompilationStateManager.setProjectPath(projectPath);
@@ -128,6 +140,7 @@ void CompilerOpenFPGA_ql::Version(std::ostream* out) {
 
 CompilerOpenFPGA_ql::~CompilerOpenFPGA_ql() {
   CleanTempFiles();
+  PrivateTempDir::removeOwn();
 }
 
 // True when `p` equals `base` or lies underneath it. Component-wise (via
@@ -6852,8 +6865,14 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::filesystem::path generated_repack_constraints =
       std::filesystem::path(ProjManager()->projectPath()) /
       (ProjManager()->projectName() + "_repack_design_constraint.xml");
+  const std::filesystem::path private_repack_constraints =
+      privateRepackConstraintsPath(ProjManager()->projectName());
   std::filesystem::path repack_constraints_file;
-  if (FileUtils::FileExists(generated_repack_constraints)) {
+  if (!private_repack_constraints.empty() &&
+      FileUtils::FileExists(private_repack_constraints)) {
+    repack_constraints_file = private_repack_constraints;
+  }
+  else if (FileUtils::FileExists(generated_repack_constraints)) {
     repack_constraints_file = generated_repack_constraints;
   }
   else if (!m_OpenFpgaRepackConstraintsFile.empty()) {
@@ -8300,12 +8319,20 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // delete a file the user supplied.
   std::error_code repack_remove_ec;
   fs::remove(repack_constraints_out, repack_remove_ec);
+  const std::filesystem::path repack_constraints_private =
+      privateRepackConstraintsPath(ProjManager()->projectName());
+  if (!repack_constraints_private.empty()) {
+    fs::remove(repack_constraints_private, repack_remove_ec);
+  }
 
   std::filesystem::path repack_constraints_in =
       QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile(
           QLDeviceTarget(), /*device_only*/ true, /*report_missing*/ false);
   if (!repack_constraints_in.empty()) {
     if (QLDeviceManager::getInstance()->deviceFileIsEncrypted(repack_constraints_in)) {
+      // The output then carries the decrypted template, so it stays private
+      // (REQ-130); a plaintext device keeps it in the project as before.
+      repack_constraints_out = repack_constraints_private;
       std::filesystem::path repack_constraints_en_path = repack_constraints_in;
       repack_constraints_in = GenerateTempFilePath();
       if (!decryptDeviceFile(repack_constraints_en_path, repack_constraints_in,
@@ -8909,49 +8936,18 @@ std::pair<std::filesystem::path, std::string> CompilerOpenFPGA_ql::findCurrentDe
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOutside) {
-
-    // remember where we are
-    std::filesystem::path current_path = std::filesystem::current_path();
-
-    // get a guaranteed temp directory
-    std::filesystem::path temp_dir_path = std::filesystem::temp_directory_path();
-
-    // change to the temp directory before generating a temp file name
-    std::filesystem::current_path(temp_dir_path);
-
-    // generate a temp file path in the system temp directory
-    std::filesystem::path temp_file_path;
-#if defined(_WIN32)
-    // in windows, the tmpnam only generates the file name (with a '\' in the front), and we need to append this
-    // to the temp_directory_path() to make a complete path.
-    std::string temp_file_path_str = std::tmpnam(nullptr);
-    // convert the string into a std::filesystem::path
-    temp_file_path = temp_file_path_str;
-    // tmpnam() returns a filepath that starts with a '\' and is hence an absolute path
-    // using the '/' operator with 2 absolute paths, results in replacement, than append!
-    // https://stackoverflow.com/questions/55214156/why-does-stdfilesystempathappend-replace-the-current-path-if-p-starts-with
-    // hence, we should convert the temp_file_path into a relative path first, and then
-    // append it to the temp_dir_path to get the absolute path we need on Windows.
-    temp_file_path = temp_file_path.relative_path();
-    temp_file_path = temp_dir_path / temp_file_path;
-#else // #if defined(_WIN32)
-    // in linux, the tmpnam generates the file path including the current dir path
-    // so, we can use this as the final path as is.
-    std::string temp_file_path_str = std::tmpnam(nullptr);
-    temp_file_path = temp_file_path_str;
-#endif // #if defined(_WIN32)
-
-    // change back to the original path we came from
-    std::filesystem::current_path(current_path);
-
-    // add to our cleanup list
+    // Decrypted device files land here, so never in the shared temp directory: a
+    // name in this process's private directory, or empty (the caller's decrypt then
+    // fails) when that directory cannot be created.
+    std::filesystem::path temp_file_path = PrivateTempDir::newFile();
+    if (temp_file_path.empty()) {
+      ErrorMessage("cannot create a private temporary directory under " +
+                   std::filesystem::temp_directory_path().string());
+      return temp_file_path;
+    }
     if (!managedOutside) {
       m_TempFileList.push_back(temp_file_path);
     }
-
-    //std::cout << "generate tmp file" << temp_file_path << " managedOutside=" << managedOutside << " total tmp files num=" <<  m_TempFileList.size() << std::endl;
-
-    // return the temp file path we obtained
     return temp_file_path;
 }
 
@@ -9001,18 +8997,13 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
     return false;
   }
 
-  std::ofstream out(dst_plain, std::ios::binary);
-  if (!out) {
+  // Owner-only whatever the umask, and every write checked: a short write (ENOSPC)
+  // must fail here rather than hand the tools a truncated device file.
+  if (!PrivateTempDir::writePrivate(dst_plain, plaintext)) {
     ErrorMessage(std::string("cannot write decrypted output: ") + dst_plain.string());
     return false;
   }
-  out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
-  // Close before testing the stream: an ofstream flushes on destruction, so
-  // returning out.good() while it is still open reports a write that failed at
-  // flush time (ENOSPC on a full disk) as success, leaving the caller to use a
-  // truncated device file.
-  out.close();
-  return out.good();
+  return true;
 }
 
 
