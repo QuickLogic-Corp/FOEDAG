@@ -23,16 +23,19 @@ class ProjectFileLoaderTest : public ::testing::Test {
  protected:
   void SetUp() override {
     Project::Instance()->InitProject();
-    for (size_t i = 0; i < spies.size(); ++i)
-      loader.registerComponent(&spies[i], static_cast<ComponentId>(i));
+    // The loader owns and deletes its components.
+    for (size_t i = 0; i < spies.size(); ++i) {
+      spies[i] = new SpyComponent;
+      loader.registerComponent(spies[i], static_cast<ComponentId>(i));
+    }
   }
   void TearDown() override { Project::Instance()->InitProject(); }
   int savedTotal() const {
     int n = 0;
-    for (const auto& s : spies) n += s.saved;
+    for (const auto* s : spies) n += s->saved;
     return n;
   }
-  std::array<SpyComponent, static_cast<size_t>(ComponentId::Count)> spies;
+  std::array<SpyComponent*, static_cast<size_t>(ComponentId::Count)> spies{};
   ProjectFileLoader loader{Project::Instance()};
 };
 
