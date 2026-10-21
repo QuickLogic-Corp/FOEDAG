@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <mutex>
 #include <random>
@@ -118,6 +119,9 @@ fs::path PrivateTempDir::path() {
   if (dir.empty() || !fs::is_directory(dir)) {
     std::error_code ec;
     dir = createIn(fs::temp_directory_path(ec));
+    // Batch runs end in exit(), which skips the compiler's destructor.
+    static const bool registered = std::atexit([] { PrivateTempDir::removeOwn(); }) == 0;
+    (void)registered;
   }
   return dir;
 }
