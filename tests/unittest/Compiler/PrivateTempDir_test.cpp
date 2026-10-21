@@ -121,6 +121,44 @@ TEST_F(PrivateTempDirTest, SweepRemovesOnlyDirectoriesOfDeadProcesses) {
 }
 #endif
 
+#ifndef _WIN32
+// `aurora --batch --script` ends with exit(), which runs no destructors; the
+// directory must still go. A process that dies without exit handlers leaves it for
+// the next start's sweep.
+static int privateDirsIn(const fs::path& base) {
+  int n = 0;
+  for (const auto& e : fs::directory_iterator(base))
+    if (PrivateTempDir::ownerPid(e.path().filename().string()) >= 0) ++n;
+  return n;
+}
+
+static void childCreatesDirThen(const fs::path& base, bool runExitHandlers) {
+  const pid_t child = ::fork();
+  if (child == 0) {
+    ::setenv("TMPDIR", base.c_str(), 1);
+    const fs::path dir = PrivateTempDir::path();
+    if (dir.empty() || dir.parent_path() != base) ::_exit(2);
+    if (runExitHandlers) std::exit(0);
+    ::_exit(0);
+  }
+  int status = 0;
+  ::waitpid(child, &status, 0);
+  ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+
+TEST_F(PrivateTempDirTest, ExitRemovesTheDirectory) {
+  childCreatesDirThen(base, /*runExitHandlers*/ true);
+  EXPECT_EQ(privateDirsIn(base), 0);
+}
+
+TEST_F(PrivateTempDirTest, DeathWithoutExitHandlersLeavesItForTheSweep) {
+  childCreatesDirThen(base, /*runExitHandlers*/ false);
+  EXPECT_EQ(privateDirsIn(base), 1);
+  EXPECT_EQ(PrivateTempDir::sweepStale(base), 1);
+  EXPECT_EQ(privateDirsIn(base), 0);
+}
+#endif
+
 TEST_F(PrivateTempDirTest, SweepOfAMissingBaseIsHarmless) {
   EXPECT_EQ(PrivateTempDir::sweepStale(base / "does-not-exist"), 0);
 }
