@@ -6032,11 +6032,11 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     // route and analysis stages together
     std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
-    std::string taCommand = base_vpr_command + " --route --analysis --disp on";
+    std::string taCommand = base_vpr_command + " --route --analysis --disp on --graphics_pause final_stage";
 #else // #ifdef _WIN32
     std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY(current_device_sta);
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
-    std::string taCommand = base_vpr_command + " --analysis --disp on";
+    std::string taCommand = base_vpr_command + " --analysis --disp on --graphics_pause final_stage";
 #endif // #ifdef _WIN32
 
     if(!profile.empty()){
@@ -11695,10 +11695,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
     taCommand->append("--route");
     taCommand->append("--analysis");
     taCommand->append("--disp", "on");
+    taCommand->append("--graphics_pause", "final_stage");
 #else // #ifdef _WIN32
     CommandWrapperPtr taCommand = BaseVprCommand(current_device_sta);
     taCommand->append("--analysis");
     taCommand->append("--disp", "on");
+    taCommand->append("--graphics_pause", "final_stage");
     // Under non-WIN32(because we always add for WIN32 anyway), if the STA target device variant is different from the target 
     // device variant for PnR, **AND** flat_routing is enabled, then vpr throws an error
     // due to mismatch in switch blocks, which needs to be fixed yet.
