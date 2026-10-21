@@ -51,6 +51,7 @@ set (CPP_LIST
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     Compiler/PrivateTempDir_test.cpp
+    ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
