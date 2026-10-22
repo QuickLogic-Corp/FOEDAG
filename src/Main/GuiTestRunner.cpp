@@ -27,6 +27,7 @@ extern "C" {
 #include <QApplication>
 #include <QEventLoop>
 #include <QFile>
+#include <QKeyEvent>
 #include <QTextStream>
 #include <QTimer>
 #include <QWidget>
@@ -37,6 +38,46 @@ extern "C" {
 
 
 namespace FOEDAG {
+
+GuiTestSpaceGate::GuiTestSpaceGate(int timeoutMs, QObject *parent)
+    : QObject(parent), m_timeoutMs(timeoutMs) {
+  qApp->installEventFilter(this);
+}
+
+void GuiTestSpaceGate::arm() {
+  m_armed = true;
+  m_open = false;
+  m_armedFor.start();
+}
+
+bool GuiTestSpaceGate::isOpen() const {
+  return m_open ||
+         (m_armed && m_timeoutMs >= 0 && m_armedFor.elapsed() >= m_timeoutMs);
+}
+
+bool GuiTestSpaceGate::eventFilter(QObject *watched, QEvent *event) {
+  const QEvent::Type type = event->type();
+  if (type != QEvent::KeyPress && type != QEvent::KeyRelease)
+    return QObject::eventFilter(watched, event);
+  auto key = static_cast<QKeyEvent *>(event);
+  if (key->key() != Qt::Key_Space || key->modifiers() != Qt::NoModifier)
+    return QObject::eventFilter(watched, event);
+  if (type == QEvent::KeyPress && m_armed) {
+    if (!key->isAutoRepeat()) {
+      m_armed = false;
+      m_open = true;
+      m_swallowRelease = true;
+    }
+    return true;
+  }
+  // The release of the Space that opened the gate would otherwise click a
+  // button that has focus.
+  if (type == QEvent::KeyRelease && m_swallowRelease) {
+    if (!key->isAutoRepeat()) m_swallowRelease = false;
+    return true;
+  }
+  return QObject::eventFilter(watched, event);
+}
 
 GuiTestRunner *GuiTestRunner::instance() {
   static GuiTestRunner *runner = new GuiTestRunner;
@@ -91,6 +132,19 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
     fail(QString("%1:%2: incomplete command").arg(file).arg(pendingLine));
 
   qApp->installEventFilter(this);
+  if (qEnvironmentVariableIntValue("AURORA_GUI_INTERACTIVE") == 1) {
+    bool ok{false};
+    int timeoutMs =
+        qEnvironmentVariableIntValue("AURORA_GUI_INTERACTIVE_TIMEOUT", &ok);
+    if (!ok || timeoutMs < 0) timeoutMs = -1;
+    m_gate = new GuiTestSpaceGate(timeoutMs, this);
+    std::cout << "Interactive mode: press Space in an aurora window to run "
+                 "each line"
+              << (timeoutMs >= 0 ? ", or wait " + std::to_string(timeoutMs) +
+                                      " ms"
+                                : std::string{})
+              << "." << std::endl;
+  }
   scheduleStep(0);
 
   QEventLoop loop;
@@ -104,6 +158,24 @@ bool GuiTestRunner::canRunNext() const {
   // open. Once it closes, that line must return first.
   const QWidget *modal = m_running.last().modal;
   return modal && modal->isVisible();
+}
+
+// Interactive mode: announces the next line once, then holds it until Space.
+// Before any window is shown there is nowhere to press Space, so no hold.
+bool GuiTestRunner::holdForSpace() {
+  if (!m_gate) return false;
+  if (m_announced != m_next) {
+    m_announced = m_next;
+    const Command &command = m_commands.at(m_next);
+    std::cout << "NEXT " << command.line << ": " << command.text.toStdString()
+              << std::endl;
+    m_gate->arm();
+  }
+  bool windowShown = false;
+  for (QWidget *w : QApplication::topLevelWidgets())
+    windowShown = windowShown || (w->isVisible() && w->windowType() != Qt::Popup &&
+                                  w->windowType() != Qt::ToolTip);
+  return windowShown && !m_gate->isOpen();
 }
 
 void GuiTestRunner::scheduleStep(int delayMs) {
@@ -122,6 +194,10 @@ void GuiTestRunner::step() {
     const QWidget *modal = m_running.last().modal;
     fail(QString("script ended while dialog '%1' (%2) is open")
              .arg(modal->windowTitle(), modal->objectName()));
+  }
+  if (holdForSpace()) {
+    scheduleStep(kHeldPollMs);
+    return;
   }
   const int index = m_next++;
   m_running.append(Frame{index, {}});

@@ -54,6 +54,7 @@ set (CPP_LIST
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
     Main/GuiTestHub_test.cpp
+    Main/GuiTestRunner_test.cpp
 
 )
 

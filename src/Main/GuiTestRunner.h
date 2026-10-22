@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <QElapsedTimer>
 #include <QObject>
 #include <QPointer>
 #include <QVector>
@@ -28,6 +29,29 @@ struct Tcl_Interp;
 class QWidget;
 
 namespace FOEDAG {
+
+// Interactive mode's pause: once armed, it opens on the next Space pressed in
+// any window and swallows that Space, so it never reaches the focused widget.
+// With a timeout (ms; -1 waits for Space only) it also opens once that time
+// has passed.
+class GuiTestSpaceGate : public QObject {
+  Q_OBJECT
+
+ public:
+  explicit GuiTestSpaceGate(int timeoutMs = -1, QObject *parent = nullptr);
+  void arm();
+  bool isOpen() const;
+
+ protected:
+  bool eventFilter(QObject *watched, QEvent *event) override;
+
+ private:
+  int m_timeoutMs{-1};
+  QElapsedTimer m_armedFor;
+  bool m_armed{false};
+  bool m_open{false};
+  bool m_swallowRelease{false};
+};
 
 // Runs a "# gui-test: sync" replay script one Tcl command at a time. It is
 // driven by a QTimer rather than Tcl "after", so lines also run inside the
@@ -72,8 +96,10 @@ class GuiTestRunner : public QObject {
 
   GuiTestRunner() = default;
   static constexpr int kBlockedPollMs = 5;
+  static constexpr int kHeldPollMs = 20;
 
   bool canRunNext() const;
+  bool holdForSpace();
   void scheduleStep(int delayMs);
   void step();
   [[noreturn]] void finish(int code);
@@ -83,6 +109,8 @@ class GuiTestRunner : public QObject {
   QVector<Command> m_commands;
   int m_next{0};
   QVector<Frame> m_running;  // innermost last
+  GuiTestSpaceGate *m_gate{nullptr};  // set in interactive mode
+  int m_announced{-1};               // last index printed as NEXT
 };
 
 }  // namespace FOEDAG

@@ -1,21 +1,37 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "aurora --replay", one run dir each.
-# usage: [AURORA=<binary>] run_scenarios.sh [--show] [scenario.tcl ...]
+# usage: [AURORA=<binary>] run_scenarios.sh [--show | --interactive [--timeout ms]] [scenario.tcl ...]
 #   AURORA: the aurora to run (default: aurora on PATH); no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
+#   --interactive: as --show, and run each line only after Space is pressed
+#     --timeout ms: or once a line has waited that long (default -1: wait for Space)
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
 # if aurora exits non-zero and its FAIL line contains every expected text.
 set -u
 
 platform=(env QT_QPA_PLATFORM=offscreen)
-if [ "${1:-}" = "--show" ]; then
-  shift
-  if [ "$(uname)" = Linux ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-    echo "[error] --show needs a display; DISPLAY and WAYLAND_DISPLAY are unset" >&2
-    exit 1
-  fi
-  platform=(env -u QT_QPA_PLATFORM)
-fi
+interactive=0
+case "${1:-}" in
+  --show | --interactive)
+    [ "$1" = --interactive ] && interactive=1
+    if [ "$(uname)" = Linux ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+      echo "[error] $1 needs a display; DISPLAY and WAYLAND_DISPLAY are unset" >&2
+      exit 1
+    fi
+    shift
+    hold_timeout=-1
+    if [ $interactive -eq 1 ] && [ "${1:-}" = "--timeout" ]; then
+      case "${2:-}" in
+        -1) ;;
+        '' | *[!0-9]*) echo "[error] --timeout needs milliseconds, or -1" >&2; exit 1 ;;
+      esac
+      hold_timeout=$2
+      shift 2
+    fi
+    platform=(env -u QT_QPA_PLATFORM AURORA_GUI_SHOW=1 AURORA_GUI_INTERACTIVE=$interactive
+      AURORA_GUI_INTERACTIVE_TIMEOUT=$hold_timeout)
+    ;;
+esac
 
 aurora=${AURORA:-$(command -v aurora)} || {
   echo "[error] no aurora on PATH; set AURORA=<binary>" >&2
@@ -28,8 +44,11 @@ if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
 out=${GUI_SCENARIOS_OUT:-$PWD/gui-scenarios}
 mkdir -p "$out"
 
+# A paused interactive session must not be killed by the time limit.
 limit=""
-if command -v timeout >/dev/null 2>&1; then limit="timeout 300"; fi
+if [ $interactive -eq 0 ] && command -v timeout >/dev/null 2>&1; then
+  limit="timeout 300"
+fi
 
 passed=0
 failed=0
@@ -44,8 +63,9 @@ for scenario in "$@"; do
   : > "$dir/eula/AURORA_EULA_ACCEPTED.txt"
   (cd "$dir" &&
     AURORA_IMAGE_DOCKER_SCRIPTS_DIR="$dir/eula" XDG_CONFIG_HOME="$dir/config" \
-      "${platform[@]}" $limit "$aurora" --replay "$scenario" \
-      > "$dir/replay.log" 2>&1)
+      "${platform[@]}" $limit "$aurora" --replay "$scenario" 2>&1 |
+      if [ $interactive -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
+    exit "${PIPESTATUS[0]}")
   rc=$?
 
   fail_line=$(grep -m1 '^FAIL: ' "$dir/replay.log")

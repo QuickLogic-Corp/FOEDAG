@@ -7,10 +7,18 @@ device data, so they run in FOEDAG's own CI.
 make test/gui-scenarios                      # build, then run every scenario
 AURORA=build/bin/aurora tests/GuiScenarios/run_scenarios.sh tests/GuiScenarios/console_puts.tcl
 AURORA=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --show   # watch them
+AURORA=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --interactive tests/GuiScenarios/console_puts.tcl
 ```
 
 `--show` uses the platform's own display instead of the offscreen one. Sync
 scripts run without delays, so the window passes quickly.
+
+`--interactive` also prints `NEXT <line>: <command>` before each line and runs
+it only when you press Space in an aurora window. That Space is not passed on
+to the GUI, so it never presses a focused button. There is no time limit.
+`--interactive --timeout <ms>` also runs a waiting line after that time, to
+watch a script at a set pace. Without `--timeout` (or with -1) it waits for
+Space only.
 
 Each scenario runs in its own directory under `build/gui-scenarios/<name>/`,
 with its log in `replay.log`.
