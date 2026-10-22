@@ -390,3 +390,33 @@ TEST_F(TaskCompilationStateManagerTest, directory_input_detects_new_file) {
   recheck->appendPath("--srcdir", srcDir);
   EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
+
+// Call sites reach the C++ cache through IncrementalBackend; a task without a
+// profile and one with an empty profile share one entry, as before the interface.
+TEST_F(TaskCompilationStateManagerTest, backend_interface_keeps_profile_keys) {
+  ScopedFile src{inProject("a.v"), "module a; endmodule"};
+
+  std::unique_ptr<IncrementalBackend> owned =
+      std::make_unique<CppBackend>(&m_compiler);
+  IncrementalBackend& backend = *owned;
+  backend.setProjectPath(m_projectDir);
+
+  auto command = std::make_shared<CommandWrapper>("vpr");
+  command->appendPath("--net", src.filePath());
+  EXPECT_TRUE(backend.isEmpty());
+  backend.storeTaskCommand(2, command);
+  EXPECT_FALSE(backend.isEmpty());
+  EXPECT_FALSE(backend.isCompilationRequired(2, command));
+  EXPECT_FALSE(backend.isCompilationRequired(2, "", command));
+  EXPECT_TRUE(backend.isCompilationRequired(2, "fast", command));
+
+  backend.storeTaskCommand(3, "fast", command);
+  EXPECT_FALSE(backend.isCompilationRequired(3, "fast", command));
+  EXPECT_TRUE(backend.isCompilationRequired(3, command));
+
+  backend.clear();
+  EXPECT_TRUE(backend.isEmpty());
+  EXPECT_TRUE(backend.isCompilationRequired(2, command));
+  EXPECT_FALSE(
+      std::filesystem::exists(m_projectDir / COMPILATION_CACHE_FILENAME));
+}

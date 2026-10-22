@@ -395,7 +395,8 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
-  TaskCompilationStateManager m_taskCompilationStateManager;
+  std::unique_ptr<IncrementalBackend> m_incrementalBackend;
+  IncrementalBackend& backend() const { return *m_incrementalBackend; }
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
