@@ -50,8 +50,8 @@ jobs:
         run: |
           set -euo pipefail
           cd aurora2
-          git config user.name  "aurora-tabbycad-automation-bot[bot]"
-          git config user.email "aurora-tabbycad-automation-bot[bot]@users.noreply.github.com"
+          git config user.name  "aurora-automation-bot[bot]"
+          git config user.email "294165865+aurora-automation-bot[bot]@users.noreply.github.com"
 
           cur=$(git ls-tree HEAD foedag/foedag-gh | awk '{print $3}')
           echo "aurora2 master foedag pin: current=$cur  new=$NEW"
