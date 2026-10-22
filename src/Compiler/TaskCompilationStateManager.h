@@ -168,4 +168,21 @@ private:
 
 using TaskCompilationStateManager = CppBackend;
 
+// The flow engine's decision (AURORA_INCREMENTAL=engine). A stub until the engine
+// client exists: it never skips a task and records nothing.
+class EngineBackend : public IncrementalBackend {
+public:
+  using IncrementalBackend::isCompilationRequired;
+  using IncrementalBackend::storeTaskCommand;
+
+  bool isCompilationRequired(int, const std::string&, const CommandWrapperPtr&) const override {
+    return true;
+  }
+  void storeTaskCommand(int, const std::string&, const CommandWrapperPtr&) override {}
+  bool isEmpty() const override { return true; }
+  void clear() override {}
+  void load() override {}
+  void setProjectPath(const std::filesystem::path&) override {}
+};
+
 }  // namespace FOEDAG

@@ -420,3 +420,28 @@ TEST_F(TaskCompilationStateManagerTest, backend_interface_keeps_profile_keys) {
   EXPECT_FALSE(
       std::filesystem::exists(m_projectDir / COMPILATION_CACHE_FILENAME));
 }
+
+// Until the engine client exists the engine backend can never skip a task, and
+// it writes nothing to the project.
+TEST_F(TaskCompilationStateManagerTest, engine_backend_stub_always_runs) {
+  ScopedFile src{inProject("a.v"), "module a; endmodule"};
+
+  std::unique_ptr<IncrementalBackend> owned = std::make_unique<EngineBackend>();
+  IncrementalBackend& backend = *owned;
+  backend.setProjectPath(m_projectDir);
+  backend.load();
+
+  auto command = std::make_shared<CommandWrapper>("vpr");
+  command->appendPath("--net", src.filePath());
+  backend.storeTaskCommand(2, command);
+  backend.storeTaskCommand(3, "fast", command);
+  EXPECT_TRUE(backend.isCompilationRequired(2, command));
+  EXPECT_TRUE(backend.isCompilationRequired(3, "fast", command));
+  EXPECT_TRUE(backend.isEmpty());
+  backend.clear();
+  std::vector<std::filesystem::path> written;
+  for (const auto& entry : std::filesystem::directory_iterator(m_projectDir)) {
+    if (entry.path() != src.filePath()) written.push_back(entry.path());
+  }
+  EXPECT_TRUE(written.empty());
+}
