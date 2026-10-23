@@ -324,3 +324,17 @@ jobs:
       run: |
         export QT_DIR="${QT_ROOT_DIR}"
         make test -j$(nproc)
+
+    - name: GUI scenarios
+      run: |
+        export QT_DIR="${QT_ROOT_DIR}"
+        make test/gui-scenarios
+
+    - name: Upload GUI scenario logs
+      uses: actions/upload-artifact@v4.3.0
+      if: ${{ failure() }}
+      with:
+        name: gui-scenarios-${{ matrix.runner }}
+        retention-days: 7
+        path: build/gui-scenarios
+        overwrite: true

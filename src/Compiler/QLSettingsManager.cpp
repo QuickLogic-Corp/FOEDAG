@@ -998,6 +998,7 @@ void QLSettingsManager::populateSettingsWidget() {
     button_reset->setDisabled(true);
     QObject::connect(button_reset, &QPushButton::released, this, &QLSettingsManager::handleResetButtonClicked);
     button_apply = new QPushButton("Apply");
+    button_apply->setObjectName("taskSettingsApply");
     button_apply->setToolTip("Apply the modifications to the current settings JSON");
     button_apply->setDisabled(true);
     QObject::connect(button_apply, &QPushButton::released, this, &QLSettingsManager::handleApplyButtonClicked);

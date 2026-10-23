@@ -30,6 +30,9 @@ tmp/
 build/
 dbuild/
 install/
+# Written to the current directory by every aurora run
+/settings
+/aurora_cmd.tcl
 
 message.txt
 deploy_key
