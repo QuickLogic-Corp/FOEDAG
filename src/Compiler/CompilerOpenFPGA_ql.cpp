@@ -113,15 +113,15 @@ static std::filesystem::path privateRepackConstraintsPath(const std::string& pro
   return dir.empty() ? dir : dir / (projectName + "_repack_design_constraint.xml");
 }
 
-CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
+CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(std::make_unique<CppBackend>(this))
 {
   // Decrypted files of an Aurora that was cancelled or killed outlive it; remove them now.
   std::error_code tmp_ec;
   PrivateTempDir::sweepStale(std::filesystem::temp_directory_path(tmp_ec));
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
     std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
-    m_taskCompilationStateManager.setProjectPath(projectPath);
-    m_taskCompilationStateManager.load();
+    backend().setProjectPath(projectPath);
+    backend().load();
   });
 }
 
@@ -2222,7 +2222,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
     CommandWrapperPtr command = it->second;
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
+    if (backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -2233,7 +2233,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       } else {
         m_state = State::Synthesized;
         Message("Design " + ProjManager()->projectName() + " is synthesized");
-        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
+        backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
       }
     } else {
       Message("##################################################");
@@ -2266,7 +2266,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
   CommandWrapperPtr command = it->second;
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command)) {
     Message("##################################################");
     Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
@@ -2292,7 +2292,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     return true;
   }
 }
@@ -3873,7 +3873,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   if(!command) {
     return false;
   }
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Pack), command)) {
     Message("##################################################");
     Message("Packing skipped, not required");
     Message("##################################################");
@@ -4672,7 +4672,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
   // Best effort. add_layout.py has run, but resolving a deferred AUTO/RESOURCES
@@ -4965,7 +4965,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(!command) {
     return false;
   }
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
     Message("##################################################");
     Message("Placement skipped, not required");
     Message("##################################################");
@@ -5008,7 +5008,7 @@ bool CompilerOpenFPGA_ql::Placement() {
                  " placement failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Detailed), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Detailed), command);
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
@@ -5255,7 +5255,7 @@ bool CompilerOpenFPGA_ql::Route() {
   if (!command) {
     return false;
   }
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Routing), command)) {
     Message("##################################################");
     Message("Routing skipped, not required");
     Message("##################################################");
@@ -5287,7 +5287,7 @@ bool CompilerOpenFPGA_ql::Route() {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Routing), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Routing), command);
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
@@ -5675,7 +5675,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       return false;
     }
 
-    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+    if (!backend().isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
       Message("##################################################");
       if (profile.empty()) {
         Message("timing analysis skipped, not required");
@@ -5695,7 +5695,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                    " timing analysis failed");
       return false;
     } else {
-      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, command);
+      backend().storeTaskCommand(static_cast<int>(Action::STA), profile, command);
     }
     // find files
     std::string libFileName =
@@ -5739,7 +5739,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     }
   }
 
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
     Message("##################################################");
     if (profile.empty()) {
       Message("timing analysis skipped, not required");
@@ -5757,7 +5757,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
                  " timing analysis failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, taCommand);
+    backend().storeTaskCommand(static_cast<int>(Action::STA), profile, taCommand);
   }
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
@@ -11769,12 +11769,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
 
 void CompilerOpenFPGA_ql::clearCompilationCache()
 {
-  m_taskCompilationStateManager.clear();
+  backend().clear();
 }
 
 bool CompilerOpenFPGA_ql::hasCompilationCache() const
 {
-  return !m_taskCompilationStateManager.isEmpty();
+  return !backend().isEmpty();
 }
 
 void CompilerOpenFPGA_ql::onQdcFileSaved() {
@@ -11897,7 +11897,7 @@ bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 
   std::unordered_map<int, CommandWrapperPtr> commands = getSynthesisCommands();
   for (const auto& [id, command]: commands) {
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
+    if (backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
       return false;
     }
   }
@@ -11907,19 +11907,19 @@ bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 bool CompilerOpenFPGA_ql::isPackingStatusActual()
 {
   CommandWrapperPtr command = getPackingCommand();
-  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command);
+  return !backend().isCompilationRequired(static_cast<int>(Action::Pack), command);
 }
 
 bool CompilerOpenFPGA_ql::isPlacementStatusActual()
 {
   CommandWrapperPtr command = getPlacementCommand();
-  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command);
+  return !backend().isCompilationRequired(static_cast<int>(Action::Detailed), command);
 }
 
 bool CompilerOpenFPGA_ql::isRoutingStatusActual()
 {
   CommandWrapperPtr command = getRoutingCommand();
-  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command);
+  return !backend().isCompilationRequired(static_cast<int>(Action::Routing), command);
 }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
@@ -11930,7 +11930,7 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
     // handle sta multicorner case
     for (const auto& [profile, device]: devices) {
       CommandWrapperPtr command = getTimingAnalysisCommand(device, "");
-      if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+      if (backend().isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
         return false;
       }
     }
@@ -11939,7 +11939,7 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
     // regular sta case
     QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
     CommandWrapperPtr command = getTimingAnalysisCommand(current_device, "");
-    return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), command);
+    return !backend().isCompilationRequired(static_cast<int>(Action::STA), command);
   }
 }
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA

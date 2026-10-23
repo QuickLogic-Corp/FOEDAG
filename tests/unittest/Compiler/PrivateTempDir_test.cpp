@@ -8,10 +8,18 @@
 #include "gtest/gtest.h"
 
 #ifndef _WIN32
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#include <cstdlib>
+#include <vector>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+extern char** environ;
 #endif
 
 using namespace FOEDAG;
@@ -132,18 +140,57 @@ static int privateDirsIn(const fs::path& base) {
   return n;
 }
 
+// The child is a fresh run of this binary, not a fork of it: exit() in a fork of a
+// process that has threads (Qt's X connection reader) can block on locks they held.
+constexpr const char* kChildEnv = "FOEDAG_PRIVATE_TEMP_DIR_CHILD";
+constexpr int kExitedWithHandlers = 3;
+constexpr int kDiedWithoutHandlers = 4;
+
+static fs::path thisExecutable() {
+#ifdef __APPLE__
+  char buf[4096];
+  uint32_t size = sizeof(buf);
+  return _NSGetExecutablePath(buf, &size) == 0 ? fs::path(buf) : fs::path();
+#else
+  return fs::read_symlink("/proc/self/exe");
+#endif
+}
+
 static void childCreatesDirThen(const fs::path& base, bool runExitHandlers) {
-  const pid_t child = ::fork();
-  if (child == 0) {
-    ::setenv("TMPDIR", base.c_str(), 1);
-    const fs::path dir = PrivateTempDir::path();
-    if (dir.empty() || dir.parent_path() != base) ::_exit(2);
-    if (runExitHandlers) std::exit(0);
-    ::_exit(0);
+  const std::string exe = thisExecutable().string();
+  ASSERT_FALSE(exe.empty());
+  std::vector<std::string> env;
+  for (char** e = environ; *e; ++e) {
+    const std::string kv = *e;
+    if (kv.rfind("TMPDIR=", 0) != 0 && kv.rfind("QT_QPA_PLATFORM=", 0) != 0) env.push_back(kv);
   }
+  env.push_back("TMPDIR=" + base.string());
+  env.push_back("QT_QPA_PLATFORM=offscreen");
+  env.push_back(std::string(kChildEnv) + "=" + (runExitHandlers ? "exit" : "die"));
+  std::vector<char*> envp;
+  for (auto& kv : env) envp.push_back(kv.data());
+  envp.push_back(nullptr);
+  std::string filter = "--gtest_filter=PrivateTempDirChild.*";
+  char* argv[] = {const_cast<char*>(exe.c_str()), filter.data(), nullptr};
+
+  pid_t child = 0;
+  ASSERT_EQ(::posix_spawn(&child, exe.c_str(), nullptr, nullptr, argv, envp.data()), 0);
   int status = 0;
-  ::waitpid(child, &status, 0);
-  ASSERT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+  ASSERT_EQ(::waitpid(child, &status, 0), child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), runExitHandlers ? kExitedWithHandlers : kDiedWithoutHandlers);
+}
+
+// Runs only as the child above; the parent checks its exit code, so a skip here
+// (exit 0) cannot pass for the real work.
+TEST(PrivateTempDirChild, CreatesItsDirectoryThenEnds) {
+  const char* how = std::getenv(kChildEnv);
+  if (how == nullptr) GTEST_SKIP() << "runs only as the child of the exit tests";
+  const fs::path dir = PrivateTempDir::path();
+  const char* tmp = std::getenv("TMPDIR");
+  if (dir.empty() || tmp == nullptr || dir.parent_path() != fs::path(tmp)) ::_exit(2);
+  if (std::string(how) == "exit") std::exit(kExitedWithHandlers);
+  ::_exit(kDiedWithoutHandlers);
 }
 
 TEST_F(PrivateTempDirTest, ExitRemovesTheDirectory) {

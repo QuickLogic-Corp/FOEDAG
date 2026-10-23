@@ -35,9 +35,37 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 namespace FOEDAG {
 
 constexpr const char* COMPILATION_CACHE_FILENAME = "compilation_cache.json";
-class TaskCompilationStateManager {
+
+// Decides whether a task must run and records it once it succeeded; an empty
+// profile is the task's only profile (aurora2 docs/specs/aurora-flow-engine, row 1.7).
+class IncrementalBackend {
 public:
-  TaskCompilationStateManager(Compiler* compiler): m_compiler(compiler) {
+  virtual ~IncrementalBackend() = default;
+
+  virtual bool isCompilationRequired(int taskId, const std::string& profile,
+                                     const CommandWrapperPtr& command) const = 0;
+  virtual void storeTaskCommand(int taskId, const std::string& profile,
+                                const CommandWrapperPtr& command) = 0;
+  virtual bool isEmpty() const = 0;
+  virtual void clear() = 0;
+  virtual void load() = 0;
+  virtual void setProjectPath(const std::filesystem::path& path) = 0;
+
+  bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
+    return isCompilationRequired(taskId, "", command);
+  }
+  void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
+    storeTaskCommand(taskId, "", command);
+  }
+};
+
+// Today's decision: each task's command and file states in compilation_cache.json.
+class CppBackend : public IncrementalBackend {
+public:
+  using IncrementalBackend::isCompilationRequired;
+  using IncrementalBackend::storeTaskCommand;
+
+  CppBackend(Compiler* compiler): m_compiler(compiler) {
     // Read the developer log toggle once and propagate it to CommandWrapper, so
     // verbose logging can be enabled at runtime via the environment variable
     // without recompiling the app.
@@ -46,29 +74,19 @@ public:
     CommandWrapper::setLogEnabled(logEnabled);
   }
 
-  bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
-    return isCompilationRequired(key(taskId), command);
-  }
-
-  bool isCompilationRequired(int taskId, const std::string& profile, const CommandWrapperPtr& command) const {
+  bool isCompilationRequired(int taskId, const std::string& profile, const CommandWrapperPtr& command) const override {
     return isCompilationRequired(key(taskId, profile), command);
   }
 
-  void storeTaskCommand(int taskId, const CommandWrapperPtr& command) {
-    command->actualize(); // to take into account date time and hash changes after task execution
-    m_taskCommandsMap[key(taskId)] = command;
-    save();
-  }
-
-  void storeTaskCommand(int taskId, const std::string& profile, const CommandWrapperPtr& command) {
+  void storeTaskCommand(int taskId, const std::string& profile, const CommandWrapperPtr& command) override {
     command->actualize(); // to take into account date time and hash changes after task execution
     m_taskCommandsMap[key(taskId, profile)] = command;
     save();
   }
-  
-  bool isEmpty() const { return m_taskCommandsMap.empty(); }
 
-  void clear() {
+  bool isEmpty() const override { return m_taskCommandsMap.empty(); }
+
+  void clear() override {
     m_taskCommandsMap.clear();
     if (!FileUtils::removeFile(m_filePath)) {
       if (CommandWrapper::projectPath().empty()) {
@@ -79,7 +97,7 @@ public:
     }
   }
 
-  void load() {
+  void load() override {
     if (FileUtils::IsExistedRegularFile(m_filePath)) {
       std::string content = FileUtils::GetFileContent(m_filePath);
       nlohmann::json json = nlohmann::json::parse(content);
@@ -89,7 +107,7 @@ public:
     }
   }
 
-  void setProjectPath(const std::filesystem::path& path) {
+  void setProjectPath(const std::filesystem::path& path) override {
     m_filePath = path / COMPILATION_CACHE_FILENAME;
     ScriptRenderer::setProjectPath(path);
     CommandWrapper::setProjectPath(path);
@@ -101,9 +119,6 @@ private:
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
   std::string m_logPrefix = "task_comp_manager: ";
 
-  std::string key(int taskId) const {
-    return std::to_string(taskId);
-  }
   std::string key(int taskId, const std::string& profile) const {
     if (profile.empty()) {
       return std::to_string(taskId);
@@ -149,6 +164,25 @@ private:
   }
 
   const std::string& logPrefix() const { return m_logPrefix; }
+};
+
+using TaskCompilationStateManager = CppBackend;
+
+// The flow engine's decision (AURORA_INCREMENTAL=engine). A stub until the engine
+// client exists: it never skips a task and records nothing.
+class EngineBackend : public IncrementalBackend {
+public:
+  using IncrementalBackend::isCompilationRequired;
+  using IncrementalBackend::storeTaskCommand;
+
+  bool isCompilationRequired(int, const std::string&, const CommandWrapperPtr&) const override {
+    return true;
+  }
+  void storeTaskCommand(int, const std::string&, const CommandWrapperPtr&) override {}
+  bool isEmpty() const override { return true; }
+  void clear() override {}
+  void load() override {}
+  void setProjectPath(const std::filesystem::path&) override {}
 };
 
 }  // namespace FOEDAG
