@@ -132,10 +132,10 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
     fail(QString("%1:%2: incomplete command").arg(file).arg(pendingLine));
 
   qApp->installEventFilter(this);
-  if (qEnvironmentVariableIntValue("AURORA_GUI_INTERACTIVE") == 1) {
+  if (qEnvironmentVariableIntValue("AURORA_GUI_TEST_INTERACTIVE") == 1) {
     bool ok{false};
-    int timeoutMs =
-        qEnvironmentVariableIntValue("AURORA_GUI_INTERACTIVE_TIMEOUT", &ok);
+    int timeoutMs = qEnvironmentVariableIntValue(
+        "AURORA_GUI_TEST_INTERACTIVE_TIMEOUT", &ok);
     if (!ok || timeoutMs < 0) timeoutMs = -1;
     m_gate = new GuiTestSpaceGate(timeoutMs, this);
     std::cout << "Interactive mode: press Space in an aurora window to run "

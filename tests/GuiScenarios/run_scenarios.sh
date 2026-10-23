@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "aurora --replay", one run dir each.
-# usage: [AURORA=<binary>] run_scenarios.sh [--show | --interactive [--timeout ms]] [scenario.tcl ...]
-#   AURORA: the aurora to run (default: aurora on PATH); no scenarios: all here
+# usage: [AURORA_GUI_TEST_BIN=<binary>] run_scenarios.sh [--show | --interactive [--timeout ms]] [scenario.tcl ...]
+#   AURORA_GUI_TEST_BIN: the aurora to run (default: aurora on PATH); no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
 #   --interactive: as --show, and run each line only after Space is pressed
 #     --timeout ms: or once a line has waited that long (default -1: wait for Space)
@@ -28,20 +28,20 @@ case "${1:-}" in
       hold_timeout=$2
       shift 2
     fi
-    platform=(env -u QT_QPA_PLATFORM AURORA_GUI_SHOW=1 AURORA_GUI_INTERACTIVE=$interactive
-      AURORA_GUI_INTERACTIVE_TIMEOUT=$hold_timeout)
+    platform=(env -u QT_QPA_PLATFORM AURORA_GUI_TEST_SHOW=1 AURORA_GUI_TEST_INTERACTIVE=$interactive
+      AURORA_GUI_TEST_INTERACTIVE_TIMEOUT=$hold_timeout)
     ;;
 esac
 
-aurora=${AURORA:-$(command -v aurora)} || {
-  echo "[error] no aurora on PATH; set AURORA=<binary>" >&2
+aurora=${AURORA_GUI_TEST_BIN:-$(command -v aurora)} || {
+  echo "[error] no aurora on PATH; set AURORA_GUI_TEST_BIN=<binary>" >&2
   exit 1
 }
 aurora=$(cd "$(dirname "$aurora")" && pwd)/$(basename "$aurora")
 echo "aurora: $aurora"
 here=$(cd "$(dirname "$0")" && pwd)
 if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
-out=${GUI_SCENARIOS_OUT:-$PWD/gui-scenarios}
+out=${AURORA_GUI_TEST_OUT_DIR:-$PWD/gui-scenarios}
 mkdir -p "$out"
 
 # A paused interactive session must not be killed by the time limit.
