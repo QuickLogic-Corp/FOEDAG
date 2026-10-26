@@ -79,12 +79,12 @@ test/unittest-coverage: run-cmake-coverage
 # Device-free GUI scenarios (replay mode, offscreen; no display needed).
 test/gui-scenarios: run-cmake-release
 	cmake --build build --target foedag-bin -j $(CPU_CORES)
-	AURORA_GUI_TEST_BIN=build/bin/aurora AURORA_GUI_TEST_OUT_DIR=$(CURDIR)/build/gui-scenarios tests/GuiScenarios/run_scenarios.sh
+	FOEDAG_GUI_TEST_BIN=build/bin/aurora FOEDAG_GUI_TEST_OUT_DIR=$(CURDIR)/build/gui-scenarios tests/GuiScenarios/run_scenarios.sh
 
 # Recorder round trip: each scenario recorded while replayed, then the recording replayed.
 test/gui-record-roundtrip: run-cmake-release
 	cmake --build build --target foedag-bin -j $(CPU_CORES)
-	AURORA_GUI_TEST_BIN=build/bin/aurora AURORA_GUI_TEST_OUT_DIR=$(CURDIR)/build/gui-roundtrip tests/GuiScenarios/run_scenarios.sh --roundtrip
+	FOEDAG_GUI_TEST_BIN=build/bin/aurora FOEDAG_GUI_TEST_OUT_DIR=$(CURDIR)/build/gui-roundtrip tests/GuiScenarios/run_scenarios.sh --roundtrip
 
 coverage-build/foedag.coverage: test/unittest-coverage
 	lcov --no-external --exclude "*_test.cpp" --capture --directory coverage-build/CMakeFiles/foedag.dir --base-directory src --output-file coverage-build/foedag.coverage
