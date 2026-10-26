@@ -73,10 +73,15 @@ run() {
   rm -rf "$dir"
   mkdir -p "$dir/eula"
   # The EULA dialog is shown once per install; pre-accept it so every run
-  # starts the same way. Settings go to the run dir for the same reason.
+  # starts the same way. Settings and the home directory (which holds the
+  # user's device registry) go to the run dir, and the device-data variables
+  # are dropped, so a local run is as device-free as CI.
   : > "$dir/eula/AURORA_EULA_ACCEPTED.txt"
+  mkdir -p "$dir/home"
   (cd "$dir" &&
     AURORA_IMAGE_DOCKER_SCRIPTS_DIR="$dir/eula" XDG_CONFIG_HOME="$dir/config" \
+      HOME="$dir/home" USERPROFILE="$dir/home" \
+      AURORA2_DEVICE_DATA_DIR= AURORA2_DEVICE_DATA_PATH= \
       "${platform[@]}" $limit "$binary" "$@" 2>&1 |
       if [ $interactive -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
     exit "${PIPESTATUS[0]}")

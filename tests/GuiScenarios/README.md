@@ -108,6 +108,9 @@ exits non-zero and its `FAIL:` line contains every expected text.
 
 ## Repeatable runs
 
-`run_scenarios.sh` pre-accepts the EULA (`AURORA_IMAGE_DOCKER_SCRIPTS_DIR`)
-and keeps Qt settings in the run directory (`XDG_CONFIG_HOME`), so no run
-depends on an earlier one. The offscreen platform needs no display.
+`run_scenarios.sh` pre-accepts the EULA (`AURORA_IMAGE_DOCKER_SCRIPTS_DIR`),
+keeps Qt settings and the home directory in the run directory
+(`XDG_CONFIG_HOME`, `HOME`), and clears `AURORA2_DEVICE_DATA_DIR` and
+`AURORA2_DEVICE_DATA_PATH`. So no run depends on an earlier one or on the
+devices installed for the user, and a local run sees what CI sees. The
+offscreen platform needs no display.

@@ -1,6 +1,7 @@
 # gui-test: sync
-# G-005 steps 2-3 (device-free): a task setting and a project setting changed in
-# Project settings persist after the dialog is reopened, and in the project files.
+# G-005 step 3 (device-free): a project setting changed in Project settings
+# persists after the dialog is reopened, and in the project file. Task settings
+# come from device data, so they are covered on a real device (stage 9).
 gui_start
 gui_trigger_action actionNewProject
 gui_wait_event dialog.shown newProjectDialog
@@ -19,29 +20,19 @@ gui_screenshot settings_persist/01_project_open
 
 gui_trigger_action actionProjectSettings
 gui_wait_event dialog.shown newProjectDialog
-gui_select newProjectTabs {Task Settings}
-gui_assert {![gui_get verific checked]}
-gui_screenshot settings_persist/02_task_settings -widget newProjectDialog
-gui_click verific
-gui_click taskSettingsApply
-gui_dialog accept
-gui_wait_for {![gui_get taskSettingsApply enabled]} -message "Apply saves the task settings"
 gui_select newProjectTabs {Design Files}
+gui_screenshot settings_persist/02_design_files -widget newProjectDialog
 gui_set_text lineEditTopModule counter_top
 gui_click newProjectFinish
 gui_wait_event dialog.closed newProjectDialog
 
 gui_trigger_action actionProjectSettings
 gui_wait_event dialog.shown newProjectDialog
-gui_select newProjectTabs {Task Settings}
-gui_assert {[gui_get verific checked]} "the task setting persists"
-gui_screenshot settings_persist/03_task_settings_reopened -widget newProjectDialog
 gui_select newProjectTabs {Design Files}
 gui_assert {[gui_get lineEditTopModule -text] eq "counter_top"} "the project setting persists"
-gui_screenshot settings_persist/04_design_files_reopened -widget newProjectDialog
+gui_screenshot settings_persist/03_design_files_reopened -widget newProjectDialog
 gui_click newProjectCancel
 gui_wait_event dialog.closed newProjectDialog
 
 proc read_file {path} { set f [open $path]; set data [read $f]; close $f; return $data }
-gui_assert {[string first {"userValue": "checked"} [read_file gui_settings/gui_settings.json]] >= 0} "verific is saved to the project settings file"
 gui_assert {[string first counter_top [read_file gui_settings/gui_settings.ospr]] >= 0} "the top module is saved to the project file"
