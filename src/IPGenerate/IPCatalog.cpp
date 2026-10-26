@@ -277,6 +277,32 @@ IPDefinition* IPCatalog::Definition(const std::string& name) {
   }
 }
 
+size_t IPCatalog::removeDefinitionsUnder(const std::filesystem::path& root) {
+  const std::filesystem::path base = std::filesystem::weakly_canonical(root);
+  size_t removed = 0;
+  for (auto it = m_definitions.begin(); it != m_definitions.end();) {
+    IPDefinition* def = *it;
+    const std::filesystem::path rel =
+        std::filesystem::weakly_canonical(def->FilePath())
+            .lexically_relative(base);
+    // Under the root: a relative path that does not climb out of it.
+    if (!rel.empty() && *rel.begin() != "..") {
+      m_definitionMap.erase(def->Name());
+      m_retiredDefinitions.push_back(def);
+      it = m_definitions.erase(it);
+      removed++;
+    } else {
+      ++it;
+    }
+  }
+  return removed;
+}
+
+bool IPCatalog::isRetired(const IPDefinition* def) const {
+  return std::find(m_retiredDefinitions.begin(), m_retiredDefinitions.end(),
+                   def) != m_retiredDefinitions.end();
+}
+
 void IPCatalog::WriteCatalog(std::ostream& out) {
   for (auto def : m_definitions) {
     out << "IP Name: " << def->Name() << std::endl;
