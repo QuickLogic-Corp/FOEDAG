@@ -65,8 +65,10 @@ void IpCatalogTree::refresh() {
   // project-local user catalog (<project>/IP_Catalog, empty when no project
   // is open); loadIps skips paths that do not exist. A name found in two
   // roots is a load error — IP names are unique across catalogs, matching
-  // the Tcl-side rule.
+  // the Tcl-side rule. A previous device's IPs are unloaded first, so the
+  // current device's catalog is not refused as a set of duplicates.
   IPGenerator* generator = GlobalSession->GetCompiler()->GetIPGenerator();
+  generator->SyncDeviceCatalog();
   std::filesystem::path IpCatalogPath = generator->DefaultIPCatalogPath();
   std::filesystem::path DeviceCatalogPath = generator->DeviceCatalogPath();
   std::filesystem::path UserCatalogPath = generator->ProjectUserCatalogPath();

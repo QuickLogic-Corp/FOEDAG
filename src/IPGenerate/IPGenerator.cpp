@@ -365,7 +365,28 @@ std::filesystem::path IPGenerator::DeviceCatalogPath() const {
   return devices->deviceTypeDirPath(target) / "aurora" / "IP_Catalog";
 }
 
+void IPGenerator::SyncDeviceCatalog() {
+  const std::filesystem::path deviceRoot = DeviceCatalogPath();
+  const std::filesystem::path current =
+      deviceRoot.empty() ? std::filesystem::path{}
+                         : std::filesystem::weakly_canonical(deviceRoot);
+  if (current == m_deviceCatalogRoot) return;
+  if (!m_deviceCatalogRoot.empty()) {
+    const size_t removed = m_catalog->removeDefinitionsUnder(m_deviceCatalogRoot);
+    m_compiler->ForgetIpCatalogRoot(m_deviceCatalogRoot);
+    if (removed > 0) {
+      m_compiler->Message("IP Catalog, target device changed: unloaded " +
+                          std::to_string(removed) + " IP(s) of " +
+                          m_deviceCatalogRoot.string());
+    }
+  }
+  m_deviceCatalogRoot = current;
+}
+
 void IPGenerator::LoadDefaultCatalogs() {
+  // Before the device root is looked up below: a previous device's IPs must
+  // be out of the catalog before the current device's catalog is scanned.
+  SyncDeviceCatalog();
   const std::filesystem::path defaultRoot = DefaultIPCatalogPath();
   const std::filesystem::path deviceRoot = DeviceCatalogPath();
   const std::filesystem::path userRoot = ProjectUserCatalogPath();
