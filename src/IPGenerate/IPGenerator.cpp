@@ -1175,6 +1175,20 @@ bool IPGenerator::Generate() {
     }
 
     const IPDefinition* def = inst->Definition();
+    // An instance configured before the target device changed points at the
+    // previous device's definition, which SyncDeviceCatalog unloaded. Do not
+    // generate from it (or from a same-named IP of the new device: the
+    // instance keeps the output location it was configured with, which may
+    // belong to another project); configuring it again binds it to the
+    // current device's IP.
+    if (m_catalog->isRetired(def)) {
+      compiler->ErrorMessage(
+          "IP Generate, " + inst->ModuleName() + ": IP '" + def->Name() +
+          "' was configured from the IP catalog of a previous target device; "
+          "configure it again with configure_ip for the current device");
+      status = false;
+      continue;
+    }
     switch (def->Type()) {
       case IPDefinition::IPType::Other: {
         break;
