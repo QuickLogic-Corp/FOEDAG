@@ -15,11 +15,13 @@ gui_click newProjectNext
 gui_click newProjectFinish
 gui_wait_event dialog.closed newProjectDialog
 gui_wait_for {[gui_get actionProjectSettings enabled]} -message "a project is open"
+gui_screenshot settings_persist/01_project_open
 
 gui_trigger_action actionProjectSettings
 gui_wait_event dialog.shown newProjectDialog
 gui_select newProjectTabs {Task Settings}
 gui_assert {![gui_get verific checked]}
+gui_screenshot settings_persist/02_task_settings -widget newProjectDialog
 gui_click verific
 gui_click taskSettingsApply
 gui_dialog accept
@@ -33,8 +35,10 @@ gui_trigger_action actionProjectSettings
 gui_wait_event dialog.shown newProjectDialog
 gui_select newProjectTabs {Task Settings}
 gui_assert {[gui_get verific checked]} "the task setting persists"
+gui_screenshot settings_persist/03_task_settings_reopened -widget newProjectDialog
 gui_select newProjectTabs {Design Files}
 gui_assert {[gui_get lineEditTopModule -text] eq "counter_top"} "the project setting persists"
+gui_screenshot settings_persist/04_design_files_reopened -widget newProjectDialog
 gui_click newProjectCancel
 gui_wait_event dialog.closed newProjectDialog
 

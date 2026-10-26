@@ -46,6 +46,7 @@ extern "C" {
 #include "Compiler/Log.h"
 #include "Foedag.h"
 #include "GuiTestFramework/GuiTestCommands.h"
+#include "GuiTestFramework/GuiTestMode.h"
 #include "IpConfigurator/IpConfigWidget.h"
 #include "Main/Tasks.h"
 #include "Main/WidgetFactory.h"
@@ -61,6 +62,7 @@ void registerBasicGuiCommands(FOEDAG::Session* session) {
                       const char* argv[]) -> int {
     LOG_CMD("gui_start");
     GlobalSession->windowShow();
+    FOEDAG::GuiTestMode::fixWindowSize(GlobalSession->MainWindow());
     return 0;
   };
   session->TclInterp()->registerCmd("gui_start", gui_start, 0, 0);

@@ -37,6 +37,7 @@ extern "C" {
 #include <iostream>
 
 #include "GuiRecorder.h"
+#include "GuiTestMode.h"
 
 namespace FOEDAG {
 
@@ -85,6 +86,13 @@ GuiTestRunner *GuiTestRunner::instance() {
   return runner;
 }
 
+QString GuiTestRunner::startupError() {
+  if (GuiTestMode::isBlessMode() && GuiTestMode::isDisplayMode())
+    return "bless mode writes goldens only from offscreen runs; unset "
+           "GUI_TEST_FRAMEWORK_SHOW and GUI_TEST_FRAMEWORK_INTERACTIVE";
+  return {};
+}
+
 bool GuiTestRunner::isSyncScript(const std::string &file) {
   std::ifstream in{file};
   std::string first;
@@ -106,6 +114,7 @@ GuiTestRunner::StrictWait::~StrictWait() {
 void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
   m_interp = interp;
   m_file = file;
+  if (const QString error = startupError(); !error.isEmpty()) fail(error);
 
   QFile f{file};
   if (!f.open(QIODevice::ReadOnly | QIODevice::Text))

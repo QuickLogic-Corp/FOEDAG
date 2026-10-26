@@ -11,8 +11,9 @@ GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> tests/GuiScenarios/run_scenarios.sh --int
 ```
 
 `<binary>` is the GUI application under test, for example `build/bin/aurora`
-in this repository. `make test/gui-scenarios` sets `GUI_TEST_FRAMEWORK_TARGET_BIN`
-for you; set it yourself when you run `run_scenarios.sh` directly.
+in this repository. `make test/gui-scenarios` sets
+`GUI_TEST_FRAMEWORK_TARGET_BIN` for you; set it yourself when you run
+`run_scenarios.sh` directly.
 
 `--show` uses the platform's own display instead of the offscreen one. Sync
 scripts run without delays, so the window passes quickly.
@@ -70,6 +71,35 @@ every scenario, checks that the recording has the same action lines, then
 replays the recording from a new directory. So scenarios are written the way
 the recorder writes them: one command per line, Tcl list quoting, and
 `$::gui_test::project_dir` for the run directory.
+
+## Screenshots
+
+`gui_screenshot <scenario>/<step> [-widget <objName>] [-mask <objName> ...]`
+waits until the widget stops repainting, saves the capture under
+`<run dir>/screenshots/` (or `GUI_TEST_FRAMEWORK_ARTIFACT_DIR`), and compares it
+with `golden/<platform>/<scenario>/<step>.png`. Masked widgets are blanked in
+both images. An optional `<step>.json` next to the golden sets
+`{"tol": 0, "max_diff_pixels": 0, "masks": [[x, y, w, h]]}`. A mismatch fails
+the run and writes `<step>.diff.png`: golden, capture and difference side by
+side.
+
+The comparison is exact, so goldens only match on the machine image that made
+them. It is off unless `GUI_TEST_FRAMEWORK_GOLDEN_DIR` is set: locally, captures
+are saved and reported as `SKIP`. CI turns it on for ubuntu-24.04:
+
+```
+make test/gui-scenarios GUI_GOLDEN_DIR=$PWD/tests/GuiScenarios/golden
+make test/gui-scenarios-bless [SCENARIO=<name>]   # write captures as goldens
+```
+
+To refresh the goldens, run the `build` workflow by hand with
+`bless_gui_goldens` set, download the `gui-goldens-linux` artifact into
+`tests/GuiScenarios/golden`, review the images and commit them. Replay renders
+offscreen with Fusion, a 1600x1000 main window and no animations, so the same
+image gives the same pixels. With `--show` or `--interactive`, screenshots are
+compared but only reported (`MATCH`, `MISMATCH`, `MISSING`), and bless mode is
+refused. Scripts marked `# needs: goldens` are skipped without a golden
+directory, and bless mode skips negative scripts.
 
 ## Negative scripts
 

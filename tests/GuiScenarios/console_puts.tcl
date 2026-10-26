@@ -4,3 +4,4 @@ gui_start
 gui_wait_for {[gui_find TclConsole] ne ""} -message "the console is shown"
 gui_set_text TclConsole {puts hello}
 gui_wait_for {[regexp -line {^hello$} [gui_get TclConsole -text]]} -message "console shows the line 'hello'"
+gui_screenshot console_puts/01_hello -widget TclConsole

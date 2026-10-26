@@ -36,6 +36,7 @@ extern "C" {
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
@@ -178,6 +179,7 @@ bool GuiRecorder::start(const QString &file, QString *error) {
     return false;
   }
   m_out = m_file.get();
+  m_scenario = QFileInfo(file).completeBaseName();
   begin();
   return true;
 }
@@ -227,6 +229,8 @@ void GuiRecorder::stop() {
   m_frames.clear();
   m_entries.clear();
   m_milestones.clear();
+  m_scenario = "recording";
+  m_checkpoints = 0;
   m_nextToWrite = 0;
   m_seq = m_writtenSeq = 0;
   m_lastActionAt = 0;
@@ -526,6 +530,19 @@ void GuiRecorder::checkpoint(QWidget *widget) {
   } else {
     lines << "# UNRECORDED: checkpoint on " + name + ": no value to check";
   }
+  // The window the widget is in; the main window is the default capture.
+  QWidget *window = named->window();
+  QString screenshot = QString("gui_screenshot %1/%2")
+                           .arg(m_scenario)
+                           .arg(++m_checkpoints, 2, 10, QChar('0'));
+  if (window && !window->inherits("QMainWindow")) {
+    if (window->objectName().isEmpty())
+      screenshot = "# UNRECORDED: checkpoint screenshot of an unnamed " +
+                   QString(window->metaObject()->className());
+    else
+      screenshot += " -widget " + tclWord(window->objectName());
+  }
+  lines << screenshot;
   Entry entry;
   entry.closed = true;
   entry.openedAt = now();

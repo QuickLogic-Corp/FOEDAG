@@ -218,6 +218,9 @@ TEST_F(GuiRecorderTest, CheckpointWritesAsserts) {
 
   GuiRecorder::instance()->checkpoint(edit);
   GuiRecorder::instance()->checkpoint(check);
-  EXPECT_EQ(lines(), join({"gui_assert {[gui_get nameEdit -text] eq \"a \\\"b\\\"\"}",
-                         "gui_assert {![gui_get optButton checked]}"}));
+  EXPECT_EQ(lines(),
+            join({"gui_assert {[gui_get nameEdit -text] eq \"a \\\"b\\\"\"}",
+                  "gui_screenshot recording/01 -widget win",
+                  "gui_assert {![gui_get optButton checked]}",
+                  "gui_screenshot recording/02 -widget win"}));
 }

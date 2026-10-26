@@ -24,16 +24,20 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/../../lib)
 
 set (SRC_CPP_LIST
   GuiRecorder.cpp
+  GuiScreenshot.cpp
   GuiTestCommands.cpp
   GuiTestHub.cpp
+  GuiTestMode.cpp
   GuiTestRunner.cpp
 )
 
 set (SRC_H_LIST
   GuiMilestone.h
   GuiRecorder.h
+  GuiScreenshot.h
   GuiTestCommands.h
   GuiTestHub.h
+  GuiTestMode.h
   GuiTestRunner.h
 )
 

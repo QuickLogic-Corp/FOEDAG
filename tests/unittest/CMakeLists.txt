@@ -59,6 +59,7 @@ set (CPP_LIST
     GuiTestFramework/GuiTestHub_test.cpp
     GuiTestFramework/GuiTestRunner_test.cpp
     GuiTestFramework/GuiRecorder_test.cpp
+    GuiTestFramework/GuiScreenshot_test.cpp
 
 )
 

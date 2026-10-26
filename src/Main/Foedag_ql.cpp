@@ -39,6 +39,7 @@ extern "C" {
 #include <QDir>
 #include <QGuiApplication>
 #include <QLabel>
+#include <QStyleFactory>
 #include <QThreadPool>
 //#include <QQmlApplicationEngine>
 //#include <QQmlContext>
@@ -58,6 +59,7 @@ extern "C" {
 #include "FoedagStyle.h"
 #include "GuiTestFramework/GuiRecorder.h"
 #include "GuiTestFramework/GuiTestHub.h"
+#include "GuiTestFramework/GuiTestMode.h"
 #include "Main/Foedag.h"
 #include "Main/ToolContext.h"
 #include "MainWindow/Session.h"
@@ -186,6 +188,8 @@ bool Foedag::initGui() {
 #endif
   // Gui mode with Qt Widgets
   int argc = m_cmdLine->Argc();
+  // Must run before the QApplication exists, to set its platform.
+  FOEDAG::GuiTestMode::prepareEnvironment(!m_cmdLine->GuiTestScript().empty());
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
   // Heap-allocate so the destructor can be called via std::atexit (registered
   // in aboutToQuit below). Tcl_MainEx calls C exit() which bypasses stack
@@ -194,7 +198,11 @@ bool Foedag::initGui() {
 #else
   QApplication app(argc, m_cmdLine->Argv());
 #endif
-  QApplication::setStyle(new FoedagStyle(QApplication::style()));
+  // Replay renders with Fusion, the same on every platform (REQ-014).
+  QApplication::setStyle(new FoedagStyle(
+      FOEDAG::GuiTestMode::isActive() ? QStyleFactory::create("Fusion")
+                                      : QApplication::style()));
+  FOEDAG::GuiTestMode::applyToApplication();
   FOEDAG::EventLoopProbe::fromEnvironment(qApp);
   FOEDAG::TclInterpreter* interpreter =
       new FOEDAG::TclInterpreter(m_cmdLine->Argv()[0]);

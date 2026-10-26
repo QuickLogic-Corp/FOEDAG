@@ -9,6 +9,9 @@
 #     with the recording's (G-013), then replay the recording unchanged (G-015)
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
 # if <binary> exits non-zero and its FAIL line contains every expected text.
+# GUI_TEST_FRAMEWORK_GOLDEN_DIR turns the screenshot gate on; without it,
+# screenshots are only saved, and "# needs: goldens" scenarios are skipped.
+# GUI_TEST_FRAMEWORK_GOLDEN=update (bless mode) skips negative scripts.
 set -u
 
 platform=(env QT_QPA_PLATFORM=offscreen)
@@ -37,6 +40,9 @@ case "${1:-}" in
   --roundtrip)
     roundtrip=1
     shift
+    # Recordings name their checkpoint screenshots after the recording, so
+    # there are no goldens to compare them with.
+    unset GUI_TEST_FRAMEWORK_GOLDEN_DIR
     ;;
 esac
 
@@ -78,6 +84,7 @@ run() {
 
 passed=0
 failed=0
+skipped=0
 for scenario in "$@"; do
   scenario=$(cd "$(dirname "$scenario")" && pwd)/$(basename "$scenario")
   name=$(basename "$scenario" .tcl)
@@ -85,6 +92,17 @@ for scenario in "$@"; do
   negative=0
   grep -q '^# expect: ' "$scenario" && negative=1
   if [ $roundtrip -eq 1 ] && [ $negative -eq 1 ]; then continue; fi
+  skip=""
+  if grep -q '^# needs: goldens' "$scenario" && [ -z "${GUI_TEST_FRAMEWORK_GOLDEN_DIR:-}" ]; then
+    skip="no GUI_TEST_FRAMEWORK_GOLDEN_DIR"
+  elif [ $negative -eq 1 ] && [ "${GUI_TEST_FRAMEWORK_GOLDEN:-}" = update ]; then
+    skip="bless mode"
+  fi
+  if [ -n "$skip" ]; then
+    skipped=$((skipped + 1))
+    echo "SKIP $name ($skip)"
+    continue
+  fi
 
   reason=""
   if [ $roundtrip -eq 1 ]; then
@@ -134,5 +152,5 @@ for scenario in "$@"; do
   fi
 done
 
-echo "GUI scenarios: $passed passed, $failed failed"
+echo "GUI scenarios: $passed passed, $failed failed, $skipped skipped"
 [ $failed -eq 0 ]

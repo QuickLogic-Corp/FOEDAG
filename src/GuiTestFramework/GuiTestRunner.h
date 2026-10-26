@@ -64,6 +64,8 @@ class GuiTestRunner : public QObject {
 
   static GuiTestRunner *instance();
   static bool isSyncScript(const std::string &file);
+  // Why the run must not start, or empty.
+  static QString startupError();
 
   // Does not return: the process exits with the script's result.
   [[noreturn]] void run(Tcl_Interp *interp, const QString &file);

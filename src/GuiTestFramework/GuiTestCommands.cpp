@@ -33,8 +33,10 @@ extern "C" {
 #include <QContextMenuEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QHash>
 #include <QKeyEvent>
@@ -51,11 +53,14 @@ extern "C" {
 #include <QThread>
 #include <QTimer>
 #include <functional>
-#include <utility>
+#include <iostream>
 #include <optional>
+#include <utility>
 
 #include "GuiRecorder.h"
+#include "GuiScreenshot.h"
 #include "GuiTestHub.h"
+#include "GuiTestMode.h"
 #include "GuiTestRunner.h"
 
 namespace FOEDAG {
@@ -685,6 +690,123 @@ int guiWaitEvent(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return succeed(interp);
 }
 
+QWidget *mainWindow() {
+  for (QWidget *w : QApplication::topLevelWidgets())
+    if (w->isVisible() && w->inherits("QMainWindow")) return w;
+  return nullptr;
+}
+
+bool writeImage(const QImage &image, const QString &path) {
+  QDir().mkpath(QFileInfo(path).absolutePath());
+  return image.save(path, "PNG");
+}
+
+int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
+  const char *usage =
+      "usage: gui_screenshot <scenario>/<step> [-widget objName] "
+      "[-mask objName ...]";
+  QString id;
+  QString widgetName;
+  QStringList maskNames;
+  for (int i = 1; i < argc; ++i) {
+    const QString arg = QString::fromUtf8(argv[i]);
+    if (arg == "-widget" || arg == "-mask") {
+      if (i + 1 >= argc) return fail(interp, usage);
+      const QString value = QString::fromUtf8(argv[++i]);
+      arg == "-widget" ? void(widgetName = value) : void(maskNames << value);
+    } else if (id.isEmpty()) {
+      id = arg;
+    } else {
+      return fail(interp, usage);
+    }
+  }
+  const QStringList parts = id.split('/');
+  if (parts.size() != 2 || parts[0].isEmpty() || parts[1].isEmpty() ||
+      id.contains(".."))
+    return fail(interp, usage);
+  const QString what = "gui_screenshot " + id;
+
+  QString error;
+  QWidget *target = widgetName.isEmpty() ? mainWindow()
+                                         : findWidget(widgetName, {}, &error);
+  if (!target)
+    return fail(interp, QString("%1: %2").arg(what, widgetName.isEmpty()
+                                                        ? "no main window shown"
+                                                        : error));
+  QList<QWidget *> masks;
+  for (const QString &name : maskNames) {
+    QWidget *mask = findWidget(name, {}, &error);
+    if (!mask) return fail(interp, QString("%1: mask %2").arg(what, error));
+    masks << mask;
+  }
+
+  const QString goldenRoot =
+      qEnvironmentVariable("GUI_TEST_FRAMEWORK_GOLDEN_DIR");
+  const QString golden = QString("%1/%2/%3.png")
+                             .arg(goldenRoot, GuiScreenshot::platformDir(), id);
+  GuiScreenshot::Sidecar sidecar;
+  if (!goldenRoot.isEmpty()) {
+    sidecar = GuiScreenshot::readSidecar(
+        golden.chopped(4) + ".json", &error);
+    if (!error.isEmpty()) return fail(interp, what + ": " + error);
+  }
+
+  QImage image;
+  if (!GuiScreenshot::settle(target, masks, sidecar.masks,
+                             GuiScreenshot::kDefaultSettleMs, &image))
+    return fail(interp, QString("%1: unstable: the image still changed after "
+                                "%2 ms")
+                            .arg(what)
+                            .arg(GuiScreenshot::kDefaultSettleMs));
+  QString artifacts = qEnvironmentVariable("GUI_TEST_FRAMEWORK_ARTIFACT_DIR");
+  if (artifacts.isEmpty()) artifacts = QDir::currentPath() + "/screenshots";
+  const QString capture = QString("%1/%2.png").arg(artifacts, id);
+  if (!writeImage(image, capture))
+    return fail(interp, QString("%1: cannot write %2").arg(what, capture));
+
+  const bool display = GuiTestMode::isDisplayMode();
+  auto report = [&](const QString &line) {
+    std::cout << line.toStdString() << std::endl;
+    return succeed(interp);
+  };
+  if (goldenRoot.isEmpty())
+    return report(QString("SKIP %1: GUI_TEST_FRAMEWORK_GOLDEN_DIR is not set")
+                      .arg(id));
+  if (GuiTestMode::isBlessMode()) {
+    if (!writeImage(image, golden))
+      return fail(interp, QString("%1: cannot write %2").arg(what, golden));
+    return report("BLESS " + id);
+  }
+#ifdef __APPLE__
+  return report(QString("SKIP %1: no macOS goldens yet").arg(id));
+#endif
+  const QImage reference{golden};
+  if (reference.isNull()) {
+    if (display) return report("MISSING " + id);
+    return fail(interp, QString("%1: missing golden %2").arg(what, golden));
+  }
+  const int differing =
+      GuiScreenshot::countDifferences(reference, image, sidecar.tolerance);
+  if (differing >= 0 && differing <= sidecar.maxDiffPixels)
+    return display ? report("MATCH " + id) : succeed(interp);
+
+  const QString diff = QString("%1/%2.diff.png").arg(artifacts, id);
+  writeImage(GuiScreenshot::triptych(reference, image), diff);
+  const QString detail =
+      differing < 0
+          ? QString("size differs: golden %1x%2, capture %3x%4")
+                .arg(reference.width())
+                .arg(reference.height())
+                .arg(image.width())
+                .arg(image.height())
+          : QString("%1 px").arg(differing);
+  if (display) return report(QString("MISMATCH %1 (%2)").arg(id, detail));
+  return fail(interp, QString("%1: mismatch: %2, %3 allowed; triptych %4")
+                          .arg(what, detail)
+                          .arg(sidecar.maxDiffPixels)
+                          .arg(diff));
+}
+
 int guiTestCheckpoint(void *, Tcl_Interp *interp, int argc,
                       const char *argv[]) {
   if (argc != 2) return fail(interp, "usage: gui_test_checkpoint <objName>");
@@ -738,6 +860,7 @@ void registerGuiTestCommands(Tcl_Interp *interp) {
       {"gui_assert", guiAssert},
       {"gui_dialog", guiDialog},
       {"gui_wait_event", guiWaitEvent},
+      {"gui_screenshot", guiScreenshot},
       {"gui_test_run", guiTestRun},
       {"gui_test_checkpoint", guiTestCheckpoint},
   };

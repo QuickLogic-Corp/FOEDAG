@@ -142,6 +142,8 @@ class GuiRecorder : public QObject {
   qint64 m_lastActionAt{0};
   QString m_projectDir;
   QString m_installDir;
+  QString m_scenario{"recording"};  // names checkpoint screenshots
+  int m_checkpoints{0};
   std::function<qint64()> m_clock;
   QElapsedTimer m_started;
 };

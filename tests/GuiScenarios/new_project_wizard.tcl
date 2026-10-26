@@ -4,16 +4,22 @@ gui_start
 gui_trigger_action actionNewProject
 gui_wait_event dialog.shown newProjectDialog
 gui_assert {[gui_get newProjectTabs -text] eq "Project Directory"}
+gui_screenshot new_project_wizard/01_directory -widget newProjectDialog
 gui_set_text m_lineEditPname gui_new_project
-gui_set_text m_lineEditPpath $::gui_test::project_dir
+# A relative location reads the same on every machine, so the page needs no mask.
+gui_set_text m_lineEditPpath .
+gui_screenshot new_project_wizard/02_directory_filled -widget newProjectDialog
 gui_click newProjectNext
 gui_assert {[gui_get newProjectTabs -text] eq "Type of Project"}
 gui_assert {[gui_get m_radioBtnRTL checked]}
+gui_screenshot new_project_wizard/03_type -widget newProjectDialog
 gui_click newProjectNext
 gui_assert {[gui_get newProjectTabs -text] eq "Add Design Files"}
 gui_set_text lineEditTopModule counter
+gui_screenshot new_project_wizard/04_design_files -widget newProjectDialog
 gui_click newProjectNext
 gui_assert {[gui_get newProjectTabs -text] eq "Target Device"}
+gui_screenshot new_project_wizard/05_device -widget newProjectDialog
 gui_click newProjectBack
 gui_assert {[gui_get lineEditTopModule -text] eq "counter"} "the wizard keeps page values when going back"
 gui_click newProjectCancel
