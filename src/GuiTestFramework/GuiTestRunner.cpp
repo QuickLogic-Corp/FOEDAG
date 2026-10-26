@@ -146,8 +146,8 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
         "GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT", &ok);
     if (!ok || timeoutMs < 0) timeoutMs = -1;
     m_gate = new GuiTestSpaceGate(timeoutMs, this);
-    std::cout << "Interactive mode: press Space in an aurora window to run "
-                 "each line"
+    std::cout << "Interactive mode: press Space in an application window to "
+                 "run each line"
               << (timeoutMs >= 0 ? ", or wait " + std::to_string(timeoutMs) +
                                       " ms"
                                 : std::string{})

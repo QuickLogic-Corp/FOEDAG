@@ -1,21 +1,26 @@
 # Device-free GUI scenarios
 
-Replay scripts that drive the aurora GUI and check what it does. They need no
+Replay scripts that drive the GUI and check what it does. They need no
 device data, so they run in FOEDAG's own CI.
 
 ```
 make test/gui-scenarios                      # build, then run every scenario
-GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh tests/GuiScenarios/console_puts.tcl
-GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --show   # watch them
-GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --interactive tests/GuiScenarios/console_puts.tcl
+GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> tests/GuiScenarios/run_scenarios.sh tests/GuiScenarios/console_puts.tcl
+GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> tests/GuiScenarios/run_scenarios.sh --show   # watch them
+GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> tests/GuiScenarios/run_scenarios.sh --interactive tests/GuiScenarios/console_puts.tcl
 ```
+
+`<binary>` is the GUI application under test, for example `build/bin/aurora`
+in this repository. `make test/gui-scenarios` sets `GUI_TEST_FRAMEWORK_TARGET_BIN`
+for you; set it yourself when you run `run_scenarios.sh` directly.
 
 `--show` uses the platform's own display instead of the offscreen one. Sync
 scripts run without delays, so the window passes quickly.
 
 `--interactive` also prints `NEXT <line>: <command>` before each line and runs
-it only when you press Space in an aurora window. That Space is not passed on
-to the GUI, so it never presses a focused button. There is no time limit.
+it only when you press Space in a window of the application. That Space is
+not passed on to the GUI, so it never presses a focused button. There is no
+time limit.
 `--interactive --timeout <ms>` also runs a waiting line after that time, to
 watch a script at a set pace. Without `--timeout` (or with -1) it waits for
 Space only.
@@ -25,8 +30,9 @@ with its log in `replay.log`.
 
 ## Replay mode
 
-`aurora --replay <script.tcl>` starts the normal GUI and runs the script inside
-it. The option is for developers, so `aurora --help` does not list it.
+`<binary> --replay <script.tcl>` starts the normal GUI and runs the script
+inside it. The option is for developers, so `<binary> --help` does not list
+it.
 
 A script whose first line is `# gui-test: sync` runs one command at a time,
 with no fixed delay between lines. It must synchronize through
@@ -50,12 +56,13 @@ aurora2 `docs/specs/gui-test-automation/` (`design-install.md` §5,
 
 ## Recording
 
-`aurora --record <file.tcl>` starts the normal GUI and writes each action as the
-`gui_*` line that replays it, with `gui_wait_event` lines for the work the GUI
-did in between. Ctrl+Shift+S writes `gui_assert` checks for the focused widget.
+`<binary> --record <file.tcl>` starts the normal GUI and writes each action as
+the `gui_*` line that replays it, with `gui_wait_event` lines for the work the
+GUI did in between. Ctrl+Shift+S writes `gui_assert` checks for the focused
+widget.
 An action on a widget without an objectName becomes a `# UNRECORDED` comment
 and a warning: name the widget, then record again. Like `--replay`, `--record`
-is not listed in `aurora --help`.
+is not listed in `<binary> --help`.
 
 `--replay <script> --record <file>` records a replayed script.
 `run_scenarios.sh --roundtrip` (`make test/gui-record-roundtrip`) does that for
@@ -66,7 +73,7 @@ the recorder writes them: one command per line, Tcl list quoting, and
 
 ## Negative scripts
 
-A script with `# expect: <text>` lines must fail: it passes only if aurora
+A script with `# expect: <text>` lines must fail: it passes only if <binary>
 exits non-zero and its `FAIL:` line contains every expected text.
 
 ## Repeatable runs

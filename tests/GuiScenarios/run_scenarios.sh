@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Runs device-free GUI scenarios with "aurora --replay", one run dir each.
-# usage: [GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>] run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
-#   GUI_TEST_FRAMEWORK_TARGET_BIN: the aurora to run (default: aurora on PATH); no scenarios: all here
+# Runs device-free GUI scenarios with "<binary> --replay", one run dir each.
+# usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
+#   GUI_TEST_FRAMEWORK_TARGET_BIN: the GUI application to test; no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
 #   --interactive: as --show, and run each line only after Space is pressed
 #     --timeout ms: or once a line has waited that long (default -1: wait for Space)
 #   --roundtrip: replay each scenario with --record, compare its action lines
 #     with the recording's (G-013), then replay the recording unchanged (G-015)
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
-# if aurora exits non-zero and its FAIL line contains every expected text.
+# if <binary> exits non-zero and its FAIL line contains every expected text.
 set -u
 
 platform=(env QT_QPA_PLATFORM=offscreen)
@@ -40,12 +40,12 @@ case "${1:-}" in
     ;;
 esac
 
-aurora=${GUI_TEST_FRAMEWORK_TARGET_BIN:-$(command -v aurora)} || {
-  echo "[error] no aurora on PATH; set GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>" >&2
+if [ -z "${GUI_TEST_FRAMEWORK_TARGET_BIN:-}" ]; then
+  echo "[error] set GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>, the GUI application to test" >&2
   exit 1
-}
-aurora=$(cd "$(dirname "$aurora")" && pwd)/$(basename "$aurora")
-echo "aurora: $aurora"
+fi
+binary=$(cd "$(dirname "$GUI_TEST_FRAMEWORK_TARGET_BIN")" && pwd)/$(basename "$GUI_TEST_FRAMEWORK_TARGET_BIN")
+echo "binary: $binary"
 here=$(cd "$(dirname "$0")" && pwd)
 if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
 out=${GUI_TEST_FRAMEWORK_OUT_DIR:-$PWD/gui-scenarios}
@@ -60,7 +60,7 @@ fi
 # The action lines G-013 compares: what a user does, not waits or checks.
 actions='^(gui_click|gui_set_text|gui_select|gui_trigger_action|gui_dialog|gui_drag|gui_menu)( |$)'
 
-# run <run dir> <aurora args...>: one aurora run in a fresh dir, log in replay.log.
+# run <run dir> <binary args...>: one run in a fresh dir, log in replay.log.
 run() {
   local dir=$1
   shift
@@ -71,7 +71,7 @@ run() {
   : > "$dir/eula/AURORA_EULA_ACCEPTED.txt"
   (cd "$dir" &&
     AURORA_IMAGE_DOCKER_SCRIPTS_DIR="$dir/eula" XDG_CONFIG_HOME="$dir/config" \
-      "${platform[@]}" $limit "$aurora" "$@" 2>&1 |
+      "${platform[@]}" $limit "$binary" "$@" 2>&1 |
       if [ $interactive -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
     exit "${PIPESTATUS[0]}")
 }
