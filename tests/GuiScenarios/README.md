@@ -5,9 +5,9 @@ device data, so they run in FOEDAG's own CI.
 
 ```
 make test/gui-scenarios                      # build, then run every scenario
-FOEDAG_GUI_TEST_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh tests/GuiScenarios/console_puts.tcl
-FOEDAG_GUI_TEST_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --show   # watch them
-FOEDAG_GUI_TEST_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --interactive tests/GuiScenarios/console_puts.tcl
+GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh tests/GuiScenarios/console_puts.tcl
+GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --show   # watch them
+GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora tests/GuiScenarios/run_scenarios.sh --interactive tests/GuiScenarios/console_puts.tcl
 ```
 
 `--show` uses the platform's own display instead of the offscreen one. Sync

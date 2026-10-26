@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "aurora --replay", one run dir each.
-# usage: [FOEDAG_GUI_TEST_BIN=<binary>] run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
-#   FOEDAG_GUI_TEST_BIN: the aurora to run (default: aurora on PATH); no scenarios: all here
+# usage: [GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>] run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
+#   GUI_TEST_FRAMEWORK_TARGET_BIN: the aurora to run (default: aurora on PATH); no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
 #   --interactive: as --show, and run each line only after Space is pressed
 #     --timeout ms: or once a line has waited that long (default -1: wait for Space)
@@ -31,8 +31,8 @@ case "${1:-}" in
       hold_timeout=$2
       shift 2
     fi
-    platform=(env -u QT_QPA_PLATFORM FOEDAG_GUI_TEST_SHOW=1 FOEDAG_GUI_TEST_INTERACTIVE=$interactive
-      FOEDAG_GUI_TEST_INTERACTIVE_TIMEOUT=$hold_timeout)
+    platform=(env -u QT_QPA_PLATFORM GUI_TEST_FRAMEWORK_SHOW=1 GUI_TEST_FRAMEWORK_INTERACTIVE=$interactive
+      GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT=$hold_timeout)
     ;;
   --roundtrip)
     roundtrip=1
@@ -40,15 +40,15 @@ case "${1:-}" in
     ;;
 esac
 
-aurora=${FOEDAG_GUI_TEST_BIN:-$(command -v aurora)} || {
-  echo "[error] no aurora on PATH; set FOEDAG_GUI_TEST_BIN=<binary>" >&2
+aurora=${GUI_TEST_FRAMEWORK_TARGET_BIN:-$(command -v aurora)} || {
+  echo "[error] no aurora on PATH; set GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>" >&2
   exit 1
 }
 aurora=$(cd "$(dirname "$aurora")" && pwd)/$(basename "$aurora")
 echo "aurora: $aurora"
 here=$(cd "$(dirname "$0")" && pwd)
 if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
-out=${FOEDAG_GUI_TEST_OUT_DIR:-$PWD/gui-scenarios}
+out=${GUI_TEST_FRAMEWORK_OUT_DIR:-$PWD/gui-scenarios}
 mkdir -p "$out"
 
 # A paused interactive session must not be killed by the time limit.

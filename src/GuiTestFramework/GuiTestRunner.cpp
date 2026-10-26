@@ -140,10 +140,10 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
              GuiRecorder::installDir().toUtf8().constData(), TCL_GLOBAL_ONLY);
 
   qApp->installEventFilter(this);
-  if (qEnvironmentVariableIntValue("FOEDAG_GUI_TEST_INTERACTIVE") == 1) {
+  if (qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_INTERACTIVE") == 1) {
     bool ok{false};
     int timeoutMs = qEnvironmentVariableIntValue(
-        "FOEDAG_GUI_TEST_INTERACTIVE_TIMEOUT", &ok);
+        "GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT", &ok);
     if (!ok || timeoutMs < 0) timeoutMs = -1;
     m_gate = new GuiTestSpaceGate(timeoutMs, this);
     std::cout << "Interactive mode: press Space in an aurora window to run "
