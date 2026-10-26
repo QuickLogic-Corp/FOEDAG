@@ -48,6 +48,22 @@ The `gui_*` commands, their syntax and the milestone names are listed in
 aurora2 `docs/specs/gui-test-automation/` (`design-install.md` §5,
 `milestones.md`, `object-names.md`).
 
+## Recording
+
+`aurora --record <file.tcl>` starts the normal GUI and writes each action as the
+`gui_*` line that replays it, with `gui_wait_event` lines for the work the GUI
+did in between. Ctrl+Shift+S writes `gui_assert` checks for the focused widget.
+An action on a widget without an objectName becomes a `# UNRECORDED` comment
+and a warning: name the widget, then record again. Like `--replay`, `--record`
+is not listed in `aurora --help`.
+
+`--replay <script> --record <file>` records a replayed script.
+`run_scenarios.sh --roundtrip` (`make test/gui-record-roundtrip`) does that for
+every scenario, checks that the recording has the same action lines, then
+replays the recording from a new directory. So scenarios are written the way
+the recorder writes them: one command per line, Tcl list quoting, and
+`$::gui_test::project_dir` for the run directory.
+
 ## Negative scripts
 
 A script with `# expect: <text>` lines must fail: it passes only if aurora

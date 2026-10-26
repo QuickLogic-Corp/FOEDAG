@@ -46,6 +46,7 @@ class CommandLine {
   const std::vector<std::string>& Args() const { return m_args; }
 
   const std::string& GuiTestScript() const { return m_runGuiTest; }
+  const std::string& GuiRecordFile() const { return m_guiRecordFile; }
 
   const std::string& Script() const { return m_runScript; }
 
@@ -80,6 +81,7 @@ class CommandLine {
   bool m_withQml = false;
   std::string m_runScript;
   std::string m_runGuiTest;
+  std::string m_guiRecordFile;
   std::string m_runTclCmd;
   std::string m_compilerName;
   std::string m_projectFile;

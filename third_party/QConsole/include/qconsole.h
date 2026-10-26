@@ -149,6 +149,10 @@ class QConsole : public QTextEdit {
   bool isMultiLine() const;
   void terminate();
 
+ signals:
+  // A complete command typed by the user, emitted before it runs.
+  void commandEntered(const QString &command);
+
  private:
   void dropEvent(QDropEvent *event);
   void dragMoveEvent(QDragMoveEvent *event);

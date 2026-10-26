@@ -22,12 +22,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QString>
 
+class QObject;
+
 namespace FOEDAG {
 
 class TclInterpreter;
 
 // The gui_* commands; registered only when aurora runs with --replay.
 void registerGuiTestCommands(TclInterpreter *interp);
+
+// The text gui_get -text reports for a widget or action; ok is false when it
+// shows none.
+QString guiDisplayedText(QObject *object, bool *ok);
 
 // Waits for a milestone raised after the last gui_* action (REQ-030).
 bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,

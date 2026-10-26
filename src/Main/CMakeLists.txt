@@ -55,6 +55,7 @@ set (SRC_CPP_LIST ../Main/Foedag_ql.cpp
   ../Main/Tasks_ql.cpp
   ../Main/WidgetFactory.cpp
   ../Main/FoedagStyle.cpp
+  ../Main/GuiRecorder.cpp
   ../Main/GuiTestCommands.cpp
   ../Main/GuiTestHub.cpp
   ../Main/GuiTestRunner.cpp
@@ -97,6 +98,7 @@ set (SRC_H_LIST ../Main/Foedag.h
   ../Main/WidgetFactory.h
   ../Main/FoedagStyle.h
   ../Main/GuiMilestone.h
+  ../Main/GuiRecorder.h
   ../Main/GuiTestCommands.h
   ../Main/GuiTestHub.h
   ../Main/GuiTestRunner.h

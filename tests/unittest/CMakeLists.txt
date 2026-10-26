@@ -58,6 +58,7 @@ set (CPP_LIST
     Simulation/Simulation_test.cpp
     Main/GuiTestHub_test.cpp
     Main/GuiTestRunner_test.cpp
+    Main/GuiRecorder_test.cpp
 
 )
 

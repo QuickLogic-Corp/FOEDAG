@@ -54,6 +54,11 @@ class GuiTestHub : public QObject {
   // The override cursor raises no event, so waits call this between checks.
   void pollBusy();
 
+ signals:
+  // Every counted milestone, in the GUI thread; the recorder turns them into
+  // waits.
+  void counted(const QString &name, const QString &arg);
+
  protected:
   bool eventFilter(QObject *watched, QEvent *event) override;
 

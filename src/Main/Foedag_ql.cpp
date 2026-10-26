@@ -56,6 +56,7 @@ extern "C" {
 #include "Console/TclWorker.h"
 #include "EventLoopProbe.h"
 #include "FoedagStyle.h"
+#include "GuiRecorder.h"
 #include "GuiTestHub.h"
 #include "Main/Foedag.h"
 #include "Main/ToolContext.h"
@@ -205,9 +206,23 @@ bool Foedag::initGui() {
 
   QWidget* mainWin = nullptr;
 
-  // Before the main window, so objects it creates are bridged.
-  if (!m_cmdLine->GuiTestScript().empty())
+  // Before the main window, so objects it creates are bridged and recorded.
+  const bool replay = !m_cmdLine->GuiTestScript().empty();
+  const bool record = !m_cmdLine->GuiRecordFile().empty();
+  if (replay || record) {
     FOEDAG::GuiTestHub::instance()->enable();
+    // Qt's own file dialog, so file choices are visible to the recorder and
+    // to the gui_* commands (REQ-027).
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+  }
+  if (record) {
+    QString error;
+    if (!FOEDAG::GuiRecorder::instance()->start(
+            QString::fromStdString(m_cmdLine->GuiRecordFile()), &error)) {
+      std::cerr << "ERROR: " << error.toStdString() << std::endl;
+      return false;
+    }
+  }
 
   GlobalSession = new FOEDAG::Session(nullptr, interpreter, commands, m_cmdLine,
                                       m_context, m_compiler, m_settings);

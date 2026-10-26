@@ -119,6 +119,7 @@ void GuiTestHub::record(const QString &name, const QString &arg) {
   if (!arg.isEmpty()) ++m_count[name + kArgSeparator + arg];
   m_recent.append(arg.isEmpty() ? name : name + " " + arg);
   while (m_recent.size() > kRecentSize) m_recent.removeFirst();
+  emit counted(name, arg);
 }
 
 void GuiTestHub::bridge(QObject *object) {

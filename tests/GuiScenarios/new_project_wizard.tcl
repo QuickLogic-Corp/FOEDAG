@@ -5,7 +5,7 @@ gui_trigger_action actionNewProject
 gui_wait_event dialog.shown newProjectDialog
 gui_assert {[gui_get newProjectTabs -text] eq "Project Directory"}
 gui_set_text m_lineEditPname gui_new_project
-gui_set_text m_lineEditPpath [pwd]
+gui_set_text m_lineEditPpath $::gui_test::project_dir
 gui_click newProjectNext
 gui_assert {[gui_get newProjectTabs -text] eq "Type of Project"}
 gui_assert {[gui_get m_radioBtnRTL checked]}

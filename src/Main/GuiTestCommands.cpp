@@ -53,6 +53,7 @@ extern "C" {
 #include <functional>
 #include <optional>
 
+#include "GuiRecorder.h"
 #include "GuiTestHub.h"
 #include "GuiTestRunner.h"
 #include "Tcl/TclInterpreter.h"
@@ -63,6 +64,15 @@ namespace {
 
 constexpr int kDefaultTimeoutMs = 30000;
 constexpr int kPollMs = 20;
+
+// Every gui_* action: the snapshot gui_wait_event counts from, and one
+// recorder frame, so the recorder writes it as a user's action.
+struct GuiTestAction {
+  explicit GuiTestAction(QObject *target) : frame(target) {
+    GuiTestHub::instance()->takeSnapshot();
+  }
+  GuiRecorder::Frame frame;
+};
 
 int fail(Tcl_Interp *interp, const QString &message) {
   Tcl_SetObjResult(interp, Tcl_NewStringObj(message.toUtf8().constData(), -1));
@@ -291,7 +301,7 @@ QAbstractButton *roleButton(QWidget *dialog, bool accept) {
 
 // Answers the active modal dialog. Returns an error message, or empty.
 QString answerDialog(QWidget *modal, const QString &how, const QString &text) {
-  GuiTestHub::instance()->takeSnapshot();
+  const GuiTestAction act{modal};
   if (how == "button") {
     QAbstractButton *b = dialogButton(modal, text);
     if (!b) return QString("dialog '%1' has no button '%2'")
@@ -346,10 +356,12 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (!w->isEnabled())
     return fail(interp, QString("gui_click %1: widget is disabled").arg(name));
 
-  GuiTestHub::instance()->takeSnapshot();
+  const GuiTestAction act{w};
   const bool dbl = o.flags.contains("-double");
   auto pushButton = qobject_cast<QAbstractButton *>(w);
   if (pushButton && button == "left" && !dbl) {
+    if (GuiRecorder::isActive())
+      GuiRecorder::instance()->aboutToClick(pushButton);
     pushButton->click();
     return succeed(interp);
   }
@@ -381,7 +393,7 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     return fail(interp,
                 QString("gui_set_text %1: widget is disabled").arg(name));
 
-  GuiTestHub::instance()->takeSnapshot();
+  const GuiTestAction act{w};
   auto typeInto = [&](QLineEdit *edit) -> int {
     if (edit->isReadOnly())
       return fail(interp,
@@ -443,7 +455,7 @@ int guiSelect(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (!w->isEnabled())
     return fail(interp, QString("gui_select %1: widget is disabled").arg(name));
 
-  GuiTestHub::instance()->takeSnapshot();
+  const GuiTestAction act{w};
   auto notFound = [&](const QStringList &items) {
     return fail(interp, QString("gui_select %1: no item '%2' (items: %3)")
                             .arg(name, item, items.mid(0, 10).join(", ")));
@@ -466,6 +478,7 @@ int guiSelect(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     QStringList items;
     for (int i = 0; i < bar->count(); ++i) {
       if (plain(bar->tabText(i)) == item) {
+        emit bar->tabBarClicked(i);  // a real click emits it; the recorder uses it
         bar->setCurrentIndex(i);
         return succeed(interp);
       }
@@ -505,7 +518,7 @@ int guiTriggerAction(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (!action->isEnabled())
     return fail(interp,
                 QString("gui_trigger_action %1: action is disabled").arg(name));
-  GuiTestHub::instance()->takeSnapshot();
+  const GuiTestAction act{action};
   action->trigger();
   return succeed(interp);
 }
@@ -560,7 +573,7 @@ int guiDrag(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (!w->isEnabled())
     return fail(interp, QString("gui_drag %1: widget is disabled").arg(name));
 
-  GuiTestHub::instance()->takeSnapshot();
+  const GuiTestAction act{w};
   QWidget *target = mouseTarget(w);
   const QPoint from{c[0], c[1]};
   const QPoint to{c[2], c[3]};
@@ -672,12 +685,28 @@ int guiWaitEvent(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return succeed(interp);
 }
 
+int guiTestCheckpoint(void *, Tcl_Interp *interp, int argc,
+                      const char *argv[]) {
+  if (argc != 2) return fail(interp, "usage: gui_test_checkpoint <objName>");
+  const QString name = QString::fromUtf8(argv[1]);
+  QString error;
+  QWidget *w = findWidget(name, {}, &error);
+  if (!w)
+    return fail(interp, QString("gui_test_checkpoint %1: %2").arg(name, error));
+  if (GuiRecorder::isActive()) GuiRecorder::instance()->checkpoint(w);
+  return succeed(interp);
+}
+
 int guiTestRun(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (argc != 2) return fail(interp, "usage: gui_test_run <script>");
   GuiTestRunner::instance()->run(interp, QString::fromUtf8(argv[1]));
 }
 
 }  // namespace
+
+QString guiDisplayedText(QObject *object, bool *ok) {
+  return displayedText(object, ok);
+}
 
 bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,
                       QString *error) {
@@ -709,6 +738,8 @@ void registerGuiTestCommands(TclInterpreter *interp) {
   interp->registerCmd("gui_dialog", guiDialog, nullptr, nullptr);
   interp->registerCmd("gui_wait_event", guiWaitEvent, nullptr, nullptr);
   interp->registerCmd("gui_test_run", guiTestRun, nullptr, nullptr);
+  interp->registerCmd("gui_test_checkpoint", guiTestCheckpoint, nullptr,
+                      nullptr);
 }
 
 }  // namespace FOEDAG

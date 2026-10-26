@@ -36,6 +36,7 @@ extern "C" {
 #include <fstream>
 #include <iostream>
 
+#include "GuiRecorder.h"
 
 namespace FOEDAG {
 
@@ -130,6 +131,13 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
   }
   if (!pending.isEmpty())
     fail(QString("%1:%2: incomplete command").arg(file).arg(pendingLine));
+
+  // REQ-027: recordings refer to these instead of absolute paths.
+  Tcl_Eval(m_interp, "namespace eval ::gui_test {}");
+  Tcl_SetVar(m_interp, "::gui_test::project_dir",
+             GuiRecorder::projectDir().toUtf8().constData(), TCL_GLOBAL_ONLY);
+  Tcl_SetVar(m_interp, "::gui_test::install_dir",
+             GuiRecorder::installDir().toUtf8().constData(), TCL_GLOBAL_ONLY);
 
   qApp->installEventFilter(this);
   if (qEnvironmentVariableIntValue("AURORA_GUI_TEST_INTERACTIVE") == 1) {
@@ -229,6 +237,7 @@ void GuiTestRunner::fail(const QString &message) {
 }
 
 void GuiTestRunner::finish(int code) {
+  if (GuiRecorder::isActive()) GuiRecorder::instance()->flush();
   if (code == 0) std::cout << "PASS: " << m_file.toStdString() << std::endl;
   for (int type : {TCL_STDOUT, TCL_STDERR})
     if (Tcl_Channel channel = Tcl_GetStdChannel(type)) Tcl_Flush(channel);
