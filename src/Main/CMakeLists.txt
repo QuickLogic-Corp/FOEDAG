@@ -55,10 +55,6 @@ set (SRC_CPP_LIST ../Main/Foedag_ql.cpp
   ../Main/Tasks_ql.cpp
   ../Main/WidgetFactory.cpp
   ../Main/FoedagStyle.cpp
-  ../Main/GuiRecorder.cpp
-  ../Main/GuiTestCommands.cpp
-  ../Main/GuiTestHub.cpp
-  ../Main/GuiTestRunner.cpp
   ../Main/ProjectFile/ProjectFileLoader.cpp
   ../Main/ProjectFile/ProjectFileComponent.cpp
   ../Main/ProjectFile/TaskManagerComponent.cpp
@@ -97,11 +93,6 @@ set (SRC_H_LIST ../Main/Foedag.h
   ../Main/Tasks.h
   ../Main/WidgetFactory.h
   ../Main/FoedagStyle.h
-  ../Main/GuiMilestone.h
-  ../Main/GuiRecorder.h
-  ../Main/GuiTestCommands.h
-  ../Main/GuiTestHub.h
-  ../Main/GuiTestRunner.h
   ../Main/ProjectFile/ProjectFileLoader.h
   ../Main/ProjectFile/ProjectFileComponent.h
   ../Main/ProjectFile/TaskManagerComponent.h
@@ -157,6 +148,7 @@ if (USE_IPA)
   target_link_libraries(foedagcore PUBLIC interactive_path_analysis)
 endif()
 target_link_libraries(foedagcore PUBLIC floorplanning)
+target_link_libraries(foedagcore PUBLIC guitestframework)
 target_compile_definitions(foedagcore PUBLIC FOEDAG_CORE_LIBRARY)
 
 set(FOEDAG_CORE_STATIC_LIB libfoedagcore.a)

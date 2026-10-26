@@ -23,7 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 #include <QSysInfo>
 
-#include "Main/GuiTestRunner.h"
+#include "GuiTestFramework/GuiTestRunner.h"
 
 using namespace FOEDAG;
 

@@ -24,7 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/CompilerDefines.h"
 #include "Main/DialogProvider.h"
-#include "Main/GuiMilestone.h"
+#include "GuiTestFramework/GuiMilestone.h"
 #include "Reports/PackingReportManager.h"
 #include "Reports/PlacementReportManager.h"
 #include "Reports/RoutingReportManager.h"

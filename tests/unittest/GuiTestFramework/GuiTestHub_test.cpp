@@ -18,7 +18,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-#include "Main/GuiTestHub.h"
+#include "GuiTestFramework/GuiTestHub.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -28,8 +28,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <thread>
 
 #include "Compiler/TaskManager.h"
-#include "Main/GuiMilestone.h"
-#include "Main/GuiTestCommands.h"
+#include "GuiTestFramework/GuiMilestone.h"
+#include "GuiTestFramework/GuiTestCommands.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;

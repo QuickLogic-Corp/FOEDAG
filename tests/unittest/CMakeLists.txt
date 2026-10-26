@@ -56,9 +56,9 @@ set (CPP_LIST
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
-    Main/GuiTestHub_test.cpp
-    Main/GuiTestRunner_test.cpp
-    Main/GuiRecorder_test.cpp
+    GuiTestFramework/GuiTestHub_test.cpp
+    GuiTestFramework/GuiTestRunner_test.cpp
+    GuiTestFramework/GuiRecorder_test.cpp
 
 )
 

@@ -45,7 +45,7 @@ extern "C" {
 #include "CommandLine.h"
 #include "Compiler/Log.h"
 #include "Foedag.h"
-#include "GuiTestCommands.h"
+#include "GuiTestFramework/GuiTestCommands.h"
 #include "IpConfigurator/IpConfigWidget.h"
 #include "Main/Tasks.h"
 #include "Main/WidgetFactory.h"
@@ -221,7 +221,7 @@ void registerBasicGuiCommands(FOEDAG::Session* session) {
                                     GlobalSession->MainWindow(), nullptr);
 
   if (!session->CmdLine()->GuiTestScript().empty())
-    FOEDAG::registerGuiTestCommands(session->TclInterp());
+    FOEDAG::registerGuiTestCommands(session->TclInterp()->getInterp());
 }
 
 void registerBasicBatchCommands(FOEDAG::Session* session) {

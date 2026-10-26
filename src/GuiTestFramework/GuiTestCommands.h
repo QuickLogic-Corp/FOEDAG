@@ -23,13 +23,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 class QObject;
+struct Tcl_Interp;
 
 namespace FOEDAG {
 
-class TclInterpreter;
-
 // The gui_* commands; registered only when aurora runs with --replay.
-void registerGuiTestCommands(TclInterpreter *interp);
+void registerGuiTestCommands(Tcl_Interp *interp);
 
 // The text gui_get -text reports for a widget or action; ok is false when it
 // shows none.

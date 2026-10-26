@@ -18,7 +18,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-#include "Main/GuiRecorder.h"
+#include "GuiTestFramework/GuiRecorder.h"
 
 #include <QAction>
 #include <QBuffer>
@@ -35,8 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <iostream>
 #include <sstream>
 
-#include "Main/GuiMilestone.h"
-#include "Main/GuiTestHub.h"
+#include "GuiTestFramework/GuiMilestone.h"
+#include "GuiTestFramework/GuiTestHub.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;

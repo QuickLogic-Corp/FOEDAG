@@ -24,8 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 class QObject;
 
-// Header-only so that libraries linked after foedagcore (compiler, tools) can
-// raise milestones; GuiTestHub fills the sinks in when it is enabled.
+// Header-only so that any library (compiler, tools) can raise milestones
+// without linking guitestframework; GuiTestHub fills the sinks in when it is
+// enabled.
 namespace FOEDAG::GuiTest {
 using MilestoneSink = void (*)(const QString &name, const QString &arg);
 using BridgeSink = void (*)(QObject *object);

@@ -51,12 +51,12 @@ extern "C" {
 #include <QThread>
 #include <QTimer>
 #include <functional>
+#include <utility>
 #include <optional>
 
 #include "GuiRecorder.h"
 #include "GuiTestHub.h"
 #include "GuiTestRunner.h"
-#include "Tcl/TclInterpreter.h"
 
 namespace FOEDAG {
 
@@ -725,21 +725,24 @@ bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,
   return false;
 }
 
-void registerGuiTestCommands(TclInterpreter *interp) {
-  interp->registerCmd("gui_find", guiFind, nullptr, nullptr);
-  interp->registerCmd("gui_click", guiClick, nullptr, nullptr);
-  interp->registerCmd("gui_set_text", guiSetText, nullptr, nullptr);
-  interp->registerCmd("gui_select", guiSelect, nullptr, nullptr);
-  interp->registerCmd("gui_trigger_action", guiTriggerAction, nullptr, nullptr);
-  interp->registerCmd("gui_get", guiGet, nullptr, nullptr);
-  interp->registerCmd("gui_drag", guiDrag, nullptr, nullptr);
-  interp->registerCmd("gui_wait_for", guiWaitFor, nullptr, nullptr);
-  interp->registerCmd("gui_assert", guiAssert, nullptr, nullptr);
-  interp->registerCmd("gui_dialog", guiDialog, nullptr, nullptr);
-  interp->registerCmd("gui_wait_event", guiWaitEvent, nullptr, nullptr);
-  interp->registerCmd("gui_test_run", guiTestRun, nullptr, nullptr);
-  interp->registerCmd("gui_test_checkpoint", guiTestCheckpoint, nullptr,
-                      nullptr);
+void registerGuiTestCommands(Tcl_Interp *interp) {
+  const std::pair<const char *, Tcl_CmdProc *> commands[] = {
+      {"gui_find", guiFind},
+      {"gui_click", guiClick},
+      {"gui_set_text", guiSetText},
+      {"gui_select", guiSelect},
+      {"gui_trigger_action", guiTriggerAction},
+      {"gui_get", guiGet},
+      {"gui_drag", guiDrag},
+      {"gui_wait_for", guiWaitFor},
+      {"gui_assert", guiAssert},
+      {"gui_dialog", guiDialog},
+      {"gui_wait_event", guiWaitEvent},
+      {"gui_test_run", guiTestRun},
+      {"gui_test_checkpoint", guiTestCheckpoint},
+  };
+  for (const auto &[name, proc] : commands)
+    Tcl_CreateCommand(interp, name, proc, nullptr, nullptr);
 }
 
 }  // namespace FOEDAG
