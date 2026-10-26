@@ -6,11 +6,6 @@ on:
     branches:
       - 'develop'
   workflow_dispatch:
-    inputs:
-      bless_gui_goldens:
-        description: 'Bless the GUI screenshot goldens and upload them'
-        type: boolean
-        default: false
 
 jobs:
 
@@ -255,8 +250,6 @@ jobs:
             install_script: install_dependencies_build_ubuntu2404.sh
             os: linux
             arch: x86-64
-            # The screenshot gate runs on the image its goldens came from.
-            gui_goldens: tests/GuiScenarios/golden
 
     runs-on: ${{ matrix.runner }}
     name: build ${{ matrix.os }}-${{ matrix.arch }} ${{ matrix.runner }}
@@ -333,33 +326,15 @@ jobs:
         make test -j$(nproc)
 
     - name: GUI scenarios
-      if: ${{ !inputs.bless_gui_goldens }}
       run: |
         export QT_DIR="${QT_ROOT_DIR}"
-        make test/gui-scenarios GUI_GOLDEN_DIR="${{ matrix.gui_goldens && format('{0}/{1}', github.workspace, matrix.gui_goldens) || '' }}"
-
-    - name: Bless GUI goldens
-      if: ${{ inputs.bless_gui_goldens && matrix.gui_goldens }}
-      run: |
-        export QT_DIR="${QT_ROOT_DIR}"
-        make test/gui-scenarios-bless
-
-    - name: Upload GUI goldens
-      if: ${{ inputs.bless_gui_goldens && matrix.gui_goldens }}
-      uses: actions/upload-artifact@v4.3.0
-      with:
-        name: gui-goldens-linux
-        retention-days: 7
-        path: ${{ matrix.gui_goldens }}
-        overwrite: true
+        make test/gui-scenarios
 
     - name: GUI recorder round trip
-      if: ${{ !inputs.bless_gui_goldens }}
       run: |
         export QT_DIR="${QT_ROOT_DIR}"
         make test/gui-record-roundtrip
 
-    # Captures every run; triptychs (*.diff.png) next to them when a gate fails.
     - name: Upload GUI scenario logs and screenshots
       uses: actions/upload-artifact@v4.3.0
       if: ${{ always() }}
@@ -369,5 +344,4 @@ jobs:
         path: |
           build/gui-scenarios
           build/gui-roundtrip
-          build/gui-bless
         overwrite: true

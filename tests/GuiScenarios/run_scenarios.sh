@@ -10,8 +10,9 @@
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
 # if <binary> exits non-zero and its FAIL line contains every expected text.
 # GUI_TEST_FRAMEWORK_GOLDEN_DIR turns the screenshot gate on; without it,
-# screenshots are only saved, and "# needs: goldens" scenarios are skipped.
-# GUI_TEST_FRAMEWORK_GOLDEN=update (bless mode) skips negative scripts.
+# screenshots are only saved. Negative scripts always use golden/ here, whose
+# goldens fail on any machine. GUI_TEST_FRAMEWORK_GOLDEN=update (bless mode)
+# skips negative scripts.
 set -u
 
 platform=(env QT_QPA_PLATFORM=offscreen)
@@ -42,7 +43,7 @@ case "${1:-}" in
     shift
     # Recordings name their checkpoint screenshots after the recording, so
     # there are no goldens to compare them with.
-    unset GUI_TEST_FRAMEWORK_GOLDEN_DIR
+    GUI_TEST_FRAMEWORK_GOLDEN_DIR=
     ;;
 esac
 
@@ -82,6 +83,7 @@ run() {
     AURORA_IMAGE_DOCKER_SCRIPTS_DIR="$dir/eula" XDG_CONFIG_HOME="$dir/config" \
       HOME="$dir/home" USERPROFILE="$dir/home" \
       AURORA2_DEVICE_DATA_DIR= AURORA2_DEVICE_DATA_PATH= \
+      GUI_TEST_FRAMEWORK_GOLDEN_DIR="$golden" \
       "${platform[@]}" $limit "$binary" "$@" 2>&1 |
       if [ $interactive -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
     exit "${PIPESTATUS[0]}")
@@ -97,17 +99,13 @@ for scenario in "$@"; do
   negative=0
   grep -q '^# expect: ' "$scenario" && negative=1
   if [ $roundtrip -eq 1 ] && [ $negative -eq 1 ]; then continue; fi
-  skip=""
-  if grep -q '^# needs: goldens' "$scenario" && [ -z "${GUI_TEST_FRAMEWORK_GOLDEN_DIR:-}" ]; then
-    skip="no GUI_TEST_FRAMEWORK_GOLDEN_DIR"
-  elif [ $negative -eq 1 ] && [ "${GUI_TEST_FRAMEWORK_GOLDEN:-}" = update ]; then
-    skip="bless mode"
-  fi
-  if [ -n "$skip" ]; then
+  if [ $negative -eq 1 ] && [ "${GUI_TEST_FRAMEWORK_GOLDEN:-}" = update ]; then
     skipped=$((skipped + 1))
-    echo "SKIP $name ($skip)"
+    echo "SKIP $name (bless mode)"
     continue
   fi
+  golden=${GUI_TEST_FRAMEWORK_GOLDEN_DIR:-}
+  [ $negative -eq 1 ] && golden=$here/golden
 
   reason=""
   if [ $roundtrip -eq 1 ]; then

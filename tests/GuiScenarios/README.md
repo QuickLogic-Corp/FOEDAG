@@ -84,22 +84,21 @@ the run and writes `<step>.diff.png`: golden, capture and difference side by
 side.
 
 The comparison is exact, so goldens only match on the machine image that made
-them. It is off unless `GUI_TEST_FRAMEWORK_GOLDEN_DIR` is set: locally, captures
-are saved and reported as `SKIP`. CI turns it on for ubuntu-24.04:
+them. It is off unless `GUI_TEST_FRAMEWORK_GOLDEN_DIR` is set: captures are
+then saved and reported as `SKIP`, as in this repository's CI. The goldens of
+these scenarios belong to the application that runs them, which keeps them
+and turns the gate on with:
 
 ```
-make test/gui-scenarios GUI_GOLDEN_DIR=$PWD/tests/GuiScenarios/golden
-make test/gui-scenarios-bless [SCENARIO=<name>]   # write captures as goldens
+GUI_TEST_FRAMEWORK_GOLDEN_DIR=<goldens> run_scenarios.sh [scenario.tcl ...]
+GUI_TEST_FRAMEWORK_GOLDEN=update GUI_TEST_FRAMEWORK_GOLDEN_DIR=<goldens> run_scenarios.sh   # bless
 ```
 
-To refresh the goldens, run the `build` workflow by hand with
-`bless_gui_goldens` set, download the `gui-goldens-linux` artifact into
-`tests/GuiScenarios/golden`, review the images and commit them. Replay renders
-offscreen with Fusion, a 1600x1000 main window and no animations, so the same
-image gives the same pixels. With `--show` or `--interactive`, screenshots are
-compared but only reported (`MATCH`, `MISMATCH`, `MISSING`), and bless mode is
-refused. Scripts marked `# needs: goldens` are skipped without a golden
-directory, and bless mode skips negative scripts.
+Replay renders offscreen with Fusion, a 1600x1000 main window and no
+animations, so the same machine image gives the same pixels. With `--show` or
+`--interactive`, screenshots are compared but only reported (`MATCH`,
+`MISMATCH`, `MISSING`), and bless mode is refused. Negative scripts always use
+`golden/` here, whose goldens fail on any machine, and bless mode skips them.
 
 ## Negative scripts
 

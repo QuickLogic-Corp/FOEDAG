@@ -77,17 +77,10 @@ test/unittest-coverage: run-cmake-coverage
 	pushd coverage-build && $(XVFB) tests/unittest/unittest && popd
 
 # Device-free GUI scenarios (replay mode, offscreen; no display needed).
-# GUI_GOLDEN_DIR turns the screenshot gate on; empty, screenshots are only saved.
-GUI_GOLDEN_DIR ?=
 GUI_SCENARIO_FILES = $(if $(SCENARIO),tests/GuiScenarios/$(SCENARIO).tcl)
 test/gui-scenarios: run-cmake-release
 	cmake --build build --target foedag-bin -j $(CPU_CORES)
-	GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora GUI_TEST_FRAMEWORK_OUT_DIR=$(CURDIR)/build/gui-scenarios GUI_TEST_FRAMEWORK_GOLDEN_DIR=$(GUI_GOLDEN_DIR) tests/GuiScenarios/run_scenarios.sh $(GUI_SCENARIO_FILES)
-
-# Bless mode: write the current captures over the goldens [SCENARIO=<name>].
-test/gui-scenarios-bless: run-cmake-release
-	cmake --build build --target foedag-bin -j $(CPU_CORES)
-	GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora GUI_TEST_FRAMEWORK_OUT_DIR=$(CURDIR)/build/gui-bless GUI_TEST_FRAMEWORK_GOLDEN_DIR=$(CURDIR)/tests/GuiScenarios/golden GUI_TEST_FRAMEWORK_GOLDEN=update tests/GuiScenarios/run_scenarios.sh $(GUI_SCENARIO_FILES)
+	GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora GUI_TEST_FRAMEWORK_OUT_DIR=$(CURDIR)/build/gui-scenarios tests/GuiScenarios/run_scenarios.sh $(GUI_SCENARIO_FILES)
 
 # Recorder round trip: each scenario recorded while replayed, then the recording replayed.
 test/gui-record-roundtrip: run-cmake-release
