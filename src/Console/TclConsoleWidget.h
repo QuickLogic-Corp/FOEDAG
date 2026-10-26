@@ -55,6 +55,8 @@ class TclConsoleWidget : public QConsole {
   void searchEnable();
   void stateChanged(FOEDAG::State);
   void linkActivated(const FOEDAG::ErrorInfo &);
+  // A command the console is about to run; the GUI recorder writes it.
+  void commandEntered(const QString &command);
 
  protected:
   QString interpretCommand(const QString &command, int *res) override;

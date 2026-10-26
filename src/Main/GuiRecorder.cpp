@@ -455,7 +455,7 @@ void GuiRecorder::watch(QWidget *widget) {
                   tclWord(text)},
             false);
     });
-  } else if (widget->inherits("QConsole")) {
+  } else if (widget->inherits("FOEDAG::TclConsoleWidget")) {
     connect(widget, SIGNAL(commandEntered(QString)), this,
             SLOT(onConsoleCommand(QString)));
   }

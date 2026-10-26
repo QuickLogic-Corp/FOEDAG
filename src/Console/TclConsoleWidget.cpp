@@ -69,6 +69,7 @@ void TclConsoleWidget::showPrompt() { displayPrompt(); }
 
 QString TclConsoleWidget::interpretCommand(const QString &command, int *res) {
   if (!command.isEmpty()) {
+    emit commandEntered(command);
     setUndoRedoEnabled(false);
     setState(State::IN_PROGRESS);
     QString prepareCommand = command;

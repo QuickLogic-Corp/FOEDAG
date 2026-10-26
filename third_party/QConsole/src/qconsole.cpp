@@ -320,10 +320,8 @@ void QConsole::handleReturnKeyPress(const QString &command) {
   }
   multiLineCommand.append(command);
   if (isCommandComplete(command)) {
-    if (!multiLineCommand.isEmpty()) {
-      emit commandEntered(multiLineCommand.join("\n"));
+    if (!multiLineCommand.isEmpty())
       execCommand(multiLineCommand.join("\n"), false);
-    }
     multiLineCommand.clear();
   } else {
     moveCursor(QTextCursor::EndOfLine);
