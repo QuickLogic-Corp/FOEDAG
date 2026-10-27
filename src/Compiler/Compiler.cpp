@@ -2686,7 +2686,7 @@ void Compiler::SetEnvironmentVariable(const std::string variable,
   m_environmentVariableMap.emplace(variable, value);
 }
 
-std::string Compiler::QtPlatformFor(bool gui) {
+std::string Compiler::getQtPlatformPluginFor(bool gui) {
   if (!gui) return "offscreen";
 #ifdef __linux__
   // Avoid Wayland: the GUI needs X11 on Ubuntu 22.04+ Wayland sessions.
@@ -2713,7 +2713,7 @@ int Compiler::ExecuteAndMonitorQtApplication(const std::string& command,
                                              bool gui,
                                              const std::string logFile,
                                              bool appendLog) {
-  const std::string platform = QtPlatformFor(gui);
+  const std::string platform = getQtPlatformPluginFor(gui);
   if (!platform.empty()) m_environmentVariableMap["QT_QPA_PLATFORM"] = platform;
   const int status = ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
   m_environmentVariableMap.erase("QT_QPA_PLATFORM");

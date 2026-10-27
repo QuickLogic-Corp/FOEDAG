@@ -285,7 +285,7 @@ class Compiler {
   virtual void invalidateTaskStatuses() {}
 
   /// QT_QPA_PLATFORM for a child Qt application; empty keeps Qt's default.
-  static std::string QtPlatformFor(bool gui);
+  static std::string getQtPlatformPluginFor(bool gui);
   /// VPR shows its GUI only with --disp on.
   static bool IsVprGuiCommand(const std::string& command);
 
