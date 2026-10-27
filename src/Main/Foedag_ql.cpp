@@ -56,7 +56,6 @@ extern "C" {
 #include "Console/TclWorker.h"
 #include "EventLoopProbe.h"
 #include "FoedagStyle.h"
-#include "GuiTestHub.h"
 #include "Main/Foedag.h"
 #include "Main/ToolContext.h"
 #include "MainWindow/Session.h"
@@ -204,10 +203,6 @@ bool Foedag::initGui() {
   loadTclInitFile(commands, m_context->ExecutableName());
 
   QWidget* mainWin = nullptr;
-
-  // Before the main window, so objects it creates are bridged.
-  if (!m_cmdLine->GuiTestScript().empty())
-    FOEDAG::GuiTestHub::instance()->enable();
 
   GlobalSession = new FOEDAG::Session(nullptr, interpreter, commands, m_cmdLine,
                                       m_context, m_compiler, m_settings);
