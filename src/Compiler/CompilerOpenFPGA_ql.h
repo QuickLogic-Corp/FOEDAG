@@ -408,6 +408,7 @@ private:
   bool m_incrementalModeWarned = false;
   void selectIncrementalBackend();
   std::unique_ptr<IncrementalBackend> makeCppBackend();
+  std::filesystem::path engineInstallRoot() const;
   EngineStageContext engineContext(const std::string& stage);
   void invalidateEngineRecords(int taskId);
   void BeforeCompileTask(Action action) override;

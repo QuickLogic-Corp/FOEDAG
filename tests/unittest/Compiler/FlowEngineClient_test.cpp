@@ -116,6 +116,12 @@ TEST_F(FlowEngineClientTest, install_root_and_interpreter_are_found_or_empty) {
 
   write("scripts/aurora_engine.py", "");
   EXPECT_TRUE(fs::equivalent(FlowEngineClient::findInstallRoot(dataPath), m_dir));
+  // Aurora's data path is <install>/device_data, and the install may sit inside a
+  // checkout that has its own scripts/aurora_engine.py.
+  const fs::path install = m_dir / "dev";
+  write("dev/scripts/aurora_engine.py", "");
+  fs::create_directories(install / "device_data");
+  EXPECT_TRUE(fs::equivalent(FlowEngineClient::findInstallRoot(install / "device_data"), install));
   EXPECT_EQ(FlowEngineClient::defaultsFile(m_dir),
             m_dir / "scripts" / "flow_engine" / "data" / "defaults.json");
 

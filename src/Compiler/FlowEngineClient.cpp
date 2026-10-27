@@ -97,9 +97,10 @@ FlowEngineClient::ModeResult FlowEngineClient::incrementalMode(
 
 fs::path FlowEngineClient::findInstallRoot(const fs::path& dataPath) {
   if (dataPath.empty()) return {};
-  // <install>/share/<app> in the aurora layout, else DataPath()/..; macOS keeps
-  // the install under the bundle's Contents/.
-  for (const fs::path& root : {dataPath / ".." / "..", dataPath / "..",
+  // Nearest first: Aurora's data path is <install>/device_data, FOEDAG's is
+  // <install>/share/<app>; one level further up may be a source checkout, which
+  // also holds scripts/aurora_engine.py. macOS keeps the install under Contents/.
+  for (const fs::path& root : {dataPath / "..", dataPath / ".." / "..",
                                dataPath / ".." / ".." / "Contents"}) {
     const fs::path candidate = root.lexically_normal();
     if (isFile(candidate / "scripts" / "aurora_engine.py")) return candidate;

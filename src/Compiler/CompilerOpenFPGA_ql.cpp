@@ -129,9 +129,7 @@ CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(mak
 }
 
 void CompilerOpenFPGA_ql::selectIncrementalBackend() {
-  const std::filesystem::path dataPath =
-      GetSession() ? GetSession()->Context()->DataPath() : std::filesystem::path{};
-  const std::filesystem::path installRoot = FlowEngineClient::findInstallRoot(dataPath);
+  const std::filesystem::path installRoot = engineInstallRoot();
   const char* env = std::getenv("AURORA_INCREMENTAL");
   // Without an engine in the install and without the switch, cpp is the only choice.
   if (installRoot.empty() && !env) {
@@ -159,6 +157,11 @@ void CompilerOpenFPGA_ql::selectIncrementalBackend() {
   }
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::engineInstallRoot() const {
+  return GetSession() ? FlowEngineClient::findInstallRoot(GetSession()->Context()->DataPath())
+                      : std::filesystem::path{};
+}
+
 std::unique_ptr<IncrementalBackend> CompilerOpenFPGA_ql::makeCppBackend() {
   auto cpp = std::make_unique<CppBackend>(this);
   cpp->setRecordHook([this](int taskId) { invalidateEngineRecords(taskId); });
@@ -172,8 +175,7 @@ void CompilerOpenFPGA_ql::invalidateEngineRecords(int taskId) {
   if (stage.empty() || !EngineBackend::hasRecords(project)) {
     return;
   }
-  const FlowEngineClient client(FlowEngineClient::findInstallRoot(
-      GetSession() ? GetSession()->Context()->DataPath() : std::filesystem::path{}));
+  const FlowEngineClient client(engineInstallRoot());
   std::vector<std::string> args{"invalidate", "--stage", stage, "--downstream"};
   if (engineContext(stage).layoutResolvedInPack) {
     args.emplace_back("--layout-resolved-in-pack");
