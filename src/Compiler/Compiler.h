@@ -313,6 +313,10 @@ class Compiler {
   /* Compiler class utilities */
   bool RunBatch();
   bool RunCompileTask(Action action);
+  bool RunCompileTaskGuarded(Action action);
+  // Around each compile task; AfterCompileTask runs after RunCompileTask's guard.
+  virtual void BeforeCompileTask(Action /*action*/) {}
+  virtual void AfterCompileTask(Action /*action*/, bool /*ok*/) {}
 
   void SetEnvironmentVariable(const std::string variable,
                               const std::string value);

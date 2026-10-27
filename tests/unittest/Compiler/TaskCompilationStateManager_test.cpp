@@ -421,27 +421,32 @@ TEST_F(TaskCompilationStateManagerTest, backend_interface_keeps_profile_keys) {
       std::filesystem::exists(m_projectDir / COMPILATION_CACHE_FILENAME));
 }
 
-// Until the engine client exists the engine backend can never skip a task, and
-// it writes nothing to the project.
-TEST_F(TaskCompilationStateManagerTest, engine_backend_stub_always_runs) {
+// Each C++ record is reported, so the compiler can clear the engine's records of
+// that task and every later one (REQ-125).
+TEST_F(TaskCompilationStateManagerTest, record_hook_sees_every_record) {
   ScopedFile src{inProject("a.v"), "module a; endmodule"};
-
-  std::unique_ptr<IncrementalBackend> owned = std::make_unique<EngineBackend>();
-  IncrementalBackend& backend = *owned;
+  CppBackend backend(&m_compiler);
   backend.setProjectPath(m_projectDir);
-  backend.load();
+  std::vector<int> recorded;
+  backend.setRecordHook([&recorded](int taskId) { recorded.push_back(taskId); });
 
   auto command = std::make_shared<CommandWrapper>("vpr");
   command->appendPath("--net", src.filePath());
-  backend.storeTaskCommand(2, command);
-  backend.storeTaskCommand(3, "fast", command);
-  EXPECT_TRUE(backend.isCompilationRequired(2, command));
-  EXPECT_TRUE(backend.isCompilationRequired(3, "fast", command));
-  EXPECT_TRUE(backend.isEmpty());
-  backend.clear();
-  std::vector<std::filesystem::path> written;
-  for (const auto& entry : std::filesystem::directory_iterator(m_projectDir)) {
-    if (entry.path() != src.filePath()) written.push_back(entry.path());
-  }
-  EXPECT_TRUE(written.empty());
+  backend.storeTaskCommand(4, command);
+  backend.storeTaskCommand(8, "fast", command);
+  EXPECT_EQ(recorded, (std::vector<int>{4, 8}));
+}
+
+// An engine record drops the C++ entries of its task and every later task.
+TEST_F(TaskCompilationStateManagerTest, forget_tasks_keeps_earlier_entries) {
+  const std::filesystem::path cache = inProject(COMPILATION_CACHE_FILENAME);
+  FileUtils::WriteToFile(cache, R"({"3_0": 1, "4": 1, "6": 1, "8_fast": 1, "12": 1})");
+  CppBackend::forgetTasks(m_projectDir, 4, 10);
+  EXPECT_EQ(nlohmann::json::parse(FileUtils::GetFileContent(cache)),
+            nlohmann::json::parse(R"({"3_0": 1, "12": 1})"));
+
+  FileUtils::WriteToFile(cache, "not json", /*newLine*/ false);
+  CppBackend::forgetTasks(m_projectDir, 4, 10);
+  EXPECT_EQ(FileUtils::GetFileContent(cache), "not json");
+  CppBackend::forgetTasks(m_projectDir / "missing", 4, 10);
 }

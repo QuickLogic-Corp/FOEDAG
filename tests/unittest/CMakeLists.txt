@@ -50,6 +50,8 @@ set (CPP_LIST
     Compiler/BlifParser_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
+    Compiler/FlowEngineClient_test.cpp
+    Compiler/EngineBackend_test.cpp
     Compiler/PrivateTempDir_test.cpp
     Main/EventLoopProbe_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp

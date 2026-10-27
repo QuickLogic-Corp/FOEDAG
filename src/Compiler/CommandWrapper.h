@@ -33,6 +33,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <optional>
 #include <regex>
 #include <memory>
+#include <sstream>
+#include <vector>
 
 #include <QDebug>
 // #include <iostream>
@@ -175,6 +177,19 @@ ScriptRenderer()=default;
     m_isMaskingEnabled = false;
     return FileUtils::calcHash(script);
   }
+
+  // The script for the flow engine's key: no FILES_INFO block, whose hashes cover
+  // the task's own outputs; the engine digests the declared files instead.
+  std::string renderForEngine() const {
+    std::string script{m_scriptTemplate};
+    for (const auto& [placeholder, value]: m_parameters) {
+      script = StringUtils::replaceAll(script, placeholder, value);
+    }
+    return StringUtils::replaceAll(script, FILES_INFO_PLACEHOLDER, "");
+  }
+
+  const std::vector<std::filesystem::path>& files() const { return m_filePathes; }
+  const std::unordered_map<std::string, std::string>& maskedFiles() const { return m_maskedFiles; }
 
 private:
   std::string m_scriptTemplate;
@@ -516,13 +531,31 @@ public:
 
   const std::string& scriptHash() const { return m_scriptHash; }
 
+  // The flow engine's describe form (aurora2 docs/specs/aurora-flow-engine §1.2.6):
+  // ordered arguments, every path argument whether or not it exists, and digests
+  // the host computes for decrypted or key-protected files. Never serialized.
+  const std::vector<std::string>& argv() const { return m_argv; }
+  const std::vector<std::filesystem::path>& declaredPaths() const { return m_declaredPaths; }
+  const std::map<std::string, std::string>& temps() const { return m_temps; }
+  const std::map<std::string, std::string>& hostDigests() const { return m_hostDigests; }
+  const std::vector<std::filesystem::path>& keyPaths() const { return m_keyPaths; }
+  const ScriptRendererPtr& scriptRenderer() const { return m_scriptRenderer; }
+  const std::string& scriptName() const { return m_scriptName; }
+
+  void setScriptName(const std::string& name) { m_scriptName = name; }
+  // `digest` is "sha256:<hex>"; the engine uses it instead of reading `path`.
+  void setHostDigest(const std::filesystem::path& path, const std::string& digest) {
+    m_hostDigests[path.string()] = digest;
+  }
+  void addKeyPath(const std::filesystem::path& path) { m_keyPaths.push_back(path); }
+
   void append(const std::string& parameter, const std::string& value = "") {
     appendArgument(parameter, value);
   }
 
   void appendPath(const std::string& filePath)=delete;
   void appendPath(const std::filesystem::path& file, const std::string& mask = "") {
-    appendArgument(file.string(), "", mask);
+    appendArgument(file.string(), "", mask, /*paramIsPath*/ true);
     handlePath(file, mask);
   }
   void appendPath(const std::string& parameter, const std::string& file)=delete;
@@ -537,7 +570,7 @@ public:
   
   void prependFile(const std::string& file)=delete;
   void prependFile(const std::filesystem::path& file, const std::string& mask = "") {
-    prependArgument(file.string(), "", mask);
+    prependArgument(file.string(), "", mask, /*paramIsPath*/ true);
     handlePath(file, mask);
   }
 
@@ -553,6 +586,13 @@ private:
   ScriptRendererPtr m_scriptRenderer;
   std::string m_scriptHash;
   std::string m_string;
+
+  std::vector<std::string> m_argv;
+  std::vector<std::filesystem::path> m_declaredPaths;
+  std::map<std::string, std::string> m_temps;  // path -> role (its mask)
+  std::map<std::string, std::string> m_hostDigests;
+  std::vector<std::filesystem::path> m_keyPaths;
+  std::string m_scriptName;
 
   friend void to_json(nlohmann::json& j, const CommandWrapper& obj) {
     j = nlohmann::json{
@@ -576,8 +616,29 @@ private:
     // command execution is done with success
   }
 
-  void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
+  // One argv token per word of `param` (it may hold several options), unless it
+  // is a path; a value is always one token.
+  static std::vector<std::string> tokens(const std::string& param, const std::string& val, bool paramIsPath) {
+    std::vector<std::string> result;
+    if (paramIsPath) {
+      result.push_back(param);
+    } else {
+      std::istringstream words(param);
+      for (std::string word; words >> word;) {
+        result.push_back(word);
+      }
+    }
+    if (!val.empty()) {
+      result.push_back(val);
+    }
+    return result;
+  }
+
+  void appendArgument(const std::string& param, const std::string& val, const std::string& mask = "", bool paramIsPath = false) {
     handleArgument(param, val, mask);
+    for (std::string& token: tokens(param, val, paramIsPath)) {
+      m_argv.push_back(std::move(token));
+    }
     if (!m_string.empty() && m_string.back() != ' ') {
       m_string += ' ';
     }
@@ -587,8 +648,10 @@ private:
     }
   }
 
-  void prependArgument(const std::string& param, const std::string& val, const std::string& mask = "") {
+  void prependArgument(const std::string& param, const std::string& val, const std::string& mask = "", bool paramIsPath = false) {
     handleArgument(param, val, mask);
+    std::vector<std::string> front = tokens(param, val, paramIsPath);
+    m_argv.insert(m_argv.begin(), front.begin(), front.end());
     std::string arg{param};
     if (!val.empty()) {
       arg += ' ' + val;
@@ -621,6 +684,10 @@ private:
   }
 
   void handlePath(const std::filesystem::path& file, const std::string& mask) {
+    m_declaredPaths.push_back(file);
+    if (!mask.empty()) {
+      m_temps[file.string()] = mask;
+    }
     std::filesystem::path resolvedPath(file);
     resolveProjectRelativePath(resolvedPath);
 
