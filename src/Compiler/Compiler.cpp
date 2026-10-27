@@ -2297,7 +2297,13 @@ void Compiler::finish() {
 
 bool Compiler::RunCompileTask(Action action) {
   BeforeCompileTask(action);
-  const bool ok = RunCompileTaskGuarded(action);
+  bool ok = false;
+  try {
+    ok = RunCompileTaskGuarded(action);
+  } catch (...) {
+    AfterCompileTask(action, false);
+    throw;
+  }
   AfterCompileTask(action, ok);
   return ok;
 }

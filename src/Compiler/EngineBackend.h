@@ -23,7 +23,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <filesystem>
 #include <functional>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace FOEDAG {
@@ -59,6 +61,7 @@ public:
   void setProjectPath(const std::filesystem::path& path) override;
   void taskStarted() override;
   void taskFinished(bool ok) override;
+  bool taskRunning() const override;
 
   // The engine's name for a task; empty for a task with no stage.
   static std::string stageName(int taskId);
@@ -86,9 +89,15 @@ private:
     int taskId;
     nlohmann::json request;
   };
-  // One list of records per running task; nested tasks (Tcl batch) stack.
+  // One list of records per running task; nested tasks (Tcl batch) stack. Tasks
+  // run on a worker thread while the GUI thread may query statuses.
+  mutable std::mutex m_mutex;
   std::vector<std::vector<Pending>> m_pending;
+  std::thread::id m_taskThread;
   mutable bool m_warned = false;
+
+  // True when the calling thread is running a task.
+  bool inTask() const;
 
   void warnOnce(const std::string& message) const;
   void record(const Pending& pending);

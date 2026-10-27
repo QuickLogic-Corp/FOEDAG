@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace FOEDAG;
@@ -319,6 +320,46 @@ TEST_F(EngineBackendTest, records_on_disk_decide_empty_and_clear) {
   ASSERT_EQ(seen.size(), 1u);
   EXPECT_EQ(seen[0]["args"],
             nlohmann::json({"invalidate", "--all", "--project", m_project.string(), "--json"}));
+}
+
+// The engine refuses to read key material (REQ-012): VPR's --crypt_key_db and
+// any *_Supp.db input reach it as host digests.
+TEST_F(EngineBackendTest, key_material_inputs_carry_host_digests) {
+  const fs::path keyDb = write(m_root / "dev" / "DEV_Supp.db", "keys");
+  const fs::path other = write(m_root / "dev" / "other_SUPP.DB", "keys too");
+  auto command = vprCommand();
+  command->appendPath("--crypt_key_db", keyDb);
+  command->appendPath("--extra", other);
+
+  const nlohmann::json req = backend({})->request("check", "pack", "", *command, m_ctx);
+  EXPECT_EQ(req["host_digests"][keyDb.string()], FlowEngineClient::sha256File(keyDb));
+  EXPECT_EQ(req["host_digests"][other.string()], FlowEngineClient::sha256File(other));
+  EXPECT_FALSE(req["host_digests"].contains((m_project / "counter_post_synth.net").string()));
+}
+
+// A status query on another thread while a task runs neither removes records
+// nor joins the task's pending records.
+TEST_F(EngineBackendTest, other_threads_are_not_in_the_task) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("run");
+
+  b->taskStarted();
+  EXPECT_TRUE(b->taskRunning());
+  std::thread gui([&b, this] {
+    EXPECT_TRUE(b->isCompilationRequired(ROUTE, vprCommand()));
+    b->storeTaskCommand(ROUTE, vprCommand());  // not part of the task: records now
+  });
+  gui.join();
+  auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_FALSE(seen[0]["request"].contains("begin"));
+  EXPECT_EQ(seen[1]["args"][0], "record");
+
+  b->taskFinished(true);
+  EXPECT_FALSE(b->taskRunning());
+  EXPECT_EQ(calls().size(), 2u);
 }
 
 }  // namespace

@@ -55,6 +55,7 @@ public:
   // its post-processing and RunCompileTask's guard all succeeded (row 1.9).
   virtual void taskStarted() {}
   virtual void taskFinished(bool /*ok*/) {}
+  virtual bool taskRunning() const { return false; }
 
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
     return isCompilationRequired(taskId, "", command);

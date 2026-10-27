@@ -113,6 +113,8 @@ static std::filesystem::path privateRepackConstraintsPath(const std::string& pro
   return dir.empty() ? dir : dir / (projectName + "_repack_design_constraint.xml");
 }
 
+thread_local bool CompilerOpenFPGA_ql::s_describeOnly = false;
+
 CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(makeCppBackend())
 {
   // Decrypted files of an Aurora that was cancelled or killed outlive it; remove them now.
@@ -3454,7 +3456,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       arch_key_db = QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
                     (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
     }
-    if (m_describeOnly) {
+    if (s_describeOnly) {
       // A name for the file a run would decrypt; nothing is written there.
       m_architectureFile = std::filesystem::temp_directory_path() / VPR_ARCH_FILE_MASK;
     } else {
@@ -3486,7 +3488,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   // The describe form declares the constraint files a run would pass; only a run
   // generates them.
-  if (m_describeOnly || GenerateIOFloorPlanConstraints()){
+  if (s_describeOnly || GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     PruneRelIpBlifs();
@@ -3495,7 +3497,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // constraints (derived from the annotated netlist) with the IO
       // constraints into a separate file. The default flow's
       // <project>_constraints.xml is left untouched.
-      if (!m_describeOnly && !GenerateRelMacroConstraints(netlistFile)) {
+      if (!s_describeOnly && !GenerateRelMacroConstraints(netlistFile)) {
         return nullptr;
       }
       command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_rpm_constraints.xml"});
@@ -10906,7 +10908,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
         ErrorMessage(error);
       }
     }
-    if (!m_describeOnly) {
+    if (!s_describeOnly) {
       std::ofstream ofs(synplify_script_path);
       ofs << synplify_script_content;
 #ifdef _WIN32
@@ -11621,7 +11623,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     }
   }
 
-  if (!m_describeOnly) {
+  if (!s_describeOnly) {
     std::ofstream ofs(script_path);
     ofs << yosys_script_content;
     ofs.close();
@@ -11953,12 +11955,18 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  // Under engine, no status query while a task runs (row 1.12): its answer
+  // would be stale the moment the task records.
+  if (m_engineSelected && backend().taskRunning()) {
+    return;
+  }
+
   CompilationFilesScopedSession compilationFilesScopedSession;
 
   // A status query must not write or decrypt anything (REQ-011); under cpp the
   // builders keep today's behaviour.
-  m_describeOnly = m_engineSelected;
-  auto describeGuard = sg::make_scope_guard([this] { m_describeOnly = false; });
+  s_describeOnly = m_engineSelected;
+  auto describeGuard = sg::make_scope_guard([this] { s_describeOnly = false; });
 
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);

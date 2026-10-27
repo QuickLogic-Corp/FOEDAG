@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "EngineBackend.h"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -41,6 +42,16 @@ fs::path absolute(const fs::path& path, const fs::path& project) {
 }
 
 std::string utf8(const fs::path& path) { return path.u8string(); }
+
+// The engine's own key-material pattern, *_supp.db, case-insensitive.
+bool isKeyDatabase(const fs::path& path) {
+  std::string name = path.filename().string();
+  std::transform(name.begin(), name.end(), name.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  const std::string suffix = "_supp.db";
+  return name.size() >= suffix.size() &&
+         name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
 
 std::string join(const nlohmann::json& reasons) {
   std::string text;
@@ -180,7 +191,23 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     hostDigests[utf8(absolute(path, ctx.project))] = digest;
   }
   std::vector<std::string> keyPaths;
-  for (const fs::path& path : command.keyPaths()) keyPaths.push_back(utf8(path));
+  std::set<fs::path> keys;
+  for (const fs::path& path : command.keyPaths()) {
+    keyPaths.push_back(utf8(path));
+    keys.insert(absolute(path, ctx.project));
+  }
+  const std::vector<std::string>& argv = command.argv();
+  for (size_t i = 0; i + 1 < argv.size(); ++i) {
+    if (argv[i] == "--crypt_key_db") keys.insert(absolute(fs::u8path(argv[i + 1]), ctx.project));
+  }
+  // The engine refuses to read key material (REQ-012), so a key input such as
+  // VPR's --crypt_key_db reaches it as a host digest.
+  for (const std::string& input : inputs) {
+    const fs::path path = fs::u8path(input);
+    if (hostDigests.contains(input) || !(keys.count(path) || isKeyDatabase(path))) continue;
+    const std::string digest = FlowEngineClient::sha256File(path);
+    if (!digest.empty()) hostDigests[input] = digest;
+  }
 
   req["inputs"] = inputs;
   req["outputs"] = outputs;
@@ -212,7 +239,7 @@ bool EngineBackend::isCompilationRequired(int taskId, const std::string& profile
     return true;
   }
 
-  const bool inTask = !m_pending.empty();
+  const bool inTask = this->inTask();
   nlohmann::json req = request("check", stage, profileName(taskId, profile), *command, ctx);
   if (inTask) req["begin"] = true;  // a stage about to run loses its record first
   const FlowEngineClient::Result result = m_client.call({"check"}, &req);
@@ -239,11 +266,14 @@ void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
   if (!command || !decides(stage) || !m_client.usable()) return;
   Pending pending{taskId, request("record", stage, profileName(taskId, profile), *command,
                                   m_context(stage))};
-  if (m_pending.empty()) {
-    record(pending);
-  } else {
-    m_pending.back().push_back(std::move(pending));
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_pending.empty() && std::this_thread::get_id() == m_taskThread) {
+      m_pending.back().push_back(std::move(pending));
+      return;
+    }
   }
+  record(pending);
 }
 
 void EngineBackend::record(const Pending& pending) {
@@ -258,14 +288,32 @@ void EngineBackend::record(const Pending& pending) {
   CppBackend::forgetTasks(m_projectPath, pending.taskId, static_cast<int>(Action::Bitstream));
 }
 
-void EngineBackend::taskStarted() { m_pending.emplace_back(); }
+void EngineBackend::taskStarted() {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_pending.empty()) m_taskThread = std::this_thread::get_id();
+  m_pending.emplace_back();
+}
 
 void EngineBackend::taskFinished(bool ok) {
-  if (m_pending.empty()) return;
-  std::vector<Pending> records = std::move(m_pending.back());
-  m_pending.pop_back();
+  std::vector<Pending> records;
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_pending.empty()) return;
+    records = std::move(m_pending.back());
+    m_pending.pop_back();
+  }
   if (!ok) return;
   for (const Pending& pending : records) record(pending);
+}
+
+bool EngineBackend::taskRunning() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return !m_pending.empty();
+}
+
+bool EngineBackend::inTask() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return !m_pending.empty() && std::this_thread::get_id() == m_taskThread;
 }
 
 bool EngineBackend::isEmpty() const { return !hasRecords(m_projectPath); }

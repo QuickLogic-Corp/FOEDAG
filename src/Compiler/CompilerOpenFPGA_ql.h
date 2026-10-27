@@ -403,7 +403,8 @@ private:
   bool m_engineSelected = false;
   // Builders run in their describe form: no decryption, no floorplanning, no
   // script files written (aurora2 docs/specs/aurora-flow-engine §1.2.6).
-  bool m_describeOnly = false;
+  // Per thread: a GUI status query must not change a task running on the worker.
+  static thread_local bool s_describeOnly;
   bool m_incrementalModeWarned = false;
   void selectIncrementalBackend();
   std::unique_ptr<IncrementalBackend> makeCppBackend();
