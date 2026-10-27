@@ -8536,6 +8536,24 @@ bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
   return Compiler::CreateDesign(name, type);
 }
 
+int CompilerOpenFPGA_ql::ExecuteAndMonitorSystemCommand(
+    const std::string& command, const std::string logFile, bool appendLog) {
+  // VPR starts Qt even with graphics off; the inherited xcb platform aborts
+  // it when DISPLAY points at no reachable X server (aurora2#2641).
+  const bool headlessVpr =
+      command.rfind(m_vprExecutablePath.string() + " ", 0) == 0 &&
+      command.find("--disp on") == std::string::npos;
+  if (!headlessVpr) {
+    return Compiler::ExecuteAndMonitorSystemCommand(command, logFile,
+                                                    appendLog);
+  }
+  m_environmentVariableMap["QT_QPA_PLATFORM"] = "offscreen";
+  const int status =
+      Compiler::ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
+  m_environmentVariableMap.erase("QT_QPA_PLATFORM");
+  return status;
+}
+
 bool CompilerOpenFPGA_ql::RpmAuthorProjectActive() {
   if (!m_rpmAuthorProject.active) return false;
   if (ProjManager() == nullptr || !ProjManager()->HasDesign()) return false;
