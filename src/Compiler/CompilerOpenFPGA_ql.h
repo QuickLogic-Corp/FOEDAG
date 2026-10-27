@@ -410,6 +410,7 @@ private:
   std::unique_ptr<IncrementalBackend> makeCppBackend();
   std::filesystem::path engineInstallRoot() const;
   EngineStageContext engineContext(const std::string& stage);
+  std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
   void invalidateEngineRecords(int taskId);
   void BeforeCompileTask(Action action) override;
   void AfterCompileTask(Action action, bool ok) override;

@@ -149,9 +149,12 @@ void CompilerOpenFPGA_ql::selectIncrementalBackend() {
   m_engineSelected = engine;
   if (engine) {
     // REQ-143: the interpreter is looked up only now, when the switch selects it.
-    m_incrementalBackend = std::make_unique<EngineBackend>(
+    auto engineBackend = std::make_unique<EngineBackend>(
         this, FlowEngineClient(installRoot),
         [this](const std::string& stage) { return engineContext(stage); });
+    engineBackend->setUpstreamProvider(
+        [this](const std::string& stage) { return engineUpstream(stage); });
+    m_incrementalBackend = std::move(engineBackend);
   } else {
     m_incrementalBackend = makeCppBackend();
   }
@@ -226,6 +229,50 @@ EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage) 
                                             : nullptr;
   ctx.external = userFile && !QLSettingsManager::getStringValue("vpr", "filename", userFile).empty();
   return ctx;
+}
+
+std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::string& stage) {
+  static const std::vector<std::string> order{"synth", "pack", "place", "route"};
+  const auto end = std::find(order.begin(), order.end(), stage);
+  if (end == order.end()) {
+    return {};
+  }
+  // Runs inside a task: describe without side effects, and leave the task's
+  // own builder state as it was.
+  const bool describeOnly = s_describeOnly;
+  const std::filesystem::path architectureFile = m_architectureFile;
+  const std::filesystem::path sbMapsFile = m_SBMapsFile;
+  const std::filesystem::path sbTemplatesDir = m_SBTemplatesDir;
+  s_describeOnly = true;
+  auto restore = sg::make_scope_guard([&] {
+    s_describeOnly = describeOnly;
+    m_architectureFile = architectureFile;
+    m_SBMapsFile = sbMapsFile;
+    m_SBTemplatesDir = sbTemplatesDir;
+  });
+
+  std::vector<UpstreamCommand> upstream;
+  for (auto it = order.begin(); it != end; ++it) {
+    if (*it == "synth") {
+      if (ProjManager()->projectType() == PostSynth) continue;
+      const auto commands = getSynthesisCommands();
+      if (commands.empty()) {
+        upstream.push_back({static_cast<int>(Action::Synthesis), "", nullptr});
+      }
+      for (const auto& [id, command] : commands) {
+        upstream.push_back({static_cast<int>(Action::Synthesis), std::to_string(id), command});
+      }
+    } else if (*it == "pack") {
+      // Analytical placement skips pack, which then never has a record.
+      if (QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+        continue;
+      }
+      upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
+    } else if (*it == "place") {
+      upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
+    }
+  }
+  return upstream;
 }
 
 void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) { backend().taskStarted(); }

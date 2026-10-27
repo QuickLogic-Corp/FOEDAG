@@ -220,6 +220,34 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
   return req;
 }
 
+bool EngineBackend::upstreamStale(const std::string& stage,
+                                  const EngineStageContext& ctx) const {
+  if (!m_upstream) return false;
+  const std::vector<UpstreamCommand> upstream = m_upstream(stage);
+  if (upstream.empty()) return false;
+  nlohmann::json plan{{"v", PROTOCOL_VERSION},
+                      {"op", "plan"},
+                      {"project", utf8(ctx.project)},
+                      {"layout_resolved_in_pack", ctx.layoutResolvedInPack},
+                      {"stages", nlohmann::json::array()}};
+  if (!ctx.deviceDir.empty()) plan["device_dir"] = utf8(ctx.deviceDir);
+  for (const UpstreamCommand& up : upstream) {
+    if (!up.command) return true;  // an upstream command that cannot be built is stale
+    const std::string name = stageName(up.taskId);
+    nlohmann::json item = request("plan", name, profileName(up.taskId, up.profile),
+                                  *up.command, m_context(name));
+    for (const char* key : {"v", "op", "project", "device_dir"}) item.erase(key);
+    plan["stages"].push_back(std::move(item));
+  }
+  const FlowEngineClient::Result result = m_client.call({"plan"}, &plan);
+  if (!result.ok) return true;
+  for (const nlohmann::json& decision : result.doc.value("stages", nlohmann::json::array())) {
+    const std::string verdict = decision.value("verdict", std::string{"run"});
+    if (verdict != "skip" && verdict != "external") return true;
+  }
+  return false;
+}
+
 void EngineBackend::warnOnce(const std::string& message) const {
   if (m_warned) return;
   m_warned = true;
@@ -241,7 +269,10 @@ bool EngineBackend::isCompilationRequired(int taskId, const std::string& profile
 
   const bool inTask = this->inTask();
   nlohmann::json req = request("check", stage, profileName(taskId, profile), *command, ctx);
-  if (inTask) req["begin"] = true;  // a stage about to run loses its record first
+  if (inTask) {
+    req["begin"] = true;  // a stage about to run loses its record first
+    req["upstream_stale"] = upstreamStale(stage, ctx);
+  }
   const FlowEngineClient::Result result = m_client.call({"check"}, &req);
   if (!result.ok) {
     if (inTask) {

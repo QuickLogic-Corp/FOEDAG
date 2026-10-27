@@ -69,6 +69,12 @@ op = args[0]
 if op == 'check':
     print(json.dumps({'v': 1, 'stage': req['stage'], 'profile': req.get('profile') or '',
                       'verdict': mode, 'reasons': ['input changed: a.v'], 'key': None}))
+elif op == 'plan':
+    plan_file = here / 'plan.txt'
+    plan = plan_file.read_text().strip() if plan_file.exists() else 'skip'
+    print(json.dumps({'v': 1, 'stages': [
+        {'v': 1, 'stage': r['stage'], 'profile': r.get('profile') or '', 'verdict': plan,
+         'reasons': [], 'key': None} for r in req['stages']]}))
 elif op == 'record':
     print(json.dumps({'v': 1, 'stage': req['stage'], 'profile': '', 'recorded': True, 'key': 'k'}))
 else:
@@ -360,6 +366,41 @@ TEST_F(EngineBackendTest, other_threads_are_not_in_the_task) {
   b->taskFinished(true);
   EXPECT_FALSE(b->taskRunning());
   EXPECT_EQ(calls().size(), 2u);
+}
+
+// REQ-018: a stage requested on its own runs when an upstream stage is stale;
+// the host asks with one plan request, and only inside a task.
+TEST_F(EngineBackendTest, a_task_check_reports_stale_upstream_stages) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  b->setUpstreamProvider([this](const std::string& stage) {
+    EXPECT_EQ(stage, "place");
+    return std::vector<UpstreamCommand>{{SYNTH, "0", vprCommand()}, {PACK, "", vprCommand()}};
+  });
+  setVerdict("skip");
+
+  EXPECT_FALSE(b->isCompilationRequired(PLACE, vprCommand()));  // status query: no plan
+  ASSERT_EQ(calls().size(), 1u);
+
+  b->taskStarted();
+  write(m_engineDir / "plan.txt", "skip");
+  b->isCompilationRequired(PLACE, vprCommand());
+  write(m_engineDir / "plan.txt", "run");
+  b->isCompilationRequired(PLACE, vprCommand());
+  b->taskFinished(false);
+
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 5u);
+  EXPECT_EQ(seen[1]["args"], nlohmann::json({"plan", "--json"}));
+  const nlohmann::json& plan = seen[1]["request"];
+  EXPECT_EQ(plan["op"], "plan");
+  ASSERT_EQ(plan["stages"].size(), 2u);
+  EXPECT_EQ(plan["stages"][0]["stage"], "synth");
+  EXPECT_EQ(plan["stages"][0]["profile"], "");
+  EXPECT_FALSE(plan["stages"][0].contains("project"));
+  EXPECT_EQ(seen[2]["request"]["upstream_stale"], false);
+  EXPECT_EQ(seen[4]["request"]["upstream_stale"], true);
 }
 
 }  // namespace

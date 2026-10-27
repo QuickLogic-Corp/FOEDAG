@@ -41,6 +41,13 @@ struct EngineStageContext {
   nlohmann::json sessionState = nlohmann::json::object();  // REQ-017
 };
 using EngineContextProvider = std::function<EngineStageContext(const std::string& stage)>;
+struct UpstreamCommand {
+  int taskId;
+  std::string profile;  // as the call sites pass it
+  CommandWrapperPtr command;
+};
+// The describe-form commands of a stage's upstream stages, in flow order.
+using UpstreamProvider = std::function<std::vector<UpstreamCommand>(const std::string& stage)>;
 
 // The flow engine's decision (AURORA_INCREMENTAL=engine; aurora2
 // docs/specs/aurora-flow-engine rows 1.9 and 1.13). Any engine failure means run.
@@ -62,6 +69,7 @@ public:
   void taskStarted() override;
   void taskFinished(bool ok) override;
   bool taskRunning() const override;
+  void setUpstreamProvider(UpstreamProvider upstream) { m_upstream = std::move(upstream); }
 
   // The engine's name for a task; empty for a task with no stage.
   static std::string stageName(int taskId);
@@ -101,6 +109,11 @@ private:
 
   void warnOnce(const std::string& message) const;
   void record(const Pending& pending);
+  // REQ-018: a stage requested on its own still runs when an upstream stage is
+  // stale. One plan request over the upstream stages; any failure counts as stale.
+  bool upstreamStale(const std::string& stage, const EngineStageContext& ctx) const;
+
+  UpstreamProvider m_upstream;
 };
 
 }  // namespace FOEDAG
