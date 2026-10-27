@@ -324,7 +324,7 @@ class Compiler {
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
       bool appendLog = false);
-  int ExecuteAndMonitorQtApplication(const std::string& command,
+  int ExecuteAndMonitorQtApplication(const std::string& command, bool gui,
                                      const std::string logFile = std::string{},
                                      bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
