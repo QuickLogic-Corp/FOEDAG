@@ -286,6 +286,8 @@ class Compiler {
 
   /// QT_QPA_PLATFORM for a child Qt application; empty keeps Qt's default.
   static std::string QtPlatformFor(bool gui);
+  /// VPR shows its GUI only with --disp on.
+  static bool IsVprGuiCommand(const std::string& command);
 
  protected:
   /* Methods that can be customized for each new compiler flow */
@@ -322,7 +324,7 @@ class Compiler {
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
       bool appendLog = false);
-  int ExecuteAndMonitorQtApplication(const std::string& command, bool gui,
+  int ExecuteAndMonitorQtApplication(const std::string& command,
                                      const std::string logFile = std::string{},
                                      bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,

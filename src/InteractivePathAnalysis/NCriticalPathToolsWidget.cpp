@@ -332,7 +332,8 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
     fullCmd += QString(" --port %1").arg(portNum);
     fullCmd += " --disp on";
 
-    const std::string platform = Compiler::QtPlatformFor(true);
+    const std::string platform = Compiler::QtPlatformFor(
+        Compiler::IsVprGuiCommand(fullCmd.toStdString()));
     if (!platform.empty()) {
       QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
       env.insert("QT_QPA_PLATFORM", QString::fromStdString(platform));
