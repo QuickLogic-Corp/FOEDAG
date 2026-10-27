@@ -8543,13 +8543,15 @@ int CompilerOpenFPGA_ql::ExecuteAndMonitorSystemCommand(
     return Compiler::ExecuteAndMonitorSystemCommand(command, logFile,
                                                     appendLog);
   }
-  // VPR starts Qt even with graphics off, so an inherited xcb platform aborts
-  // it when DISPLAY points at no X server (aurora2#2641). The GUI needs X11
-  // even on Wayland.
+  // With --disp off, VPR switches Qt to offscreen only if QT_QPA_PLATFORM is
+  // unset. The bin/aurora wrapper exports xcb whenever DISPLAY is set, which
+  // blocks that, so VPR aborts when no X server is reachable. Set the platform
+  // explicitly instead (aurora2#2641).
   if (command.find("--disp on") == std::string::npos) {
     m_environmentVariableMap["QT_QPA_PLATFORM"] = "offscreen";
   } else {
 #ifdef __linux__
+    // Avoid Wayland: the VPR GUI needs X11 on Ubuntu 22.04+ Wayland sessions.
     m_environmentVariableMap["QT_QPA_PLATFORM"] = "xcb";
 #endif
   }
