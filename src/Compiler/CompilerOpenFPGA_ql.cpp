@@ -8538,16 +8538,20 @@ bool CompilerOpenFPGA_ql::CreateDesign(const std::string& name,
 
 int CompilerOpenFPGA_ql::ExecuteAndMonitorSystemCommand(
     const std::string& command, const std::string logFile, bool appendLog) {
-  // VPR starts Qt even with graphics off; the inherited xcb platform aborts
-  // it when DISPLAY points at no reachable X server (aurora2#2641).
-  const bool headlessVpr =
-      command.rfind(m_vprExecutablePath.string() + " ", 0) == 0 &&
-      command.find("--disp on") == std::string::npos;
-  if (!headlessVpr) {
+  if (command.rfind(m_vprExecutablePath.string() + " ", 0) != 0) {
     return Compiler::ExecuteAndMonitorSystemCommand(command, logFile,
                                                     appendLog);
   }
-  m_environmentVariableMap["QT_QPA_PLATFORM"] = "offscreen";
+  // VPR starts Qt even with graphics off, so an inherited xcb platform aborts
+  // it when DISPLAY points at no X server (aurora2#2641). The GUI needs X11
+  // even on Wayland.
+  if (command.find("--disp on") == std::string::npos) {
+    m_environmentVariableMap["QT_QPA_PLATFORM"] = "offscreen";
+  } else {
+#ifdef __linux__
+    m_environmentVariableMap["QT_QPA_PLATFORM"] = "xcb";
+#endif
+  }
   const int status =
       Compiler::ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
   m_environmentVariableMap.erase("QT_QPA_PLATFORM");
