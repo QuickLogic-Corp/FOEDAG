@@ -284,6 +284,9 @@ class Compiler {
   virtual void clearCompilationCache() {}
   virtual void invalidateTaskStatuses() {}
 
+  /// QT_QPA_PLATFORM for a child Qt application; empty keeps Qt's default.
+  static std::string QtPlatformFor(bool gui);
+
  protected:
   /* Methods that can be customized for each new compiler flow */
   virtual bool IPGenerate();
@@ -319,6 +322,9 @@ class Compiler {
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
       bool appendLog = false);
+  int ExecuteAndMonitorQtApplication(const std::string& command, bool gui,
+                                     const std::string logFile = std::string{},
+                                     bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(

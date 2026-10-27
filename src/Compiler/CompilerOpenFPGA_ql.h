@@ -301,9 +301,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// design.
   bool CreateDesign(const std::string& name,
                     const std::string& type = std::string{}) override;
-  int ExecuteAndMonitorSystemCommand(const std::string& command,
-                                     const std::string logFile = std::string{},
-                                     bool appendLog = false) override;
   virtual bool LoadDeviceData(const std::string& deviceName);
   virtual bool LicenseDevice(const std::string& deviceName);
   virtual bool DesignChanged(const std::string& synth_script,
