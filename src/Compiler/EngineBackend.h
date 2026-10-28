@@ -21,8 +21,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FlowEngineClient.h"
 #include "TaskCompilationStateManager.h"
 
+#include <atomic>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -60,6 +62,8 @@ public:
 
   bool isCompilationRequired(int taskId, const std::string& profile,
                              const CommandWrapperPtr& command) const override;
+  // The decision itself; isCompilationRequired turns any exception into run.
+  bool decide(int taskId, const std::string& profile, const CommandWrapperPtr& command) const;
   void storeTaskCommand(int taskId, const std::string& profile,
                         const CommandWrapperPtr& command) override;
   bool isEmpty() const override;
@@ -97,12 +101,12 @@ private:
     int taskId;
     nlohmann::json request;
   };
-  // One list of records per running task; nested tasks (Tcl batch) stack. Tasks
-  // run on a worker thread while the GUI thread may query statuses.
+  // One list of records per running task, stacked per thread: a task runs on a
+  // worker thread, a Tcl batch runs its tasks on further threads, and the GUI
+  // thread may query statuses meanwhile.
   mutable std::mutex m_mutex;
-  std::vector<std::vector<Pending>> m_pending;
-  std::thread::id m_taskThread;
-  mutable bool m_warned = false;
+  std::map<std::thread::id, std::vector<std::vector<Pending>>> m_pending;
+  mutable std::atomic<bool> m_warned{false};
 
   // True when the calling thread is running a task.
   bool inTask() const;

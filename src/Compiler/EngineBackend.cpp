@@ -221,7 +221,7 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
 }
 
 bool EngineBackend::upstreamStale(const std::string& stage,
-                                  const EngineStageContext& ctx) const {
+                                  const EngineStageContext& ctx) const try {
   if (!m_upstream) return false;
   const std::vector<UpstreamCommand> upstream = m_upstream(stage);
   if (upstream.empty()) return false;
@@ -246,16 +246,29 @@ bool EngineBackend::upstreamStale(const std::string& stage,
     if (verdict != "skip" && verdict != "external") return true;
   }
   return false;
+} catch (const std::exception&) {
+  return true;
 }
 
 void EngineBackend::warnOnce(const std::string& message) const {
-  if (m_warned) return;
-  m_warned = true;
+  if (m_warned.exchange(true)) return;
   m_compiler->Message("Warning: flow engine: " + message);
 }
 
+// REQ-006: anything that goes wrong while deciding means run, never a crash.
 bool EngineBackend::isCompilationRequired(int taskId, const std::string& profile,
                                           const CommandWrapperPtr& command) const {
+  try {
+    return decide(taskId, profile, command);
+  } catch (const std::exception& e) {
+    m_compiler->Message("Warning: flow engine cannot decide " + stageName(taskId) + " (" +
+                        e.what() + "); running it");
+    return true;
+  }
+}
+
+bool EngineBackend::decide(int taskId, const std::string& profile,
+                           const CommandWrapperPtr& command) const {
   const std::string stage = stageName(taskId);
   if (!command || !decides(stage)) return true;
   const EngineStageContext ctx = m_context(stage);
@@ -295,12 +308,20 @@ void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
                                      const CommandWrapperPtr& command) {
   const std::string stage = stageName(taskId);
   if (!command || !decides(stage) || !m_client.usable()) return;
-  Pending pending{taskId, request("record", stage, profileName(taskId, profile), *command,
-                                  m_context(stage))};
+  Pending pending{taskId, {}};
+  try {
+    pending.request =
+        request("record", stage, profileName(taskId, profile), *command, m_context(stage));
+  } catch (const std::exception& e) {
+    m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + e.what() +
+                        "); it runs next time");
+    return;
+  }
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_pending.empty() && std::this_thread::get_id() == m_taskThread) {
-      m_pending.back().push_back(std::move(pending));
+    auto it = m_pending.find(std::this_thread::get_id());
+    if (it != m_pending.end()) {
+      it->second.back().push_back(std::move(pending));
       return;
     }
   }
@@ -308,30 +329,36 @@ void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
 }
 
 void EngineBackend::record(const Pending& pending) {
-  const FlowEngineClient::Result result = m_client.call({"record"}, &pending.request);
-  if (!result.ok) {
-    m_compiler->Message("Warning: flow engine cannot record " +
-                        pending.request.value("stage", std::string{}) + " (" + result.error +
+  const std::string stage = stageName(pending.taskId);
+  try {
+    const FlowEngineClient::Result result = m_client.call({"record"}, &pending.request);
+    if (!result.ok) {
+      m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + result.error +
+                          "); it runs next time");
+      return;
+    }
+    // REQ-125: the C++ cache's entries for this task and every later one are stale.
+    CppBackend::forgetTasks(m_projectPath, pending.taskId, static_cast<int>(Action::Bitstream));
+  } catch (const std::exception& e) {
+    m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + e.what() +
                         "); it runs next time");
-    return;
   }
-  // REQ-125: the C++ cache's entries for this task and every later one are stale.
-  CppBackend::forgetTasks(m_projectPath, pending.taskId, static_cast<int>(Action::Bitstream));
 }
 
 void EngineBackend::taskStarted() {
   std::lock_guard<std::mutex> lock(m_mutex);
-  if (m_pending.empty()) m_taskThread = std::this_thread::get_id();
-  m_pending.emplace_back();
+  m_pending[std::this_thread::get_id()].emplace_back();
 }
 
 void EngineBackend::taskFinished(bool ok) {
   std::vector<Pending> records;
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_pending.empty()) return;
-    records = std::move(m_pending.back());
-    m_pending.pop_back();
+    auto it = m_pending.find(std::this_thread::get_id());
+    if (it == m_pending.end()) return;
+    records = std::move(it->second.back());
+    it->second.pop_back();
+    if (it->second.empty()) m_pending.erase(it);
   }
   if (!ok) return;
   for (const Pending& pending : records) record(pending);
@@ -344,15 +371,19 @@ bool EngineBackend::taskRunning() const {
 
 bool EngineBackend::inTask() const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  return !m_pending.empty() && std::this_thread::get_id() == m_taskThread;
+  return m_pending.count(std::this_thread::get_id()) != 0;
 }
 
 bool EngineBackend::isEmpty() const { return !hasRecords(m_projectPath); }
 
 void EngineBackend::clear() {
   if (!hasRecords(m_projectPath)) return;
-  const FlowEngineClient::Result result =
-      m_client.call({"invalidate", "--all", "--project", utf8(m_projectPath)});
+  FlowEngineClient::Result result;
+  try {
+    result = m_client.call({"invalidate", "--all", "--project", utf8(m_projectPath)});
+  } catch (const std::exception& e) {
+    result.error = e.what();
+  }
   if (!result.ok) {
     m_compiler->ErrorMessage("flow engine cannot clear the compilation cache: " + result.error);
   }

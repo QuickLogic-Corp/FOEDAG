@@ -152,6 +152,17 @@ FlowEngineClient::Result FlowEngineClient::call(const std::vector<std::string>& 
     return result;
   }
 
+  // A request that cannot be serialised (e.g. a path that is not UTF-8) is a failure.
+  std::string body;
+  if (request) {
+    try {
+      body = request->dump();
+    } catch (const std::exception& e) {
+      result.error = std::string("cannot send the request: ") + e.what();
+      return result;
+    }
+  }
+
   QProcess process;
   QStringList arguments{"-I", "-X", "utf8", toQString(m_script)};
   for (const std::string& arg : args) arguments << QString::fromStdString(arg);
@@ -171,7 +182,6 @@ FlowEngineClient::Result FlowEngineClient::call(const std::vector<std::string>& 
     return result;
   }
   if (request) {
-    const std::string body = request->dump();
     process.write(body.data(), static_cast<qint64>(body.size()));
   }
   process.closeWriteChannel();

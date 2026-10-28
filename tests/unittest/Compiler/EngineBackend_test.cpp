@@ -62,6 +62,9 @@ with open(here / 'calls.jsonl', 'a') as f:
     f.write(json.dumps({'args': args, 'request': req}) + '\n')
 mode_file = here / 'mode.txt'
 mode = mode_file.read_text().strip() if mode_file.exists() else 'skip'
+if mode == 'list':
+    print('[1]')
+    sys.exit(0)
 if mode == 'error':
     print(json.dumps({'v': 1, 'error': {'code': 'io', 'message': 'boom'}}))
     sys.exit(4)
@@ -401,6 +404,57 @@ TEST_F(EngineBackendTest, a_task_check_reports_stale_upstream_stages) {
   EXPECT_FALSE(plan["stages"][0].contains("project"));
   EXPECT_EQ(seen[2]["request"]["upstream_stale"], false);
   EXPECT_EQ(seen[4]["request"]["upstream_stale"], true);
+}
+
+// REQ-006: a request that cannot be serialised or an answer that is not an
+// object means run (and no record), never an exception out of the backend.
+TEST_F(EngineBackendTest, failures_inside_the_backend_mean_run) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  auto notUtf8 = vprCommand();
+  notUtf8->append("--title", "caf\xe9");
+
+  setVerdict("skip");
+  EXPECT_TRUE(b->isCompilationRequired(PACK, notUtf8));
+  b->storeTaskCommand(PACK, notUtf8);
+  EXPECT_TRUE(calls().empty());  // nothing reached the engine
+
+  setVerdict("list");
+  EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));
+  b->taskStarted();
+  EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));  // upstream plan answer too
+  b->taskFinished(false);
+}
+
+// A Tcl batch runs its tasks on further threads: each task's records wait for
+// that task, on its own thread, and a failed inner task records nothing.
+TEST_F(EngineBackendTest, a_nested_task_on_another_thread_has_its_own_records) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("run");
+
+  b->taskStarted();  // the batch
+  auto inner = [&b, this](bool ok) {
+    b->taskStarted();
+    EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));
+    b->storeTaskCommand(PACK, vprCommand());
+    b->taskFinished(ok);
+  };
+  std::thread failed(inner, false);
+  failed.join();
+  std::thread succeeded(inner, true);
+  succeeded.join();
+  EXPECT_TRUE(b->taskRunning());
+  b->taskFinished(true);
+  EXPECT_FALSE(b->taskRunning());
+
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 3u);
+  EXPECT_EQ(seen[0]["request"]["begin"], true);  // the inner task is in a task
+  EXPECT_EQ(seen[1]["request"]["begin"], true);
+  EXPECT_EQ(seen[2]["args"][0], "record");  // only the task that succeeded
 }
 
 }  // namespace

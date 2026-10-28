@@ -182,6 +182,11 @@ TEST_F(FlowEngineClientTest, failures_are_reported_not_thrown) {
   EXPECT_FALSE(exitCode.ok);
   EXPECT_NE(exitCode.error.find("exit 3"), std::string::npos);
 
+  const nlohmann::json notUtf8{{"path", "caf\xe9"}};
+  const auto unsendable = fake("print('{}')\n").call({"check"}, &notUtf8);
+  EXPECT_FALSE(unsendable.ok);
+  EXPECT_NE(unsendable.error.find("cannot send"), std::string::npos);
+
   const auto slow = fake("import time\ntime.sleep(30)\n", 300).call({"check"});
   EXPECT_FALSE(slow.ok);
   EXPECT_NE(slow.error.find("no answer"), std::string::npos);
