@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The Foedag team
+Copyright 2026 QuickLogic team
 
 GPL License
 
