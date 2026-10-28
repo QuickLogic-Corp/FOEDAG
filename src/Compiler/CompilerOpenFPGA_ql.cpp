@@ -178,13 +178,18 @@ void CompilerOpenFPGA_ql::invalidateEngineRecords(int taskId) {
   if (stage.empty() || !EngineBackend::hasRecords(project)) {
     return;
   }
-  const FlowEngineClient client(engineInstallRoot());
-  std::vector<std::string> args{"invalidate", "--stage", stage, "--downstream"};
-  if (engineContext(stage).layoutResolvedInPack) {
-    args.emplace_back("--layout-resolved-in-pack");
+  FlowEngineClient::Result result;
+  try {
+    const FlowEngineClient client(engineInstallRoot());
+    std::vector<std::string> args{"invalidate", "--stage", stage, "--downstream"};
+    if (engineContext(stage).layoutResolvedInPack) {
+      args.emplace_back("--layout-resolved-in-pack");
+    }
+    args.insert(args.end(), {"--project", project.u8string()});
+    result = client.call(args);
+  } catch (const std::exception& e) {
+    result.error = e.what();
   }
-  args.insert(args.end(), {"--project", project.u8string()});
-  const FlowEngineClient::Result result = client.call(args);
   if (!result.ok) {
     Message("Warning: flow engine records from " + stage +
             " on may be stale and could not be cleared: " + result.error);

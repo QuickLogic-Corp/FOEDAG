@@ -174,6 +174,10 @@ TEST_F(FlowEngineClientTest, failures_are_reported_not_thrown) {
   EXPECT_FALSE(errorDoc.ok);
   EXPECT_EQ(errorDoc.error, "lock-held: busy");
 
+  const auto stringError = fake("print(json.dumps({'error': 'text'}))\nsys.exit(4)\n").call({"check"});
+  EXPECT_FALSE(stringError.ok);
+  EXPECT_EQ(stringError.error, "error: \"text\"");
+
   const auto garbage = fake("print('not json')\n").call({"check"});
   EXPECT_FALSE(garbage.ok);
   EXPECT_NE(garbage.error.find("unreadable"), std::string::npos);

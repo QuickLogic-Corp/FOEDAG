@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -422,9 +423,41 @@ TEST_F(EngineBackendTest, failures_inside_the_backend_mean_run) {
 
   setVerdict("list");
   EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));
+}
+
+// An upstream provider that throws makes the stage run (upstream counted stale),
+// rather than skipping it or ending the task.
+TEST_F(EngineBackendTest, an_upstream_failure_counts_as_stale) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  b->setUpstreamProvider([](const std::string&) -> std::vector<UpstreamCommand> {
+    throw std::runtime_error("builder failed");
+  });
+  setVerdict("skip");
   b->taskStarted();
-  EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));  // upstream plan answer too
+  b->isCompilationRequired(PLACE, vprCommand());
   b->taskFinished(false);
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 1u);
+  EXPECT_EQ(seen[0]["request"]["upstream_stale"], true);
+}
+
+// Nested tasks on one thread: the inner task's records go with the inner task.
+TEST_F(EngineBackendTest, nested_tasks_on_one_thread_keep_their_own_records) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  b->taskStarted();
+  b->storeTaskCommand(PACK, vprCommand());
+  b->taskStarted();
+  b->storeTaskCommand(ROUTE, vprCommand());
+  b->taskFinished(false);
+  EXPECT_TRUE(calls().empty());
+  b->taskFinished(true);
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 1u);
+  EXPECT_EQ(seen[0]["request"]["stage"], "pack");
 }
 
 // A Tcl batch runs its tasks on further threads: each task's records wait for

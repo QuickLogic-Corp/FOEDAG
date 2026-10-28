@@ -246,7 +246,8 @@ bool EngineBackend::upstreamStale(const std::string& stage,
     if (verdict != "skip" && verdict != "external") return true;
   }
   return false;
-} catch (const std::exception&) {
+} catch (const std::exception& e) {
+  warnOnce(std::string("cannot check upstream stages (") + e.what() + "); running the stage");
   return true;
 }
 
@@ -261,8 +262,12 @@ bool EngineBackend::isCompilationRequired(int taskId, const std::string& profile
   try {
     return decide(taskId, profile, command);
   } catch (const std::exception& e) {
-    m_compiler->Message("Warning: flow engine cannot decide " + stageName(taskId) + " (" +
-                        e.what() + "); running it");
+    const std::string what = "cannot decide " + stageName(taskId) + " (" + e.what() + ")";
+    if (inTask()) {
+      m_compiler->Message("Warning: flow engine " + what + "; running it");
+    } else {
+      warnOnce(what + "; stages show as not up to date");
+    }
     return true;
   }
 }

@@ -62,8 +62,7 @@ public:
 
   bool isCompilationRequired(int taskId, const std::string& profile,
                              const CommandWrapperPtr& command) const override;
-  // The decision itself; isCompilationRequired turns any exception into run.
-  bool decide(int taskId, const std::string& profile, const CommandWrapperPtr& command) const;
+
   void storeTaskCommand(int taskId, const std::string& profile,
                         const CommandWrapperPtr& command) override;
   bool isEmpty() const override;
@@ -112,6 +111,8 @@ private:
   bool inTask() const;
 
   void warnOnce(const std::string& message) const;
+  // The decision itself; isCompilationRequired turns any exception into run.
+  bool decide(int taskId, const std::string& profile, const CommandWrapperPtr& command) const;
   void record(const Pending& pending);
   // REQ-018: a stage requested on its own still runs when an upstream stage is
   // stale. One plan request over the upstream stages; any failure counts as stale.

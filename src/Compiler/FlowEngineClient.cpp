@@ -202,8 +202,13 @@ FlowEngineClient::Result FlowEngineClient::call(const std::vector<std::string>& 
   }
   if (result.doc.is_object() && result.doc.contains("error")) {
     const nlohmann::json& err = result.doc["error"];
-    result.error = err.value("code", std::string{"error"}) + ": " +
-                   err.value("message", std::string{});
+    const auto field = [&err](const char* name) {
+      return err.is_object() && err.contains(name) && err[name].is_string()
+                 ? err[name].get<std::string>()
+                 : std::string{};
+    };
+    result.error = (err.is_object() ? field("code") : std::string{"error"}) + ": " +
+                   (err.is_object() ? field("message") : err.dump());
     return result;
   }
   if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
