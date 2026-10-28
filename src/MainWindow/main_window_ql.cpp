@@ -1073,7 +1073,6 @@ void MainWindow::createActions() {
       m_settings.value(DEFAULT_PROJECT_PATH, QString{}).toString());
   connect(newProjdialog, SIGNAL(accepted()), this, SLOT(newDialogAccepted()));
   newProjectAction = new QAction(tr("&New Project..."), this);
-  newProjectAction->setObjectName("actionNewProject");
   newProjectAction->setToolTip(tr("Create a new project"));
   connect(newProjectAction, SIGNAL(triggered()), this, SLOT(newProjectDlg()));
 
@@ -1083,7 +1082,6 @@ void MainWindow::createActions() {
   connect(openFile, SIGNAL(triggered()), this, SLOT(openFileSlot()));
 
   exitAction = new QAction(tr("E&xit"), this);
-  exitAction->setObjectName("actionExit");
   exitAction->setShortcut(tr("Ctrl+Q"));
   exitAction->setToolTip(tr("Exit the application"));
 
@@ -1113,7 +1111,6 @@ void MainWindow::createActions() {
   connect(clearCompilationStatesAction, &QAction::triggered, this, &MainWindow::clearCompilationStates);
 
   aboutAction = new QAction(tr("About"), this);
-  aboutAction->setObjectName("actionAbout");
   connect(aboutAction, &QAction::triggered, this, [this]() {
     AboutWidget w(m_projectInfo, GlobalSession->Context()->BinaryPath(), this);
     w.exec();
