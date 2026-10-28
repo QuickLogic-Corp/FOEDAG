@@ -40,7 +40,7 @@ bool isActive();
 // GUI_TEST_FRAMEWORK_SHOW or GUI_TEST_FRAMEWORK_INTERACTIVE (REQ-036).
 bool isDisplayMode();
 // GUI_TEST_FRAMEWORK_GOLDEN=update.
-bool isBlessMode();
+bool isGenGoldensMode();
 
 void fixWindowSize(QWidget *mainWindow);
 

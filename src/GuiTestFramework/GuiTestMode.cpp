@@ -55,7 +55,7 @@ bool isDisplayMode() {
          qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_INTERACTIVE") == 1;
 }
 
-bool isBlessMode() {
+bool isGenGoldensMode() {
   return qgetenv("GUI_TEST_FRAMEWORK_GOLDEN") == "update";
 }
 

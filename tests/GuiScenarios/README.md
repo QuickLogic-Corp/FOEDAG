@@ -91,14 +91,14 @@ and turns the gate on with:
 
 ```
 GUI_TEST_FRAMEWORK_GOLDEN_DIR=<goldens> run_scenarios.sh [scenario.tcl ...]
-GUI_TEST_FRAMEWORK_GOLDEN=update GUI_TEST_FRAMEWORK_GOLDEN_DIR=<goldens> run_scenarios.sh   # bless
+GUI_TEST_FRAMEWORK_GOLDEN=update GUI_TEST_FRAMEWORK_GOLDEN_DIR=<goldens> run_scenarios.sh   # gen-goldens
 ```
 
 Replay renders offscreen with Fusion, a 1600x1000 main window and no
 animations, so the same machine image gives the same pixels. With `--show` or
 `--interactive`, screenshots are compared but only reported (`MATCH`,
-`MISMATCH`, `MISSING`), and bless mode is refused. Negative scripts always use
-`golden/` here, whose goldens fail on any machine, and bless mode skips them.
+`MISMATCH`, `MISSING`), and gen-goldens mode is refused. Negative scripts always use
+`golden/` here, whose goldens fail on any machine, and gen-goldens mode skips them.
 
 ## Negative scripts
 

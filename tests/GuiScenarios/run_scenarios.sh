@@ -11,7 +11,7 @@
 # if <binary> exits non-zero and its FAIL line contains every expected text.
 # GUI_TEST_FRAMEWORK_GOLDEN_DIR turns the screenshot gate on; without it,
 # screenshots are only saved. Negative scripts always use golden/ here, whose
-# goldens fail on any machine. GUI_TEST_FRAMEWORK_GOLDEN=update (bless mode)
+# goldens fail on any machine. GUI_TEST_FRAMEWORK_GOLDEN=update (gen-goldens mode)
 # skips negative scripts.
 set -u
 
@@ -101,7 +101,7 @@ for scenario in "$@"; do
   if [ $roundtrip -eq 1 ] && [ $negative -eq 1 ]; then continue; fi
   if [ $negative -eq 1 ] && [ "${GUI_TEST_FRAMEWORK_GOLDEN:-}" = update ]; then
     skipped=$((skipped + 1))
-    echo "SKIP $name (bless mode)"
+    echo "SKIP $name (gen-goldens mode)"
     continue
   fi
   golden=${GUI_TEST_FRAMEWORK_GOLDEN_DIR:-}

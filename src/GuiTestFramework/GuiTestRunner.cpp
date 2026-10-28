@@ -87,8 +87,8 @@ GuiTestRunner *GuiTestRunner::instance() {
 }
 
 QString GuiTestRunner::startupError() {
-  if (GuiTestMode::isBlessMode() && GuiTestMode::isDisplayMode())
-    return "bless mode writes goldens only from offscreen runs; unset "
+  if (GuiTestMode::isGenGoldensMode() && GuiTestMode::isDisplayMode())
+    return "gen-goldens mode writes goldens only from offscreen runs; unset "
            "GUI_TEST_FRAMEWORK_SHOW and GUI_TEST_FRAMEWORK_INTERACTIVE";
   return {};
 }

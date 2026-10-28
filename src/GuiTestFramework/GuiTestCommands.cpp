@@ -772,10 +772,10 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (goldenRoot.isEmpty())
     return report(QString("SKIP %1: GUI_TEST_FRAMEWORK_GOLDEN_DIR is not set")
                       .arg(id));
-  if (GuiTestMode::isBlessMode()) {
+  if (GuiTestMode::isGenGoldensMode()) {
     if (!writeImage(image, golden))
       return fail(interp, QString("%1: cannot write %2").arg(what, golden));
-    return report("BLESS " + id);
+    return report("GENERATED " + id);
   }
 #ifdef __APPLE__
   return report(QString("SKIP %1: no macOS goldens yet").arg(id));

@@ -26,6 +26,7 @@ extern "C" {
 
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QLabel>
 #include <QPainter>
@@ -149,7 +150,8 @@ TEST(GuiScreenshot, Settle) {
   EXPECT_FALSE(settle(&never, {}, {}, 500, &image)) << "reported as unstable";
 }
 
-// U-020: display mode reports a mismatch without failing; bless is refused.
+// U-020: display mode reports a mismatch without failing; gen-goldens mode is
+// refused.
 TEST(GuiScreenshot, DisplayModeReportsOnly) {
   QTemporaryDir dir;
   ASSERT_TRUE(dir.isValid());
@@ -189,6 +191,41 @@ TEST(GuiScreenshot, DisplayModeReportsOnly) {
   EXPECT_FALSE(GuiTestRunner::startupError().isEmpty());
   qunsetenv("GUI_TEST_FRAMEWORK_SHOW");
   EXPECT_TRUE(GuiTestRunner::startupError().isEmpty());
+
+  qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN");
+  qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR");
+  qunsetenv("GUI_TEST_FRAMEWORK_ARTIFACT_DIR");
+  Tcl_DeleteInterp(interp);
+}
+
+// U-021: a golden written twice has the same bytes, with no time or text
+// chunk (REQ-041).
+TEST(GuiScreenshot, RepeatableBytes) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  QLabel label{"Gui 123"};
+  label.setObjectName("u021Label");
+  label.setFixedSize(120, 30);
+  label.show();
+  qputenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR", (dir.path() + "/golden").toUtf8());
+  qputenv("GUI_TEST_FRAMEWORK_ARTIFACT_DIR", (dir.path() + "/out").toUtf8());
+  qputenv("GUI_TEST_FRAMEWORK_GOLDEN", "update");
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  const QString golden =
+      dir.path() + "/golden/" + platformDir() + "/u021/step.png";
+  QList<QByteArray> writes;
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_EQ(Tcl_Eval(interp, "gui_screenshot u021/step -widget u021Label"),
+              TCL_OK)
+        << Tcl_GetStringResult(interp);
+    QFile file{golden};
+    ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+    writes << file.readAll();
+  }
+  EXPECT_EQ(writes[0], writes[1]);
+  for (const char *chunk : {"tIME", "tEXt", "zTXt", "iTXt"})
+    EXPECT_FALSE(writes[0].contains(chunk)) << chunk;
 
   qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN");
   qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR");
