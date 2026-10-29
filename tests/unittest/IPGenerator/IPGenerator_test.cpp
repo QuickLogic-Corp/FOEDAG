@@ -156,6 +156,46 @@ TEST(IPGenerate, CheckAllIPPath) {
   EXPECT_EQ(ipGen->GetProjectIPsPath(), "run_1/IPs");
 }
 
+TEST(IPGenerate, RemoveDefinitionsUnderRoot) {
+  // A device switch unloads the previous device's catalog root: only the
+  // definitions under that root leave the catalog, and a definition of the
+  // same name from another root can then be added.
+  IPCatalog catalog;
+  const std::filesystem::path base =
+      std::filesystem::temp_directory_path() / "foedag_remove_defs_test";
+  auto generator = [&base](const std::string& root, const std::string& ip) {
+    return base / root / "quicklogic" / "ip" / ip / "v1_0" / (ip + "_gen.py");
+  };
+  auto definition = [](const std::string& name,
+                       const std::filesystem::path& path) {
+    return new IPDefinition(IPDefinition::IPType::LiteXGenerator, name, name,
+                            path, {}, {});
+  };
+  IPDefinition* deviceA = definition("rpm_ip_v1_0", generator("devA", "rpm_ip"));
+  IPDefinition* installed =
+      definition("soft_ip_v1_0", generator("installed", "soft_ip"));
+  // Shares "devA" as a string prefix but is a different directory.
+  IPDefinition* sibling =
+      definition("other_ip_v1_0", generator("devAB", "other_ip"));
+  ASSERT_TRUE(catalog.addIP(deviceA));
+  ASSERT_TRUE(catalog.addIP(installed));
+  ASSERT_TRUE(catalog.addIP(sibling));
+
+  EXPECT_EQ(catalog.removeDefinitionsUnder(base / "devA"), 1u);
+  EXPECT_EQ(catalog.Definition("rpm_ip_v1_0"), nullptr);
+  EXPECT_EQ(catalog.Definition("soft_ip_v1_0"), installed);
+  EXPECT_EQ(catalog.Definition("other_ip_v1_0"), sibling);
+  EXPECT_EQ(catalog.Definitions().size(), 2u);
+  // The retired definition is still a valid object.
+  EXPECT_EQ(deviceA->Name(), "rpm_ip_v1_0");
+
+  IPDefinition* deviceB = definition("rpm_ip_v1_0", generator("devB", "rpm_ip"));
+  EXPECT_TRUE(catalog.addIP(deviceB));
+  EXPECT_EQ(catalog.Definition("rpm_ip_v1_0"), deviceB);
+
+  EXPECT_EQ(catalog.removeDefinitionsUnder(base / "nothing_here"), 0u);
+}
+
 TEST(IPParameterValidate, IntRange) {
   IPParameter p("Width", "Width", "8", IPParameter::ParamType::Int);
   p.SetRange({"1", "16"});

@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 #include <QString>
@@ -33,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
+#include "Compiler/EngineBackend.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -229,6 +231,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// GUI open_project in particular never passes through CreateDesign.
   void PruneRelIpBlifs();
 
+  /// Records an explicit `verific_parser on|off` from the Tcl script. For the
+  /// rest of the session that request takes priority over
+  /// `general > options > verific` in the settings JSON; see ResolveUseVerific().
+  void SetUseVerificFromTcl(bool on);
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -388,6 +395,9 @@ class CompilerOpenFPGA_ql : public Compiler {
                                     std::string netlistFileName,
                                     std::string sdfFileName,
                                     std::string sdcFileName);
+  /// Decides whether Verific parses the design: never for a Synplify project,
+  /// else the explicit Tcl request if there was one, else the settings JSON.
+  bool ResolveUseVerific();
   bool m_keepAllSignals = false;
 
 private:
@@ -395,8 +405,26 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
+  /// Set only by the verific_parser Tcl command; unset means "not mentioned".
+  std::optional<bool> m_useVerificFromTcl;
   std::unique_ptr<IncrementalBackend> m_incrementalBackend;
   IncrementalBackend& backend() const { return *m_incrementalBackend; }
+
+  // AURORA_INCREMENTAL=engine selected the flow engine for this project.
+  bool m_engineSelected = false;
+  // Builders run in their describe form: no decryption, no floorplanning, no
+  // script files written (aurora2 docs/specs/aurora-flow-engine §1.2.6).
+  // Per thread: a GUI status query must not change a task running on the worker.
+  static thread_local bool s_describeOnly;
+  bool m_incrementalModeWarned = false;
+  void selectIncrementalBackend();
+  std::unique_ptr<IncrementalBackend> makeCppBackend();
+  std::filesystem::path engineInstallRoot() const;
+  EngineStageContext engineContext(const std::string& stage);
+  std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
+  void invalidateEngineRecords(int taskId);
+  void BeforeCompileTask(Action action) override;
+  void AfterCompileTask(Action action, bool ok) override;
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
