@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 #include <QString>
@@ -229,6 +230,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// GUI open_project in particular never passes through CreateDesign.
   void PruneRelIpBlifs();
 
+  /// Records an explicit `verific_parser on|off` from the Tcl script. For the
+  /// rest of the session that request takes priority over
+  /// `general > options > verific` in the settings JSON; see ResolveUseVerific().
+  void SetUseVerificFromTcl(bool on);
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -388,6 +394,9 @@ class CompilerOpenFPGA_ql : public Compiler {
                                     std::string netlistFileName,
                                     std::string sdfFileName,
                                     std::string sdcFileName);
+  /// Decides whether Verific parses the design: never for a Synplify project,
+  /// else the explicit Tcl request if there was one, else the settings JSON.
+  bool ResolveUseVerific();
   bool m_keepAllSignals = false;
 
 private:
@@ -395,6 +404,8 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
+  /// Set only by the verific_parser Tcl command; unset means "not mentioned".
+  std::optional<bool> m_useVerificFromTcl;
   std::unique_ptr<IncrementalBackend> m_incrementalBackend;
   IncrementalBackend& backend() const { return *m_incrementalBackend; }
 
