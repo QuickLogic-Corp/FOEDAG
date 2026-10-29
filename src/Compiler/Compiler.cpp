@@ -2307,6 +2307,19 @@ void Compiler::finish() {
 }
 
 bool Compiler::RunCompileTask(Action action) {
+  BeforeCompileTask(action);
+  bool ok = false;
+  try {
+    ok = RunCompileTaskGuarded(action);
+  } catch (...) {
+    AfterCompileTask(action, false);
+    throw;
+  }
+  AfterCompileTask(action, ok);
+  return ok;
+}
+
+bool Compiler::RunCompileTaskGuarded(Action action) {
   auto currentTask = m_taskManager->currentTask();
   // Use Scope Guard to add headers to new logs whenever this function exits
   auto guard = sg::make_scope_guard([this, action, currentTask] {

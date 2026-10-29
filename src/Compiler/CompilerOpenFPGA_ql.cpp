@@ -113,16 +113,177 @@ static std::filesystem::path privateRepackConstraintsPath(const std::string& pro
   return dir.empty() ? dir : dir / (projectName + "_repack_design_constraint.xml");
 }
 
-CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(std::make_unique<CppBackend>(this))
+thread_local bool CompilerOpenFPGA_ql::s_describeOnly = false;
+
+CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(makeCppBackend())
 {
   // Decrypted files of an Aurora that was cancelled or killed outlive it; remove them now.
   std::error_code tmp_ec;
   PrivateTempDir::sweepStale(std::filesystem::temp_directory_path(tmp_ec));
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
     std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
+    selectIncrementalBackend();
     backend().setProjectPath(projectPath);
     backend().load();
   });
+}
+
+void CompilerOpenFPGA_ql::selectIncrementalBackend() {
+  const std::filesystem::path installRoot = engineInstallRoot();
+  const char* env = std::getenv("AURORA_INCREMENTAL");
+  // Without an engine in the install and without the switch, cpp is the only choice.
+  if (installRoot.empty() && !env) {
+    m_engineSelected = false;
+    return;
+  }
+  const FlowEngineClient::ModeResult mode =
+      FlowEngineClient::incrementalMode(env, FlowEngineClient::defaultsFile(installRoot));
+  if (!mode.warning.empty() && !m_incrementalModeWarned) {
+    m_incrementalModeWarned = true;
+    Message("Warning: " + mode.warning);
+  }
+  const bool engine = mode.mode == FlowEngineClient::Mode::Engine;
+  if (engine == m_engineSelected) {
+    return;
+  }
+  m_engineSelected = engine;
+  if (engine) {
+    // REQ-143: the interpreter is looked up only now, when the switch selects it.
+    auto engineBackend = std::make_unique<EngineBackend>(
+        this, FlowEngineClient(installRoot),
+        [this](const std::string& stage) { return engineContext(stage); });
+    engineBackend->setUpstreamProvider(
+        [this](const std::string& stage) { return engineUpstream(stage); });
+    m_incrementalBackend = std::move(engineBackend);
+  } else {
+    m_incrementalBackend = makeCppBackend();
+  }
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::engineInstallRoot() const {
+  return GetSession() ? FlowEngineClient::findInstallRoot(GetSession()->Context()->DataPath())
+                      : std::filesystem::path{};
+}
+
+std::unique_ptr<IncrementalBackend> CompilerOpenFPGA_ql::makeCppBackend() {
+  auto cpp = std::make_unique<CppBackend>(this);
+  cpp->setRecordHook([this](int taskId) { invalidateEngineRecords(taskId); });
+  return cpp;
+}
+
+void CompilerOpenFPGA_ql::invalidateEngineRecords(int taskId) {
+  // REQ-125, and REQ-143: no engine records means nothing to clear and nothing to start.
+  const std::filesystem::path project = ProjManager()->projectPath();
+  const std::string stage = EngineBackend::stageName(taskId);
+  if (stage.empty() || !EngineBackend::hasRecords(project)) {
+    return;
+  }
+  FlowEngineClient::Result result;
+  try {
+    const FlowEngineClient client(engineInstallRoot());
+    std::vector<std::string> args{"invalidate", "--stage", stage, "--downstream"};
+    if (engineContext(stage).layoutResolvedInPack) {
+      args.emplace_back("--layout-resolved-in-pack");
+    }
+    args.insert(args.end(), {"--project", project.u8string()});
+    result = client.call(args);
+  } catch (const std::exception& e) {
+    result.error = e.what();
+  }
+  if (!result.ok) {
+    Message("Warning: flow engine records from " + stage +
+            " on may be stale and could not be cleared: " + result.error);
+  }
+}
+
+EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage) {
+  EngineStageContext ctx;
+  ctx.project = ProjManager()->projectPath();
+  ctx.projectName = ProjManager()->projectName();
+  ctx.top = ProjManager()->DesignTopModule();
+
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+  if (devices->isDeviceTargetValid(target)) {
+    ctx.deviceDir = devices->deviceTypeDirPath(target);
+    ctx.layoutResolvedInPack = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+        devices->deviceLayoutSettings(target), target);
+    ctx.sessionState["device"] = devices->convertToDeviceString(target);
+  }
+
+  // Tcl-set and session values the command line does not show (REQ-017).
+  nlohmann::json& state = ctx.sessionState;
+  std::vector<std::string> relIps;
+  for (const auto& blif : m_relIpBlifs) relIps.push_back(blif.u8string());
+  state["rel_ip_blifs"] = relIps;
+  state["project_type"] = static_cast<int>(ProjManager()->projectType());
+  if (stage == "synth") {
+    state["synthesis_tool"] = static_cast<int>(ProjManager()->synthesisTool());
+    state["verific"] = m_useVerific;
+  } else {
+    state["netlist_type"] = static_cast<int>(GetNetlistType());
+    state["channel_width"] = m_channel_width;
+    state["pnr_options"] = PnROpt();
+    if (stage == "place") state["pin_assign"] = static_cast<int>(PinAssignOpts());
+  }
+
+  // A user-supplied net/place/route file is never run over.
+  const char* userFile = stage == "pack"    ? "net_file"
+                         : stage == "place" ? "place_file"
+                         : stage == "route" ? "route_file"
+                                            : nullptr;
+  ctx.external = userFile && !QLSettingsManager::getStringValue("vpr", "filename", userFile).empty();
+  return ctx;
+}
+
+std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::string& stage) {
+  static const std::vector<std::string> order{"synth", "pack", "place", "route"};
+  const auto end = std::find(order.begin(), order.end(), stage);
+  if (end == order.end()) {
+    return {};
+  }
+  // Runs inside a task: describe without side effects, and leave the task's
+  // own builder state as it was.
+  const bool describeOnly = s_describeOnly;
+  const std::filesystem::path architectureFile = m_architectureFile;
+  const std::filesystem::path sbMapsFile = m_SBMapsFile;
+  const std::filesystem::path sbTemplatesDir = m_SBTemplatesDir;
+  s_describeOnly = true;
+  auto restore = sg::make_scope_guard([&] {
+    s_describeOnly = describeOnly;
+    m_architectureFile = architectureFile;
+    m_SBMapsFile = sbMapsFile;
+    m_SBTemplatesDir = sbTemplatesDir;
+  });
+
+  std::vector<UpstreamCommand> upstream;
+  for (auto it = order.begin(); it != end; ++it) {
+    if (*it == "synth") {
+      if (ProjManager()->projectType() == PostSynth) continue;
+      const auto commands = getSynthesisCommands();
+      if (commands.empty()) {
+        upstream.push_back({static_cast<int>(Action::Synthesis), "", nullptr});
+      }
+      for (const auto& [id, command] : commands) {
+        upstream.push_back({static_cast<int>(Action::Synthesis), std::to_string(id), command});
+      }
+    } else if (*it == "pack") {
+      // Analytical placement skips pack, which then never has a record.
+      if (QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+        continue;
+      }
+      upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
+    } else if (*it == "place") {
+      upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
+    }
+  }
+  return upstream;
+}
+
+void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) { backend().taskStarted(); }
+
+void CompilerOpenFPGA_ql::AfterCompileTask(Action /*action*/, bool ok) {
+  backend().taskFinished(ok);
 }
 
 void CompilerOpenFPGA_ql::Version(std::ostream* out) {
@@ -3370,16 +3531,30 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     return nullptr;
   }
 
+  // The engine identifies a decrypted architecture by its encrypted file and never
+  // reads the key database (REQ-012, REQ-130).
+  std::string arch_host_digest;
+  std::filesystem::path arch_key_db;
   if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
-    
-    std::filesystem::path vpr_xml_en_path = m_architectureFile;
-    m_architectureFile = GenerateTempFilePath();
 
-    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
-                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
-                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
-      // empty string returned on error.
-      return nullptr;
+    std::filesystem::path vpr_xml_en_path = m_architectureFile;
+    if (m_engineSelected) {
+      arch_host_digest = FlowEngineClient::sha256File(vpr_xml_en_path);
+      arch_key_db = QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
+                    (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
+    }
+    if (s_describeOnly) {
+      // A name for the file a run would decrypt; nothing is written there.
+      m_architectureFile = std::filesystem::temp_directory_path() / VPR_ARCH_FILE_MASK;
+    } else {
+      m_architectureFile = GenerateTempFilePath();
+
+      if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
+        // empty string returned on error.
+        return nullptr;
+      }
     }
   }
 
@@ -3398,7 +3573,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints()){
+  // The describe form declares the constraint files a run would pass; only a run
+  // generates them.
+  if (s_describeOnly || GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     PruneRelIpBlifs();
@@ -3407,7 +3584,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // constraints (derived from the annotated netlist) with the IO
       // constraints into a separate file. The default flow's
       // <project>_constraints.xml is left untouched.
-      if (!GenerateRelMacroConstraints(netlistFile)) {
+      if (!s_describeOnly && !GenerateRelMacroConstraints(netlistFile)) {
         return nullptr;
       }
       command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_rpm_constraints.xml"});
@@ -3426,7 +3603,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   command->prependFile(std::filesystem::path{netlistFile});
   command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
   command->prepend(m_vprExecutablePath.string());
-  
+  if (!arch_host_digest.empty()) {
+    command->setHostDigest(m_architectureFile, arch_host_digest);
+    command->addKeyPath(arch_key_db);
+  }
+
   return command;
 }
 
@@ -10837,17 +11018,19 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
         ErrorMessage(error);
       }
     }
-    std::ofstream ofs(synplify_script_path);
-    ofs << synplify_script_content;
+    if (!s_describeOnly) {
+      std::ofstream ofs(synplify_script_path);
+      ofs << synplify_script_content;
 #ifdef _WIN32
-    ofs << "\n";
-    ofs << "# Run all implementations of the active project.\n";
-    ofs << "run -all\n";
-    ofs << "\n";
-    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
-    ofs << "program_terminate\n";
+      ofs << "\n";
+      ofs << "# Run all implementations of the active project.\n";
+      ofs << "run -all\n";
+      ofs << "\n";
+      ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
+      ofs << "program_terminate\n";
 #endif
-    ofs.close();
+      ofs.close();
+    }
 
 #ifdef _WIN32
     // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
@@ -10871,6 +11054,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
     CommandWrapperPtr command = std::make_shared<CommandWrapper>();
     command->setScriptRenderer(synplifyScript);
+    command->setScriptName(ProjManager()->projectName() + ".prj");
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
     command->append(synplifyExecName);
@@ -11545,9 +11729,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     }
   }
 
-  std::ofstream ofs(script_path);
-  ofs << yosys_script_content;
-  ofs.close();
+  if (!s_describeOnly) {
+    std::ofstream ofs(script_path);
+    ofs << yosys_script_content;
+    ofs.close();
+  }
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
     ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
@@ -11577,6 +11763,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   command->setScriptRenderer(yosysScript);
+  command->setScriptName(ProjManager()->projectName() + ".ys");
   command->append(yosys_executable_path.string());
   command->append("-s");
   command->append(ProjManager()->projectName() + ".ys");
@@ -11882,7 +12069,18 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  // Under engine, no status query while a task runs (row 1.12): its answer
+  // would be stale the moment the task records.
+  if (m_engineSelected && backend().taskRunning()) {
+    return;
+  }
+
   CompilationFilesScopedSession compilationFilesScopedSession;
+
+  // A status query must not write or decrypt anything (REQ-011); under cpp the
+  // builders keep today's behaviour.
+  s_describeOnly = m_engineSelected;
+  auto describeGuard = sg::make_scope_guard([this] { s_describeOnly = false; });
 
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);

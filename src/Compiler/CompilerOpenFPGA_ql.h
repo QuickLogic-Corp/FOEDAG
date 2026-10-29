@@ -34,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
+#include "Compiler/EngineBackend.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -408,6 +409,22 @@ private:
   std::optional<bool> m_useVerificFromTcl;
   std::unique_ptr<IncrementalBackend> m_incrementalBackend;
   IncrementalBackend& backend() const { return *m_incrementalBackend; }
+
+  // AURORA_INCREMENTAL=engine selected the flow engine for this project.
+  bool m_engineSelected = false;
+  // Builders run in their describe form: no decryption, no floorplanning, no
+  // script files written (aurora2 docs/specs/aurora-flow-engine §1.2.6).
+  // Per thread: a GUI status query must not change a task running on the worker.
+  static thread_local bool s_describeOnly;
+  bool m_incrementalModeWarned = false;
+  void selectIncrementalBackend();
+  std::unique_ptr<IncrementalBackend> makeCppBackend();
+  std::filesystem::path engineInstallRoot() const;
+  EngineStageContext engineContext(const std::string& stage);
+  std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
+  void invalidateEngineRecords(int taskId);
+  void BeforeCompileTask(Action action) override;
+  void AfterCompileTask(Action action, bool ok) override;
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();

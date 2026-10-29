@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <unordered_map>
 #include <iostream>
 #include <cstdlib>
+#include <functional>
 
 namespace FOEDAG {
 
@@ -50,6 +51,11 @@ public:
   virtual void clear() = 0;
   virtual void load() = 0;
   virtual void setProjectPath(const std::filesystem::path& path) = 0;
+  // Around each compile task; a record made inside one is kept only if the task,
+  // its post-processing and RunCompileTask's guard all succeeded (row 1.9).
+  virtual void taskStarted() {}
+  virtual void taskFinished(bool /*ok*/) {}
+  virtual bool taskRunning() const { return false; }
 
   bool isCompilationRequired(int taskId, const CommandWrapperPtr& command) const {
     return isCompilationRequired(taskId, "", command);
@@ -82,6 +88,39 @@ public:
     command->actualize(); // to take into account date time and hash changes after task execution
     m_taskCommandsMap[key(taskId, profile)] = command;
     save();
+    if (m_recordHook) {
+      m_recordHook(taskId);
+    }
+  }
+
+  // Called after each record; the compiler clears the flow engine's records of
+  // this task and every later one there (REQ-125).
+  void setRecordHook(std::function<void(int taskId)> hook) { m_recordHook = std::move(hook); }
+
+  // Drops the entries of task `fromTaskId` and of every later task up to
+  // `lastTaskId` from a project's compilation_cache.json (REQ-125).
+  static void forgetTasks(const std::filesystem::path& projectPath, int fromTaskId, int lastTaskId) {
+    const std::filesystem::path file = projectPath / COMPILATION_CACHE_FILENAME;
+    if (!FileUtils::IsExistedRegularFile(file)) {
+      return;
+    }
+    nlohmann::json json = nlohmann::json::parse(FileUtils::GetFileContent(file), nullptr, false);
+    if (!json.is_object()) {
+      return;
+    }
+    bool changed = false;
+    for (auto it = json.begin(); it != json.end();) {
+      const int taskId = std::atoi(it.key().c_str());
+      if (taskId >= fromTaskId && taskId <= lastTaskId) {
+        it = json.erase(it);
+        changed = true;
+      } else {
+        ++it;
+      }
+    }
+    if (changed) {
+      FileUtils::WriteToFile(file, json.dump());
+    }
   }
 
   bool isEmpty() const override { return m_taskCommandsMap.empty(); }
@@ -118,6 +157,7 @@ private:
   std::unordered_map<std::string, CommandWrapperPtr> m_taskCommandsMap;
   std::filesystem::path m_filePath{COMPILATION_CACHE_FILENAME};
   std::string m_logPrefix = "task_comp_manager: ";
+  std::function<void(int)> m_recordHook;
 
   std::string key(int taskId, const std::string& profile) const {
     if (profile.empty()) {
@@ -167,22 +207,5 @@ private:
 };
 
 using TaskCompilationStateManager = CppBackend;
-
-// The flow engine's decision (AURORA_INCREMENTAL=engine). A stub until the engine
-// client exists: it never skips a task and records nothing.
-class EngineBackend : public IncrementalBackend {
-public:
-  using IncrementalBackend::isCompilationRequired;
-  using IncrementalBackend::storeTaskCommand;
-
-  bool isCompilationRequired(int, const std::string&, const CommandWrapperPtr&) const override {
-    return true;
-  }
-  void storeTaskCommand(int, const std::string&, const CommandWrapperPtr&) override {}
-  bool isEmpty() const override { return true; }
-  void clear() override {}
-  void load() override {}
-  void setProjectPath(const std::filesystem::path&) override {}
-};
 
 }  // namespace FOEDAG
