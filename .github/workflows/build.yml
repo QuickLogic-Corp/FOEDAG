@@ -335,9 +335,9 @@ jobs:
         export QT_DIR="${QT_ROOT_DIR}"
         make test/gui-record-roundtrip
 
-    - name: Upload GUI scenario logs and screenshots
+    - name: Upload GUI scenario logs
       uses: actions/upload-artifact@v4.3.0
-      if: ${{ always() }}
+      if: ${{ failure() }}
       with:
         name: gui-scenarios-${{ matrix.runner }}
         retention-days: 7
