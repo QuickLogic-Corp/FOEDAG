@@ -438,7 +438,9 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
           << std::endl;
   (*out) << "   delete_ip <name>           : Delete IP by name"
           << std::endl;
-  (*out) << "   verific_parser <on/off>    : Turns on/off Verific parser"
+  (*out) << "   verific_parser <on/off>    : Turns on/off Verific parser; "
+            "takes priority over general > options > verific in the "
+            "settings JSON"
          << std::endl;
   (*out) << "   message_severity <message_id> <ERROR/WARNING/INFO/IGNORE> : "
             "Upgrade/downgrade RTL compilation message severity"
@@ -1251,13 +1253,17 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   auto verific_parser = [](void* clientData, Tcl_Interp* interp, int argc,
                            const char* argv[]) -> int {
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-    std::string name;
     if (argc != 2) {
       compiler->ErrorMessage("Specify on/off");
       return TCL_ERROR;
     }
     std::string arg = argv[1];
-    compiler->SetUseVerific((arg == "on") ? true : false);
+    if (arg != "on" && arg != "off") {
+      compiler->ErrorMessage("verific_parser: expected on or off, got '" +
+                             arg + "'");
+      return TCL_ERROR;
+    }
+    compiler->SetUseVerificFromTcl(arg == "on");
     return TCL_OK;
   };
   interp->registerCmd("verific_parser", verific_parser, this, 0);
@@ -2178,6 +2184,37 @@ std::string CompilerOpenFPGA_ql::FinishAnalyzeScript(const std::string& script) 
   return result;
 }
 
+void CompilerOpenFPGA_ql::SetUseVerificFromTcl(bool on) {
+  m_useVerificFromTcl = on;
+  SetUseVerific(on);
+  Message(std::string("Verific parser ") + (on ? "on" : "off") +
+          " (verific_parser Tcl command; takes priority over "
+          "general > options > verific in the settings JSON)");
+  if (m_projManager != nullptr &&
+      (m_projManager->synthesisTool() == Synplify ||
+       m_projManager->projectType() == PostMapSynplify)) {
+    Message("verific_parser has no effect on a Synplify project: Synplify "
+            "is its own frontend");
+  }
+}
+
+bool CompilerOpenFPGA_ql::ResolveUseVerific() {
+  // Synplify is its own frontend and reads VHDL/SystemVerilog natively, so
+  // Verific is never used for a Synplify or post-map Synplify project,
+  // whatever the settings JSON or the Tcl script asked for.
+  if (m_projManager->synthesisTool() == Synplify ||
+      m_projManager->projectType() == PostMapSynplify) {
+    return false;
+  }
+  // An explicit `verific_parser on|off` in the Tcl script wins over the JSON.
+  if (m_useVerificFromTcl.has_value()) {
+    return m_useVerificFromTcl.value();
+  }
+  // Default: `general > options > verific` in the project settings JSON.
+  return QLSettingsManager::getStringValue("general", "options", "verific") ==
+         "checked";
+}
+
 bool CompilerOpenFPGA_ql::Analyze() {
 
   return true;
@@ -2260,12 +2297,7 @@ bool CompilerOpenFPGA_ql::Analyze() {
   }
 
 
-  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  }
-  else {
-    m_useVerific = false;
-  }
+  m_useVerific = ResolveUseVerific();
 
   std::string analysisScript = InitAnalyzeScript();
   analysisScript = FinishAnalyzeScript(analysisScript);
@@ -8218,9 +8250,32 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
   if (!forceOverwrite && fs::exists(io_floor_planningpath)){
-    Message(ProjManager()->projectName() + "_constraints.xml" + 
-            " Already Exists. Using the Existing Constraint File.");
-    return true;
+    // Packing() deletes this file, so a run through packing always rebuilds
+    // it. A later stage run on its own (place after editing the .qdc, say)
+    // would otherwise keep the constraints of the old .qdc or .pcf.
+    std::string newerSource;
+    std::error_code ec;
+    const auto generated = fs::last_write_time(io_floor_planningpath, ec);
+    if (!ec) {
+      QLSettingsManager* settings = QLSettingsManager::getInstance();
+      for (const std::filesystem::path& source :
+           {settings->getQDCFilePath(), settings->getPCFFilePath()}) {
+        std::error_code sec;
+        if (source.empty() || !fs::exists(source, sec)) continue;
+        const auto edited = fs::last_write_time(source, sec);
+        if (!sec && edited > generated) {
+          newerSource = source.string();
+          break;
+        }
+      }
+    }
+    if (newerSource.empty()) {
+      Message(ProjManager()->projectName() + "_constraints.xml" +
+              " Already Exists. Using the Existing Constraint File.");
+      return true;
+    }
+    Message(ProjManager()->projectName() + "_constraints.xml is older than " +
+            newerSource + "; regenerating it.");
   }
 
   if (!ProjManager()->HasDesign()) {
@@ -11039,11 +11094,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // init synthesis script from the right location according to the selected device.
   ScriptRendererPtr yosysScript = std::make_shared<ScriptRenderer>(GetYosysScriptTemplate());
 
-  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  } else {
-    m_useVerific = false;
-  }
+  m_useVerific = ResolveUseVerific();
  
   if(m_projManager->synthesisTool() != Synplify)
   {
@@ -11692,15 +11743,23 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
 
   std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-#if(AURORA_USE_TABBYCAD == 1)
   if(m_useVerific) {
+#if(AURORA_USE_TABBYCAD == 1)
     yosys_executable_path = GetSession()->Context()->BinaryPath() /
                             ".." /
                             "tabby" /
                             "bin" /
                             "yosys_verific";
-  }
+    if (!FileUtils::FileExists(yosys_executable_path)) {
+      ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
+                   "found: " + yosys_executable_path.string());
+      return {};
+    }
+#else
+    Message("Verific parser requested but this build was configured without "
+            "TabbyCAD; synthesis uses " + yosys_executable_path.string());
 #endif // #if(AURORA_USE_TABBYCAD == 1)
+  }
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   command->setScriptRenderer(yosysScript);
