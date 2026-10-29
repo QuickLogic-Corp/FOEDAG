@@ -77,10 +77,9 @@ test/unittest-coverage: run-cmake-coverage
 	pushd coverage-build && $(XVFB) tests/unittest/unittest && popd
 
 # Device-free GUI scenarios (replay mode, offscreen; no display needed).
-GUI_SCENARIO_FILES = $(if $(SCENARIO),tests/GuiScenarios/$(SCENARIO).tcl)
 test/gui-scenarios: run-cmake-release
 	cmake --build build --target foedag-bin -j $(CPU_CORES)
-	GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora GUI_TEST_FRAMEWORK_OUT_DIR=$(CURDIR)/build/gui-scenarios tests/GuiScenarios/run_scenarios.sh $(GUI_SCENARIO_FILES)
+	GUI_TEST_FRAMEWORK_TARGET_BIN=build/bin/aurora GUI_TEST_FRAMEWORK_OUT_DIR=$(CURDIR)/build/gui-scenarios tests/GuiScenarios/run_scenarios.sh
 
 # Recorder round trip: each scenario recorded while replayed, then the recording replayed.
 test/gui-record-roundtrip: run-cmake-release
