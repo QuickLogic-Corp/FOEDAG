@@ -8037,9 +8037,32 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
   if (!forceOverwrite && fs::exists(io_floor_planningpath)){
-    Message(ProjManager()->projectName() + "_constraints.xml" + 
-            " Already Exists. Using the Existing Constraint File.");
-    return true;
+    // Packing() deletes this file, so a run through packing always rebuilds
+    // it. A later stage run on its own (place after editing the .qdc, say)
+    // would otherwise keep the constraints of the old .qdc or .pcf.
+    std::string newerSource;
+    std::error_code ec;
+    const auto generated = fs::last_write_time(io_floor_planningpath, ec);
+    if (!ec) {
+      QLSettingsManager* settings = QLSettingsManager::getInstance();
+      for (const std::filesystem::path& source :
+           {settings->getQDCFilePath(), settings->getPCFFilePath()}) {
+        std::error_code sec;
+        if (source.empty() || !fs::exists(source, sec)) continue;
+        const auto edited = fs::last_write_time(source, sec);
+        if (!sec && edited > generated) {
+          newerSource = source.string();
+          break;
+        }
+      }
+    }
+    if (newerSource.empty()) {
+      Message(ProjManager()->projectName() + "_constraints.xml" +
+              " Already Exists. Using the Existing Constraint File.");
+      return true;
+    }
+    Message(ProjManager()->projectName() + "_constraints.xml is older than " +
+            newerSource + "; regenerating it.");
   }
 
   if (!ProjManager()->HasDesign()) {
