@@ -952,6 +952,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto ipgenerate = [](void* clientData, Tcl_Interp* interp, int argc,
                          const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
+      // As configure_ip does: a target device changed since then swaps the
+      // device catalog before anything is generated.
+      if (IPGenerator* generator = compiler->GetIPGenerator()) {
+        generator->LoadDefaultCatalogs();
+      }
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "clean") {
@@ -1263,6 +1268,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto ipgenerate = [](void* clientData, Tcl_Interp* interp, int argc,
                          const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
+      // As configure_ip does: a target device changed since then swaps the
+      // device catalog before anything is generated.
+      if (IPGenerator* generator = compiler->GetIPGenerator()) {
+        generator->LoadDefaultCatalogs();
+      }
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "clean") {
