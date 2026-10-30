@@ -1963,6 +1963,15 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
           "vpr_stdout.log",
           "post_place_timing.rpt",
           PLACEMENT_LOG,
+          // clock-aware placement: the driver's verdict and report data; its
+          // iteration directories go with Placement Clean
+          "clock_regions/spec.json",
+          "clock_regions/result.json",
+          "clock_regions/clock_regions.json",
+          "clock_regions/clock_regions.rpt",
+          "clock_regions/clock_region_state.json",
+          "clock_regions/place_macros.echo",
+          "clock_regions/device_grid.echo",
       };
       break;
     case Compiler::Action::Routing:
@@ -4963,6 +4972,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     m_state = State::GloballyPlaced;
     PlaceOpt(PlacementOpt::None);
     CleanFiles(Action::Detailed);
+    std::error_code clean_ec;  // the clock-region driver's outputs, when placement was clock-aware
+    std::filesystem::remove_all(
+        std::filesystem::path(ProjManager()->projectPath()) / CLOCK_REGIONS_DIR, clean_ec);
     return true;
   }
 #if UPSTREAM_UNUSED
