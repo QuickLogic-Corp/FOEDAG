@@ -159,11 +159,17 @@ TEST_F(FlowEngineClientTest, sha256_is_cached_only_for_settled_files) {
   EXPECT_EQ(FlowEngineClient::sha256File(file), first);
   EXPECT_EQ(FlowEngineClient::sha256FilesHashed(), before + 1);  // settled: hashed once
 
-  // Same size, mtime put back: the ctime still moves, so the change is seen.
+  // Same size, mtime put back: the change time still moves, so the change is
+  // seen (on Windows only through NTFS's own ChangeTime, not Qt's).
   const auto mtime = fs::last_write_time(file);
+  const qint64 changedBefore = FlowEngineClient::changeTimeMs(file);
+  QThread::msleep(50);
   write("arch.xml.en", "cipher two");
   fs::last_write_time(file, mtime);
+  EXPECT_EQ(fs::last_write_time(file), mtime);
+  EXPECT_GT(FlowEngineClient::changeTimeMs(file), changedBefore);
   EXPECT_NE(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::changeTimeMs(m_dir / "none"), -1);
 }
 
 TEST_F(FlowEngineClientTest, unusable_client_fails_without_starting_anything) {

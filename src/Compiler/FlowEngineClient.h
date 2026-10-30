@@ -20,6 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "nlohmann_json/json.hpp"
 
+#include <QtGlobal>
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -63,6 +65,10 @@ public:
   // own digest cache (aurora2 design-install §1.2.3): a status query on the
   // GUI thread then hashes a 13 MB encrypted architecture once, not per query.
   static std::string sha256File(const std::filesystem::path& path);
+  // When the file's content or metadata last changed, ms since the epoch; -1
+  // when unknown (then sha256File does not cache it). A true change time on
+  // every platform: a write that restores size and mtime still moves it.
+  static qint64 changeTimeMs(const std::filesystem::path& path);
   // Hashes actually computed by sha256File; for tests.
   static std::size_t sha256FilesHashed();
 

@@ -18,6 +18,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "FlowEngineClient.h"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QFile>
@@ -141,6 +148,29 @@ constexpr qint64 RACY_MS = 2000;
 
 std::size_t FlowEngineClient::sha256FilesHashed() { return s_hashed.load(); }
 
+qint64 FlowEngineClient::changeTimeMs(const fs::path& path) {
+#ifdef _WIN32
+  // Qt 6.9 reports the last write time as the metadata change time on Windows
+  // (qfilesystemmetadata_p.h fillFromFindData/fillFromFindInfo); NTFS keeps
+  // the real one in FILE_BASIC_INFO.
+  const HANDLE handle = CreateFileW(path.wstring().c_str(), FILE_READ_ATTRIBUTES,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return -1;
+  FILE_BASIC_INFO basic{};
+  const BOOL ok = GetFileInformationByHandleEx(handle, FileBasicInfo, &basic, sizeof(basic));
+  CloseHandle(handle);
+  if (!ok || basic.ChangeTime.QuadPart <= 0) return -1;
+  // 100 ns ticks since 1601-01-01, to ms since 1970-01-01.
+  return (basic.ChangeTime.QuadPart - 116444736000000000LL) / 10000;
+#else
+  QFileInfo info(toQString(path));
+  info.setCaching(false);
+  if (!info.exists()) return -1;
+  return info.fileTime(QFileDevice::FileMetadataChangeTime).toMSecsSinceEpoch();
+#endif
+}
+
 std::string FlowEngineClient::sha256File(const fs::path& path) {
   const QString name = toQString(path);
   QFileInfo info(name);
@@ -149,7 +179,7 @@ std::string FlowEngineClient::sha256File(const fs::path& path) {
   const QString key = info.absoluteFilePath();
   const qint64 size = info.size();
   const qint64 mtime = info.lastModified().toMSecsSinceEpoch();
-  const qint64 ctime = info.fileTime(QFileDevice::FileMetadataChangeTime).toMSecsSinceEpoch();
+  const qint64 ctime = changeTimeMs(path);
   {
     std::lock_guard<std::mutex> lock(s_digestMutex);
     auto it = s_digests.find(key);
@@ -166,7 +196,7 @@ std::string FlowEngineClient::sha256File(const fs::path& path) {
   ++s_hashed;
   const std::string digest = "sha256:" + hash.result().toHex().toStdString();
   std::lock_guard<std::mutex> lock(s_digestMutex);
-  if (hashedAt - std::max(mtime, ctime) > RACY_MS) {
+  if (ctime >= 0 && hashedAt - std::max(mtime, ctime) > RACY_MS) {
     // Changed within the racy window, a later write could keep size and times.
     s_digests[key] = {size, mtime, ctime, digest};
   } else {
