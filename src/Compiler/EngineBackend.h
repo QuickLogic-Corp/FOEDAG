@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -114,6 +115,18 @@ public:
   static void declarePackLayoutInputs(CommandWrapper& command,
                                       const std::filesystem::path& customLayoutYml,
                                       const std::filesystem::path& deviceConfig);
+  // Bitstream reads route's <project>_post_synth.route. Under the engine it is
+  // refused when that file is missing, or when route was not run or found
+  // current in this process and the engine does not call route up to date
+  // (`routeVerdict` empty: the engine could not tell, which never refuses).
+  // A user-supplied route file is never refused.
+  static bool bitstreamNeedsRoute(bool routeFileExists, bool routeIsUserFile,
+                                  bool routeCurrentThisProcess,
+                                  const std::optional<std::string>& routeVerdict);
+  // One plan over `stages` (no record is removed); the verdict of `stage`, or
+  // nothing when the engine could not answer.
+  std::optional<std::string> verdictOf(const std::vector<UpstreamCommand>& stages,
+                                       const std::string& stage) const;
   // Only exit 0 (written) and 2 (nothing to do) are results worth a record.
   static bool floorplanRecords(int status) { return status == 0 || status == 2; }
   // The python3 (python.exe on Windows) on PATH, absolute; empty when none.

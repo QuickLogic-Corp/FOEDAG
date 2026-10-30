@@ -76,9 +76,12 @@ if op == 'check':
 elif op == 'plan':
     plan_file = here / 'plan.txt'
     plan = plan_file.read_text().strip() if plan_file.exists() else 'skip'
+    # 'place=skip,route=run' gives each stage its own verdict.
+    per_stage = dict(p.split('=') for p in plan.split(',')) if '=' in plan else {}
     print(json.dumps({'v': 1, 'stages': [
-        {'v': 1, 'stage': r['stage'], 'profile': r.get('profile') or '', 'verdict': plan,
-         'reasons': [], 'key': None} for r in req['stages']]}))
+        {'v': 1, 'stage': r['stage'], 'profile': r.get('profile') or '',
+         'verdict': per_stage.get(r['stage'], plan), 'reasons': [], 'key': None}
+        for r in req['stages']]}))
 elif op == 'record':
     print(json.dumps({'v': 1, 'stage': req['stage'], 'profile': '', 'recorded': True, 'key': 'k'}))
 else:
@@ -439,6 +442,36 @@ TEST_F(EngineBackendTest, record_clears_later_cpp_cache_entries) {
   backend(client)->storeTaskCommand(PACK, vprCommand());
   const nlohmann::json left = nlohmann::json::parse(FileUtils::GetFileContent(cache));
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
+}
+
+// Bitstream reads route's file: refused without it, or when route did not
+// produce it for the current inputs; never when route is known current.
+TEST_F(EngineBackendTest, bitstream_needs_a_current_route) {
+  using V = std::optional<std::string>;
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, false, V{}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, true, V{"skip"}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"run"}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"pending-upstream"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"skip"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"external"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, true, V{"run"}));  // route ran
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{}));      // no answer
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(false, true, false, V{}));      // user file
+}
+
+TEST_F(EngineBackendTest, the_verdict_of_one_stage_comes_from_a_plan) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  const std::vector<UpstreamCommand> stages{{PLACE, "", vprCommand()}, {ROUTE, "", vprCommand()}};
+  write(m_engineDir / "plan.txt", "place=skip,route=run");
+  EXPECT_EQ(b->verdictOf(stages, "route"), std::optional<std::string>{"run"});
+  write(m_engineDir / "plan.txt", "place=run,route=skip");
+  EXPECT_EQ(b->verdictOf(stages, "route"), std::optional<std::string>{"skip"});
+  EXPECT_FALSE(b->verdictOf({{PLACE, "", vprCommand()}, {ROUTE, "", nullptr}}, "route"));
+  setVerdict("error");
+  EXPECT_FALSE(b->verdictOf(stages, "route"));
+  EXPECT_EQ(calls().back()["args"][0], "plan");  // a plan, never a check --begin
 }
 
 // Pack on an AUTO/CUSTOM device reads custom_layout.yml and the device config;

@@ -176,6 +176,33 @@ void EngineBackend::declarePackLayoutInputs(CommandWrapper& command,
   if (!deviceConfig.empty()) command.addProbe("device_config", {deviceConfig});
 }
 
+bool EngineBackend::bitstreamNeedsRoute(bool routeFileExists, bool routeIsUserFile,
+                                        bool routeCurrentThisProcess,
+                                        const std::optional<std::string>& routeVerdict) {
+  if (routeIsUserFile) return false;
+  if (!routeFileExists) return true;
+  if (routeCurrentThisProcess || !routeVerdict) return false;
+  return *routeVerdict != "skip" && *routeVerdict != "external";
+}
+
+std::optional<std::string> EngineBackend::verdictOf(const std::vector<UpstreamCommand>& stages,
+                                                    const std::string& stage) const try {
+  if (!m_client.usable()) return std::nullopt;
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = planRequest(stages, &unbuilt);
+  if (std::find(unbuilt.begin(), unbuilt.end(), stage) != unbuilt.end()) return std::nullopt;
+  const FlowEngineClient::Result result = m_client.call({"plan"}, &plan);
+  if (!result.ok) return std::nullopt;
+  for (const nlohmann::json& decision : result.doc.value("stages", nlohmann::json::array())) {
+    if (decision.value("stage", std::string{}) == stage) {
+      return decision.value("verdict", std::string{"run"});
+    }
+  }
+  return std::nullopt;
+} catch (const std::exception&) {
+  return std::nullopt;
+}
+
 std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string& projectName) {
   return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
 }

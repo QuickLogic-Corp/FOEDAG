@@ -439,6 +439,11 @@ private:
   bool buildFloorplan(FloorplanJob& job);
   int runFloorplan(const FloorplanJob& job);
   bool engineFloorplan();
+  // Under the engine: route ran or was found current in this process, and no
+  // synth, pack or place has run since (bitstream's route check).
+  bool m_routeCurrent = false;
+  // False, after saying why, when bitstream must not run before route.
+  bool engineBitstreamHasRoute();
   // The layout an AUTO/CUSTOM pack resolved, for the stages after it (row 1.10).
   bool layoutResolvedInPack() const;
   void resetPackLayout();

@@ -2570,6 +2570,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
     CommandWrapperPtr command = it->second;
     if (backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
+      m_routeCurrent = false;
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -2630,6 +2631,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
 
+  m_routeCurrent = false;
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -4370,6 +4372,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     return true;
   }
  
+  m_routeCurrent = false;
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
 
 #if UPSTREAM_UNUSED
@@ -5490,6 +5493,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     return true;
   }
 
+  m_routeCurrent = false;
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
   // Using a Scope Guard so this will fire even if we exit mid function
@@ -5765,6 +5769,7 @@ bool CompilerOpenFPGA_ql::Route() {
   if (!backend().isCompilationRequired(static_cast<int>(Action::Routing), command)) {
     Message("##################################################");
     Message("Routing skipped, not required");
+    m_routeCurrent = m_engineSelected;
     Message("##################################################");
     m_state = State::Routed;
     if (m_engineSelected) {
@@ -5800,6 +5805,7 @@ bool CompilerOpenFPGA_ql::Route() {
   } else {
     if (faultAfterTool("route")) return false;
     backend().storeTaskCommand(static_cast<int>(Action::Routing), command);
+    m_routeCurrent = m_engineSelected;
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
@@ -7820,6 +7826,29 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   return result;
 }
 
+bool CompilerOpenFPGA_ql::engineBitstreamHasRoute() {
+  const std::string routeName = ProjManager()->projectName() + "_post_synth.route";
+  const bool userFile = !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty();
+  const bool exists =
+      FileUtils::FileExists(std::filesystem::path(ProjManager()->projectPath()) / routeName);
+  std::optional<std::string> verdict;
+  if (!userFile && exists && !m_routeCurrent) {
+    if (auto* engine = dynamic_cast<EngineBackend*>(m_incrementalBackend.get())) {
+      const bool describeOnly = s_describeOnly;
+      auto restore = sg::make_scope_guard([&] { s_describeOnly = describeOnly; });
+      verdict = engine->verdictOf(engineUpstream("bitstream"), "route");
+    }
+  }
+  if (!EngineBackend::bitstreamNeedsRoute(exists, userFile, m_routeCurrent, verdict)) {
+    return true;
+  }
+  ErrorMessage("Bitstream needs the routing of the current design, but " + routeName +
+               (exists ? " was not produced by route for the current inputs"
+                       : " does not exist") +
+               " (timing analysis that re-routes writes its own routing). Run 'route' first.");
+  return false;
+}
+
 void CompilerOpenFPGA_ql::noteBitstreamTemp(const std::filesystem::path& temp,
                                             const std::string& mask,
                                             const std::filesystem::path& source) {
@@ -8064,6 +8093,10 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
     // Force bitstream generation
   }
 #endif // #if UPSTREAM_UNUSED
+
+  if (m_engineSelected && !engineBitstreamHasRoute()) {
+    return false;
+  }
 
   std::string command = m_openFpgaExecutablePath.string() + " -batch -f " +
                         ProjManager()->projectName() + ".openfpga";
