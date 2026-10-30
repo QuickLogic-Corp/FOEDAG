@@ -69,12 +69,14 @@ void EngineStatusRefresh::fire() {
     return;
   }
   const quint64 generation = ++m_generation;
+  // Out from here: a task that starts while the query is described makes it ask again.
+  ++m_inFlight;
   std::function<nlohmann::json()> work = m_describe();
   if (!work) {
+    --m_inFlight;
     return;
   }
   QPointer<EngineStatusRefresh> self(this);
-  ++m_inFlight;
   QThreadPool::globalInstance()->start([self, generation, work = std::move(work)] {
     nlohmann::json answer = work();
     // Delivered through the application object, which outlives this one.
@@ -94,6 +96,11 @@ void EngineStatusRefresh::deliver(quint64 generation, const nlohmann::json& answ
   }
   if (m_busy()) {
     m_skippedForTask = true;  // the task's records make this answer stale
+    return;
+  }
+  if (answer.is_object() && answer.contains("error")) {
+    if (m_onError) m_onError(answer["error"].is_string() ? answer["error"].get<std::string>()
+                                                         : answer["error"].dump());
     return;
   }
   m_apply(answer);

@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "gtest/gtest.h"
 
+#include <QElapsedTimer>
 #include <QThread>
 
 #include <filesystem>
@@ -170,6 +171,17 @@ TEST_F(FlowEngineClientTest, sha256_is_cached_only_for_settled_files) {
   EXPECT_GT(FlowEngineClient::changeTimeMs(file), changedBefore);
   EXPECT_NE(FlowEngineClient::sha256File(file), first);
   EXPECT_EQ(FlowEngineClient::changeTimeMs(m_dir / "none"), -1);
+}
+
+// The status plan's client gives up after its own, shorter timeout.
+TEST_F(FlowEngineClientTest, a_client_with_a_shorter_timeout_gives_up_sooner) {
+  if (!havePython()) GTEST_SKIP() << "no python3";
+  const FlowEngineClient slow = fake("import time\ntime.sleep(5)\n", 20000);
+  QElapsedTimer timer;
+  timer.start();
+  const FlowEngineClient::Result result = slow.withTimeout(300).call({"plan"});
+  EXPECT_FALSE(result.ok);
+  EXPECT_LT(timer.elapsed(), 3000);
 }
 
 TEST_F(FlowEngineClientTest, unusable_client_fails_without_starting_anything) {

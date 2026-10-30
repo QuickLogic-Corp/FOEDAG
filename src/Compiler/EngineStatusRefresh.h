@@ -38,6 +38,9 @@ class TclInterpreter;
 class EngineStatusRefresh : public QObject {
  public:
   static constexpr int DEBOUNCE_MS = 300;
+  // A status plan that takes longer is abandoned, so app exit never waits long
+  // on a hung engine.
+  static constexpr int PLAN_TIMEOUT_MS = 10000;
   // GUI thread: the work to run off it; an empty function asks nothing.
   using Describe = std::function<std::function<nlohmann::json()>()>;
   // GUI thread: what the work returned.
@@ -46,6 +49,12 @@ class EngineStatusRefresh : public QObject {
 
   EngineStatusRefresh(Describe describe, Apply apply, Busy busy,
                       int debounceMs = DEBOUNCE_MS, QObject* parent = nullptr);
+
+  // GUI thread: an answer of the form {"error": ...} (the plan failed or timed
+  // out) goes here instead of Apply, so statuses stay as they were.
+  void setErrorHandler(std::function<void(const std::string&)> onError) {
+    m_onError = std::move(onError);
+  }
 
   // GUI thread. Each call restarts the debounce window.
   void request();
@@ -72,6 +81,7 @@ class EngineStatusRefresh : public QObject {
   Describe m_describe;
   Apply m_apply;
   Busy m_busy;
+  std::function<void(const std::string&)> m_onError;
   QTimer m_timer;
   std::atomic<quint64> m_generation{0};
   std::atomic<int> m_inFlight{0};

@@ -50,22 +50,29 @@ struct Probe {
   int workMs = 0;
   std::atomic<bool> workOnGuiThread{false};
   std::function<void()> onDescribe;  // GUI thread, as the query is described
+  bool fail = false;                  // the work answers {"error": ...}
+  std::vector<std::string> errors;
 
   std::unique_ptr<EngineStatusRefresh> make(int debounceMs = 50) {
     QThread* gui = QThread::currentThread();
-    return std::make_unique<EngineStatusRefresh>(
+    auto refresh = std::make_unique<EngineStatusRefresh>(
         [this, gui] {
           const int n = ++describes;
           if (onDescribe) onDescribe();
           const int ms = workMs;
-          return std::function<nlohmann::json()>([this, n, ms, gui] {
+          const bool failing = fail;
+          return std::function<nlohmann::json()>([this, n, ms, gui, failing] {
             if (QThread::currentThread() == gui) workOnGuiThread = true;
             QThread::msleep(ms);
-            return nlohmann::json(n);
+            return failing ? nlohmann::json{{"error", "timed out"}} : nlohmann::json(n);
           });
         },
-        [this](const nlohmann::json& answer) { applied.push_back(answer.get<int>()); },
+        [this](const nlohmann::json& answer) {
+          applied.push_back(answer.is_number() ? answer.get<int>() : -1);
+        },
         [this] { return busy; }, debounceMs);
+    refresh->setErrorHandler([this](const std::string& error) { errors.push_back(error); });
+    return refresh;
   }
 };
 
@@ -173,6 +180,33 @@ TEST(EngineStatusRefresh, an_answer_queued_before_a_task_is_dropped) {
   runEventLoop(600);
   EXPECT_EQ(probe.describes, 2);
   EXPECT_EQ(probe.applied, std::vector<int>{2});
+}
+
+// A task that starts while the query is still being described.
+TEST(EngineStatusRefresh, a_task_started_while_describing_makes_it_ask_again) {
+  Probe probe;
+  auto refresh = probe.make(20);
+  probe.onDescribe = [&] {
+    probe.onDescribe = nullptr;
+    refresh->taskStarted();
+    QTimer::singleShot(0, [&] { refresh->taskFinished(); });
+  };
+  refresh->request();
+  runEventLoop(500);
+  EXPECT_EQ(probe.describes, 2);
+  EXPECT_EQ(probe.applied, std::vector<int>{2});
+}
+
+// A failed or timed-out plan leaves statuses alone and reports the error.
+TEST(EngineStatusRefresh, a_failed_query_changes_no_status) {
+  Probe probe;
+  probe.fail = true;
+  auto refresh = probe.make(20);
+  refresh->request();
+  runEventLoop(300);
+  EXPECT_EQ(probe.describes, 1);
+  EXPECT_TRUE(probe.applied.empty());
+  EXPECT_EQ(probe.errors, std::vector<std::string>{"timed out"});
 }
 
 bool hasCommand(TclInterpreter& interp, const std::string& name) {

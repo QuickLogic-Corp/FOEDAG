@@ -12811,6 +12811,13 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
           [this] { return describeEngineStatus(); },
           [this](const nlohmann::json& answer) { applyEngineStatus(answer); },
           [this] { return backend().taskRunning(); });
+      m_statusRefresh->setErrorHandler([this](const std::string& error) {
+        if (!m_statusWarned) {
+          m_statusWarned = true;
+          Message("Warning: flow engine status query failed (" + error +
+                  "); task statuses are left as they were");
+        }
+      });
     }
     m_statusRefresh->request();
     return;
@@ -12855,7 +12862,8 @@ std::function<nlohmann::json()> CompilerOpenFPGA_ql::describeEngineStatus() {
     const std::string error = e.what();
     return [error] { return nlohmann::json{{"error", error}}; };
   }
-  return [client = engine->client(), plan, unbuilt]() -> nlohmann::json {
+  return [client = engine->client().withTimeout(EngineStatusRefresh::PLAN_TIMEOUT_MS), plan,
+          unbuilt]() -> nlohmann::json {
     nlohmann::json answer{{"unbuilt", unbuilt}, {"verdicts", nlohmann::json::object()}};
     try {
       const FlowEngineClient::Result result = client.call({"plan"}, &plan);
@@ -12871,13 +12879,8 @@ std::function<nlohmann::json()> CompilerOpenFPGA_ql::describeEngineStatus() {
 }
 
 void CompilerOpenFPGA_ql::applyEngineStatus(const nlohmann::json& answer) {
-  if (answer.contains("error") && !m_statusWarned) {
-    m_statusWarned = true;
-    Message("Warning: flow engine status query failed (" + answer.value("error", std::string{}) +
-            "); stages show as not up to date");
-  }
+  // Errors never get here: EngineStatusRefresh hands them to the error handler.
   auto upToDate = [&answer](const std::string& stage) {
-    if (answer.contains("error")) return false;
     for (const auto& name : answer.value("unbuilt", nlohmann::json::array())) {
       if (name == stage) return false;
     }

@@ -81,6 +81,12 @@ public:
                    const std::filesystem::path& osLibs, int timeoutMs);
 
   bool usable() const { return !m_interpreter.empty() && !m_script.empty(); }
+  // The same client with another timeout.
+  FlowEngineClient withTimeout(int timeoutMs) const {
+    FlowEngineClient client(*this);
+    client.m_timeoutMs = timeoutMs;
+    return client;
+  }
   const std::filesystem::path& interpreter() const { return m_interpreter; }
 
   // `<python> -I -X utf8 aurora_engine.py <args...> --json`, request on stdin.
