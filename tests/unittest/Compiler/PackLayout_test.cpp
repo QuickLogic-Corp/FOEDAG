@@ -68,6 +68,29 @@ TEST_F(PackLayoutTest, round_trips_through_the_project) {
   EXPECT_EQ(back->toJson(), layout.toJson());
 }
 
+// A new session removed device_layout.json; a skipped pack puts back the same
+// bytes the pack that ran left.
+TEST_F(PackLayoutTest, a_skipped_pack_restores_device_layout_json) {
+  const std::string written = "{\n  \"width\": 12,\n  \"layout_name\": \"AUTO_12x12\"\n}";
+  PackLayout layout = sample();
+  layout.deviceLayout = written;
+  ASSERT_TRUE(layout.write(m_project));
+
+  const fs::path file = m_project / "device_layout.json";
+  ASSERT_TRUE(FileUtils::WriteToFile(file, written));  // as pack left it
+  const std::string packWrote = FileUtils::GetFileContent(file);
+  fs::remove(file);                                    // session start
+
+  const std::optional<PackLayout> back = PackLayout::read(m_project);
+  ASSERT_TRUE(back);
+  EXPECT_TRUE(back->restoreDeviceLayout(m_project));
+  ASSERT_TRUE(fs::exists(file));
+  EXPECT_EQ(FileUtils::GetFileContent(file), packWrote);
+
+  PackLayout none = sample();  // a pack_layout.json from before the field
+  EXPECT_FALSE(none.restoreDeviceLayout(m_project));
+}
+
 TEST_F(PackLayoutTest, anything_unusable_reads_as_none) {
   EXPECT_FALSE(PackLayout::read(m_project));  // no file
   FileUtils::WriteToFile(m_project / PackLayout::FILE_NAME, "not json");

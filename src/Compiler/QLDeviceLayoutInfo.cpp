@@ -164,7 +164,8 @@ bool QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
   return false;
 }
 
-QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target) {
+QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target, bool packSucceeded)
+    : m_packSucceeded(packSucceeded) {
   QLDeviceManager* device_manager = QLDeviceManager::getInstance();
   if (device_manager == nullptr) {
     return;
@@ -382,7 +383,7 @@ bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
   // invalidates it, Fail, InProgress) means the log's contents are not backed
   // by a Packing run this session can vouch for.
   Compiler* c = compiler();
-  {
+  if (!m_packSucceeded) {
     TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
     Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
     if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {
@@ -431,15 +432,10 @@ std::filesystem::path QLDeviceLayoutInfo::deviceLayoutJSONPath() {
   return project_path / "device_layout.json";
 }
 
-bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
+std::string QLDeviceLayoutInfo::deviceLayoutJSONContents() const {
   if (!m_layout.resolved) {
-    return false;
+    return {};
   }
-  const std::filesystem::path filepath = deviceLayoutJSONPath();
-  if (filepath.empty()) {
-    return false;
-  }
-
   json layout_json;
   layout_json["width"] = m_layout.width;
   layout_json["height"] = m_layout.height;
@@ -457,7 +453,19 @@ bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
   layout_json["layout_mode"] = m_layout.layoutMode;
   layout_json["source"] = m_layout.source;
 
-  const std::string contents = layout_json.dump(2);
+  return layout_json.dump(2);
+}
+
+bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
+  if (!m_layout.resolved) {
+    return false;
+  }
+  const std::filesystem::path filepath = deviceLayoutJSONPath();
+  if (filepath.empty()) {
+    return false;
+  }
+
+  const std::string contents = deviceLayoutJSONContents();
 
   // setCurrentDeviceTarget() is reached again from every
   // QLSettingsManager::getInstance(), so an unconditional write would rewrite this

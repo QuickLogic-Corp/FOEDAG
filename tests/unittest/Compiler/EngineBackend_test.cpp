@@ -192,6 +192,7 @@ TEST_F(EngineBackendTest, owned_outputs_follow_the_ownership_table) {
     return std::find(pack.begin(), pack.end(), file) != pack.end();
   };
   EXPECT_TRUE(owns("pack_layout.json"));
+  EXPECT_FALSE(owns("device_layout.json"));  // restored, not owned
   EXPECT_TRUE(owns("vpr_generated.xml.en"));
   EXPECT_TRUE(owns("sb_maps_generated.yml"));
   EXPECT_TRUE(owns("sb_maps_generated.yml.en"));

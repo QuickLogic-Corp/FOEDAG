@@ -401,6 +401,11 @@ bool CompilerOpenFPGA_ql::writePackLayout(PackLayout layout) {
   for (auto& [path, digests] : layout.files) {
     digests.written = FlowEngineClient::sha256File(project / std::filesystem::u8path(path));
   }
+  // What refresh() writes once this pack's task is marked a success.
+  layout.deviceLayout =
+      QLDeviceLayoutInfo(QLDeviceManager::getInstance()->getCurrentDeviceTarget(),
+                         /*packSucceeded*/ true)
+          .deviceLayoutJSONContents();
   if (!layout.write(project)) {
     ErrorMessage("Cannot write " + (project / PackLayout::FILE_NAME).string());
     return false;
@@ -4372,6 +4377,12 @@ bool CompilerOpenFPGA_ql::Packing() {
     Message("Packing skipped, not required");
     Message("##################################################");
     m_state = State::Packed;
+    // The layout's geometry for floorplanning and the GUI, as pack left it.
+    if (m_engineSelected && layoutResolvedInPack()) {
+      if (const std::optional<PackLayout> layout = PackLayout::read(ProjManager()->projectPath())) {
+        layout->restoreDeviceLayout(ProjManager()->projectPath());
+      }
+    }
     // Power reads these metrics; a cached pack still provides them (REQ-122).
     if (m_engineSelected) {
       QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);

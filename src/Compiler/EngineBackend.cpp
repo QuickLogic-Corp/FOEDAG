@@ -128,7 +128,9 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
     std::vector<std::string> outputs{name + "_post_synth.net"};
     if (ctx.layoutResolvedInPack) {
       // Pack deletes the plaintext generated arch once it is encrypted.
-      for (const char* file : {"device_layout.json", "pack_layout.json", "vpr_generated.xml.en",
+      // device_layout.json is pack_layout.json's to restore, not an output:
+      // refresh() removes it at every session start until pack has ended.
+      for (const char* file : {"pack_layout.json", "vpr_generated.xml.en",
                                "sb_maps_generated.yml", "sb_maps_generated.yml.en"}) {
         outputs.emplace_back(file);
       }

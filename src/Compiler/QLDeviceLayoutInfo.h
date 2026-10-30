@@ -47,7 +47,11 @@ class QLDeviceLayout {
 // stays false and nothing is written. Nothing here can fail a compile.
 class QLDeviceLayoutInfo {
  public:
-  explicit QLDeviceLayoutInfo(QLDeviceTarget device_target = QLDeviceTarget());
+  explicit QLDeviceLayoutInfo(QLDeviceTarget device_target = QLDeviceTarget())
+      : QLDeviceLayoutInfo(device_target, /*packSucceeded*/ false) {}
+  // `packSucceeded`: the caller knows this session's pack just succeeded, though
+  // its task is not marked so yet (the flow engine records the layout then).
+  QLDeviceLayoutInfo(QLDeviceTarget device_target, bool packSucceeded);
   // Wrap an already-resolved layout. Lets the pure parsers below be exercised
   // through the same accessors the flow uses.
   explicit QLDeviceLayoutInfo(const QLDeviceLayout& layout) : m_layout(layout) {}
@@ -66,6 +70,9 @@ class QLDeviceLayoutInfo {
   // <projectPath>/device_layout.json. Empty when there is no project.
   static std::filesystem::path deviceLayoutJSONPath();
   bool writeDeviceLayoutJSON() const;
+  // What writeDeviceLayoutJSON() writes, without the trailing newline; empty
+  // when unresolved.
+  std::string deviceLayoutJSONContents() const;
   // Drop a file left by an earlier run, so an unresolved layout reads as "not
   // known yet" rather than as last run's geometry.
   static void removeStaleDeviceLayoutJSON();
@@ -112,6 +119,7 @@ class QLDeviceLayoutInfo {
 
   QLDeviceLayout m_layout;
   std::string m_error;
+  bool m_packSucceeded = false;
 };
 
 }  // namespace FOEDAG

@@ -43,12 +43,19 @@ struct PackLayout {
     std::string written;    // "sha256:<hex>" of the file pack left on disk
   };
   std::map<std::string, Digests> files;  // by project-relative path
+  // The device_layout.json this pack left (without the trailing newline). Not a
+  // pack output: refresh() removes it at every session start until pack ends,
+  // so a skipped pack writes it back from here.
+  std::string deviceLayout;
 
   nlohmann::json toJson() const;
   static std::optional<PackLayout> fromJson(const nlohmann::json& json);
 
   bool write(const std::filesystem::path& project) const;
   static std::optional<PackLayout> read(const std::filesystem::path& project);
+
+  // Writes deviceLayout to <project>/device_layout.json; false when there is none.
+  bool restoreDeviceLayout(const std::filesystem::path& project) const;
 
   // Plaintext digests of the generated files still on disk as pack wrote them;
   // a file changed since is left for the engine to digest as it is.

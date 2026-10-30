@@ -39,6 +39,7 @@ nlohmann::json PackLayout::toJson() const {
           {"layout_name", layoutName},
           {"vpr_xml", vprXml.generic_u8string()},
           {"sb_maps", sbMaps.generic_u8string()},
+          {"device_layout", deviceLayout},
           {"files", files_json}};
 }
 
@@ -52,6 +53,7 @@ std::optional<PackLayout> PackLayout::fromJson(const nlohmann::json& json) try {
   layout.layoutName = json.at("layout_name").get<std::string>();
   layout.vprXml = fs::u8path(json.at("vpr_xml").get<std::string>());
   layout.sbMaps = fs::u8path(json.at("sb_maps").get<std::string>());
+  layout.deviceLayout = json.value("device_layout", std::string{});
   if (layout.layoutName.empty() || layout.vprXml.empty() || layout.vprXml.is_absolute() ||
       layout.sbMaps.is_absolute()) {
     return std::nullopt;
@@ -73,6 +75,15 @@ std::optional<PackLayout> PackLayout::read(const fs::path& project) {
   const fs::path file = project / FILE_NAME;
   if (!FileUtils::FileExists(file)) return std::nullopt;
   return fromJson(nlohmann::json::parse(FileUtils::GetFileContent(file), nullptr, false));
+}
+
+bool PackLayout::restoreDeviceLayout(const fs::path& project) const {
+  if (deviceLayout.empty()) return false;
+  const fs::path file = project / "device_layout.json";
+  bool ok = false;
+  // Same bytes as QLDeviceLayoutInfo::writeDeviceLayoutJSON(); left alone if equal.
+  if (FileUtils::GetFileContent(file, &ok) == deviceLayout + "\n" && ok) return true;
+  return FileUtils::WriteToFile(file, deviceLayout);
 }
 
 std::map<std::string, std::string> PackLayout::outputHostDigests(const fs::path& project) const {
