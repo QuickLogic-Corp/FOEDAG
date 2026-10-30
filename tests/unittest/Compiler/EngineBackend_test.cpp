@@ -333,10 +333,11 @@ TEST_F(EngineBackendTest, stages_not_yet_decided_always_run_and_ask_nothing) {
   setVerdict("skip");
   EXPECT_TRUE(b->isCompilationRequired(STA, "fast", vprCommand()));
   b->storeTaskCommand(STA, "fast", vprCommand());
-  // Pack on an AUTO/CUSTOM device restores no layout on a skip yet (row 1.10).
-  m_ctx.layoutResolvedInPack = true;
-  EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));
   EXPECT_TRUE(calls().empty());
+  // Pack on an AUTO/CUSTOM device is decided: a skip restores pack_layout.json.
+  m_ctx.layoutResolvedInPack = true;
+  EXPECT_FALSE(b->isCompilationRequired(PACK, vprCommand()));
+  EXPECT_EQ(calls().size(), 1u);
 }
 
 TEST_F(EngineBackendTest, missing_interpreter_runs_every_stage_with_one_warning) {

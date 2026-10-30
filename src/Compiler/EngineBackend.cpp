@@ -330,9 +330,6 @@ bool EngineBackend::decide(int taskId, const std::string& profile,
   if (!command || !decides(stage)) return true;
   const std::string engineProfile = profileName(taskId, profile);
   const EngineStageContext ctx = m_context(stage, engineProfile);
-  // Pack sets the generated-layout members only when it runs; restoring them
-  // on a skip is row 1.10.
-  if (stage == "pack" && ctx.layoutResolvedInPack) return true;
   if (!m_client.usable()) {
     warnOnce("no bundled interpreter or engine in this install; every stage runs");
     return true;

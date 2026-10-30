@@ -35,6 +35,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
 #include "Compiler/EngineBackend.h"
+#include "Compiler/PackLayout.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -437,6 +438,13 @@ private:
   bool buildFloorplan(FloorplanJob& job);
   int runFloorplan(const FloorplanJob& job);
   bool engineFloorplan();
+  // The layout an AUTO/CUSTOM pack resolved, for the stages after it (row 1.10).
+  bool layoutResolvedInPack() const;
+  void resetPackLayout();
+  // Restores the members from pack_layout.json under the engine; false when the
+  // device needs one and it cannot be read. Always true under cpp.
+  bool restorePackLayout();
+  bool writePackLayout(PackLayout layout);
   // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
   // the engine: the caller fails the task although its tool succeeded (T-015).
   bool faultAfterTool(const std::string& stage) const;

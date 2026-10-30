@@ -125,6 +125,10 @@ CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(mak
     selectIncrementalBackend();
     backend().setProjectPath(projectPath);
     backend().load();
+    if (m_engineSelected) {
+      resetPackLayout();
+      restorePackLayout();
+    }
   });
 }
 
@@ -209,9 +213,13 @@ EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage,
   const QLDeviceTarget target = devices->getCurrentDeviceTarget();
   if (devices->isDeviceTargetValid(target)) {
     ctx.deviceDir = devices->deviceTypeDirPath(target);
-    ctx.layoutResolvedInPack = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
-        devices->deviceLayoutSettings(target), target);
+    ctx.layoutResolvedInPack = layoutResolvedInPack();
     ctx.sessionState["device"] = devices->convertToDeviceString(target);
+  }
+  if (stage == "pack" && ctx.layoutResolvedInPack) {
+    if (const std::optional<PackLayout> layout = PackLayout::read(ctx.project)) {
+      ctx.outputHostDigests = layout->outputHostDigests(ctx.project);
+    }
   }
 
   // Tcl-set and session values the command line does not show (REQ-017).
@@ -305,9 +313,67 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
   return upstream;
 }
 
-void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) {
+void CompilerOpenFPGA_ql::BeforeCompileTask(Action action) {
   m_floorplanOutcome.reset();
+  // A later stage run on its own needs the layout an earlier pack resolved.
+  if (m_engineSelected && action > Action::Pack && action <= Action::Bitstream &&
+      !m_autoLayoutGenerationMode && !m_customLayoutGenerationMode) {
+    restorePackLayout();
+  }
   backend().taskStarted();
+}
+
+bool CompilerOpenFPGA_ql::layoutResolvedInPack() const {
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+  return devices->isDeviceTargetValid(target) &&
+         QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(devices->deviceLayoutSettings(target),
+                                                           target);
+}
+
+void CompilerOpenFPGA_ql::resetPackLayout() {
+  m_autoLayoutGenerationMode = false;
+  m_customLayoutGenerationMode = false;
+  m_autoLayoutGeneratedLayoutName.clear();
+  m_autoLayoutGeneratedVPRXMLPath.clear();
+  m_autoLayoutGeneratedSBMapsYMLPath.clear();
+}
+
+bool CompilerOpenFPGA_ql::restorePackLayout() {
+  if (!m_engineSelected || !layoutResolvedInPack()) {
+    return true;
+  }
+  const std::filesystem::path project = ProjManager()->projectPath();
+  const std::optional<PackLayout> layout = PackLayout::read(project);
+  if (!layout) {
+    return false;
+  }
+  m_autoLayoutGenerationMode = layout->autoMode;
+  m_customLayoutGenerationMode = layout->customMode;
+  m_autoLayoutGeneratedLayoutName = layout->layoutName;
+  m_autoLayoutGeneratedVPRXMLPath = project / layout->vprXml;
+  m_autoLayoutGeneratedSBMapsYMLPath =
+      layout->sbMaps.empty() ? std::filesystem::path{} : project / layout->sbMaps;
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::writePackLayout(PackLayout layout) {
+  const std::filesystem::path project = ProjManager()->projectPath();
+  layout.autoMode = m_autoLayoutGenerationMode;
+  layout.customMode = !m_autoLayoutGenerationMode;
+  layout.layoutName = m_autoLayoutGeneratedLayoutName;
+  layout.vprXml = m_autoLayoutGeneratedVPRXMLPath.lexically_relative(project);
+  if (!m_autoLayoutGeneratedSBMapsYMLPath.empty()) {
+    layout.sbMaps = m_autoLayoutGeneratedSBMapsYMLPath.lexically_relative(project);
+  }
+  for (auto& [path, digests] : layout.files) {
+    digests.written = FlowEngineClient::sha256File(project / std::filesystem::u8path(path));
+  }
+  if (!layout.write(project)) {
+    ErrorMessage("Cannot write " + (project / PackLayout::FILE_NAME).string());
+    return false;
+  }
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::faultAfterTool(const std::string& stage) const {
@@ -4122,11 +4188,17 @@ bool CompilerOpenFPGA_ql::Packing() {
   QLDeviceTarget current_device_target = 
       QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
+  // Pack's key must not depend on what an earlier pack of this session resolved.
+  PackLayout pack_layout;
+  if (m_engineSelected) {
+    resetPackLayout();
+  }
   CommandWrapperPtr command = getPackingCommand();
   if(!command) {
     return false;
   }
-  if (!backend().isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Pack), command) &&
+      restorePackLayout()) {
     Message("##################################################");
     Message("Packing skipped, not required");
     Message("##################################################");
@@ -4789,6 +4861,11 @@ bool CompilerOpenFPGA_ql::Packing() {
     // this will be saved into m_autoLayoutGeneratedVPRXMLPath.
     std::vector<std::filesystem::path> file_list_to_encrypt;
     file_list_to_encrypt.push_back(generated_vpr_xml_path);
+    if (m_engineSelected) {
+      // Encryption differs run to run; the engine keys the plaintext (REQ-121).
+      pack_layout.files["vpr_generated.xml.en"].plaintext =
+          FlowEngineClient::sha256File(generated_vpr_xml_path);
+    }
     if (!encryptDeviceFiles(file_list_to_encrypt,
                             QLDeviceManager::getInstance()->deviceTypeDirPath(),
                             QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
@@ -4852,6 +4929,10 @@ bool CompilerOpenFPGA_ql::Packing() {
           FileUtils::FileExists(generated_sb_maps_yml_path)) {
         std::vector<std::filesystem::path> sbmaps_to_encrypt;
         sbmaps_to_encrypt.push_back(generated_sb_maps_yml_path);
+        if (m_engineSelected) {
+          pack_layout.files["sb_maps_generated.yml.en"].plaintext =
+              FlowEngineClient::sha256File(generated_sb_maps_yml_path);
+        }
         if (!encryptDeviceFiles(
                 sbmaps_to_encrypt,
                 QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -4925,6 +5006,10 @@ bool CompilerOpenFPGA_ql::Packing() {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {
+    if (m_engineSelected && (m_autoLayoutGenerationMode || m_customLayoutGenerationMode) &&
+        !writePackLayout(pack_layout)) {
+      return false;
+    }
     if (faultAfterTool("pack")) return false;
     backend().storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
