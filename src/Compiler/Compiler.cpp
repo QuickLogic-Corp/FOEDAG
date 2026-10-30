@@ -2708,6 +2708,40 @@ void Compiler::SetEnvironmentVariable(const std::string variable,
   m_environmentVariableMap.emplace(variable, value);
 }
 
+std::string Compiler::getQtPlatformPluginFor(bool gui) {
+  if (!gui) return "offscreen";
+#ifdef __linux__
+  // Avoid Wayland: the GUI needs X11 on Ubuntu 22.04+ Wayland sessions.
+  return "xcb";
+#else
+  return {};
+#endif
+}
+
+bool Compiler::IsVprGuiCommand(const std::string& command) {
+  std::istringstream tokens(command);
+  std::string token;
+  while (tokens >> token) {
+    if (token == "--disp" && tokens >> token) return token == "on";
+  }
+  return false;
+}
+
+// With --disp off, VPR switches Qt to offscreen only if QT_QPA_PLATFORM is
+// unset. The bin/aurora wrapper exports xcb whenever DISPLAY is set, which
+// blocks that, so VPR aborts when no X server is reachable. Set the platform
+// explicitly instead (aurora2#2641).
+int Compiler::ExecuteAndMonitorQtApplication(const std::string& command,
+                                             bool gui,
+                                             const std::string logFile,
+                                             bool appendLog) {
+  const std::string platform = getQtPlatformPluginFor(gui);
+  if (!platform.empty()) m_environmentVariableMap["QT_QPA_PLATFORM"] = platform;
+  const int status = ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
+  m_environmentVariableMap.erase("QT_QPA_PLATFORM");
+  return status;
+}
+
 int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,
                                              const std::string logFile,
                                              bool appendLog) {
