@@ -8800,6 +8800,12 @@ bool CompilerOpenFPGA_ql::RefuseDumpingCommand(const std::string& command) {
   const std::vector<std::string> refused =
       findRefusedDumpOptions(command, ProjManager()->projectPath(), RpmAuthorProjectActive());
   if (!refused.empty() && DeviceIsEncrypted()) {
+    if (std::find(refused.begin(), refused.end(), kSourceTooDeep) != refused.end()) {
+      ErrorMessage("Refusing to run: " + std::string(kSourceTooDeep) +
+                   ", so it could not be checked for options that write the encrypted "
+                   "device's architecture data to disk.");
+      return true;
+    }
     std::string options;
     for (const std::string& option : refused) {
       options += (options.empty() ? "" : ", ") + option;

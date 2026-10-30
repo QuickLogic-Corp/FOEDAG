@@ -356,7 +356,7 @@ TEST(RefusedDumpOptions, SourceChainTooDeepIsRefused) {
   }
   const Tokens found = refused("openfpga -batch -f 0.openfpga", false, dir.path());
   ASSERT_EQ(found.size(), 1u);
-  EXPECT_NE(found.front().find("source nested deeper"), std::string::npos);
+  EXPECT_EQ(found.front(), kSourceTooDeep);
 }
 
 namespace {
@@ -408,4 +408,49 @@ TEST(DeviceIsEncrypted, EncryptedArchitectureIsEncrypted) {
 TEST(DeviceIsEncrypted, PlainArchitectureIsNotEncrypted) {
   const ScratchDir dir("arch_plain");
   EXPECT_FALSE(archCompiler().encrypted(false, false, dir.write("vpr.xml", "<architecture/>\n")));
+}
+
+namespace {
+
+// What findRefusedDumpOptions() reports for a one-line OpenFPGA script.
+Tokens refusedInScriptLine(const ScratchDir& dir, const std::string& line) {
+  dir.write("line.openfpga", line + "\n");
+  return refused("openfpga -batch -f line.openfpga", false, dir.path());
+}
+
+}  // namespace
+
+TEST(RefusedDumpOptions, EmptyQuotedChunksAreDroppedLikeTheOpenFpgaShell) {
+  const ScratchDir dir("quote_chunks");
+  // Chunks between '"' are "vpr a ", "", "x", " --write_rr_graph r ", "". Without
+  // the empty ones the option is outside the quotes: VPR gets it.
+  EXPECT_EQ(refusedInScriptLine(dir, "vpr a \"\"x\" --write_rr_graph r \""),
+            Tokens{"--write_rr_graph"});
+  // Without the empty chunk " --write_rr_graph r" is the quoted one: one argument.
+  EXPECT_TRUE(refusedInScriptLine(dir, "vpr a \"\" --write_rr_graph r").empty());
+  // The same shift inside a source stream.
+  EXPECT_EQ(refusedInScriptLine(
+                dir, "source --command_stream \"\"vpr a --write_rr_graph r\" \""),
+            Tokens{"--write_rr_graph"});
+}
+
+TEST(RefusedDumpOptions, LinesTheOpenFpgaShellRejectsRunNothing) {
+  const ScratchDir dir("quote_rejected");
+  // A leading quote or an odd number of quotes is a fatal error before any run.
+  EXPECT_TRUE(refusedInScriptLine(dir, "\"vpr\" a --write_rr_graph r").empty());
+  EXPECT_TRUE(refusedInScriptLine(dir, "vpr a --write_rr_graph r \"").empty());
+}
+
+TEST_F(DumpOptionsGuardTest, EncryptedDeviceRefusesTooDeeplySourcedScript) {
+  compiler().encrypted = true;
+  for (int i = 0; i < 20; ++i) {
+    FileUtils::WriteToFile(m_project / (std::to_string(i) + ".openfpga"),
+                           "source --command_stream " + std::to_string(i + 1) +
+                               ".openfpga --from_file\n");
+  }
+  EXPECT_TRUE(refuses(m_openfpga.string() + " -batch -f 0.openfpga"));
+  ASSERT_EQ(compiler().errors.size(), 1u);
+  EXPECT_NE(compiler().errors.front().find("sources files more than 16 levels deep"),
+            std::string::npos);
+  EXPECT_EQ(compiler().errors.front().find("Refusing to run VPR with"), std::string::npos);
 }

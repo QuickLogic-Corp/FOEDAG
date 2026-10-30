@@ -32,6 +32,10 @@ namespace {
 
 // Reviewed deny-list (plan Q7). Each writes data VPR built from the decrypted
 // architecture, whatever its value.
+// Deliberately not scanned: OpenFPGA's `ext_exec --command` runs its text through
+// system(), which can already run anything, and `openfpga -x "<cmds>"` cannot
+// carry a multi-word command through ExecuteAndMonitorSystemCommand, which
+// splits the command line on spaces.
 constexpr std::array<std::string_view, 4> kAlwaysDumps = {
     "--write_rr_graph",
     "--write_router_lookahead",
@@ -94,29 +98,39 @@ std::string ltrimSpaces(const std::string& text) {
   return start == std::string::npos ? std::string{} : text.substr(start);
 }
 
-// Shell<T>::execute_command: split on ' ', except that text between a pair of
-// double quotes is one token, without its quotes.
+// StringToken::split(delim): strtok, so empty pieces are dropped.
+std::vector<std::string> strtokSplit(const std::string& text, char delim) {
+  std::vector<std::string> pieces;
+  std::istringstream in(text);
+  for (std::string piece; std::getline(in, piece, delim);) {
+    if (!piece.empty()) pieces.push_back(piece);
+  }
+  return pieces;
+}
+
+// Shell<T>::execute_command. A line that starts with '"' or has an odd number of
+// them is a fatal error and runs nothing. Otherwise StringToken::split_by_chunks:
+// split on '"' dropping empty chunks, then split the even chunks on ' ' and keep
+// the odd ones whole. Dropping empty chunks shifts which chunks count as quoted:
+// in 'vpr a ""x" --write_rr_graph r "' the option is outside the quotes.
 std::vector<std::string> shellTokens(const std::string& line) {
+  const size_t quotes = static_cast<size_t>(std::count(line.begin(), line.end(), '"'));
+  if (quotes == 0) return strtokSplit(line, ' ');
+  if (line.front() == '"' || quotes % 2 != 0) return {};
   std::vector<std::string> tokens;
-  const auto splitSpaces = [&tokens](const std::string& text) {
-    std::istringstream in(text);
-    for (std::string token; std::getline(in, token, ' ');) {
-      if (!token.empty()) tokens.push_back(token);
+  const std::vector<std::string> chunks = strtokSplit(line, '"');
+  for (size_t i = 0; i < chunks.size(); ++i) {
+    if (i % 2 != 0) {
+      tokens.push_back(chunks[i]);
+      continue;
     }
-  };
-  std::istringstream chunks(line);
-  bool quoted = false;
-  for (std::string chunk; std::getline(chunks, chunk, '"'); quoted = !quoted) {
-    if (quoted) {
-      if (!chunk.empty()) tokens.push_back(chunk);
-    } else {
-      splitSpaces(chunk);
-    }
+    for (std::string& token : strtokSplit(chunks[i], ' ')) tokens.push_back(std::move(token));
   }
   return tokens;
 }
 
-// Deeper than this, a chain of distinct sourced files is refused outright.
+// Deeper than this, a chain of distinct sourced files is refused outright; keep
+// kSourceTooDeep in step.
 constexpr int kMaxSourceDepth = 16;
 
 struct ShellScan {
@@ -126,7 +140,7 @@ struct ShellScan {
 
   void script(const std::filesystem::path& file, int depth) {
     if (depth > kMaxSourceDepth) {
-      found.push_back("source nested deeper than " + std::to_string(kMaxSourceDepth));
+      found.push_back(std::string(kSourceTooDeep));
       return;
     }
     std::error_code ec;

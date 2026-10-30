@@ -20,9 +20,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace FOEDAG {
+
+/// Reported by findRefusedDumpOptions() in place of an option when an OpenFPGA
+/// script sources files more than 16 levels deep and was not scanned past that.
+inline constexpr std::string_view kSourceTooDeep =
+    "the OpenFPGA script sources files more than 16 levels deep";
 
 /// Splits a command line the way Compiler::ExecuteAndMonitorSystemCommand
 /// does (on whitespace), dropping empty tokens.
