@@ -48,13 +48,13 @@ set (CPP_LIST
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp
     Compiler/BlifParser_test.cpp
-    Compiler/DumpOptions_test.cpp
-    Compiler/DumpOptionsGuard_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     Compiler/FlowEngineClient_test.cpp
     Compiler/EngineBackend_test.cpp
     Compiler/PrivateTempDir_test.cpp
+    Compiler/DumpOptions_test.cpp
+    Compiler/DumpOptionsGuard_test.cpp
     Main/EventLoopProbe_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
