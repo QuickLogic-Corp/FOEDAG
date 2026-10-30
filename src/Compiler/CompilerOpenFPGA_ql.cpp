@@ -152,6 +152,10 @@ void CompilerOpenFPGA_ql::selectIncrementalBackend() {
     return;
   }
   m_engineSelected = engine;
+  QLDeviceLayoutInfo::setPackedLayoutSource(
+      engine ? QLDeviceLayoutInfo::PackedLayoutSource(
+                   [this](const QLDeviceTarget& target) { return packedDeviceLayout(target); })
+             : QLDeviceLayoutInfo::PackedLayoutSource());
   if (engine) {
     // REQ-143: the interpreter is looked up only now, when the switch selects it.
     auto engineBackend = std::make_unique<EngineBackend>(
@@ -351,8 +355,24 @@ void CompilerOpenFPGA_ql::BeforeCompileTask(Action action) {
   if (m_engineSelected && action > Action::Pack && action <= Action::Bitstream &&
       !m_autoLayoutGenerationMode && !m_customLayoutGenerationMode) {
     restorePackLayout();
+    // ...and its geometry, for floorplanning: refresh() takes it from pack_layout.json.
+    QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   }
   backend().taskStarted();
+}
+
+std::string CompilerOpenFPGA_ql::packedDeviceLayout(const QLDeviceTarget& target) {
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  if (!m_engineSelected || !ProjManager() || !devices->isDeviceTargetValid(target) ||
+      !QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(devices->deviceLayoutSettings(target),
+                                                         target)) {
+    return {};
+  }
+  const std::filesystem::path project = ProjManager()->projectPath();
+  if (project.empty()) return {};
+  const std::optional<PackLayout> layout = PackLayout::read(project);
+  return layout ? layout->vouchedDeviceLayout(project, devices->convertToDeviceString(target))
+                : std::string{};
 }
 
 bool CompilerOpenFPGA_ql::layoutResolvedInPack() const {
@@ -401,6 +421,8 @@ bool CompilerOpenFPGA_ql::writePackLayout(PackLayout layout) {
   for (auto& [path, digests] : layout.files) {
     digests.written = FlowEngineClient::sha256File(project / std::filesystem::u8path(path));
   }
+  layout.device = QLDeviceManager::getInstance()->convertToDeviceString(
+      QLDeviceManager::getInstance()->getCurrentDeviceTarget());
   // What refresh() writes once this pack's task is marked a success.
   layout.deviceLayout =
       QLDeviceLayoutInfo(QLDeviceManager::getInstance()->getCurrentDeviceTarget(),
@@ -443,6 +465,7 @@ void CompilerOpenFPGA_ql::Version(std::ostream* out) {
 }
 
 CompilerOpenFPGA_ql::~CompilerOpenFPGA_ql() {
+  QLDeviceLayoutInfo::setPackedLayoutSource({});
   CleanTempFiles();
   PrivateTempDir::removeOwn();
 }
@@ -2575,7 +2598,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     }
     CommandWrapperPtr command = it->second;
     if (backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
-      m_routeCurrent = false;
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -2636,7 +2658,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
 
-  m_routeCurrent = false;
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
   CleanTempFiles();
@@ -4390,7 +4411,6 @@ bool CompilerOpenFPGA_ql::Packing() {
     return true;
   }
  
-  m_routeCurrent = false;
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command->string());
 
 #if UPSTREAM_UNUSED
@@ -5511,7 +5531,6 @@ bool CompilerOpenFPGA_ql::Placement() {
     return true;
   }
 
-  m_routeCurrent = false;
   FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_place.cmd"), command->string());
 
   // Using a Scope Guard so this will fire even if we exit mid function
@@ -5787,7 +5806,6 @@ bool CompilerOpenFPGA_ql::Route() {
   if (!backend().isCompilationRequired(static_cast<int>(Action::Routing), command)) {
     Message("##################################################");
     Message("Routing skipped, not required");
-    m_routeCurrent = m_engineSelected;
     Message("##################################################");
     m_state = State::Routed;
     if (m_engineSelected) {
@@ -5823,7 +5841,6 @@ bool CompilerOpenFPGA_ql::Route() {
   } else {
     if (faultAfterTool("route")) return false;
     backend().storeTaskCommand(static_cast<int>(Action::Routing), command);
-    m_routeCurrent = m_engineSelected;
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
@@ -7849,15 +7866,11 @@ bool CompilerOpenFPGA_ql::engineBitstreamHasRoute() {
   const bool userFile = !QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty();
   const bool exists =
       FileUtils::FileExists(std::filesystem::path(ProjManager()->projectPath()) / routeName);
-  std::optional<std::string> verdict;
-  if (!userFile && exists && !m_routeCurrent) {
-    if (auto* engine = dynamic_cast<EngineBackend*>(m_incrementalBackend.get())) {
-      const bool describeOnly = s_describeOnly;
-      auto restore = sg::make_scope_guard([&] { s_describeOnly = describeOnly; });
-      verdict = engine->verdictOf(engineUpstream("bitstream"), "route");
-    }
-  }
-  if (!EngineBackend::bitstreamNeedsRoute(exists, userFile, m_routeCurrent, verdict)) {
+  // No memory of earlier tasks: a route that failed, a PCF edited since, or
+  // another project all show in the engine's plan (route records at task end).
+  auto* engine = dynamic_cast<EngineBackend*>(m_incrementalBackend.get());
+  if (!engine || !engine->bitstreamNeedsRoute([this] { return engineUpstream("bitstream"); },
+                                              exists, userFile)) {
     return true;
   }
   ErrorMessage("Bitstream needs the routing of the current design, but " + routeName +

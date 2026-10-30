@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <functional>
 #include <set>
 #include <string>
 
@@ -80,6 +81,11 @@ class QLDeviceLayoutInfo {
   // Resolve for the current device and write device_layout.json when the answer
   // exists; otherwise remove any stale file. The whole feature's entry point.
   static void refresh(QLDeviceTarget device_target = QLDeviceTarget());
+  // Under the flow engine: the device_layout.json content the last pack left,
+  // for a layout resolved in pack that this session has not packed yet; empty
+  // for none. refresh() writes it instead of removing the file.
+  using PackedLayoutSource = std::function<std::string(const QLDeviceTarget& device_target)>;
+  static void setPackedLayoutSource(PackedLayoutSource source);
 
   // auto_device.log names no device - it is just whatever Packing() last ran
   // add_layout.py for. Call before switching the current device: if the

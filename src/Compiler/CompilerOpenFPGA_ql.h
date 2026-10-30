@@ -441,9 +441,6 @@ private:
   bool engineFloorplan();
   // getPackingCommand() is building pack's command (BaseVprCommand's caller).
   bool m_buildingPack = false;
-  // Under the engine: route ran or was found current in this process, and no
-  // synth, pack or place has run since (bitstream's route check).
-  bool m_routeCurrent = false;
   // False, after saying why, when bitstream must not run before route.
   bool engineBitstreamHasRoute();
   // The layout an AUTO/CUSTOM pack resolved, for the stages after it (row 1.10).
@@ -453,6 +450,8 @@ private:
   // device needs one and it cannot be read. Always true under cpp.
   bool restorePackLayout();
   bool writePackLayout(PackLayout layout);
+  // pack_layout.json's device_layout.json for `target`, while it still holds.
+  std::string packedDeviceLayout(const QLDeviceTarget& target);
   static const std::vector<std::pair<std::string, std::string>>& powerMetrics();
   // A BaseVprCommandLEGACY() string in the engine's describe form.
   CommandWrapperPtr wrapVprCommand(const std::string& command, const QLDeviceTarget& device);

@@ -179,12 +179,19 @@ void EngineBackend::declarePackLayoutInputs(CommandWrapper& command,
 }
 
 bool EngineBackend::bitstreamNeedsRoute(bool routeFileExists, bool routeIsUserFile,
-                                        bool routeCurrentThisProcess,
                                         const std::optional<std::string>& routeVerdict) {
   if (routeIsUserFile) return false;
   if (!routeFileExists) return true;
-  if (routeCurrentThisProcess || !routeVerdict) return false;
+  if (!routeVerdict) return false;
   return *routeVerdict != "skip" && *routeVerdict != "external";
+}
+
+bool EngineBackend::bitstreamNeedsRoute(
+    const std::function<std::vector<UpstreamCommand>()>& upstream, bool routeFileExists,
+    bool routeIsUserFile) const {
+  std::optional<std::string> verdict;
+  if (!routeIsUserFile && routeFileExists) verdict = verdictOf(upstream(), "route");
+  return bitstreamNeedsRoute(routeFileExists, routeIsUserFile, verdict);
 }
 
 std::optional<std::string> EngineBackend::verdictOf(const std::vector<UpstreamCommand>& stages,

@@ -40,6 +40,7 @@ nlohmann::json PackLayout::toJson() const {
           {"vpr_xml", vprXml.generic_u8string()},
           {"sb_maps", sbMaps.generic_u8string()},
           {"device_layout", deviceLayout},
+          {"device", device},
           {"files", files_json}};
 }
 
@@ -54,6 +55,7 @@ std::optional<PackLayout> PackLayout::fromJson(const nlohmann::json& json) try {
   layout.vprXml = fs::u8path(json.at("vpr_xml").get<std::string>());
   layout.sbMaps = fs::u8path(json.at("sb_maps").get<std::string>());
   layout.deviceLayout = json.value("device_layout", std::string{});
+  layout.device = json.value("device", std::string{});
   if (layout.layoutName.empty() || layout.vprXml.empty() || layout.vprXml.is_absolute() ||
       layout.sbMaps.is_absolute()) {
     return std::nullopt;
@@ -75,6 +77,18 @@ std::optional<PackLayout> PackLayout::read(const fs::path& project) {
   const fs::path file = project / FILE_NAME;
   if (!FileUtils::FileExists(file)) return std::nullopt;
   return fromJson(nlohmann::json::parse(FileUtils::GetFileContent(file), nullptr, false));
+}
+
+std::string PackLayout::vouchedDeviceLayout(const fs::path& project,
+                                            const std::string& currentDevice) const {
+  if (deviceLayout.empty() || device.empty() || device != currentDevice) return {};
+  for (const auto& [path, digests] : files) {
+    if (digests.written.empty() ||
+        FlowEngineClient::sha256File(project / fs::u8path(path)) != digests.written) {
+      return {};
+    }
+  }
+  return deviceLayout;
 }
 
 bool PackLayout::restoreDeviceLayout(const fs::path& project) const {

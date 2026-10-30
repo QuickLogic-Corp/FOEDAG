@@ -116,13 +116,15 @@ public:
                                       const std::filesystem::path& customLayoutYml,
                                       const std::filesystem::path& deviceConfig);
   // Bitstream reads route's <project>_post_synth.route. Under the engine it is
-  // refused when that file is missing, or when route was not run or found
-  // current in this process and the engine does not call route up to date
-  // (`routeVerdict` empty: the engine could not tell, which never refuses).
-  // A user-supplied route file is never refused.
+  // refused when that file is missing, or when the engine does not call route
+  // up to date (`routeVerdict` empty: the engine could not tell, which never
+  // refuses). A user-supplied route file is never refused.
   static bool bitstreamNeedsRoute(bool routeFileExists, bool routeIsUserFile,
-                                  bool routeCurrentThisProcess,
                                   const std::optional<std::string>& routeVerdict);
+  // The check itself, asked afresh every time: one plan over `upstream()` (synth
+  // up to route), built only when the answer depends on it.
+  bool bitstreamNeedsRoute(const std::function<std::vector<UpstreamCommand>()>& upstream,
+                           bool routeFileExists, bool routeIsUserFile) const;
   // One plan over `stages` (no record is removed); the verdict of `stage`, or
   // nothing when the engine could not answer.
   std::optional<std::string> verdictOf(const std::vector<UpstreamCommand>& stages,

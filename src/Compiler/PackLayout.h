@@ -47,6 +47,8 @@ struct PackLayout {
   // pack output: refresh() removes it at every session start until pack ends,
   // so a skipped pack writes it back from here.
   std::string deviceLayout;
+  // The device it was packed for (QLDeviceManager::convertToDeviceString).
+  std::string device;
 
   nlohmann::json toJson() const;
   static std::optional<PackLayout> fromJson(const nlohmann::json& json);
@@ -54,6 +56,10 @@ struct PackLayout {
   bool write(const std::filesystem::path& project) const;
   static std::optional<PackLayout> read(const std::filesystem::path& project);
 
+  // deviceLayout, while it describes what is on disk: packed for `device`, and
+  // every generated file still as pack wrote it; else empty.
+  std::string vouchedDeviceLayout(const std::filesystem::path& project,
+                                  const std::string& device) const;
   // Writes deviceLayout to <project>/device_layout.json; false when there is none.
   bool restoreDeviceLayout(const std::filesystem::path& project) const;
 

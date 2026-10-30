@@ -91,6 +91,25 @@ TEST_F(PackLayoutTest, a_skipped_pack_restores_device_layout_json) {
   EXPECT_FALSE(none.restoreDeviceLayout(m_project));
 }
 
+// A new session's place (no pack yet) gets the layout pack_layout.json
+// vouches for: same device, generated files as pack wrote them.
+TEST_F(PackLayoutTest, the_layout_is_vouched_for_while_pack_outputs_hold) {
+  const fs::path xml = m_project / "vpr_generated.xml.en";
+  FileUtils::WriteToFile(xml, "cipher");
+  PackLayout layout = sample();
+  layout.deviceLayout = "{\n  \"width\": 12\n}";
+  layout.device = "QLF_K6N10_GF_12nm_AUTO";
+  layout.files["vpr_generated.xml.en"].written = FlowEngineClient::sha256File(xml);
+  ASSERT_TRUE(layout.write(m_project));
+  const std::optional<PackLayout> back = PackLayout::read(m_project);
+  ASSERT_TRUE(back);
+
+  EXPECT_EQ(back->vouchedDeviceLayout(m_project, "QLF_K6N10_GF_12nm_AUTO"), layout.deviceLayout);
+  EXPECT_TRUE(back->vouchedDeviceLayout(m_project, "QLF_K6N10_GF_12nm_OTHER").empty());
+  FileUtils::WriteToFile(xml, "another pack");
+  EXPECT_TRUE(back->vouchedDeviceLayout(m_project, "QLF_K6N10_GF_12nm_AUTO").empty());
+}
+
 TEST_F(PackLayoutTest, anything_unusable_reads_as_none) {
   EXPECT_FALSE(PackLayout::read(m_project));  // no file
   FileUtils::WriteToFile(m_project / PackLayout::FILE_NAME, "not json");

@@ -461,15 +461,44 @@ TEST_F(EngineBackendTest, pack_inputs_follow_the_layout_kind) {
 // produce it for the current inputs; never when route is known current.
 TEST_F(EngineBackendTest, bitstream_needs_a_current_route) {
   using V = std::optional<std::string>;
-  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, false, V{}));
-  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, true, V{"skip"}));
-  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"run"}));
-  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"pending-upstream"}));
-  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"skip"}));
-  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{"external"}));
-  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, true, V{"run"}));  // route ran
-  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, false, V{}));      // no answer
-  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(false, true, false, V{}));      // user file
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, V{}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, V{"skip"}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, V{"run"}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, V{"pending-upstream"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, V{"skip"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, V{"external"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, V{}));      // no answer
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(false, true, V{}));      // user file
+}
+
+// The route check keeps no memory: each bitstream asks the plan again. A route
+// that ran and was current, then failed after an option change; a PCF edited
+// after route; another project opened: each time the plan no longer calls route
+// up to date, and bitstream is refused.
+TEST_F(EngineBackendTest, the_route_check_asks_the_plan_every_time) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  int built = 0;
+  auto upstream = [&] {
+    ++built;
+    return std::vector<UpstreamCommand>{{PLACE, "", vprCommand()}, {ROUTE, "", vprCommand()}};
+  };
+  write(m_engineDir / "plan.txt", "place=skip,route=skip");  // route ran
+  EXPECT_FALSE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "place=skip,route=run");  // route failed afterwards
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "place=skip,route=skip");  // route ran again
+  EXPECT_FALSE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "place=run,route=pending-upstream");  // PCF edited
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "route=run");  // another project, no route record
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, true, false));
+  EXPECT_EQ(built, 5);
+
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, false, false));   // no .route: no plan needed
+  EXPECT_FALSE(b->bitstreamNeedsRoute(upstream, false, true));   // the user's route file
+  EXPECT_EQ(built, 5);
 }
 
 TEST_F(EngineBackendTest, the_verdict_of_one_stage_comes_from_a_plan) {

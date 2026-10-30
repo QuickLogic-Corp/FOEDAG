@@ -515,6 +515,14 @@ void QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(
   std::filesystem::remove(project_path / "auto_device.log", ec);
 }
 
+namespace {
+QLDeviceLayoutInfo::PackedLayoutSource s_packedLayoutSource;
+}  // namespace
+
+void QLDeviceLayoutInfo::setPackedLayoutSource(PackedLayoutSource source) {
+  s_packedLayoutSource = std::move(source);
+}
+
 void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
   if (projectPath().empty()) {
     // No project: device selection in the new-project wizard has nowhere to write
@@ -523,6 +531,22 @@ void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
   }
   QLDeviceLayoutInfo layout_info(device_target);
   if (!layout_info.resolved()) {
+    // Under the engine, a pack whose outputs are still as it wrote them vouches
+    // for the layout they were made for.
+    static thread_local bool asking = false;
+    if (s_packedLayoutSource && !asking) {
+      asking = true;
+      const std::string packed = s_packedLayoutSource(device_target);
+      asking = false;
+      const std::filesystem::path filepath = deviceLayoutJSONPath();
+      if (!packed.empty() && !filepath.empty()) {
+        bool ok = false;
+        if (FileUtils::GetFileContent(filepath, &ok) != packed + "\n" || !ok) {
+          FileUtils::WriteToFile(filepath, packed);
+        }
+        return;
+      }
+    }
     // AUTO/RESOURCES before packing, or a package that states no geometry. Either
     // way the previous run's file must not be left behind to be read as current.
     removeStaleDeviceLayoutJSON();
