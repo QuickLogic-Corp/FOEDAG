@@ -407,6 +407,19 @@ TEST_F(EngineBackendTest, a_task_check_reports_stale_upstream_stages) {
   EXPECT_EQ(seen[4]["request"]["upstream_stale"], true);
 }
 
+// A stage that runs because an upstream stage is stale says so, like any run.
+TEST_F(EngineBackendTest, a_pending_upstream_stage_reports_that_it_runs) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("pending-upstream");
+  b->taskStarted();
+  EXPECT_TRUE(b->isCompilationRequired(PLACE, vprCommand()));
+  b->taskFinished(false);
+  ASSERT_EQ(m_compiler.messages.size(), 1u);
+  EXPECT_EQ(m_compiler.messages[0].rfind("Flow engine: place runs: ", 0), 0u);
+}
+
 // REQ-006: a request that cannot be serialised or an answer that is not an
 // object means run (and no record), never an exception out of the backend.
 TEST_F(EngineBackendTest, failures_inside_the_backend_mean_run) {

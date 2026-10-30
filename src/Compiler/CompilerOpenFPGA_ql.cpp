@@ -3246,11 +3246,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
 #endif // #if UPSTREAM_UNUSED
   if(m_autoLayoutGenerationMode) {
-    Message("Base VPR Command running with Auto Layout Generated Device!\n");
+    if (!s_describeOnly) Message("Base VPR Command running with Auto Layout Generated Device!\n");
     command->append("--device", m_autoLayoutGeneratedLayoutName);
   }
   else if(m_customLayoutGenerationMode) {
-    Message("Base VPR Command running with Custom Layout Generated Device!\n");
+    if (!s_describeOnly) Message("Base VPR Command running with Custom Layout Generated Device!\n");
     command->append("--device", m_autoLayoutGeneratedLayoutName);
   }
   else {
@@ -3342,10 +3342,10 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   // if we have a valid sdc_file_path at this point, pass it on to vpr:
   if(!sdc_file_path.empty()) {
-    Message(std::string("SDC file found: ") + sdc_file_path.string());
+    if (!s_describeOnly) Message(std::string("SDC file found: ") + sdc_file_path.string());
     command->appendPath("--sdc_file", sdc_file_path);
   }
-  else {
+  else if (!s_describeOnly) {
     Message(std::string("SDC file not found, no constraints passed to vpr."));
   }
   // ---------------------------------------------------------------- sdc_file --
@@ -3558,7 +3558,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     }
   }
 
-  Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
+  if (!s_describeOnly) Message( std::string("Using vpr.xml for: ") + QLDeviceManager::getInstance()->convertToDeviceString(device_target) );
 
   // construct the base vpr command with all the options here.
 #if UPSTREAM_UNUSED

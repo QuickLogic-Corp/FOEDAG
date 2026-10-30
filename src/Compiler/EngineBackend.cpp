@@ -302,11 +302,12 @@ bool EngineBackend::decide(int taskId, const std::string& profile,
     return true;
   }
   const std::string verdict = result.doc.value("verdict", std::string{"run"});
-  if (inTask && verdict == "run") {
+  const bool runs = verdict != "skip" && verdict != "external";
+  if (inTask && runs) {
     m_compiler->Message("Flow engine: " + stage + " runs: " +
                         join(result.doc.value("reasons", nlohmann::json::array())));
   }
-  return verdict != "skip" && verdict != "external";
+  return runs;
 }
 
 void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
