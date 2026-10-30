@@ -772,9 +772,16 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (goldenRoot.isEmpty())
     return report(QString("SKIP %1: GUI_TEST_FRAMEWORK_GOLDEN_DIR is not set")
                       .arg(id));
+  const QString diff = QString("%1/%2.diff.png").arg(artifacts, id);
   if (GuiTestMode::isGenGoldensMode()) {
+    // The gate stops a scenario at its first mismatch, so only this run can
+    // show the reviewer every golden that changes.
+    const QImage previous{golden};
     if (!writeImage(image, golden))
       return fail(interp, QString("%1: cannot write %2").arg(what, golden));
+    if (!previous.isNull() &&
+        GuiScreenshot::countDifferences(previous, image, 0) != 0)
+      writeImage(GuiScreenshot::triptych(previous, image), diff);
     return report("GENERATED " + id);
   }
 #ifdef __APPLE__
@@ -790,7 +797,6 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (differing >= 0 && differing <= sidecar.maxDiffPixels)
     return display ? report("MATCH " + id) : succeed(interp);
 
-  const QString diff = QString("%1/%2.diff.png").arg(artifacts, id);
   writeImage(GuiScreenshot::triptych(reference, image), diff);
   const QString detail =
       differing < 0

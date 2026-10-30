@@ -60,7 +60,7 @@ bool settle(QWidget *widget, const QList<QWidget *> &maskWidgets,
 int countDifferences(const QImage &golden, const QImage &current,
                      int tolerance);
 
-// golden | current | difference × 8, for a failed gate.
+// golden | current | difference × 8, for a failed gate or a changed golden.
 QImage triptych(const QImage &golden, const QImage &current);
 
 // Golden subdirectory for this build's platform.
