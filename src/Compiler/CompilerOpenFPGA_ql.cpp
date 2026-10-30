@@ -11753,7 +11753,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     const std::string synplifyExecName{"synplify_base"};
 #endif
 
-    if (!FileUtils::IsSystemCommandAvailable(synplifyExecName)) {
+    // A status query looks the tool up rather than run `which` on the GUI thread.
+    const bool synplifyFound = s_describeOnly ? EngineBackend::onPath(synplifyExecName)
+                                              : FileUtils::IsSystemCommandAvailable(synplifyExecName);
+    if (!synplifyFound) {
       ErrorMessage("Synthesis cannot proceed because " + synplifyExecName + " is not found in PATH. Please ensure the Synplify tool is correctly installed, all post-installation steps are completed.");
       return {};
     }

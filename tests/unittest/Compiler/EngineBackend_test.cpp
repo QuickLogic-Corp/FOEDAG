@@ -503,6 +503,13 @@ TEST_F(EngineBackendTest, floorplan_removes_its_outputs_first_and_records_0_or_2
   for (int status : {1, -1, 127, 134, 3}) EXPECT_FALSE(EngineBackend::floorplanRecords(status));
 }
 
+TEST_F(EngineBackendTest, on_path_looks_programs_up) {
+  const std::string python = QStandardPaths::findExecutable("python3").toStdString();
+  if (python.empty()) GTEST_SKIP() << "no python3";
+  EXPECT_TRUE(EngineBackend::onPath("python3"));
+  EXPECT_FALSE(EngineBackend::onPath("no_such_tool_afe_2661"));
+}
+
 TEST_F(EngineBackendTest, the_helper_python_is_sent_when_known) {
   const auto b = backend({});
   EXPECT_FALSE(b->request("check", "floorplan", "", *vprCommand(), m_ctx).contains("helper_python"));

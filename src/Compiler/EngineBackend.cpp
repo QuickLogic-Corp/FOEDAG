@@ -207,6 +207,10 @@ std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string&
   return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
 }
 
+bool EngineBackend::onPath(const std::string& program) {
+  return !QStandardPaths::findExecutable(QString::fromStdString(program)).isEmpty();
+}
+
 fs::path EngineBackend::pathPython() {
 #ifdef _WIN32
   const QString python = QStandardPaths::findExecutable("python.exe");

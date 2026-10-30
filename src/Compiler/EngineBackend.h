@@ -129,6 +129,8 @@ public:
                                        const std::string& stage) const;
   // Only exit 0 (written) and 2 (nothing to do) are results worth a record.
   static bool floorplanRecords(int status) { return status == 0 || status == 2; }
+  // True when `program` is on PATH; a lookup, no process is started (REQ-011).
+  static bool onPath(const std::string& program);
   // The python3 (python.exe on Windows) on PATH, absolute; empty when none.
   static std::filesystem::path pathPython();
   // A command line built as text, in describe form: the `positional` tokens after
