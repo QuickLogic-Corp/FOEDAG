@@ -3824,6 +3824,130 @@ static std::string removeVprOption(const std::string& options, const std::string
 }
 
 
+// Replace the value of every "--flag <value>" pair, token-exact.
+static std::string setVprOptionValue(const std::string& command, const std::string& flag,
+                                     const std::string& value) {
+  std::vector<std::string> tokens = StringUtils::tokenize(command, " ");
+  for (size_t i = 0; i + 1 < tokens.size(); ++i) {
+    if (tokens[i] == flag) {
+      tokens[++i] = value;
+    }
+  }
+  return StringUtils::join(tokens, " ");
+}
+
+static bool hasVprToken(const std::string& command, const std::string& token) {
+  const std::vector<std::string> tokens = StringUtils::tokenize(command, " ");
+  return std::find(tokens.begin(), tokens.end(), token) != tokens.end();
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::wrapVprCommand(const std::string& command,
+                                                      const QLDeviceTarget& device) {
+  // BaseVprCommandLEGACY() strings: "<vpr> <arch> <netlist> --opt [value]...", paths
+  // without spaces. The decrypted architecture is known by its encrypted file.
+  static const std::set<std::string> pathOptions{
+      "--net_file",       "--place_file",          "--route_file",     "--sdc_file",
+      "--read_vpr_constraints", "--read_rr_graph", "--read_router_lookahead", "--sb_maps",
+      "--sb_templates",   "--crypt_key_db",        "--write_rr_graph"};
+  const std::vector<std::string> tokens = StringUtils::tokenize(command, " ");
+  if (tokens.size() < 3) {
+    return nullptr;
+  }
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const std::filesystem::path arch_en = devices->deviceVPRArchitectureFile(device);
+  const std::filesystem::path arch{tokens[1]};
+  const bool decrypted =
+      !arch_en.empty() && arch != arch_en && devices->deviceFileIsEncrypted(arch_en);
+  std::map<std::string, std::string> masks;
+  if (decrypted) {
+    masks[tokens[1]] = VPR_ARCH_FILE_MASK;
+  }
+  CommandWrapperPtr wrapped = EngineBackend::wrapCommandLine(tokens, 2, pathOptions, masks);
+  if (decrypted) {
+    wrapped->setHostDigest(arch, FlowEngineClient::sha256File(arch_en));
+    wrapped->addKeyPath(devices->deviceTypeDirPath(device) /
+                        (devices->convertToDeviceTypeString(device) + "_Supp.db"));
+  }
+  return wrapped;
+}
+
+void CompilerOpenFPGA_ql::invalidateEngineStage(const std::string& stage,
+                                                const std::string& profile) {
+  const std::filesystem::path project = ProjManager()->projectPath();
+  if (!EngineBackend::hasRecords(project)) {
+    return;
+  }
+  std::vector<std::string> args{"invalidate", "--stage", stage};
+  if (!profile.empty()) {
+    args.insert(args.end(), {"--profile", profile});
+  }
+  args.insert(args.end(), {"--project", project.u8string()});
+  FlowEngineClient::Result result;
+  try {
+    result = FlowEngineClient(engineInstallRoot()).call(args);
+  } catch (const std::exception& e) {
+    result.error = e.what();
+  }
+  if (!result.ok) {
+    Message("Warning: flow engine cannot clear the records of " + stage + ": " + result.error);
+  }
+}
+
+void CompilerOpenFPGA_ql::cleanRemovedStaProfiles(
+    const std::map<std::string, QLDeviceTarget>& devices) {
+  // REQ-127: what a removed corner profile left behind goes, a kept one's stays.
+  const std::filesystem::path project = ProjManager()->projectPath();
+  const std::string name = ProjManager()->projectName();
+  auto current = [&devices](const std::string& profile) { return devices.count(profile) != 0; };
+  const std::vector<std::pair<std::string, std::string>> reports{
+      {"timing_analysis", ".rpt"}, {"report_timing.hold", ".rpt"},
+      {"report_timing.setup", ".rpt"}, {"post_ta_timing", ".rpt"}, {name, "_sta.cmd"}};
+  std::error_code ec;
+  std::vector<std::filesystem::path> stale;
+  for (std::filesystem::directory_iterator it(project, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    const std::string file = it->path().filename().string();
+    for (const auto& [prefix, suffix] : reports) {
+      if (file.size() < prefix.size() + suffix.size() || file.rfind(prefix, 0) != 0 ||
+          file.compare(file.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        continue;
+      }
+      const std::string middle =
+          file.substr(prefix.size(), file.size() - prefix.size() - suffix.size());
+      if (!middle.empty() && middle.front() != '_') continue;
+      if (!current(middle.empty() ? middle : middle.substr(1))) stale.push_back(it->path());
+    }
+  }
+  for (const std::filesystem::path& file : stale) {
+    std::filesystem::remove(file, ec);
+  }
+
+  if (!EngineBackend::hasRecords(project)) {
+    return;
+  }
+  FlowEngineClient::Result status;
+  try {
+    status = FlowEngineClient(engineInstallRoot()).call({"status", "--project", project.u8string()});
+  } catch (const std::exception& e) {
+    status.error = e.what();
+  }
+  if (!status.ok) {
+    // Nothing tells which records are stale; drop them all rather than keep one.
+    invalidateEngineStage("sta");
+    return;
+  }
+  for (const nlohmann::json& record : status.doc.value("records", nlohmann::json::array())) {
+    const std::string profile = record.value("profile", std::string{});
+    if (record.value("stage", std::string{}) != "sta" || current(profile)) continue;
+    if (profile.empty()) {
+      // The engine cannot remove the profile-less record alone.
+      invalidateEngineStage("sta");
+      return;
+    }
+    invalidateEngineStage("sta", profile);
+  }
+}
+
 // Set a "--flag on|off" pair in a whitespace-separated option string. An existing
 // occurrence has its value rewritten in place, otherwise the pair is appended.
 // Token-exact like removeVprOption(), so the flag does not match a value or a
@@ -6149,7 +6273,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     return false;
   }
 
-  CleanFiles(Action::STA); // this is required to remove the not actual multi corner reports left from previous run
+  // The engine keeps each kept profile's reports and cleans removed ones below.
+  if (!m_engineSelected) {
+    CleanFiles(Action::STA); // this is required to remove the not actual multi corner reports left from previous run
+  }
 
 #if UPSTREAM_UNUSED
   if (!HasTargetDevice()) return false;
@@ -6160,6 +6287,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     TimingAnalysisOpt(STAOpt::None);
     m_state = State::Routed;
     CleanFiles(Action::STA);
+    // STA owns no outputs, so only its records say the reports were made.
+    if (m_engineSelected) {
+      invalidateEngineStage("sta");
+    }
     return true;
   }
 
@@ -6314,6 +6445,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   }
 
+  if (m_engineSelected) {
+    cleanRemovedStaProfiles(devices);
+  }
+
   for (const auto& [profile, device]: devices) {
     if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {
       if (!TimingAnalysisHelper(device, profile)) {
@@ -6427,6 +6562,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
   }
 #endif // #if UPSTREAM_UNUSED
   std::string taCommand;
+  CommandWrapperPtr sta_command;
   // use OpenSTA to do the job
   if (TimingAnalysisEngineOpt() == STAEngineOpt::Opensta) {
     // allows SDF to be generated for OpenSTA
@@ -6515,6 +6651,25 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 
     taCommand += std::string(" --analysis");
 
+    if (m_engineSelected && hasVprToken(taCommand, "--route")) {
+      // REQ-016: STA that re-routes writes its own routing, never route's, and
+      // is not cached.
+      taCommand = setVprOptionValue(taCommand, "--route_file",
+                                    ProjManager()->projectName() + sta_suffix + "_sta.route");
+    } else if (m_engineSelected) {
+      sta_command = wrapVprCommand(taCommand, current_device_sta);
+      if (!backend().isCompilationRequired(static_cast<int>(Action::STA), profile, sta_command)) {
+        // The guard would copy another stage's vpr_stdout.log over the report.
+        guard.dismiss();
+        CleanTempFiles();
+        Message("##################################################");
+        Message("Timing Analysis" + (profile.empty() ? std::string{} : " (" + profile + ")") +
+                " skipped, not required");
+        Message("##################################################");
+        return true;
+      }
+    }
+
     std::ofstream ofs(sta_cmd_filepath);
     ofs << taCommand << std::endl;
     ofs.close();
@@ -6528,6 +6683,10 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     return false;
   }
 
+  if (sta_command) {
+    if (faultAfterTool("sta")) return false;
+    backend().storeTaskCommand(static_cast<int>(Action::STA), profile, sta_command);
+  }
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
 
 #ifdef _WIN32
@@ -6573,6 +6732,9 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
     PowerAnalysisOpt(PowerOpt::None);
     m_state = State::Routed;
     CleanFiles(Action::Power);
+    if (m_engineSelected) {
+      invalidateEngineStage("power");
+    }
     return true;
   }
 

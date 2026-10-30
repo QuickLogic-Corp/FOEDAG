@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -98,6 +99,13 @@ public:
   static std::vector<std::string> ownedOutputs(const std::string& stage,
                                                const std::string& profile,
                                                const EngineStageContext& ctx);
+  // A command line built as text, in describe form: the `positional` tokens after
+  // the program and the value of each option in `pathOptions` are declared
+  // paths, a path in `masks` under its mask; anything else is an argv token.
+  static CommandWrapperPtr wrapCommandLine(const std::vector<std::string>& tokens,
+                                           size_t positional,
+                                           const std::set<std::string>& pathOptions,
+                                           const std::map<std::string, std::string>& masks);
   // True when the project has engine decision records.
   static bool hasRecords(const std::filesystem::path& project);
   // Test-only fault hook: AURORA_FAULT_AFTER_TOOL=<stage> fails that stage after

@@ -157,7 +157,7 @@ TEST_F(EngineBackendTest, stage_names_and_profiles) {
   EXPECT_TRUE(EngineBackend::decides("route"));
   EXPECT_TRUE(EngineBackend::decides("floorplan"));
   EXPECT_TRUE(EngineBackend::decides("power"));
-  EXPECT_FALSE(EngineBackend::decides("sta"));
+  EXPECT_TRUE(EngineBackend::decides("sta"));
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "0"), "");
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "1"), "synplify");
   EXPECT_EQ(EngineBackend::profileName(STA, "fast"), "fast");
@@ -332,8 +332,9 @@ TEST_F(EngineBackendTest, stages_not_yet_decided_always_run_and_ask_nothing) {
   if (!client.usable()) GTEST_SKIP() << "no python3";
   const auto b = backend(client);
   setVerdict("skip");
-  EXPECT_TRUE(b->isCompilationRequired(STA, "fast", vprCommand()));
-  b->storeTaskCommand(STA, "fast", vprCommand());
+  constexpr int BATCH = static_cast<int>(Compiler::Action::Batch);
+  EXPECT_TRUE(b->isCompilationRequired(BATCH, vprCommand()));
+  b->storeTaskCommand(BATCH, vprCommand());
   EXPECT_TRUE(calls().empty());
   // Pack on an AUTO/CUSTOM device is decided: a skip restores pack_layout.json.
   m_ctx.layoutResolvedInPack = true;
@@ -351,6 +352,34 @@ TEST_F(EngineBackendTest, missing_interpreter_runs_every_stage_with_one_warning)
 
 // Inside a task the check removes the record first, and the record waits until
 // RunCompileTask's guard has run; a failed task records nothing (row 1.9).
+// STA's command line is built as text; its describe form names the same files.
+TEST_F(EngineBackendTest, a_text_command_line_wraps_into_the_describe_form) {
+  const std::vector<std::string> tokens{"vpr",          "/tmp/x123",    "counter_post_synth.blif",
+                                        "--device",     "castor",       "--route_file",
+                                        "counter.route", "--analysis",  "--sdc_file"};
+  const CommandWrapperPtr command = EngineBackend::wrapCommandLine(
+      tokens, 2, {"--route_file", "--sdc_file"}, {{"/tmp/x123", VPR_ARCH_FILE_MASK}});
+  EXPECT_EQ(command->argv(), tokens);
+  EXPECT_EQ(command->declaredPaths(),
+            (std::vector<fs::path>{"/tmp/x123", "counter_post_synth.blif", "counter.route"}));
+  EXPECT_EQ(command->temps(), (std::map<std::string, std::string>{{"/tmp/x123", VPR_ARCH_FILE_MASK}}));
+}
+
+// Each STA corner profile is its own record.
+TEST_F(EngineBackendTest, sta_profiles_are_decided_one_by_one) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("skip");
+  EXPECT_FALSE(b->isCompilationRequired(STA, "fast", vprCommand()));
+  b->storeTaskCommand(STA, "slow", vprCommand());
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["request"]["stage"], "sta");
+  EXPECT_EQ(seen[0]["request"]["profile"], "fast");
+  EXPECT_EQ(seen[1]["request"]["profile"], "slow");
+}
+
 TEST_F(EngineBackendTest, records_wait_for_the_task_to_succeed) {
   FlowEngineClient client = fakeClient();
   if (!client.usable()) GTEST_SKIP() << "no python3";

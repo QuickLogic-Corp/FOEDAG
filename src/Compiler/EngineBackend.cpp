@@ -92,9 +92,9 @@ std::string EngineBackend::stageName(int taskId) {
 }
 
 bool EngineBackend::decides(const std::string& stage) {
-  // STA and bitstream join with row 1.11.
+  // Bitstream joins with row 1.11d.
   return stage == "synth" || stage == "floorplan" || stage == "pack" || stage == "place" ||
-         stage == "route" || stage == "power";
+         stage == "route" || stage == "sta" || stage == "power";
 }
 
 std::string EngineBackend::profileName(int taskId, const std::string& profile) {
@@ -144,6 +144,28 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
     return {"fabric_bitstream.bit"};
   }
   return {};
+}
+
+CommandWrapperPtr EngineBackend::wrapCommandLine(const std::vector<std::string>& tokens,
+                                                 size_t positional,
+                                                 const std::set<std::string>& pathOptions,
+                                                 const std::map<std::string, std::string>& masks) {
+  auto command = std::make_shared<CommandWrapper>();
+  auto mask = [&masks](const std::string& token) {
+    auto it = masks.find(token);
+    return it == masks.end() ? std::string{} : it->second;
+  };
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (i > 0 && i <= positional) {
+      command->appendPath(fs::path{tokens[i]}, mask(tokens[i]));
+    } else if (i > positional && pathOptions.count(tokens[i]) && i + 1 < tokens.size()) {
+      command->appendPath(tokens[i], fs::path{tokens[i + 1]}, mask(tokens[i + 1]));
+      ++i;
+    } else {
+      command->append(tokens[i]);
+    }
+  }
+  return command;
 }
 
 const std::vector<std::string>& EngineBackend::keyOptions() {

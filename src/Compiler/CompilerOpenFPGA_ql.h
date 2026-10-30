@@ -446,6 +446,11 @@ private:
   bool restorePackLayout();
   bool writePackLayout(PackLayout layout);
   static const std::vector<std::pair<std::string, std::string>>& powerMetrics();
+  // A BaseVprCommandLEGACY() string in the engine's describe form.
+  CommandWrapperPtr wrapVprCommand(const std::string& command, const QLDeviceTarget& device);
+  // Removes a stage's engine records (one profile, or all when empty).
+  void invalidateEngineStage(const std::string& stage, const std::string& profile = {});
+  void cleanRemovedStaProfiles(const std::map<std::string, QLDeviceTarget>& devices);
   CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
                                     const std::vector<std::string>& modes,
                                     const QLDeviceTarget& device);
