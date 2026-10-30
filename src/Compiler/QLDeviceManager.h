@@ -455,6 +455,19 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target = QLDeviceTarget(),
                                                                 bool device_only = false,
                                                                 bool report_missing = true);
+  // The device's clock-region file (config.json CLOCK_REGIONS), as installed: the
+  // plaintext file, or the same path plus ".en". Empty when the device declares none.
+  // When the key names a file that is not there, the result is empty and `error`,
+  // if given, names the device and the key; placement then fails rather than
+  // running unchecked.
+  std::filesystem::path deviceClockRegionFile(QLDeviceTarget device_target = QLDeviceTarget(),
+                                              std::string* error = nullptr);
+  // The lookup behind deviceClockRegionFile(), on a device directory and its parsed
+  // config.json; `device` names the device in `error`.
+  static std::filesystem::path clockRegionFileIn(const std::filesystem::path& device_dir,
+                                                 const json& config,
+                                                 const std::string& device,
+                                                 std::string* error);
   std::filesystem::path deviceOpenFPGAFixedSimFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAFabricKeyFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamRemappingFile(QLDeviceTarget device_target = QLDeviceTarget());
