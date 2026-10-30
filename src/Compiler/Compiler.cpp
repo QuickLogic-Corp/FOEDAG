@@ -952,6 +952,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto ipgenerate = [](void* clientData, Tcl_Interp* interp, int argc,
                          const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
+      // As configure_ip does: a target device changed since then swaps the
+      // device catalog before anything is generated.
+      if (IPGenerator* generator = compiler->GetIPGenerator()) {
+        generator->LoadDefaultCatalogs();
+      }
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "clean") {
@@ -1263,6 +1268,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto ipgenerate = [](void* clientData, Tcl_Interp* interp, int argc,
                          const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
+      // As configure_ip does: a target device changed since then swaps the
+      // device catalog before anything is generated.
+      if (IPGenerator* generator = compiler->GetIPGenerator()) {
+        generator->LoadDefaultCatalogs();
+      }
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "clean") {
@@ -2297,6 +2307,19 @@ void Compiler::finish() {
 }
 
 bool Compiler::RunCompileTask(Action action) {
+  BeforeCompileTask(action);
+  bool ok = false;
+  try {
+    ok = RunCompileTaskGuarded(action);
+  } catch (...) {
+    AfterCompileTask(action, false);
+    throw;
+  }
+  AfterCompileTask(action, ok);
+  return ok;
+}
+
+bool Compiler::RunCompileTaskGuarded(Action action) {
   auto currentTask = m_taskManager->currentTask();
   // Use Scope Guard to add headers to new logs whenever this function exits
   auto guard = sg::make_scope_guard([this, action, currentTask] {

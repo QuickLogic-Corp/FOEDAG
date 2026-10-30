@@ -131,9 +131,14 @@ class IPGenerator {
   // scanned roots and only this loader consults the record. Called by
   // ip_catalog/configure_ip; explicit add_litex_ip_catalog calls always
   // rescan and never suppress these defaults. A device-target change is
-  // picked up here without extra plumbing: the new device's root is a path
-  // never yet recorded, so the next lazy load scans it.
+  // handled by SyncDeviceCatalog() first.
   void LoadDefaultCatalogs();
+  // Keeps the catalog's device IPs those of the current target device: when
+  // the device catalog root differs from the one whose IPs are loaded, the
+  // previous device's IPs are taken out of the catalog and its root is
+  // forgotten, so that the new device's catalog (often the same IP names,
+  // built for another device) loads instead of being refused as duplicates.
+  void SyncDeviceCatalog();
 
   IPCatalog* Catalog() { return m_catalog; }
   Compiler* GetCompiler() { return m_compiler; }
@@ -182,6 +187,9 @@ class IPGenerator {
 private:
   std::filesystem::path m_installDir;
   std::map<std::string, std::filesystem::path> m_ipOutputLocations;
+  // Device catalog root (weakly canonical) whose IPs are in the catalog;
+  // empty when none. Maintained by SyncDeviceCatalog().
+  std::filesystem::path m_deviceCatalogRoot;
 
   void dumpDeviceInfo(const std::filesystem::path&);
   void dumpParameterModifications(const std::filesystem::path&);
