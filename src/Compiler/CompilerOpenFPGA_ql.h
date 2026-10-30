@@ -429,6 +429,18 @@ private:
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
+  // Clock-aware placement (aurora2 docs/development/clock_aware_placement): when the
+  // device ships a clock-region file, Placement() runs clock-region-place instead of
+  // one VPR command; the driver runs `command` itself, once per placement, and copies
+  // the legal placement to the command's place file.
+  bool RunClockAwarePlacement(const CommandWrapperPtr& command,
+                              const std::filesystem::path& regionFile);
+  // The second stored command of a clock-aware placement: the installed region file
+  // (its digest changes with a device-data update) and the final place file.
+  CommandWrapperPtr getClockRegionCommand(const std::filesystem::path& regionFile,
+                                          const CommandWrapperPtr& vprCommand);
+  // The value of `--option VALUE` or `--option=VALUE` in a command's argv; empty if absent.
+  static std::string argvValue(const std::vector<std::string>& argv, const std::string& option);
   CommandWrapperPtr getRoutingCommand();      
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA       
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
