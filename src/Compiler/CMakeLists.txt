@@ -92,6 +92,7 @@ set (SRC_CPP_LIST
   WildcardFileFinder.cpp
   DialogUtils.cpp
   PackLayout.cpp
+  EngineStatusRefresh.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -136,6 +137,7 @@ set (SRC_H_INSTALL_LIST
   WildcardFileFinder.h
   DialogUtils.h
   PackLayout.h
+  EngineStatusRefresh.h
 )
 
 set (SRC_H_LIST

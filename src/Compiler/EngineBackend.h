@@ -117,6 +117,11 @@ public:
   nlohmann::json request(const std::string& op, const std::string& stage,
                          const std::string& profile, const CommandWrapper& command,
                          const EngineStageContext& ctx) const;
+  // One plan request over `stages`; a stage whose command could not be built is
+  // left out and named in `unbuilt`.
+  nlohmann::json planRequest(const std::vector<UpstreamCommand>& stages,
+                             std::vector<std::string>* unbuilt) const;
+  const FlowEngineClient& client() const { return m_client; }
 
 private:
   Compiler* m_compiler = nullptr;

@@ -293,25 +293,37 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
   return req;
 }
 
-bool EngineBackend::upstreamStale(const std::string& stage,
-                                  const EngineStageContext& ctx) const try {
-  if (!m_upstream) return false;
-  const std::vector<UpstreamCommand> upstream = m_upstream(stage);
-  if (upstream.empty()) return false;
+nlohmann::json EngineBackend::planRequest(const std::vector<UpstreamCommand>& stages,
+                                          std::vector<std::string>* unbuilt) const {
+  const EngineStageContext ctx = m_context("", "");
   nlohmann::json plan{{"v", PROTOCOL_VERSION},
                       {"op", "plan"},
                       {"project", utf8(ctx.project)},
                       {"layout_resolved_in_pack", ctx.layoutResolvedInPack},
                       {"stages", nlohmann::json::array()}};
   if (!ctx.deviceDir.empty()) plan["device_dir"] = utf8(ctx.deviceDir);
-  for (const UpstreamCommand& up : upstream) {
-    if (!up.command) return true;  // an upstream command that cannot be built is stale
+  for (const UpstreamCommand& up : stages) {
     const std::string name = stageName(up.taskId);
+    if (!up.command) {
+      if (unbuilt) unbuilt->push_back(name);
+      continue;
+    }
     const std::string profile = profileName(up.taskId, up.profile);
     nlohmann::json item = request("plan", name, profile, *up.command, m_context(name, profile));
     for (const char* key : {"v", "op", "project", "device_dir"}) item.erase(key);
     plan["stages"].push_back(std::move(item));
   }
+  return plan;
+}
+
+bool EngineBackend::upstreamStale(const std::string& stage,
+                                  const EngineStageContext& /*ctx*/) const try {
+  if (!m_upstream) return false;
+  const std::vector<UpstreamCommand> upstream = m_upstream(stage);
+  if (upstream.empty()) return false;
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = planRequest(upstream, &unbuilt);
+  if (!unbuilt.empty()) return true;  // an upstream command that cannot be built is stale
   const FlowEngineClient::Result result = m_client.call({"plan"}, &plan);
   if (!result.ok) return true;
   for (const nlohmann::json& decision : result.doc.value("stages", nlohmann::json::array())) {

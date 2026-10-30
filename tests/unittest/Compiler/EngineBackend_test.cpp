@@ -570,6 +570,21 @@ TEST_F(EngineBackendTest, a_task_check_reports_stale_upstream_stages) {
   EXPECT_EQ(seen[4]["request"]["upstream_stale"], true);
 }
 
+// The GUI's status query is one plan over every stage; a stage whose command
+// cannot be built is named, not sent.
+TEST_F(EngineBackendTest, a_plan_request_names_unbuilt_stages) {
+  const auto b = backend({});
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = b->planRequest(
+      {{SYNTH, "0", vprCommand()}, {PACK, "", nullptr}, {PLACE, "", vprCommand()}}, &unbuilt);
+  EXPECT_EQ(plan["op"], "plan");
+  EXPECT_EQ(plan["project"], m_project.string());
+  ASSERT_EQ(plan["stages"].size(), 2u);
+  EXPECT_EQ(plan["stages"][0]["stage"], "synth");
+  EXPECT_EQ(plan["stages"][1]["stage"], "place");
+  EXPECT_EQ(unbuilt, std::vector<std::string>{"pack"});
+}
+
 // A stage that runs because an upstream stage is stale says so, like any run.
 TEST_F(EngineBackendTest, a_pending_upstream_stage_reports_that_it_runs) {
   FlowEngineClient client = fakeClient();

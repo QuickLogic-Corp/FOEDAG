@@ -36,6 +36,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/TaskCompilationStateManager.h"
 #include "Compiler/EngineBackend.h"
 #include "Compiler/PackLayout.h"
+#include "Compiler/EngineStatusRefresh.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -477,6 +478,13 @@ private:
   bool runBitstreamEncode(const EncodeJob& job);
   CommandWrapperPtr describeBitstreamEncode(const EncodeJob& job);
   void engineBitstreamEncode(uint32_t stages);
+  // GUI statuses under the engine: debounced, one plan off the GUI thread.
+  std::unique_ptr<EngineStatusRefresh> m_statusRefresh;
+  bool m_statusWarned = false;
+  std::function<nlohmann::json()> describeEngineStatus();
+  void applyEngineStatus(const nlohmann::json& answer);
+  // The status sequence shared by both backends; `actual` answers per task.
+  void applyTaskStatuses(const std::function<bool(int task)>& actual);
   CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
                                     const std::vector<std::string>& modes,
                                     const QLDeviceTarget& device);

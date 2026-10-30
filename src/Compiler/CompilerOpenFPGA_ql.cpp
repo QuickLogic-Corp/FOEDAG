@@ -60,6 +60,7 @@
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
+#include "NewProject/ProjectManager/DesignFileWatcher.h"
 #include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
@@ -397,6 +398,9 @@ bool CompilerOpenFPGA_ql::faultAfterTool(const std::string& stage) const {
 void CompilerOpenFPGA_ql::AfterCompileTask(Action /*action*/, bool ok) {
   m_floorplanOutcome.reset();
   backend().taskFinished(ok);
+  if (m_statusRefresh) {
+    m_statusRefresh->taskFinished();
+  }
 }
 
 void CompilerOpenFPGA_ql::Version(std::ostream* out) {
@@ -764,6 +768,19 @@ write_edif ${OUTPUT_EDIF}
 bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                                         bool batchMode) {
   Compiler::RegisterCommands(interp, batchMode);
+  // Test only: aurora2's T-024 events script raises the GUI's status events.
+  EngineStatusRefresh::registerTestEventCommand(interp, [this](const std::string& event) {
+    if (event == "settings") {
+      emit QLSettingsManager::getInstance()->settingsChanged();
+    } else if (event == "design_files") {
+      emit DesignFileWatcher::Instance()->designFilesChanged();
+    } else if (event == "pcf_saved") {
+      onPcfFileSaved();
+    } else {
+      return false;
+    }
+    return true;
+  });
   auto select_architecture_file = [](void* clientData, Tcl_Interp* interp,
                                      int argc, const char* argv[]) -> int {
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
@@ -12712,20 +12729,105 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  // Under engine, no status query while a task runs (row 1.12): its answer
-  // would be stale the moment the task records.
-  if (m_engineSelected && backend().taskRunning()) {
+  if (m_engineSelected) {
+    if (!m_statusRefresh) {
+      m_statusRefresh = std::make_unique<EngineStatusRefresh>(
+          [this] { return describeEngineStatus(); },
+          [this](const nlohmann::json& answer) { applyEngineStatus(answer); },
+          [this] { return backend().taskRunning(); });
+    }
+    m_statusRefresh->request();
     return;
   }
 
   CompilationFilesScopedSession compilationFilesScopedSession;
 
-  // A status query must not write or decrypt anything (REQ-011); under cpp the
-  // builders keep today's behaviour.
-  s_describeOnly = m_engineSelected;
-  auto describeGuard = sg::make_scope_guard([this] { s_describeOnly = false; });
+  applyTaskStatuses([this](int task) {
+    switch (task) {
+      case SYNTHESIS:
+        return isSynthesisStatusActual();
+      case PACKING:
+        return isPackingStatusActual();
+      case PLACEMENT:
+        return isPlacementStatusActual();
+      default:
+        return isRoutingStatusActual();
+    }
+  });
+}
 
-  if (!isSynthesisStatusActual()) {
+std::function<nlohmann::json()> CompilerOpenFPGA_ql::describeEngineStatus() {
+  auto* engine = dynamic_cast<EngineBackend*>(m_incrementalBackend.get());
+  if (!engine || !ProjManager() || ProjManager()->getDesignFiles().empty()) {
+    return {};
+  }
+#ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  auto tmpFilesGuard = sg::make_scope_guard([this] {
+    CleanTempFiles();
+  });
+#endif // DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
+  CompilationFilesScopedSession compilationFilesScopedSession;
+  if (!m_autoLayoutGenerationMode && !m_customLayoutGenerationMode) {
+    restorePackLayout();
+  }
+  nlohmann::json plan;
+  std::vector<std::string> unbuilt;
+  try {
+    // Every stage up to route, described without side effects (REQ-011).
+    plan = engine->planRequest(engineUpstream("bitstream"), &unbuilt);
+  } catch (const std::exception& e) {
+    const std::string error = e.what();
+    return [error] { return nlohmann::json{{"error", error}}; };
+  }
+  return [client = engine->client(), plan, unbuilt]() -> nlohmann::json {
+    nlohmann::json answer{{"unbuilt", unbuilt}, {"verdicts", nlohmann::json::object()}};
+    try {
+      const FlowEngineClient::Result result = client.call({"plan"}, &plan);
+      if (!result.ok) return {{"error", result.error}};
+      for (const nlohmann::json& d : result.doc.value("stages", nlohmann::json::array())) {
+        answer["verdicts"][d.value("stage", std::string{})] = d.value("verdict", std::string{"run"});
+      }
+    } catch (const std::exception& e) {
+      return {{"error", e.what()}};
+    }
+    return answer;
+  };
+}
+
+void CompilerOpenFPGA_ql::applyEngineStatus(const nlohmann::json& answer) {
+  if (answer.contains("error") && !m_statusWarned) {
+    m_statusWarned = true;
+    Message("Warning: flow engine status query failed (" + answer.value("error", std::string{}) +
+            "); stages show as not up to date");
+  }
+  auto upToDate = [&answer](const std::string& stage) {
+    if (answer.contains("error")) return false;
+    for (const auto& name : answer.value("unbuilt", nlohmann::json::array())) {
+      if (name == stage) return false;
+    }
+    const nlohmann::json& verdicts = answer.at("verdicts");
+    if (!verdicts.contains(stage)) return true;  // not part of this project's flow
+    const std::string verdict = verdicts.at(stage).get<std::string>();
+    return verdict == "skip" || verdict == "external";
+  };
+  // Floorplan comes before pack, or after it where pack resolves the layout.
+  const bool floorplanAfterPack = layoutResolvedInPack();
+  applyTaskStatuses([&](int task) {
+    switch (task) {
+      case SYNTHESIS:
+        return upToDate("synth");
+      case PACKING:
+        return upToDate("pack") && (floorplanAfterPack || upToDate("floorplan"));
+      case PLACEMENT:
+        return upToDate("place") && (!floorplanAfterPack || upToDate("floorplan"));
+      default:
+        return upToDate("route");
+    }
+  });
+}
+
+void CompilerOpenFPGA_ql::applyTaskStatuses(const std::function<bool(int task)>& actual) {
+  if (!actual(SYNTHESIS)) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
     m_state = State::IPGenerated;
     return;
@@ -12735,7 +12837,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isPackingStatusActual()) {
+  if (!actual(PACKING)) {
     GetTaskManager()->tryMarkDirtyFrom(PACKING);
     m_state = State::Synthesized;
     return;
@@ -12745,7 +12847,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isPlacementStatusActual()) {
+  if (!actual(PLACEMENT)) {
     GetTaskManager()->tryMarkDirtyFrom(PLACEMENT);
     m_state = State::Packed;
     return;
@@ -12755,7 +12857,7 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
-  if (!isRoutingStatusActual()) {
+  if (!actual(ROUTING)) {
     GetTaskManager()->tryMarkDirtyFrom(ROUTING);
     m_state = State::Placed;
     return;
