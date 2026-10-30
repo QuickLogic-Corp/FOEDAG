@@ -78,7 +78,7 @@ public:
   void storeTaskCommand(int taskId, const std::string& profile,
                         const CommandWrapperPtr& command) override;
   bool isEmpty() const override;
-  void clear() override;
+  bool clear() override;
   void load() override {}
   void setProjectPath(const std::filesystem::path& path) override;
   void taskStarted() override;

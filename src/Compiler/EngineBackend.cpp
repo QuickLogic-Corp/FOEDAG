@@ -552,8 +552,8 @@ bool EngineBackend::inTask() const {
 
 bool EngineBackend::isEmpty() const { return !hasRecords(m_projectPath); }
 
-void EngineBackend::clear() {
-  if (!hasRecords(m_projectPath)) return;
+bool EngineBackend::clear() {
+  if (!hasRecords(m_projectPath)) return true;
   FlowEngineClient::Result result;
   try {
     result = m_client.call({"invalidate", "--all", "--project", utf8(m_projectPath)});
@@ -563,6 +563,7 @@ void EngineBackend::clear() {
   if (!result.ok) {
     m_compiler->ErrorMessage("flow engine cannot clear the compilation cache: " + result.error);
   }
+  return result.ok;
 }
 
 void EngineBackend::setProjectPath(const fs::path& path) {

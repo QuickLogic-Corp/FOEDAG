@@ -291,6 +291,13 @@ class Compiler {
   // the compilation cache first, as clear_compilation_cache does, so every
   // stage runs. The project is not open at startup, hence the first task.
   void ForceFullRun(bool on) { m_forceFullRun = on; }
+  // The clear --no-incremental asks for; false when records may remain.
+  virtual bool forceClearCompilationCache() {
+    clearCompilationCache();
+    return true;
+  }
+  // A project is open, so there is a cache to clear.
+  virtual bool hasOpenProject() const;
   bool ForceFullRunPending() const { return m_forceFullRun; }
   virtual void invalidateTaskStatuses() {}
 

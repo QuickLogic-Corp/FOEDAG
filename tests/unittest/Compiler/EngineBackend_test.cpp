@@ -564,6 +564,17 @@ TEST_F(EngineBackendTest, forget_removes_a_profile_or_the_stage) {
                                              m_project.string(), "--json"}));
 }
 
+// A clear the engine refuses (a lock held, say) reports failure.
+TEST_F(EngineBackendTest, a_refused_clear_reports_failure) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  EXPECT_TRUE(b->clear());  // no records: nothing to refuse
+  write(m_project / ".aurora" / "state" / "pack.json", "{}");
+  setVerdict("error");
+  EXPECT_FALSE(b->clear());
+}
+
 TEST_F(EngineBackendTest, records_on_disk_decide_empty_and_clear) {
   FlowEngineClient client = fakeClient();
   if (!client.usable()) GTEST_SKIP() << "no python3";
@@ -575,7 +586,7 @@ TEST_F(EngineBackendTest, records_on_disk_decide_empty_and_clear) {
 
   write(m_project / ".aurora" / "state" / "pack.json", "{}");
   EXPECT_FALSE(b->isEmpty());
-  b->clear();
+  EXPECT_TRUE(b->clear());
   const auto seen = calls();
   ASSERT_EQ(seen.size(), 1u);
   EXPECT_EQ(seen[0]["args"],

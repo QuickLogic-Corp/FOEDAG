@@ -519,6 +519,7 @@ private:
 #endif
 
   void clearCompilationCache() override final;
+  bool forceClearCompilationCache() override { return backend().clear(); }
   bool hasCompilationCache() const override final;
 
   const std::vector<std::string>& vprRedirectedWarnings() const;
