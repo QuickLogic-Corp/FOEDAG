@@ -127,6 +127,24 @@ void QLMetricsManager::addParsedMetrics(std::vector<AuroraMetrics> metrics_list)
   //std::cout << "\n\naddParsedMetrics, new total number of metrics: " << QLMetricsManager::getInstance()->auroraMetricsSize() << "\n\n" << std::endl;
 }
 
+nlohmann::json QLMetricsManager::snapshot(
+    const std::vector<std::pair<std::string, std::string>>& names) const {
+  return snapshot(aurora_metrics_map, names);
+}
+
+nlohmann::json QLMetricsManager::snapshot(
+    const MetricsMap& metrics, const std::vector<std::pair<std::string, std::string>>& names) {
+  nlohmann::json values = nlohmann::json::object();
+  for (const auto& [stage, name] : names) {
+    nlohmann::json& value = values[stage + "." + name];
+    auto outer = metrics.find(stage);
+    if (outer == metrics.end()) continue;
+    auto inner = outer->second.find(name);
+    if (inner != outer->second.end() && inner->second.found) value = inner->second.string_value;
+  }
+  return values;
+}
+
 std::size_t QLMetricsManager::auroraMetricsSize() const {
   std::size_t count = 0;
   for (const auto& [stage, stage_metrics]: QLMetricsManager::getInstance()->aurora_metrics_map) {
@@ -166,6 +184,12 @@ bool QLMetricsManager::parseJSON() {
     std::string metrics_json_filename = "aurora_metrics.json";
     std::filesystem::path scripts_path = GlobalSession->Context()->DataPath() / ".." / "scripts";
     metrics_json_filepath = scripts_path / metrics_json_filename;
+  }
+
+  m_catalogueOverride.clear();
+  if (path_aurora_metrics_env_str != nullptr && !metrics_json_filepath.empty()) {
+    std::error_code ec;
+    m_catalogueOverride = std::filesystem::absolute(metrics_json_filepath, ec).lexically_normal();
   }
 
   if(FileUtils::FileExists(metrics_json_filepath)) {

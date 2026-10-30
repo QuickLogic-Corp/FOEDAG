@@ -135,11 +135,21 @@ public:
   static double getDoubleValue(std::string stage, std::string name);
   static void addParsedMetrics(std::vector<AuroraMetrics> metrics_list);
   bool isEmpty() const { return auroraMetricsSize() == 0; }
+  // {"<stage>.<name>": value} for the given metrics, null for one not found;
+  // what a consumer such as power reads (flow engine, REQ-122).
+  nlohmann::json snapshot(const std::vector<std::pair<std::string, std::string>>& names) const;
+  using MetricsMap = std::unordered_map<std::string, std::unordered_map<std::string, AuroraMetrics>>;
+  static nlohmann::json snapshot(const MetricsMap& metrics,
+                                 const std::vector<std::pair<std::string, std::string>>& names);
+  // The catalogue AURORA2_METRICS_JSON_PATH named, absolute; empty when the
+  // installed scripts/aurora_metrics.json was read.
+  const std::filesystem::path& catalogueOverride() const { return m_catalogueOverride; }
 
 private:
     bool parseJSON();
     std::vector<AuroraMetrics> buildMetricsListForAction(Compiler::Action action);
     std::size_t auroraMetricsSize() const;
+    std::filesystem::path m_catalogueOverride;
 
 public:
   json metrics_json;

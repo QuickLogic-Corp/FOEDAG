@@ -445,6 +445,10 @@ private:
   // device needs one and it cannot be read. Always true under cpp.
   bool restorePackLayout();
   bool writePackLayout(PackLayout layout);
+  static const std::vector<std::pair<std::string, std::string>>& powerMetrics();
+  CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
+                                    const std::vector<std::string>& modes,
+                                    const QLDeviceTarget& device);
   // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
   // the engine: the caller fails the task although its tool succeeded (T-015).
   bool faultAfterTool(const std::string& stage) const;

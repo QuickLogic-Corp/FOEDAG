@@ -92,9 +92,9 @@ std::string EngineBackend::stageName(int taskId) {
 }
 
 bool EngineBackend::decides(const std::string& stage) {
-  // STA, power and bitstream join with row 1.11.
+  // STA and bitstream join with row 1.11.
   return stage == "synth" || stage == "floorplan" || stage == "pack" || stage == "place" ||
-         stage == "route";
+         stage == "route" || stage == "power";
 }
 
 std::string EngineBackend::profileName(int taskId, const std::string& profile) {

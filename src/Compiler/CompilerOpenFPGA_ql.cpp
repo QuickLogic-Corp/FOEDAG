@@ -216,6 +216,13 @@ EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage,
     ctx.layoutResolvedInPack = layoutResolvedInPack();
     ctx.sessionState["device"] = devices->convertToDeviceString(target);
   }
+  if (stage == "power") {
+    QLMetricsManager* metrics = QLMetricsManager::getInstance();
+    ctx.metrics = metrics->snapshot(powerMetrics());
+    if (!metrics->catalogueOverride().empty()) {
+      ctx.metricsCatalogue = metrics->catalogueOverride().u8string();
+    }
+  }
   if (stage == "pack" && ctx.layoutResolvedInPack) {
     if (const std::optional<PackLayout> layout = PackLayout::read(ctx.project)) {
       ctx.outputHostDigests = layout->outputHostDigests(ctx.project);
@@ -264,8 +271,9 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
       engineContext(stage).layoutResolvedInPack
           ? std::vector<std::string>{"synth", "pack", "floorplan", "place", "route"}
           : std::vector<std::string>{"synth", "floorplan", "pack", "place", "route"};
-  const auto end = std::find(order.begin(), order.end(), stage);
-  if (end == order.end()) {
+  const bool afterRoute = stage == "sta" || stage == "power" || stage == "bitstream";
+  const auto end = afterRoute ? order.end() : std::find(order.begin(), order.end(), stage);
+  if (end == order.end() && !afterRoute) {
     return {};
   }
   // Runs inside a task: describe without side effects, and leave the task's
@@ -301,6 +309,8 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
       upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
     } else if (*it == "place") {
       upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
+    } else if (*it == "route") {
+      upstream.push_back({static_cast<int>(Action::Routing), "", getRoutingCommand()});
     } else if (*it == "floorplan") {
       FloorplanJob job;
       const bool built = buildFloorplan(job);
@@ -4203,6 +4213,10 @@ bool CompilerOpenFPGA_ql::Packing() {
     Message("Packing skipped, not required");
     Message("##################################################");
     m_state = State::Packed;
+    // Power reads these metrics; a cached pack still provides them (REQ-122).
+    if (m_engineSelected) {
+      QLMetricsManager::getInstance()->parseMetricsForAction(Action::Pack);
+    }
     return true;
   }
  
@@ -5309,6 +5323,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement skipped, not required");
     Message("##################################################");
     m_state = State::Placed;
+    if (m_engineSelected) {
+      QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
+    }
     // RPM-authoring project: (re)package the IP on this success path too —
     // the inputs are consistent by the very hash-diff that allowed the
     // skip, packaging is idempotent (write-if-changed in the driver), and
@@ -5600,6 +5617,10 @@ bool CompilerOpenFPGA_ql::Route() {
     Message("Routing skipped, not required");
     Message("##################################################");
     m_state = State::Routed;
+    if (m_engineSelected) {
+      QLMetricsManager::getInstance()->parseMetricsForAction(Action::Routing);
+      QLMetricsManager::getInstance()->parseRoutingReportForDetailedUtilization();
+    }
     return true;
   }
 
@@ -6780,6 +6801,17 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   std::filesystem::path power_calculator_exec{"power-calculator"};
 #endif // _WIN32
 
+  CommandWrapperPtr power_command;
+  if (m_engineSelected) {
+    power_command = getPowerCommand(power_calculator_exec, modes, current_device);
+    if (!backend().isCompilationRequired(static_cast<int>(Action::Power), power_command)) {
+      Message("##################################################");
+      Message("Power analysis skipped, not required");
+      Message("##################################################");
+      return true;
+    }
+  }
+
   // unpack embedded in qrc xlsx file to a temprorary location
 #ifdef HAS_POWER_CALC_RESOURCE
   initPowerCalcResource();
@@ -6844,6 +6876,11 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
   };
 
   if (status == 0) {
+    if (faultAfterTool("power")) return false;
+    // rc 1 says the calculator skipped; only a real result is recorded.
+    if (power_command) {
+      backend().storeTaskCommand(static_cast<int>(Action::Power), power_command);
+    }
     Message("Design " + ProjManager()->projectName() + " is power analysed");
     return true;
   } else if (status == 1) {
@@ -9528,6 +9565,49 @@ int CompilerOpenFPGA_ql::CleanTempFiles() {
 
 void CompilerOpenFPGA_ql::CleanScripts() {
   m_customYosysScript = "";
+}
+
+const std::vector<std::pair<std::string, std::string>>& CompilerOpenFPGA_ql::powerMetrics() {
+  // Every metric configurePowerCalculatorInput() reads.
+  static const std::vector<std::pair<std::string, std::string>> names{
+      {"synthesis", "num_1_LUT"},       {"synthesis", "num_2_LUT"},
+      {"synthesis", "num_3_LUT"},       {"synthesis", "num_4_LUT"},
+      {"synthesis", "num_5_LUT"},       {"synthesis", "num_6_LUT"},
+      {"synthesis", "num_adder_carry"}, {"synthesis", "num_dffsre"},
+      {"synthesis", "num_dffnsre"},     {"synthesis", "num_sdffsre"},
+      {"synthesis", "num_sdffnsre"},    {"synthesis", "num_sh_dff"},
+      {"synthesis", "num_dff"},         {"synthesis", "num_dffn"},
+      {"synthesis", "num_dffre"},       {"synthesis", "num_dffnre"},
+      {"synthesis", "num_sdffre"},      {"synthesis", "num_sdffnre"},
+      {"synthesis", "num_sh_dffre"},    {"synthesis", "num_sh_dffnre"},
+      {"routing", "device_size_x"},     {"routing", "device_size_y"},
+      {"routing", "num_input"},         {"routing", "num_output"},
+      {"routing", "num_wiring_segments"}, {"routing", "num_clock_network"},
+      {"routing", "num_dsp"},           {"routing", "num_bram"}};
+  return names;
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::getPowerCommand(const std::filesystem::path& exec,
+                                                       const std::vector<std::string>& modes,
+                                                       const QLDeviceTarget& device) {
+  // The xlsx model is embedded in this binary and the input json is written from
+  // the metrics, so neither is a file input: the build ID and the metrics are.
+  auto command = std::make_shared<CommandWrapper>(exec.string());
+  command->append("--modes", StringUtils::join(modes, ","));
+  command->append("--device_foundry", device.device_variant.foundry);
+  command->append("--device_node", device.device_variant.node);
+  std::filesystem::path power_json = QLSettingsManager::getInstance()->power_estimation_json_filepath;
+  if (power_json.empty()) {
+    power_json = std::filesystem::path(ProjManager()->projectPath()) /
+                 (ProjManager()->projectName() + "_power.json");
+  }
+  command->declarePath(power_json);
+  // configurePowerCalculatorInput() reads the tile sizes from it.
+  const std::filesystem::path arch = QLDeviceManager::getInstance()->deviceVPRArchitectureFile(device);
+  if (!arch.empty()) {
+    command->declarePath(arch);
+  }
+  return command;
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDeviceTarget device)

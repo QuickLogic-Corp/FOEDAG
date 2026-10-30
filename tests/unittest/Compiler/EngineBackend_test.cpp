@@ -156,6 +156,7 @@ TEST_F(EngineBackendTest, stage_names_and_profiles) {
   EXPECT_EQ(EngineBackend::stageName(EngineBackend::FLOORPLAN_TASK), "floorplan");
   EXPECT_TRUE(EngineBackend::decides("route"));
   EXPECT_TRUE(EngineBackend::decides("floorplan"));
+  EXPECT_TRUE(EngineBackend::decides("power"));
   EXPECT_FALSE(EngineBackend::decides("sta"));
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "0"), "");
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "1"), "synplify");
