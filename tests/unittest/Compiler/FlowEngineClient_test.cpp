@@ -24,6 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "gtest/gtest.h"
 
+#include <QElapsedTimer>
+#include <QThread>
+
 #include <filesystem>
 #include <string>
 
@@ -139,6 +142,46 @@ TEST_F(FlowEngineClientTest, sha256_of_a_file) {
   EXPECT_EQ(FlowEngineClient::sha256File(file),
             "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   EXPECT_TRUE(FlowEngineClient::sha256File(m_dir / "none").empty());
+}
+
+// A file written within the racy window is hashed every time; once it is older
+// it is hashed once, until its size or times change.
+TEST_F(FlowEngineClientTest, sha256_is_cached_only_for_settled_files) {
+  const fs::path file = write("arch.xml.en", "cipher one");
+  const std::string first = FlowEngineClient::sha256File(file);
+  std::size_t before = FlowEngineClient::sha256FilesHashed();
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256FilesHashed(), before + 1);  // racy: hashed again
+
+  QThread::msleep(2200);
+  before = FlowEngineClient::sha256FilesHashed();
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256FilesHashed(), before + 1);  // settled: hashed once
+
+  // Same size, mtime put back: the change time still moves, so the change is
+  // seen (on Windows only through NTFS's own ChangeTime, not Qt's).
+  const auto mtime = fs::last_write_time(file);
+  const qint64 changedBefore = FlowEngineClient::changeTimeMs(file);
+  QThread::msleep(50);
+  write("arch.xml.en", "cipher two");
+  fs::last_write_time(file, mtime);
+  EXPECT_EQ(fs::last_write_time(file), mtime);
+  EXPECT_GT(FlowEngineClient::changeTimeMs(file), changedBefore);
+  EXPECT_NE(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::changeTimeMs(m_dir / "none"), -1);
+}
+
+// The status plan's client gives up after its own, shorter timeout.
+TEST_F(FlowEngineClientTest, a_client_with_a_shorter_timeout_gives_up_sooner) {
+  if (!havePython()) GTEST_SKIP() << "no python3";
+  const FlowEngineClient slow = fake("import time\ntime.sleep(5)\n", 20000);
+  QElapsedTimer timer;
+  timer.start();
+  const FlowEngineClient::Result result = slow.withTimeout(300).call({"plan"});
+  EXPECT_FALSE(result.ok);
+  EXPECT_LT(timer.elapsed(), 3000);
 }
 
 TEST_F(FlowEngineClientTest, unusable_client_fails_without_starting_anything) {

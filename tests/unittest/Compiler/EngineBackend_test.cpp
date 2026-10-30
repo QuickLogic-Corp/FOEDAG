@@ -76,9 +76,12 @@ if op == 'check':
 elif op == 'plan':
     plan_file = here / 'plan.txt'
     plan = plan_file.read_text().strip() if plan_file.exists() else 'skip'
+    # 'place=skip,route=run' gives each stage its own verdict.
+    per_stage = dict(p.split('=') for p in plan.split(',')) if '=' in plan else {}
     print(json.dumps({'v': 1, 'stages': [
-        {'v': 1, 'stage': r['stage'], 'profile': r.get('profile') or '', 'verdict': plan,
-         'reasons': [], 'key': None} for r in req['stages']]}))
+        {'v': 1, 'stage': r['stage'], 'profile': r.get('profile') or '',
+         'verdict': per_stage.get(r['stage'], plan), 'reasons': [], 'key': None}
+        for r in req['stages']]}))
 elif op == 'record':
     print(json.dumps({'v': 1, 'stage': req['stage'], 'profile': '', 'recorded': True, 'key': 'k'}))
 else:
@@ -117,7 +120,7 @@ protected:
 
   std::unique_ptr<EngineBackend> backend(FlowEngineClient client) {
     auto b = std::make_unique<EngineBackend>(&m_compiler, std::move(client),
-                                             [this](const std::string&) { return m_ctx; });
+                                             [this](const std::string&, const std::string&) { return m_ctx; });
     b->setProjectPath(m_project);
     return b;
   }
@@ -153,11 +156,28 @@ TEST_F(EngineBackendTest, stage_names_and_profiles) {
   EXPECT_EQ(EngineBackend::stageName(ROUTE), "route");
   EXPECT_EQ(EngineBackend::stageName(STA), "sta");
   EXPECT_EQ(EngineBackend::stageName(static_cast<int>(Compiler::Action::Batch)), "");
+  EXPECT_EQ(EngineBackend::stageName(EngineBackend::FLOORPLAN_TASK), "floorplan");
   EXPECT_TRUE(EngineBackend::decides("route"));
-  EXPECT_FALSE(EngineBackend::decides("sta"));
+  EXPECT_TRUE(EngineBackend::decides("floorplan"));
+  EXPECT_TRUE(EngineBackend::decides("power"));
+  EXPECT_TRUE(EngineBackend::decides("bitstream"));
+  EXPECT_TRUE(EngineBackend::decides("sta"));
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "0"), "");
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "1"), "synplify");
   EXPECT_EQ(EngineBackend::profileName(STA, "fast"), "fast");
+}
+
+// aurora2 tests/flow_engine/fault_injection.py looks for this exact line.
+TEST_F(EngineBackendTest, the_fault_hook_names_one_stage) {
+  qunsetenv(EngineBackend::FAULT_ENV);
+  EXPECT_FALSE(EngineBackend::faultRequested("route"));
+  qputenv(EngineBackend::FAULT_ENV, "route");
+  EXPECT_TRUE(EngineBackend::faultRequested("route"));
+  EXPECT_FALSE(EngineBackend::faultRequested("place"));
+  EXPECT_FALSE(EngineBackend::faultRequested(""));
+  qunsetenv(EngineBackend::FAULT_ENV);
+  EXPECT_EQ(EngineBackend::faultMessage("route"),
+            "AURORA_FAULT_AFTER_TOOL: failing route after its tool succeeded");
 }
 
 TEST_F(EngineBackendTest, owned_outputs_follow_the_ownership_table) {
@@ -168,7 +188,68 @@ TEST_F(EngineBackendTest, owned_outputs_follow_the_ownership_table) {
   EXPECT_EQ(EngineBackend::ownedOutputs("pack", "", m_ctx).size(), 1u);
   m_ctx.layoutResolvedInPack = true;
   const auto pack = EngineBackend::ownedOutputs("pack", "", m_ctx);
-  EXPECT_NE(std::find(pack.begin(), pack.end(), "pack_layout.json"), pack.end());
+  const auto owns = [&pack](const std::string& file) {
+    return std::find(pack.begin(), pack.end(), file) != pack.end();
+  };
+  EXPECT_TRUE(owns("pack_layout.json"));
+  EXPECT_FALSE(owns("device_layout.json"));  // restored, not owned
+  EXPECT_TRUE(owns("vpr_generated.xml.en"));
+  EXPECT_TRUE(owns("sb_maps_generated.yml"));
+  EXPECT_TRUE(owns("sb_maps_generated.yml.en"));
+  EXPECT_FALSE(owns("vpr_generated.xml"));  // deleted once encrypted
+  EXPECT_EQ(EngineBackend::ownedOutputs("floorplan", "", m_ctx),
+            (std::vector<std::string>{"counter_repack_design_constraint.xml",
+                                      "counter_constraints.xml", "counter_rpm_constraints.xml"}));
+  EXPECT_EQ(EngineBackend::ownedOutputs("bitstream", "", m_ctx),
+            std::vector<std::string>{"fabric_bitstream.bit"});
+  EXPECT_EQ(EngineBackend::ownedOutputs("bitstream", "encode", m_ctx).size(), 3u);
+  EXPECT_TRUE(EngineBackend::ownedOutputs("sta", "fast", m_ctx).empty());
+  EXPECT_TRUE(EngineBackend::ownedOutputs("power", "", m_ctx).empty());
+}
+
+// REQ-122: metrics always travel with their catalogue, null meaning the
+// installed default; a stage without metrics sends neither.
+TEST_F(EngineBackendTest, metrics_go_with_their_catalogue) {
+  const auto b = backend({});
+  nlohmann::json req = b->request("check", "power", "", *vprCommand(), m_ctx);
+  EXPECT_FALSE(req.contains("metrics"));
+  EXPECT_FALSE(req.contains("metrics_catalogue"));
+
+  m_ctx.metrics = {{"routing.num_input", "3"}};
+  req = b->request("check", "power", "", *vprCommand(), m_ctx);
+  EXPECT_EQ(req["metrics"], m_ctx.metrics);
+  ASSERT_TRUE(req.contains("metrics_catalogue"));
+  EXPECT_TRUE(req["metrics_catalogue"].is_null());
+
+  m_ctx.metricsCatalogue = (m_root / "my_metrics.json").string();
+  req = b->request("check", "power", "", *vprCommand(), m_ctx);
+  EXPECT_EQ(req["metrics_catalogue"], (m_root / "my_metrics.json").string());
+}
+
+// REQ-121: an encrypted owned output is known by its plaintext digest, but only
+// while it exists; outputs outside the project are keyed by their mask.
+TEST_F(EngineBackendTest, output_host_digests_and_private_outputs) {
+  m_ctx.layoutResolvedInPack = true;
+  const std::string plain = "sha256:" + std::string(64, 'b');
+  m_ctx.outputHostDigests["vpr_generated.xml.en"] = plain;
+  m_ctx.outputHostDigests["sb_maps_generated.yml.en"] = plain;
+  write(m_project / "vpr_generated.xml.en", "cipher");
+  const fs::path privateOut = m_root / "private" / "counter_repack.xml";
+  auto command = vprCommand();
+  command->declareOutput(privateOut, "repack_constraints_private");
+  command->declarePath(m_root / "data.csv");
+
+  const nlohmann::json req = backend({})->request("check", "pack", "", *command, m_ctx);
+  EXPECT_EQ(req["host_digests"][(m_project / "vpr_generated.xml.en").string()], plain);
+  EXPECT_FALSE(req["host_digests"].contains((m_project / "sb_maps_generated.yml.en").string()));
+  const auto& outputs = req["outputs"];
+  EXPECT_NE(std::find(outputs.begin(), outputs.end(), privateOut.string()), outputs.end());
+  EXPECT_EQ(req["temps"][privateOut.string()], "repack_constraints_private");
+  const auto& inputs = req["inputs"];
+  EXPECT_NE(std::find(inputs.begin(), inputs.end(), (m_root / "data.csv").string()), inputs.end());
+  EXPECT_EQ(std::find(inputs.begin(), inputs.end(), privateOut.string()), inputs.end());
+  // declarePath adds no argv token.
+  EXPECT_EQ(req["argv"], nlohmann::json(vprCommand()->argv()));
 }
 
 // The describe form: ordered argv, every declared path whether or not it
@@ -256,12 +337,14 @@ TEST_F(EngineBackendTest, stages_not_yet_decided_always_run_and_ask_nothing) {
   if (!client.usable()) GTEST_SKIP() << "no python3";
   const auto b = backend(client);
   setVerdict("skip");
-  EXPECT_TRUE(b->isCompilationRequired(STA, "fast", vprCommand()));
-  b->storeTaskCommand(STA, "fast", vprCommand());
-  // Pack on an AUTO/CUSTOM device restores no layout on a skip yet (row 1.10).
-  m_ctx.layoutResolvedInPack = true;
-  EXPECT_TRUE(b->isCompilationRequired(PACK, vprCommand()));
+  constexpr int BATCH = static_cast<int>(Compiler::Action::Batch);
+  EXPECT_TRUE(b->isCompilationRequired(BATCH, vprCommand()));
+  b->storeTaskCommand(BATCH, vprCommand());
   EXPECT_TRUE(calls().empty());
+  // Pack on an AUTO/CUSTOM device is decided: a skip restores pack_layout.json.
+  m_ctx.layoutResolvedInPack = true;
+  EXPECT_FALSE(b->isCompilationRequired(PACK, vprCommand()));
+  EXPECT_EQ(calls().size(), 1u);
 }
 
 TEST_F(EngineBackendTest, missing_interpreter_runs_every_stage_with_one_warning) {
@@ -274,6 +357,54 @@ TEST_F(EngineBackendTest, missing_interpreter_runs_every_stage_with_one_warning)
 
 // Inside a task the check removes the record first, and the record waits until
 // RunCompileTask's guard has run; a failed task records nothing (row 1.9).
+// STA's command line is built as text; its describe form names the same files.
+TEST_F(EngineBackendTest, a_text_command_line_wraps_into_the_describe_form) {
+  const std::vector<std::string> tokens{"vpr",          "/tmp/x123",    "counter_post_synth.blif",
+                                        "--device",     "castor",       "--route_file",
+                                        "counter.route", "--analysis",  "--sdc_file"};
+  const CommandWrapperPtr command = EngineBackend::wrapCommandLine(
+      tokens, 2, {"--route_file", "--sdc_file"}, {{"/tmp/x123", VPR_ARCH_FILE_MASK}});
+  EXPECT_EQ(command->argv(), tokens);
+  EXPECT_EQ(command->declaredPaths(),
+            (std::vector<fs::path>{"/tmp/x123", "counter_post_synth.blif", "counter.route"}));
+  EXPECT_EQ(command->temps(), (std::map<std::string, std::string>{{"/tmp/x123", VPR_ARCH_FILE_MASK}}));
+}
+
+// Encode is bitstream's "encode" profile, recorded on its own.
+TEST_F(EngineBackendTest, encode_is_the_bitstream_encode_profile) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("run");
+  b->taskStarted();
+  EXPECT_TRUE(b->isCompilationRequired(static_cast<int>(Compiler::Action::Bitstream),
+                                       EngineBackend::ENCODE_PROFILE, vprCommand()));
+  b->storeTaskCommand(static_cast<int>(Compiler::Action::Bitstream),
+                      EngineBackend::ENCODE_PROFILE, vprCommand());
+  b->taskFinished(true);
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["request"]["stage"], "bitstream");
+  EXPECT_EQ(seen[0]["request"]["profile"], "encode");
+  EXPECT_EQ(seen[1]["request"]["profile"], "encode");
+  EXPECT_EQ(seen[1]["request"]["outputs"].size(), 3u);
+}
+
+// Each STA corner profile is its own record.
+TEST_F(EngineBackendTest, sta_profiles_are_decided_one_by_one) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("skip");
+  EXPECT_FALSE(b->isCompilationRequired(STA, "fast", vprCommand()));
+  b->storeTaskCommand(STA, "slow", vprCommand());
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["request"]["stage"], "sta");
+  EXPECT_EQ(seen[0]["request"]["profile"], "fast");
+  EXPECT_EQ(seen[1]["request"]["profile"], "slow");
+}
+
 TEST_F(EngineBackendTest, records_wait_for_the_task_to_succeed) {
   FlowEngineClient client = fakeClient();
   if (!client.usable()) GTEST_SKIP() << "no python3";
@@ -314,6 +445,166 @@ TEST_F(EngineBackendTest, record_clears_later_cpp_cache_entries) {
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
 }
 
+// Where pack resolves the layout it takes no IO constraints, and only a CUSTOM
+// device's pack reads custom_layout.yml.
+TEST_F(EngineBackendTest, pack_inputs_follow_the_layout_kind) {
+  EXPECT_TRUE(EngineBackend::packReadsIOConstraints(false));
+  EXPECT_FALSE(EngineBackend::packReadsIOConstraints(true));
+  EXPECT_TRUE(EngineBackend::packReadsCustomLayout(true, "CUSTOM", "anything"));
+  EXPECT_FALSE(EngineBackend::packReadsCustomLayout(true, "FIXED", "FPGA_CUSTOM"));
+  EXPECT_TRUE(EngineBackend::packReadsCustomLayout(false, "", "FPGA_CUSTOM"));
+  EXPECT_FALSE(EngineBackend::packReadsCustomLayout(false, "", "FPGA_AUTO"));
+  EXPECT_FALSE(EngineBackend::packReadsCustomLayout(false, "", "castor_10x8"));
+}
+
+// Bitstream reads route's file: refused without it, or when route did not
+// produce it for the current inputs; never when route is known current.
+TEST_F(EngineBackendTest, bitstream_needs_a_current_route) {
+  using V = std::optional<std::string>;
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, V{}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(false, false, V{"skip"}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, V{"run"}));
+  EXPECT_TRUE(EngineBackend::bitstreamNeedsRoute(true, false, V{"pending-upstream"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, V{"skip"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, V{"external"}));
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(true, false, V{}));      // no answer
+  EXPECT_FALSE(EngineBackend::bitstreamNeedsRoute(false, true, V{}));      // user file
+}
+
+// The route check keeps no memory: each bitstream asks the plan again. A route
+// that ran and was current, then failed after an option change; a PCF edited
+// after route; another project opened: each time the plan no longer calls route
+// up to date, and bitstream is refused.
+TEST_F(EngineBackendTest, the_route_check_asks_the_plan_every_time) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  int built = 0;
+  auto upstream = [&] {
+    ++built;
+    return std::vector<UpstreamCommand>{{PLACE, "", vprCommand()}, {ROUTE, "", vprCommand()}};
+  };
+  write(m_engineDir / "plan.txt", "place=skip,route=skip");  // route ran
+  EXPECT_FALSE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "place=skip,route=run");  // route failed afterwards
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "place=skip,route=skip");  // route ran again
+  EXPECT_FALSE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "place=run,route=pending-upstream");  // PCF edited
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, true, false));
+  write(m_engineDir / "plan.txt", "route=run");  // another project, no route record
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, true, false));
+  EXPECT_EQ(built, 5);
+
+  EXPECT_TRUE(b->bitstreamNeedsRoute(upstream, false, false));   // no .route: no plan needed
+  EXPECT_FALSE(b->bitstreamNeedsRoute(upstream, false, true));   // the user's route file
+  EXPECT_EQ(built, 5);
+}
+
+TEST_F(EngineBackendTest, the_verdict_of_one_stage_comes_from_a_plan) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  const std::vector<UpstreamCommand> stages{{PLACE, "", vprCommand()}, {ROUTE, "", vprCommand()}};
+  write(m_engineDir / "plan.txt", "place=skip,route=run");
+  EXPECT_EQ(b->verdictOf(stages, "route"), std::optional<std::string>{"run"});
+  write(m_engineDir / "plan.txt", "place=run,route=skip");
+  EXPECT_EQ(b->verdictOf(stages, "route"), std::optional<std::string>{"skip"});
+  EXPECT_FALSE(b->verdictOf({{PLACE, "", vprCommand()}, {ROUTE, "", nullptr}}, "route"));
+  setVerdict("error");
+  EXPECT_FALSE(b->verdictOf(stages, "route"));
+  EXPECT_EQ(calls().back()["args"][0], "plan");  // a plan, never a check --begin
+}
+
+// Pack on an AUTO/CUSTOM device reads custom_layout.yml and the device config;
+// both are probes, so editing either one, or adding the yml, makes pack run.
+TEST_F(EngineBackendTest, pack_probes_the_custom_layout_and_device_config) {
+  const fs::path yml = m_root / "custom_layout.yml";
+  const fs::path config = m_root / "dev" / "config.json";
+  auto command = vprCommand();
+  EngineBackend::declarePackLayoutInputs(*command, yml, config);
+  const nlohmann::json req = backend({})->request("check", "pack", "", *command, m_ctx);
+  EXPECT_EQ(req["probes"],
+            nlohmann::json({{{"role", "custom_layout"}, {"candidates", {yml.string()}}},
+                            {{"role", "device_config"}, {"candidates", {config.string()}}}}));
+  // Probes are not inputs: an absent yml must not make pack stale forever.
+  const auto& inputs = req["inputs"];
+  EXPECT_EQ(std::find(inputs.begin(), inputs.end(), yml.string()), inputs.end());
+  EXPECT_FALSE(backend({})->request("check", "pack", "", *vprCommand(), m_ctx).contains("probes"));
+}
+
+// generate_floorplanning.py exits 2 without touching its outputs, so they go
+// first; only 0 and 2 are recorded.
+TEST_F(EngineBackendTest, floorplan_removes_its_outputs_first_and_records_0_or_2) {
+  const auto stale = EngineBackend::floorplanStaleOutputs("counter");
+  EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_constraints.xml"), stale.end());
+  EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_repack_design_constraint.xml"),
+            stale.end());
+  EXPECT_TRUE(EngineBackend::floorplanRecords(0));
+  EXPECT_TRUE(EngineBackend::floorplanRecords(2));
+  for (int status : {1, -1, 127, 134, 3}) EXPECT_FALSE(EngineBackend::floorplanRecords(status));
+}
+
+TEST_F(EngineBackendTest, on_path_looks_programs_up) {
+  const std::string python = QStandardPaths::findExecutable("python3").toStdString();
+  if (python.empty()) GTEST_SKIP() << "no python3";
+  EXPECT_TRUE(EngineBackend::onPath("python3"));
+  EXPECT_FALSE(EngineBackend::onPath("no_such_tool_afe_2661"));
+}
+
+TEST_F(EngineBackendTest, the_helper_python_is_sent_when_known) {
+  const auto b = backend({});
+  EXPECT_FALSE(b->request("check", "floorplan", "", *vprCommand(), m_ctx).contains("helper_python"));
+  m_ctx.helperPython = m_root / "bin" / "python3";
+  EXPECT_EQ(b->request("check", "floorplan", "", *vprCommand(), m_ctx)["helper_python"],
+            (m_root / "bin" / "python3").string());
+}
+
+// The C++ cache has no floorplan entry; an engine floorplan record makes pack's
+// and every later entry stale.
+TEST_F(EngineBackendTest, a_floorplan_record_clears_cpp_entries_from_pack_on) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const fs::path cache = m_project / COMPILATION_CACHE_FILENAME;
+  nlohmann::json entries{{std::to_string(SYNTH) + "_0", 1}, {std::to_string(PACK), 1},
+                         {std::to_string(ROUTE), 1}};
+  write(cache, entries.dump());
+
+  backend(client)->storeTaskCommand(EngineBackend::FLOORPLAN_TASK, vprCommand());
+  EXPECT_EQ(calls().at(0)["request"]["stage"], "floorplan");
+  const nlohmann::json left = nlohmann::json::parse(FileUtils::GetFileContent(cache));
+  EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
+}
+
+// Forgetting asks the engine to remove one profile's records, or the stage's.
+TEST_F(EngineBackendTest, forget_removes_a_profile_or_the_stage) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  b->forget("sta", "fast");
+  EXPECT_TRUE(calls().empty());  // no records, nothing to start
+  write(m_project / ".aurora" / "state" / "sta@fast.json", "{}");
+  b->forget("sta", "fast");
+  b->forget("sta");
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["args"], nlohmann::json({"invalidate", "--stage", "sta", "--profile", "fast",
+                                             "--project", m_project.string(), "--json"}));
+  EXPECT_EQ(seen[1]["args"], nlohmann::json({"invalidate", "--stage", "sta", "--project",
+                                             m_project.string(), "--json"}));
+}
+
+// A clear the engine refuses (a lock held, say) reports failure.
+TEST_F(EngineBackendTest, a_refused_clear_reports_failure) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  EXPECT_TRUE(b->clear());  // no records: nothing to refuse
+  write(m_project / ".aurora" / "state" / "pack.json", "{}");
+  setVerdict("error");
+  EXPECT_FALSE(b->clear());
+}
+
 TEST_F(EngineBackendTest, records_on_disk_decide_empty_and_clear) {
   FlowEngineClient client = fakeClient();
   if (!client.usable()) GTEST_SKIP() << "no python3";
@@ -325,7 +616,7 @@ TEST_F(EngineBackendTest, records_on_disk_decide_empty_and_clear) {
 
   write(m_project / ".aurora" / "state" / "pack.json", "{}");
   EXPECT_FALSE(b->isEmpty());
-  b->clear();
+  EXPECT_TRUE(b->clear());
   const auto seen = calls();
   ASSERT_EQ(seen.size(), 1u);
   EXPECT_EQ(seen[0]["args"],
@@ -345,6 +636,26 @@ TEST_F(EngineBackendTest, key_material_inputs_carry_host_digests) {
   EXPECT_EQ(req["host_digests"][keyDb.string()], FlowEngineClient::sha256File(keyDb));
   EXPECT_EQ(req["host_digests"][other.string()], FlowEngineClient::sha256File(other));
   EXPECT_FALSE(req["host_digests"].contains((m_project / "counter_post_synth.net").string()));
+}
+
+// The encoder's ASCON key files are key material too, in either option form.
+TEST_F(EngineBackendTest, ascon_key_files_carry_host_digests) {
+  const fs::path key = write(m_root / "keys" / "key.txt", "k");
+  const fs::path nonce = write(m_root / "keys" / "nonce.txt", "n");
+  const fs::path ad = write(m_project / "ad.txt", "a");
+  auto command = std::make_shared<CommandWrapper>("python3");
+  command->append("--ascon_key", key.string());
+  command->declarePath(key);
+  command->append("--ascon_nonce=" + nonce.string());
+  command->declarePath(nonce);
+  command->append("--ascon_ad", "ad.txt");
+  command->declarePath(fs::path{"ad.txt"});
+
+  const nlohmann::json req =
+      backend({})->request("check", "bitstream", "encode", *command, m_ctx);
+  EXPECT_EQ(req["host_digests"][key.string()], FlowEngineClient::sha256File(key));
+  EXPECT_EQ(req["host_digests"][nonce.string()], FlowEngineClient::sha256File(nonce));
+  EXPECT_EQ(req["host_digests"][ad.string()], FlowEngineClient::sha256File(ad));
 }
 
 // A status query on another thread while a task runs neither removes records
@@ -405,6 +716,34 @@ TEST_F(EngineBackendTest, a_task_check_reports_stale_upstream_stages) {
   EXPECT_FALSE(plan["stages"][0].contains("project"));
   EXPECT_EQ(seen[2]["request"]["upstream_stale"], false);
   EXPECT_EQ(seen[4]["request"]["upstream_stale"], true);
+}
+
+// The GUI's status query is one plan over every stage; a stage whose command
+// cannot be built is named, not sent.
+TEST_F(EngineBackendTest, a_plan_request_names_unbuilt_stages) {
+  const auto b = backend({});
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = b->planRequest(
+      {{SYNTH, "0", vprCommand()}, {PACK, "", nullptr}, {PLACE, "", vprCommand()}}, &unbuilt);
+  EXPECT_EQ(plan["op"], "plan");
+  EXPECT_EQ(plan["project"], m_project.string());
+  ASSERT_EQ(plan["stages"].size(), 2u);
+  EXPECT_EQ(plan["stages"][0]["stage"], "synth");
+  EXPECT_EQ(plan["stages"][1]["stage"], "place");
+  EXPECT_EQ(unbuilt, std::vector<std::string>{"pack"});
+}
+
+// A stage that runs because an upstream stage is stale says so, like any run.
+TEST_F(EngineBackendTest, a_pending_upstream_stage_reports_that_it_runs) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("pending-upstream");
+  b->taskStarted();
+  EXPECT_TRUE(b->isCompilationRequired(PLACE, vprCommand()));
+  b->taskFinished(false);
+  ASSERT_EQ(m_compiler.messages.size(), 1u);
+  EXPECT_EQ(m_compiler.messages[0].rfind("Flow engine: place runs: ", 0), 0u);
 }
 
 // REQ-006: a request that cannot be serialised or an answer that is not an

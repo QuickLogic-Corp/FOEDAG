@@ -18,8 +18,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "EngineBackend.h"
 
+#include <QStandardPaths>
+
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -69,6 +72,7 @@ EngineBackend::EngineBackend(Compiler* compiler, FlowEngineClient client,
     : m_compiler(compiler), m_client(std::move(client)), m_context(std::move(context)) {}
 
 std::string EngineBackend::stageName(int taskId) {
+  if (taskId == FLOORPLAN_TASK) return "floorplan";
   switch (static_cast<Action>(taskId)) {
     case Action::Synthesis:
       return "synth";
@@ -90,8 +94,8 @@ std::string EngineBackend::stageName(int taskId) {
 }
 
 bool EngineBackend::decides(const std::string& stage) {
-  // Floorplan, STA, power and bitstream join with row 1.11.
-  return stage == "synth" || stage == "pack" || stage == "place" || stage == "route";
+  return stage == "synth" || stage == "floorplan" || stage == "pack" || stage == "place" ||
+         stage == "route" || stage == "sta" || stage == "power" || stage == "bitstream";
 }
 
 std::string EngineBackend::profileName(int taskId, const std::string& profile) {
@@ -116,11 +120,18 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
             name + "_post_synth.v",    name + "_post_synth.edif",
             name + "_post_synth.vhd",  name + ".clocks"};
   }
+  if (stage == "floorplan") {
+    return {name + "_repack_design_constraint.xml", name + "_constraints.xml",
+            name + "_rpm_constraints.xml"};
+  }
   if (stage == "pack") {
     std::vector<std::string> outputs{name + "_post_synth.net"};
     if (ctx.layoutResolvedInPack) {
-      for (const char* file : {"device_layout.json", "pack_layout.json", "vpr_generated.xml",
-                               "sb_maps_generated.yml"}) {
+      // Pack deletes the plaintext generated arch once it is encrypted.
+      // device_layout.json is pack_layout.json's to restore, not an output:
+      // refresh() removes it at every session start until pack has ended.
+      for (const char* file : {"pack_layout.json", "vpr_generated.xml.en",
+                               "sb_maps_generated.yml", "sb_maps_generated.yml.en"}) {
         outputs.emplace_back(file);
       }
     }
@@ -128,7 +139,105 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
   }
   if (stage == "place") return {name + "_post_synth.place", name + "_place2pcf.pcf"};
   if (stage == "route") return {name + "_post_synth.route"};
+  if (stage == "bitstream") {
+    if (profile == ENCODE_PROFILE) {
+      return {name + "_fabric_bitstream.bch", name + "_fabric_bitstream.ascon",
+              name + "_fabric_bitstream.tag"};
+    }
+    return {"fabric_bitstream.bit"};
+  }
   return {};
+}
+
+CommandWrapperPtr EngineBackend::wrapCommandLine(const std::vector<std::string>& tokens,
+                                                 size_t positional,
+                                                 const std::set<std::string>& pathOptions,
+                                                 const std::map<std::string, std::string>& masks) {
+  auto command = std::make_shared<CommandWrapper>();
+  auto mask = [&masks](const std::string& token) {
+    auto it = masks.find(token);
+    return it == masks.end() ? std::string{} : it->second;
+  };
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (i > 0 && i <= positional) {
+      command->appendPath(fs::path{tokens[i]}, mask(tokens[i]));
+    } else if (i > positional && pathOptions.count(tokens[i]) && i + 1 < tokens.size()) {
+      command->appendPath(tokens[i], fs::path{tokens[i + 1]}, mask(tokens[i + 1]));
+      ++i;
+    } else {
+      command->append(tokens[i]);
+    }
+  }
+  return command;
+}
+
+void EngineBackend::declarePackLayoutInputs(CommandWrapper& command,
+                                            const fs::path& customLayoutYml,
+                                            const fs::path& deviceConfig) {
+  if (!customLayoutYml.empty()) command.addProbe("custom_layout", {customLayoutYml});
+  if (!deviceConfig.empty()) command.addProbe("device_config", {deviceConfig});
+}
+
+bool EngineBackend::bitstreamNeedsRoute(bool routeFileExists, bool routeIsUserFile,
+                                        const std::optional<std::string>& routeVerdict) {
+  if (routeIsUserFile) return false;
+  if (!routeFileExists) return true;
+  if (!routeVerdict) return false;
+  return *routeVerdict != "skip" && *routeVerdict != "external";
+}
+
+bool EngineBackend::bitstreamNeedsRoute(
+    const std::function<std::vector<UpstreamCommand>()>& upstream, bool routeFileExists,
+    bool routeIsUserFile) const {
+  std::optional<std::string> verdict;
+  if (!routeIsUserFile && routeFileExists) verdict = verdictOf(upstream(), "route");
+  return bitstreamNeedsRoute(routeFileExists, routeIsUserFile, verdict);
+}
+
+std::optional<std::string> EngineBackend::verdictOf(const std::vector<UpstreamCommand>& stages,
+                                                    const std::string& stage) const try {
+  if (!m_client.usable()) return std::nullopt;
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = planRequest(stages, &unbuilt);
+  if (std::find(unbuilt.begin(), unbuilt.end(), stage) != unbuilt.end()) return std::nullopt;
+  const FlowEngineClient::Result result = m_client.call({"plan"}, &plan);
+  if (!result.ok) return std::nullopt;
+  for (const nlohmann::json& decision : result.doc.value("stages", nlohmann::json::array())) {
+    if (decision.value("stage", std::string{}) == stage) {
+      return decision.value("verdict", std::string{"run"});
+    }
+  }
+  return std::nullopt;
+} catch (const std::exception&) {
+  return std::nullopt;
+}
+
+bool EngineBackend::packReadsCustomLayout(bool deviceTypePresent, const std::string& deviceType,
+                                          const std::string& layoutName) {
+  return deviceTypePresent ? deviceType == "CUSTOM" : layoutName == "FPGA_CUSTOM";
+}
+
+std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string& projectName) {
+  return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
+}
+
+bool EngineBackend::onPath(const std::string& program) {
+  return !QStandardPaths::findExecutable(QString::fromStdString(program)).isEmpty();
+}
+
+fs::path EngineBackend::pathPython() {
+#ifdef _WIN32
+  const QString python = QStandardPaths::findExecutable("python.exe");
+#else
+  const QString python = QStandardPaths::findExecutable("python3");
+#endif
+  return python.isEmpty() ? fs::path{} : fs::path(python.toStdWString());
+}
+
+const std::vector<std::string>& EngineBackend::keyOptions() {
+  static const std::vector<std::string> options{"--crypt_key_db", "--ascon_key", "--ascon_nonce",
+                                                "--ascon_ad"};
+  return options;
 }
 
 bool EngineBackend::hasRecords(const fs::path& project) {
@@ -141,6 +250,15 @@ bool EngineBackend::hasRecords(const fs::path& project) {
   return false;
 }
 
+bool EngineBackend::faultRequested(const std::string& stage) {
+  const char* value = std::getenv(FAULT_ENV);
+  return value && !stage.empty() && stage == value;
+}
+
+std::string EngineBackend::faultMessage(const std::string& stage) {
+  return std::string(FAULT_ENV) + ": failing " + stage + " after its tool succeeded";
+}
+
 nlohmann::json EngineBackend::request(const std::string& op, const std::string& stage,
                                       const std::string& profile, const CommandWrapper& command,
                                       const EngineStageContext& ctx) const {
@@ -150,7 +268,19 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
 
   std::vector<std::string> outputs;
   std::set<fs::path> owned;
+  nlohmann::json hostDigests = nlohmann::json::object();
   for (const std::string& output : ownedOutputs(stage, profile, ctx)) {
+    const fs::path path = absolute(output, ctx.project);
+    outputs.push_back(utf8(path));
+    owned.insert(path);
+    // A host digest stands for a file; a missing one must stay missing.
+    auto digest = ctx.outputHostDigests.find(output);
+    std::error_code ec;
+    if (digest != ctx.outputHostDigests.end() && fs::exists(path, ec)) {
+      hostDigests[utf8(path)] = digest->second;
+    }
+  }
+  for (const fs::path& output : command.declaredOutputs()) {
     const fs::path path = absolute(output, ctx.project);
     outputs.push_back(utf8(path));
     owned.insert(path);
@@ -186,7 +316,6 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     }
   }
 
-  nlohmann::json hostDigests = nlohmann::json::object();
   for (const auto& [path, digest] : command.hostDigests()) {
     hostDigests[utf8(absolute(path, ctx.project))] = digest;
   }
@@ -197,11 +326,17 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     keys.insert(absolute(path, ctx.project));
   }
   const std::vector<std::string>& argv = command.argv();
-  for (size_t i = 0; i + 1 < argv.size(); ++i) {
-    if (argv[i] == "--crypt_key_db") keys.insert(absolute(fs::u8path(argv[i + 1]), ctx.project));
+  for (size_t i = 0; i < argv.size(); ++i) {
+    for (const std::string& option : keyOptions()) {
+      if (argv[i] == option && i + 1 < argv.size()) {
+        keys.insert(absolute(fs::u8path(argv[i + 1]), ctx.project));
+      } else if (argv[i].rfind(option + "=", 0) == 0) {
+        keys.insert(absolute(fs::u8path(argv[i].substr(option.size() + 1)), ctx.project));
+      }
+    }
   }
   // The engine refuses to read key material (REQ-012), so a key input such as
-  // VPR's --crypt_key_db reaches it as a host digest.
+  // VPR's --crypt_key_db or an encoder key file reaches it as a host digest.
   for (const std::string& input : inputs) {
     const fs::path path = fs::u8path(input);
     if (hostDigests.contains(input) || !(keys.count(path) || isKeyDatabase(path))) continue;
@@ -209,6 +344,13 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     if (!digest.empty()) hostDigests[input] = digest;
   }
 
+  nlohmann::json probes = nlohmann::json::array();
+  for (const auto& [role, candidates] : command.probes()) {
+    std::vector<std::string> paths;
+    for (const fs::path& candidate : candidates) paths.push_back(utf8(absolute(candidate, ctx.project)));
+    probes.push_back({{"role", role}, {"candidates", paths}});
+  }
+  if (!probes.empty()) req["probes"] = probes;
   req["inputs"] = inputs;
   req["outputs"] = outputs;
   req["scripts"] = scripts;
@@ -217,28 +359,46 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
   req["key_paths"] = keyPaths;
   req["session_state"] = ctx.sessionState;
   req["external"] = ctx.external;
+  if (!ctx.helperPython.empty()) req["helper_python"] = utf8(ctx.helperPython);
+  if (!ctx.metrics.is_null()) {
+    // The catalogue always goes with the metrics: without it the engine runs.
+    req["metrics"] = ctx.metrics;
+    req["metrics_catalogue"] = ctx.metricsCatalogue;
+  }
   return req;
 }
 
-bool EngineBackend::upstreamStale(const std::string& stage,
-                                  const EngineStageContext& ctx) const try {
-  if (!m_upstream) return false;
-  const std::vector<UpstreamCommand> upstream = m_upstream(stage);
-  if (upstream.empty()) return false;
+nlohmann::json EngineBackend::planRequest(const std::vector<UpstreamCommand>& stages,
+                                          std::vector<std::string>* unbuilt) const {
+  const EngineStageContext ctx = m_context("", "");
   nlohmann::json plan{{"v", PROTOCOL_VERSION},
                       {"op", "plan"},
                       {"project", utf8(ctx.project)},
                       {"layout_resolved_in_pack", ctx.layoutResolvedInPack},
                       {"stages", nlohmann::json::array()}};
   if (!ctx.deviceDir.empty()) plan["device_dir"] = utf8(ctx.deviceDir);
-  for (const UpstreamCommand& up : upstream) {
-    if (!up.command) return true;  // an upstream command that cannot be built is stale
+  for (const UpstreamCommand& up : stages) {
     const std::string name = stageName(up.taskId);
-    nlohmann::json item = request("plan", name, profileName(up.taskId, up.profile),
-                                  *up.command, m_context(name));
+    if (!up.command) {
+      if (unbuilt) unbuilt->push_back(name);
+      continue;
+    }
+    const std::string profile = profileName(up.taskId, up.profile);
+    nlohmann::json item = request("plan", name, profile, *up.command, m_context(name, profile));
     for (const char* key : {"v", "op", "project", "device_dir"}) item.erase(key);
     plan["stages"].push_back(std::move(item));
   }
+  return plan;
+}
+
+bool EngineBackend::upstreamStale(const std::string& stage,
+                                  const EngineStageContext& /*ctx*/) const try {
+  if (!m_upstream) return false;
+  const std::vector<UpstreamCommand> upstream = m_upstream(stage);
+  if (upstream.empty()) return false;
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = planRequest(upstream, &unbuilt);
+  if (!unbuilt.empty()) return true;  // an upstream command that cannot be built is stale
   const FlowEngineClient::Result result = m_client.call({"plan"}, &plan);
   if (!result.ok) return true;
   for (const nlohmann::json& decision : result.doc.value("stages", nlohmann::json::array())) {
@@ -276,17 +436,15 @@ bool EngineBackend::decide(int taskId, const std::string& profile,
                            const CommandWrapperPtr& command) const {
   const std::string stage = stageName(taskId);
   if (!command || !decides(stage)) return true;
-  const EngineStageContext ctx = m_context(stage);
-  // Pack sets the generated-layout members only when it runs; restoring them
-  // on a skip is row 1.10.
-  if (stage == "pack" && ctx.layoutResolvedInPack) return true;
+  const std::string engineProfile = profileName(taskId, profile);
+  const EngineStageContext ctx = m_context(stage, engineProfile);
   if (!m_client.usable()) {
     warnOnce("no bundled interpreter or engine in this install; every stage runs");
     return true;
   }
 
   const bool inTask = this->inTask();
-  nlohmann::json req = request("check", stage, profileName(taskId, profile), *command, ctx);
+  nlohmann::json req = request("check", stage, engineProfile, *command, ctx);
   if (inTask) {
     req["begin"] = true;  // a stage about to run loses its record first
     req["upstream_stale"] = upstreamStale(stage, ctx);
@@ -302,11 +460,12 @@ bool EngineBackend::decide(int taskId, const std::string& profile,
     return true;
   }
   const std::string verdict = result.doc.value("verdict", std::string{"run"});
-  if (inTask && verdict == "run") {
+  const bool runs = verdict != "skip" && verdict != "external";
+  if (inTask && runs) {
     m_compiler->Message("Flow engine: " + stage + " runs: " +
                         join(result.doc.value("reasons", nlohmann::json::array())));
   }
-  return verdict != "skip" && verdict != "external";
+  return runs;
 }
 
 void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
@@ -315,8 +474,9 @@ void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
   if (!command || !decides(stage) || !m_client.usable()) return;
   Pending pending{taskId, {}};
   try {
+    const std::string engineProfile = profileName(taskId, profile);
     pending.request =
-        request("record", stage, profileName(taskId, profile), *command, m_context(stage));
+        request("record", stage, engineProfile, *command, m_context(stage, engineProfile));
   } catch (const std::exception& e) {
     m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + e.what() +
                         "); it runs next time");
@@ -342,11 +502,31 @@ void EngineBackend::record(const Pending& pending) {
                           "); it runs next time");
       return;
     }
-    // REQ-125: the C++ cache's entries for this task and every later one are stale.
-    CppBackend::forgetTasks(m_projectPath, pending.taskId, static_cast<int>(Action::Bitstream));
+    // REQ-125: the C++ cache's entries for this task and every later one are
+    // stale; the C++ cache folds floorplanning into pack.
+    const int from =
+        pending.taskId == FLOORPLAN_TASK ? static_cast<int>(Action::Pack) : pending.taskId;
+    CppBackend::forgetTasks(m_projectPath, from, static_cast<int>(Action::Bitstream));
   } catch (const std::exception& e) {
     m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + e.what() +
                         "); it runs next time");
+  }
+}
+
+void EngineBackend::forget(const std::string& stage, const std::string& profile) {
+  if (!hasRecords(m_projectPath)) return;
+  std::vector<std::string> args{"invalidate", "--stage", stage};
+  if (!profile.empty()) args.insert(args.end(), {"--profile", profile});
+  args.insert(args.end(), {"--project", utf8(m_projectPath)});
+  FlowEngineClient::Result result;
+  try {
+    result = m_client.call(args);
+  } catch (const std::exception& e) {
+    result.error = e.what();
+  }
+  if (!result.ok) {
+    m_compiler->Message("Warning: flow engine cannot clear the records of " + stage + ": " +
+                        result.error);
   }
 }
 
@@ -381,8 +561,8 @@ bool EngineBackend::inTask() const {
 
 bool EngineBackend::isEmpty() const { return !hasRecords(m_projectPath); }
 
-void EngineBackend::clear() {
-  if (!hasRecords(m_projectPath)) return;
+bool EngineBackend::clear() {
+  if (!hasRecords(m_projectPath)) return true;
   FlowEngineClient::Result result;
   try {
     result = m_client.call({"invalidate", "--all", "--project", utf8(m_projectPath)});
@@ -392,6 +572,7 @@ void EngineBackend::clear() {
   if (!result.ok) {
     m_compiler->ErrorMessage("flow engine cannot clear the compilation cache: " + result.error);
   }
+  return result.ok;
 }
 
 void EngineBackend::setProjectPath(const fs::path& path) {

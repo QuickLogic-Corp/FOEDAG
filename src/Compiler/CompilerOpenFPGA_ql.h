@@ -35,6 +35,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
 #include "Compiler/EngineBackend.h"
+#include "Compiler/PackLayout.h"
+#include "Compiler/EngineStatusRefresh.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -420,9 +422,81 @@ private:
   void selectIncrementalBackend();
   std::unique_ptr<IncrementalBackend> makeCppBackend();
   std::filesystem::path engineInstallRoot() const;
-  EngineStageContext engineContext(const std::string& stage);
+  EngineStageContext engineContext(const std::string& stage, const std::string& profile = {});
   std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
   void invalidateEngineRecords(int taskId);
+  // IO floorplanning as its own engine stage (row 1.11): the builder, the run,
+  // and the decision, made once per task.
+  struct FloorplanJob {
+    std::string python;
+    std::vector<std::string> args;
+    CommandWrapperPtr command;  // describe form; built only under the engine
+    bool deferred = false;  // AUTO/RESOURCES device not yet packed: nothing to do
+    std::vector<std::filesystem::path> removeBeforeRun;
+  };
+  static constexpr const char* REPACK_TEMPLATE_MASK = "repack_template_mask";
+  std::optional<bool> m_floorplanOutcome;
+  bool buildFloorplan(FloorplanJob& job);
+  int runFloorplan(const FloorplanJob& job);
+  bool engineFloorplan();
+  // getPackingCommand() is building pack's command (BaseVprCommand's caller).
+  bool m_buildingPack = false;
+  // False, after saying why, when bitstream must not run before route.
+  bool engineBitstreamHasRoute();
+  // The layout an AUTO/CUSTOM pack resolved, for the stages after it (row 1.10).
+  bool layoutResolvedInPack() const;
+  void resetPackLayout();
+  // Restores the members from pack_layout.json under the engine; false when the
+  // device needs one and it cannot be read. Always true under cpp.
+  bool restorePackLayout();
+  bool writePackLayout(PackLayout layout);
+  // pack_layout.json's device_layout.json for `target`, while it still holds.
+  std::string packedDeviceLayout(const QLDeviceTarget& target);
+  static const std::vector<std::pair<std::string, std::string>>& powerMetrics();
+  // A BaseVprCommandLEGACY() string in the engine's describe form.
+  CommandWrapperPtr wrapVprCommand(const std::string& command, const QLDeviceTarget& device);
+  // Removes a stage's engine records (one profile, or all when empty).
+  void invalidateEngineStage(const std::string& stage, const std::string& profile = {});
+  void cleanRemovedStaProfiles(const std::map<std::string, QLDeviceTarget>& devices);
+  // Bitstream's describe form, gathered while FinishOpenFPGAScript() builds the
+  // script: decrypted files by mask and source digest, plain files as inputs.
+  struct EngineTemp {
+    std::filesystem::path path;
+    std::string mask;
+    std::string digest;
+  };
+  std::vector<EngineTemp> m_bitstreamTemps;
+  std::vector<std::filesystem::path> m_bitstreamInputs;
+  std::string m_bitstreamVprCommand;
+  void noteBitstreamTemp(const std::filesystem::path& temp, const std::string& mask,
+                         const std::filesystem::path& source);
+  CommandWrapperPtr describeBitstream(const std::string& command, const std::string& script);
+  // The secure encode post-process, built then run; bitstream@encode under the engine.
+  struct EncodeJob {
+    std::string python;
+    std::vector<std::string> args;
+    std::vector<std::string> keyFiles;  // --ascon_key/--ascon_nonce/--ascon_ad values
+    std::filesystem::path log;
+    std::filesystem::path out;
+    std::string banner;
+  };
+  bool buildBitstreamEncode(uint32_t stages, EncodeJob& job);
+  bool runBitstreamEncode(const EncodeJob& job);
+  CommandWrapperPtr describeBitstreamEncode(const EncodeJob& job);
+  void engineBitstreamEncode(uint32_t stages);
+  // GUI statuses under the engine: debounced, one plan off the GUI thread.
+  std::unique_ptr<EngineStatusRefresh> m_statusRefresh;
+  bool m_statusWarned = false;
+  std::function<nlohmann::json()> describeEngineStatus();
+  void applyEngineStatus(const nlohmann::json& answer);
+  // The status sequence shared by both backends; `actual` answers per task.
+  void applyTaskStatuses(const std::function<bool(int task)>& actual);
+  CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
+                                    const std::vector<std::string>& modes,
+                                    const QLDeviceTarget& device);
+  // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
+  // the engine: the caller fails the task although its tool succeeded (T-015).
+  bool faultAfterTool(const std::string& stage) const;
   void BeforeCompileTask(Action action) override;
   void AfterCompileTask(Action action, bool ok) override;
 
@@ -444,6 +518,7 @@ private:
 #endif
 
   void clearCompilationCache() override final;
+  bool forceClearCompilationCache() override { return backend().clear(); }
   bool hasCompilationCache() const override final;
 
   const std::vector<std::string>& vprRedirectedWarnings() const;

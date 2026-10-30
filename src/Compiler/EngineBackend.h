@@ -26,6 +26,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -41,8 +43,18 @@ struct EngineStageContext {
   bool layoutResolvedInPack = false;
   bool external = false;  // the stage's output is a user-supplied file (REQ-018)
   nlohmann::json sessionState = nlohmann::json::object();  // REQ-017
+  // Parsed metric values the stage consumes (REQ-122); null when it consumes none.
+  nlohmann::json metrics = nullptr;
+  // The interpreter a stage's helper script runs under (helper_python).
+  std::filesystem::path helperPython;
+  // Absolute path of the metrics catalogue read; null for the installed default.
+  nlohmann::json metricsCatalogue = nullptr;
+  // Digests of owned outputs the engine must not read as they are: encrypted
+  // files, identified by their plaintext (REQ-121). Project-relative keys.
+  std::map<std::string, std::string> outputHostDigests;
 };
-using EngineContextProvider = std::function<EngineStageContext(const std::string& stage)>;
+using EngineContextProvider =
+    std::function<EngineStageContext(const std::string& stage, const std::string& profile)>;
 struct UpstreamCommand {
   int taskId;
   std::string profile;  // as the call sites pass it
@@ -66,16 +78,25 @@ public:
   void storeTaskCommand(int taskId, const std::string& profile,
                         const CommandWrapperPtr& command) override;
   bool isEmpty() const override;
-  void clear() override;
+  bool clear() override;
   void load() override {}
   void setProjectPath(const std::filesystem::path& path) override;
   void taskStarted() override;
   void taskFinished(bool ok) override;
   bool taskRunning() const override;
   void setUpstreamProvider(UpstreamProvider upstream) { m_upstream = std::move(upstream); }
+  // Removes a stage's records: one profile, or every profile when empty. For a
+  // run the engine must not remember (re-routing STA) and for `clean`.
+  void forget(const std::string& stage, const std::string& profile = {});
 
   // The engine's name for a task; empty for a task with no stage.
   static std::string stageName(int taskId);
+  // Floorplanning has no Compiler::Action; this id stands for it.
+  static constexpr int FLOORPLAN_TASK = 1000;
+  // Bitstream's encode sub-step is its own record (aurora2 stages.ENCODE_PROFILE).
+  static constexpr const char* ENCODE_PROFILE = "encode";
+  // Value options naming key material; the engine refuses to read their files.
+  static const std::vector<std::string>& keyOptions();
   // True for the stages this backend decides; the rest always run.
   static bool decides(const std::string& stage);
   // The engine's profile: synthesis keys Yosys as the stage's only profile.
@@ -84,12 +105,66 @@ public:
   static std::vector<std::string> ownedOutputs(const std::string& stage,
                                                const std::string& profile,
                                                const EngineStageContext& ctx);
+  // Floorplan outputs removed before generate_floorplanning.py runs under the
+  // engine, project-relative: an exit 2 (no PCF, no QDC) writes nothing, so a
+  // previous run's file must not survive it.
+  static std::vector<std::string> floorplanStaleOutputs(const std::string& projectName);
+  // What pack reads to resolve an AUTO/CUSTOM layout besides its command line:
+  // <project>/../custom_layout.yml and the device config.json, as probes, so a
+  // missing file is a state of its own and an edit makes pack run.
+  static void declarePackLayoutInputs(CommandWrapper& command,
+                                      const std::filesystem::path& customLayoutYml,
+                                      const std::filesystem::path& deviceConfig);
+  // Bitstream reads route's <project>_post_synth.route. Under the engine it is
+  // refused when that file is missing, or when the engine does not call route
+  // up to date (`routeVerdict` empty: the engine could not tell, which never
+  // refuses). A user-supplied route file is never refused.
+  static bool bitstreamNeedsRoute(bool routeFileExists, bool routeIsUserFile,
+                                  const std::optional<std::string>& routeVerdict);
+  // The check itself, asked afresh every time: one plan over `upstream()` (synth
+  // up to route), built only when the answer depends on it.
+  bool bitstreamNeedsRoute(const std::function<std::vector<UpstreamCommand>()>& upstream,
+                           bool routeFileExists, bool routeIsUserFile) const;
+  // One plan over `stages` (no record is removed); the verdict of `stage`, or
+  // nothing when the engine could not answer.
+  std::optional<std::string> verdictOf(const std::vector<UpstreamCommand>& stages,
+                                       const std::string& stage) const;
+  // Where pack resolves the layout, floorplan follows pack, so pack runs without
+  // IO constraints and does not generate them (aurora2 stages.graph).
+  static bool packReadsIOConstraints(bool layoutResolvedInPack) { return !layoutResolvedInPack; }
+  // Only the CUSTOM arm of Packing() reads <project>/../custom_layout.yml: a
+  // CUSTOM device, or a package without DEVICE_TYPE whose layout is FPGA_CUSTOM.
+  static bool packReadsCustomLayout(bool deviceTypePresent, const std::string& deviceType,
+                                    const std::string& layoutName);
+  // Only exit 0 (written) and 2 (nothing to do) are results worth a record.
+  static bool floorplanRecords(int status) { return status == 0 || status == 2; }
+  // True when `program` is on PATH; a lookup, no process is started (REQ-011).
+  static bool onPath(const std::string& program);
+  // The python3 (python.exe on Windows) on PATH, absolute; empty when none.
+  static std::filesystem::path pathPython();
+  // A command line built as text, in describe form: the `positional` tokens after
+  // the program and the value of each option in `pathOptions` are declared
+  // paths, a path in `masks` under its mask; anything else is an argv token.
+  static CommandWrapperPtr wrapCommandLine(const std::vector<std::string>& tokens,
+                                           size_t positional,
+                                           const std::set<std::string>& pathOptions,
+                                           const std::map<std::string, std::string>& masks);
   // True when the project has engine decision records.
   static bool hasRecords(const std::filesystem::path& project);
+  // Test-only fault hook: AURORA_FAULT_AFTER_TOOL=<stage> fails that stage after
+  // its tool succeeded and before it records (aurora2 fault_injection.py).
+  static constexpr const char* FAULT_ENV = "AURORA_FAULT_AFTER_TOOL";
+  static bool faultRequested(const std::string& stage);
+  static std::string faultMessage(const std::string& stage);
 
   nlohmann::json request(const std::string& op, const std::string& stage,
                          const std::string& profile, const CommandWrapper& command,
                          const EngineStageContext& ctx) const;
+  // One plan request over `stages`; a stage whose command could not be built is
+  // left out and named in `unbuilt`.
+  nlohmann::json planRequest(const std::vector<UpstreamCommand>& stages,
+                             std::vector<std::string>* unbuilt) const;
+  const FlowEngineClient& client() const { return m_client; }
 
 private:
   Compiler* m_compiler = nullptr;
