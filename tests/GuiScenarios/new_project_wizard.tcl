@@ -25,7 +25,7 @@ puts $f "module counter_16bit (input clk, output reg \[15:0\] count);\nendmodule
 close $f
 gui_click sourceGridAddFile
 gui_wait_event dialog.shown
-gui_set_text fileNameEdit $design_dir/counter_16bit.v
+gui_set_text fileNameEdit /tmp/gui_new_project_wizard/counter_16bit.v
 gui_dialog accept
 gui_wait_event dialog.closed
 gui_screenshot new_project_wizard/03_design_files -widget newProjectDialog

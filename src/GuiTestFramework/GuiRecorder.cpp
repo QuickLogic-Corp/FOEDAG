@@ -420,6 +420,11 @@ void GuiRecorder::watch(QWidget *widget) {
     });
   } else if (auto edit = qobject_cast<QLineEdit *>(widget)) {
     connect(edit, &QLineEdit::editingFinished, this, [this, edit]() {
+      // Return and then the loss of focus both finish the same edit; a dialog
+      // accepted from its button would otherwise record it a second time.
+      const char *recorded = "guiRecorderText";
+      if (edit->property(recorded).toString() == edit->text()) return;
+      edit->setProperty(recorded, edit->text());
       QWidget *owner = namedOwner(edit);
       if (owner->objectName().isEmpty()) {
         offer(edit, {}, false, unrecordedText(owner, edit->text()));
