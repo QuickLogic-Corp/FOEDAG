@@ -49,12 +49,14 @@ struct Probe {
   bool busy = false;
   int workMs = 0;
   std::atomic<bool> workOnGuiThread{false};
+  std::function<void()> onDescribe;  // GUI thread, as the query is described
 
   std::unique_ptr<EngineStatusRefresh> make(int debounceMs = 50) {
     QThread* gui = QThread::currentThread();
     return std::make_unique<EngineStatusRefresh>(
         [this, gui] {
           const int n = ++describes;
+          if (onDescribe) onDescribe();
           const int ms = workMs;
           return std::function<nlohmann::json()>([this, n, ms, gui] {
             if (QThread::currentThread() == gui) workOnGuiThread = true;
@@ -152,6 +154,25 @@ TEST(EngineStatusRefresh, a_task_inside_a_running_query_makes_it_ask_again) {
   refresh->taskFinished();
   runEventLoop(200);
   EXPECT_EQ(probe.describes, 2);
+}
+
+// The answer is already posted when a task starts and ends, before the GUI
+// thread gets to it: it still describes the state before the task.
+TEST(EngineStatusRefresh, an_answer_queued_before_a_task_is_dropped) {
+  Probe probe;
+  auto refresh = probe.make(20);
+  probe.onDescribe = [&] {
+    QTimer::singleShot(0, [&] {
+      QThread::msleep(150);  // the worker posts its answer meanwhile
+      probe.onDescribe = nullptr;
+      refresh->taskStarted();
+      refresh->taskFinished();
+    });
+  };
+  refresh->request();
+  runEventLoop(600);
+  EXPECT_EQ(probe.describes, 2);
+  EXPECT_EQ(probe.applied, std::vector<int>{2});
 }
 
 bool hasCommand(TclInterpreter& interp, const std::string& name) {
