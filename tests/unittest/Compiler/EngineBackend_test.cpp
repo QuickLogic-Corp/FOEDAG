@@ -441,6 +441,26 @@ TEST_F(EngineBackendTest, record_clears_later_cpp_cache_entries) {
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
 }
 
+// generate_floorplanning.py exits 2 without touching its outputs, so they go
+// first; only 0 and 2 are recorded.
+TEST_F(EngineBackendTest, floorplan_removes_its_outputs_first_and_records_0_or_2) {
+  const auto stale = EngineBackend::floorplanStaleOutputs("counter");
+  EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_constraints.xml"), stale.end());
+  EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_repack_design_constraint.xml"),
+            stale.end());
+  EXPECT_TRUE(EngineBackend::floorplanRecords(0));
+  EXPECT_TRUE(EngineBackend::floorplanRecords(2));
+  for (int status : {1, -1, 127, 134, 3}) EXPECT_FALSE(EngineBackend::floorplanRecords(status));
+}
+
+TEST_F(EngineBackendTest, the_helper_python_is_sent_when_known) {
+  const auto b = backend({});
+  EXPECT_FALSE(b->request("check", "floorplan", "", *vprCommand(), m_ctx).contains("helper_python"));
+  m_ctx.helperPython = m_root / "bin" / "python3";
+  EXPECT_EQ(b->request("check", "floorplan", "", *vprCommand(), m_ctx)["helper_python"],
+            (m_root / "bin" / "python3").string());
+}
+
 // The C++ cache has no floorplan entry; an engine floorplan record makes pack's
 // and every later entry stale.
 TEST_F(EngineBackendTest, a_floorplan_record_clears_cpp_entries_from_pack_on) {

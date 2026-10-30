@@ -217,6 +217,10 @@ EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage,
     ctx.layoutResolvedInPack = layoutResolvedInPack();
     ctx.sessionState["device"] = devices->convertToDeviceString(target);
   }
+  if (stage == "floorplan") {
+    // generate_floorplanning.py runs under the python3 found on PATH.
+    ctx.helperPython = EngineBackend::pathPython();
+  }
   if (stage == "power") {
     QLMetricsManager* metrics = QLMetricsManager::getInstance();
     ctx.metrics = metrics->snapshot(powerMetrics());
@@ -8835,10 +8839,15 @@ bool CompilerOpenFPGA_ql::engineFloorplan() {
     Message("IO floorplanning skipped, not required");
     return ok = true;
   }
-  if (runFloorplan(job) == 1 || faultAfterTool("floorplan")) {
+  const int status = runFloorplan(job);
+  if (status == 1 || faultAfterTool("floorplan")) {
     return ok;
   }
-  backend().storeTaskCommand(EngineBackend::FLOORPLAN_TASK, job.command);
+  // Any other failure (a signal, a missing interpreter) runs again next time;
+  // the task goes on as it would under cpp.
+  if (EngineBackend::floorplanRecords(status)) {
+    backend().storeTaskCommand(EngineBackend::FLOORPLAN_TASK, job.command);
+  }
   return ok = true;
 }
 
@@ -9034,7 +9043,7 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     std::filesystem::path python_exec{"python3"};
   #endif // _WIN32
 
-  if (!FileUtils::IsSystemCommandAvailable(python_exec.string())) {
+  if (!s_describeOnly && !FileUtils::IsSystemCommandAvailable(python_exec.string())) {
   #ifdef USE_IPGENERATOR_PYTHON_FOR_FLOORPLANNING
     // if we couldn't find system python3 interpreter we use bundled python3 from ipgenerator
     pythonExec = IPCatalog::getPythonPath(GetIPGenerator()->EnvsPath());
@@ -9148,7 +9157,13 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   // Drop a previous run's output so a run that generates nothing (a design with
   // no clocks) cannot inherit it. The name is ours alone, so this can never
   // delete a file the user supplied.
-  job.removeBeforeRun.push_back(repack_constraints_out);
+  if (m_engineSelected) {
+    for (const std::string& stale : EngineBackend::floorplanStaleOutputs(ProjManager()->projectName())) {
+      job.removeBeforeRun.push_back(std::filesystem::path(ProjManager()->projectPath()) / stale);
+    }
+  } else {
+    job.removeBeforeRun.push_back(repack_constraints_out);
+  }
   const std::filesystem::path repack_constraints_private =
       privateRepackConstraintsPath(ProjManager()->projectName());
   if (!repack_constraints_private.empty()) {

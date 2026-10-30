@@ -44,6 +44,8 @@ struct EngineStageContext {
   nlohmann::json sessionState = nlohmann::json::object();  // REQ-017
   // Parsed metric values the stage consumes (REQ-122); null when it consumes none.
   nlohmann::json metrics = nullptr;
+  // The interpreter a stage's helper script runs under (helper_python).
+  std::filesystem::path helperPython;
   // Absolute path of the metrics catalogue read; null for the installed default.
   nlohmann::json metricsCatalogue = nullptr;
   // Digests of owned outputs the engine must not read as they are: encrypted
@@ -99,6 +101,14 @@ public:
   static std::vector<std::string> ownedOutputs(const std::string& stage,
                                                const std::string& profile,
                                                const EngineStageContext& ctx);
+  // Floorplan outputs removed before generate_floorplanning.py runs under the
+  // engine, project-relative: an exit 2 (no PCF, no QDC) writes nothing, so a
+  // previous run's file must not survive it.
+  static std::vector<std::string> floorplanStaleOutputs(const std::string& projectName);
+  // Only exit 0 (written) and 2 (nothing to do) are results worth a record.
+  static bool floorplanRecords(int status) { return status == 0 || status == 2; }
+  // The python3 (python.exe on Windows) on PATH, absolute; empty when none.
+  static std::filesystem::path pathPython();
   // A command line built as text, in describe form: the `positional` tokens after
   // the program and the value of each option in `pathOptions` are declared
   // paths, a path in `masks` under its mask; anything else is an argv token.

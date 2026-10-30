@@ -18,6 +18,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "EngineBackend.h"
 
+#include <QStandardPaths>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -167,6 +169,19 @@ CommandWrapperPtr EngineBackend::wrapCommandLine(const std::vector<std::string>&
   return command;
 }
 
+std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string& projectName) {
+  return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
+}
+
+fs::path EngineBackend::pathPython() {
+#ifdef _WIN32
+  const QString python = QStandardPaths::findExecutable("python.exe");
+#else
+  const QString python = QStandardPaths::findExecutable("python3");
+#endif
+  return python.isEmpty() ? fs::path{} : fs::path(python.toStdWString());
+}
+
 const std::vector<std::string>& EngineBackend::keyOptions() {
   static const std::vector<std::string> options{"--crypt_key_db", "--ascon_key", "--ascon_nonce",
                                                 "--ascon_ad"};
@@ -285,6 +300,7 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
   req["key_paths"] = keyPaths;
   req["session_state"] = ctx.sessionState;
   req["external"] = ctx.external;
+  if (!ctx.helperPython.empty()) req["helper_python"] = utf8(ctx.helperPython);
   if (!ctx.metrics.is_null()) {
     // The catalogue always goes with the metrics: without it the engine runs.
     req["metrics"] = ctx.metrics;
