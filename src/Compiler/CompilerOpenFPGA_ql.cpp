@@ -282,6 +282,14 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
 
 void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) { backend().taskStarted(); }
 
+bool CompilerOpenFPGA_ql::faultAfterTool(const std::string& stage) const {
+  if (!m_engineSelected || !EngineBackend::faultRequested(stage)) {
+    return false;
+  }
+  ErrorMessage(EngineBackend::faultMessage(stage));
+  return true;
+}
+
 void CompilerOpenFPGA_ql::AfterCompileTask(Action /*action*/, bool ok) {
   backend().taskFinished(ok);
 }
@@ -2424,6 +2432,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
                     " synthesis failed");
         return false;
       } else {
+        if (faultAfterTool("synth")) return false;
         m_state = State::Synthesized;
         Message("Design " + ProjManager()->projectName() + " is synthesized");
         backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
@@ -2483,6 +2492,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     " synthesis failed");
     return false;
   } else {
+    if (faultAfterTool("synth")) return false;
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
@@ -4885,6 +4895,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {
+    if (faultAfterTool("pack")) return false;
     backend().storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
@@ -5221,6 +5232,7 @@ bool CompilerOpenFPGA_ql::Placement() {
                  " placement failed");
     return false;
   } else {
+    if (faultAfterTool("place")) return false;
     backend().storeTaskCommand(static_cast<int>(Action::Detailed), command);
   }
   m_state = State::Placed;
@@ -5500,6 +5512,7 @@ bool CompilerOpenFPGA_ql::Route() {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
     return false;
   } else {
+    if (faultAfterTool("route")) return false;
     backend().storeTaskCommand(static_cast<int>(Action::Routing), command);
   }
   m_state = State::Routed;

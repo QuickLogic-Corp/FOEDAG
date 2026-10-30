@@ -423,6 +423,9 @@ private:
   EngineStageContext engineContext(const std::string& stage);
   std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
   void invalidateEngineRecords(int taskId);
+  // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
+  // the engine: the caller fails the task although its tool succeeded (T-015).
+  bool faultAfterTool(const std::string& stage) const;
   void BeforeCompileTask(Action action) override;
   void AfterCompileTask(Action action, bool ok) override;
 

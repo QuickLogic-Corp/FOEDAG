@@ -20,6 +20,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -139,6 +140,15 @@ bool EngineBackend::hasRecords(const fs::path& project) {
     if (file.extension() == ".json" && file.filename() != "digests.json") return true;
   }
   return false;
+}
+
+bool EngineBackend::faultRequested(const std::string& stage) {
+  const char* value = std::getenv(FAULT_ENV);
+  return value && !stage.empty() && stage == value;
+}
+
+std::string EngineBackend::faultMessage(const std::string& stage) {
+  return std::string(FAULT_ENV) + ": failing " + stage + " after its tool succeeded";
 }
 
 nlohmann::json EngineBackend::request(const std::string& op, const std::string& stage,

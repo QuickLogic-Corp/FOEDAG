@@ -160,6 +160,19 @@ TEST_F(EngineBackendTest, stage_names_and_profiles) {
   EXPECT_EQ(EngineBackend::profileName(STA, "fast"), "fast");
 }
 
+// aurora2 tests/flow_engine/fault_injection.py looks for this exact line.
+TEST_F(EngineBackendTest, the_fault_hook_names_one_stage) {
+  qunsetenv(EngineBackend::FAULT_ENV);
+  EXPECT_FALSE(EngineBackend::faultRequested("route"));
+  qputenv(EngineBackend::FAULT_ENV, "route");
+  EXPECT_TRUE(EngineBackend::faultRequested("route"));
+  EXPECT_FALSE(EngineBackend::faultRequested("place"));
+  EXPECT_FALSE(EngineBackend::faultRequested(""));
+  qunsetenv(EngineBackend::FAULT_ENV);
+  EXPECT_EQ(EngineBackend::faultMessage("route"),
+            "AURORA_FAULT_AFTER_TOOL: failing route after its tool succeeded");
+}
+
 TEST_F(EngineBackendTest, owned_outputs_follow_the_ownership_table) {
   EXPECT_EQ(EngineBackend::ownedOutputs("route", "", m_ctx),
             std::vector<std::string>{"counter_post_synth.route"});

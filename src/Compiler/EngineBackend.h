@@ -86,6 +86,11 @@ public:
                                                const EngineStageContext& ctx);
   // True when the project has engine decision records.
   static bool hasRecords(const std::filesystem::path& project);
+  // Test-only fault hook: AURORA_FAULT_AFTER_TOOL=<stage> fails that stage after
+  // its tool succeeded and before it records (aurora2 fault_injection.py).
+  static constexpr const char* FAULT_ENV = "AURORA_FAULT_AFTER_TOOL";
+  static bool faultRequested(const std::string& stage);
+  static std::string faultMessage(const std::string& stage);
 
   nlohmann::json request(const std::string& op, const std::string& stage,
                          const std::string& profile, const CommandWrapper& command,
