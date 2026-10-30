@@ -49,6 +49,7 @@ set (CPP_LIST
     Compiler/QLDevicePath_test.cpp
     Compiler/BlifParser_test.cpp
     Compiler/DumpOptions_test.cpp
+    Compiler/DumpOptionsGuard_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     Compiler/FlowEngineClient_test.cpp

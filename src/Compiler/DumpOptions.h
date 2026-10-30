@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -33,5 +34,18 @@ std::vector<std::string> splitCommandTokens(const std::string& command);
 /// reported. Each hit is named as given: "--write_rr_graph" or
 /// "--echo_file on".
 std::vector<std::string> findDumpOptions(const std::vector<std::string>& tokens);
+
+/// The dump options `command` would hand to VPR, which an encrypted device must
+/// refuse: the command's own arguments when its program is vpr, or those of
+/// every `vpr` line of the script when it is `openfpga -f|--file <script>`
+/// (a relative script path is resolved against `workDir`, where the command
+/// runs). Any other program finds nothing.
+///
+/// `rpmAuthoringActive` exempts "--echo_file on", and nothing else, on a vpr
+/// place-only command (--place or --analytical_place, without --pack, --route
+/// or --analysis): the RPM-IP authoring place run needs the echo files.
+std::vector<std::string> findRefusedDumpOptions(const std::string& command,
+                                                const std::filesystem::path& workDir,
+                                                bool rpmAuthoringActive);
 
 }  // namespace FOEDAG

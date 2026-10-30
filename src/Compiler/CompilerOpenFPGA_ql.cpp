@@ -56,6 +56,7 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/DumpOptions.h"
 #include "Compiler/PrivateTempDir.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
@@ -8782,6 +8783,42 @@ bool CompilerOpenFPGA_ql::RpmAuthorProjectActive() {
     return false;
   }
   return true;
+}
+
+int CompilerOpenFPGA_ql::ExecuteAndMonitorSystemCommand(const std::string& command,
+                                                        const std::string logFile,
+                                                        bool appendLog) {
+  if (RefuseDumpingCommand(command)) {
+    return -1;
+  }
+  return Compiler::ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
+}
+
+bool CompilerOpenFPGA_ql::RefuseDumpingCommand(const std::string& command) {
+  // Scan first: DeviceIsEncrypted() looks the device up, which is only worth doing
+  // for a command that would dump.
+  const std::vector<std::string> refused =
+      findRefusedDumpOptions(command, ProjManager()->projectPath(), RpmAuthorProjectActive());
+  if (!refused.empty() && DeviceIsEncrypted()) {
+    std::string options;
+    for (const std::string& option : refused) {
+      options += (options.empty() ? "" : ", ") + option;
+    }
+    ErrorMessage("Refusing to run VPR with " + options +
+                 ": the device is encrypted and these options write its architecture data to "
+                 "disk. Remove them from the VPR options.");
+    return true;
+  }
+  return false;
+}
+
+bool CompilerOpenFPGA_ql::DeviceIsEncrypted() {
+  if (m_autoLayoutGenerationMode || m_customLayoutGenerationMode) {
+    return true;
+  }
+  const std::filesystem::path arch = QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
+  // No architecture found: fail closed.
+  return arch.empty() || QLDeviceManager::getInstance()->deviceFileIsEncrypted(arch);
 }
 
 bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {

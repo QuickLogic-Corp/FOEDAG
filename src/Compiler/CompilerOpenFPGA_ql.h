@@ -237,6 +237,18 @@ class CompilerOpenFPGA_ql : public Compiler {
   void SetUseVerificFromTcl(bool on);
 
  protected:
+  /// Refuses, without starting it, a command that would have VPR write data built
+  /// from the decrypted architecture of an encrypted device (REQ-131 of aurora2's
+  /// docs/specs/aurora-flow-engine); see RefuseDumpingCommand().
+  int ExecuteAndMonitorSystemCommand(const std::string& command,
+                                     const std::string logFile = std::string{},
+                                     bool appendLog = false) override;
+  /// True, after reporting the options, when `command` would dump on an
+  /// encrypted device; see findRefusedDumpOptions().
+  bool RefuseDumpingCommand(const std::string& command);
+  /// True when VPR reads an encrypted architecture: the device's installed one,
+  /// or the one pack generates in AUTO/CUSTOM layout mode, always saved as .en.
+  virtual bool DeviceIsEncrypted();
   virtual bool IPGenerate();
   virtual bool Analyze();
   virtual bool Synthesize();
