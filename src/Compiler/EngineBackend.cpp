@@ -169,6 +169,13 @@ CommandWrapperPtr EngineBackend::wrapCommandLine(const std::vector<std::string>&
   return command;
 }
 
+void EngineBackend::declarePackLayoutInputs(CommandWrapper& command,
+                                            const fs::path& customLayoutYml,
+                                            const fs::path& deviceConfig) {
+  if (!customLayoutYml.empty()) command.addProbe("custom_layout", {customLayoutYml});
+  if (!deviceConfig.empty()) command.addProbe("device_config", {deviceConfig});
+}
+
 std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string& projectName) {
   return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
 }
@@ -292,6 +299,13 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     if (!digest.empty()) hostDigests[input] = digest;
   }
 
+  nlohmann::json probes = nlohmann::json::array();
+  for (const auto& [role, candidates] : command.probes()) {
+    std::vector<std::string> paths;
+    for (const fs::path& candidate : candidates) paths.push_back(utf8(absolute(candidate, ctx.project)));
+    probes.push_back({{"role", role}, {"candidates", paths}});
+  }
+  if (!probes.empty()) req["probes"] = probes;
   req["inputs"] = inputs;
   req["outputs"] = outputs;
   req["scripts"] = scripts;

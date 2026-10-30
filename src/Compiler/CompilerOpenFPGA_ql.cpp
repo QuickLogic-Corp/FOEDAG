@@ -317,13 +317,15 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
       const std::string layoutName = m_autoLayoutGeneratedLayoutName;
       const std::filesystem::path vprXml = m_autoLayoutGeneratedVPRXMLPath;
       const std::filesystem::path sbMaps = m_autoLayoutGeneratedSBMapsYMLPath;
+      auto restoreLayout = sg::make_scope_guard([&] {
+        m_autoLayoutGenerationMode = autoMode;
+        m_customLayoutGenerationMode = customMode;
+        m_autoLayoutGeneratedLayoutName = layoutName;
+        m_autoLayoutGeneratedVPRXMLPath = vprXml;
+        m_autoLayoutGeneratedSBMapsYMLPath = sbMaps;
+      });
       resetPackLayout();
       upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
-      m_autoLayoutGenerationMode = autoMode;
-      m_customLayoutGenerationMode = customMode;
-      m_autoLayoutGeneratedLayoutName = layoutName;
-      m_autoLayoutGeneratedVPRXMLPath = vprXml;
-      m_autoLayoutGeneratedSBMapsYMLPath = sbMaps;
     } else if (*it == "place") {
       upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
     } else if (*it == "route") {
@@ -12494,6 +12496,17 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
 
   command->append("--pack");
 
+  if (m_engineSelected) {
+    std::filesystem::path custom_layout_yml;
+    if (!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+                                    custom_layout_yml)) {
+      custom_layout_yml.clear();
+    }
+    QLDeviceManager* devices = QLDeviceManager::getInstance();
+    EngineBackend::declarePackLayoutInputs(
+        *command, custom_layout_yml,
+        devices->deviceLayoutSettings(devices->getCurrentDeviceTarget()).config_json_path);
+  }
   return command;
 }
 

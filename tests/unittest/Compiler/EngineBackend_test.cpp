@@ -441,6 +441,23 @@ TEST_F(EngineBackendTest, record_clears_later_cpp_cache_entries) {
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
 }
 
+// Pack on an AUTO/CUSTOM device reads custom_layout.yml and the device config;
+// both are probes, so editing either one, or adding the yml, makes pack run.
+TEST_F(EngineBackendTest, pack_probes_the_custom_layout_and_device_config) {
+  const fs::path yml = m_root / "custom_layout.yml";
+  const fs::path config = m_root / "dev" / "config.json";
+  auto command = vprCommand();
+  EngineBackend::declarePackLayoutInputs(*command, yml, config);
+  const nlohmann::json req = backend({})->request("check", "pack", "", *command, m_ctx);
+  EXPECT_EQ(req["probes"],
+            nlohmann::json({{{"role", "custom_layout"}, {"candidates", {yml.string()}}},
+                            {{"role", "device_config"}, {"candidates", {config.string()}}}}));
+  // Probes are not inputs: an absent yml must not make pack stale forever.
+  const auto& inputs = req["inputs"];
+  EXPECT_EQ(std::find(inputs.begin(), inputs.end(), yml.string()), inputs.end());
+  EXPECT_FALSE(backend({})->request("check", "pack", "", *vprCommand(), m_ctx).contains("probes"));
+}
+
 // generate_floorplanning.py exits 2 without touching its outputs, so they go
 // first; only 0 and 2 are recorded.
 TEST_F(EngineBackendTest, floorplan_removes_its_outputs_first_and_records_0_or_2) {

@@ -105,6 +105,12 @@ public:
   // engine, project-relative: an exit 2 (no PCF, no QDC) writes nothing, so a
   // previous run's file must not survive it.
   static std::vector<std::string> floorplanStaleOutputs(const std::string& projectName);
+  // What pack reads to resolve an AUTO/CUSTOM layout besides its command line:
+  // <project>/../custom_layout.yml and the device config.json, as probes, so a
+  // missing file is a state of its own and an edit makes pack run.
+  static void declarePackLayoutInputs(CommandWrapper& command,
+                                      const std::filesystem::path& customLayoutYml,
+                                      const std::filesystem::path& deviceConfig);
   // Only exit 0 (written) and 2 (nothing to do) are results worth a record.
   static bool floorplanRecords(int status) { return status == 0 || status == 2; }
   // The python3 (python.exe on Windows) on PATH, absolute; empty when none.
