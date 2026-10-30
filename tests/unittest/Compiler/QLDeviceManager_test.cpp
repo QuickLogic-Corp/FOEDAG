@@ -25,6 +25,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/QLDeviceLayoutInfo.h"
 #include "gtest/gtest.h"
+
+#include <unistd.h>
+
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 using namespace FOEDAG;
 
 TEST(QLDeviceManager, NormalizeVersionStringSpellings) {
@@ -485,4 +491,70 @@ TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
           "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "10"})";
   EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_number)), "io"), 280);
   EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_string)), "io"), 280);
+}
+
+// ---- the device's clock-region file (config.json CLOCK_REGIONS) ------------
+
+namespace {
+struct StagedDevice {
+  std::filesystem::path dir;
+  StagedDevice() {
+    dir = std::filesystem::temp_directory_path() /
+          ("qldm_clock_regions_" + std::to_string(::getpid()) + "_" +
+           std::to_string(reinterpret_cast<std::uintptr_t>(this)));
+    std::filesystem::create_directories(dir / "aurora");
+  }
+  ~StagedDevice() {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  }
+  void touch(const std::string& relative) {
+    std::ofstream(dir / relative) << "x";
+  }
+};
+}  // namespace
+
+TEST(QLDeviceManager, ClockRegionFileAbsentWhenTheDeviceDeclaresNone) {
+  StagedDevice device;
+  std::string error;
+  const json config = json::parse(R"({"DEVICE_SIZE": "8x6"})");
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", &error).empty());
+  EXPECT_TRUE(error.empty());
+  // an empty value or a non-string value declares none as well
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, json::parse(R"({"CLOCK_REGIONS": ""})"), "d", &error).empty());
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, json::parse(R"({"CLOCK_REGIONS": 3})"), "d", &error).empty());
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(QLDeviceManager, ClockRegionFilePlaintextIsPreferredOverEncrypted) {
+  StagedDevice device;
+  device.touch("aurora/clock_regions.xml");
+  device.touch("aurora/clock_regions.xml.en");
+  std::string error;
+  const json config = json::parse(R"({"CLOCK_REGIONS": "aurora/clock_regions.xml"})");
+  EXPECT_EQ(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", &error),
+            device.dir / "aurora/clock_regions.xml");
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(QLDeviceManager, ClockRegionFileFallsBackToTheInstalledEncryptedFile) {
+  StagedDevice device;
+  device.touch("aurora/clock_regions.xml.en");
+  std::string error;
+  const json config = json::parse(R"({"CLOCK_REGIONS": "aurora/clock_regions.xml"})");
+  EXPECT_EQ(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", &error),
+            device.dir / "aurora/clock_regions.xml.en");
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(QLDeviceManager, ClockRegionFileMissingIsAnErrorNamingDeviceAndKey) {
+  StagedDevice device;
+  std::string error;
+  const json config = json::parse(R"({"CLOCK_REGIONS": "aurora/clock_regions.xml"})");
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, config, "FPGA240144", &error).empty());
+  EXPECT_NE(error.find("FPGA240144"), std::string::npos);
+  EXPECT_NE(error.find("CLOCK_REGIONS"), std::string::npos);
+  EXPECT_NE(error.find("aurora/clock_regions.xml"), std::string::npos);
+  // without an error sink the lookup is still just empty
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", nullptr).empty());
 }

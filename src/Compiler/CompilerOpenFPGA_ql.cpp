@@ -91,6 +91,11 @@ extern const char* foedag_build_type;
 
 using json = nlohmann::ordered_json;
 
+// Clock-aware placement: the driver's directory in the project and the profile key of
+// its stored command (see RunClockAwarePlacement).
+static constexpr const char* CLOCK_REGIONS_DIR = "clock_regions";
+static constexpr const char* CLOCK_REGIONS_PROFILE = "clock_regions";
+
 using namespace FOEDAG;
 
 
@@ -1958,6 +1963,15 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
           "vpr_stdout.log",
           "post_place_timing.rpt",
           PLACEMENT_LOG,
+          // clock-aware placement: the driver's verdict and report data; its
+          // iteration directories go with Placement Clean
+          "clock_regions/spec.json",
+          "clock_regions/result.json",
+          "clock_regions/clock_regions.json",
+          "clock_regions/clock_regions.rpt",
+          "clock_regions/clock_region_state.json",
+          "clock_regions/place_macros.echo",
+          "clock_regions/device_grid.echo",
       };
       break;
     case Compiler::Action::Routing:
@@ -4958,6 +4972,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     m_state = State::GloballyPlaced;
     PlaceOpt(PlacementOpt::None);
     CleanFiles(Action::Detailed);
+    std::error_code clean_ec;  // the clock-region driver's outputs, when placement was clock-aware
+    std::filesystem::remove_all(
+        std::filesystem::path(ProjManager()->projectPath()) / CLOCK_REGIONS_DIR, clean_ec);
     return true;
   }
 #if UPSTREAM_UNUSED
@@ -5178,7 +5195,24 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(!command) {
     return false;
   }
-  if (!backend().isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+  // Clock-aware placement runs when the device ships a clock-region file. A device whose
+  // config.json names a file that is not installed fails here: it must not be placed
+  // unchecked.
+  std::string regionError;
+  const std::filesystem::path regionFile =
+      QLDeviceManager::getInstance()->deviceClockRegionFile(QLDeviceTarget(), &regionError);
+  if (!regionError.empty()) {
+    ErrorMessage("Clock-aware placement: " + regionError);
+    return false;
+  }
+  const CommandWrapperPtr clockRegionCommand =
+      regionFile.empty() ? nullptr : getClockRegionCommand(regionFile, command);
+  const bool placementRequired =
+      backend().isCompilationRequired(static_cast<int>(Action::Detailed), command) ||
+      (clockRegionCommand &&
+       backend().isCompilationRequired(static_cast<int>(Action::Detailed),
+                                       CLOCK_REGIONS_PROFILE, clockRegionCommand));
+  if (!placementRequired) {
     Message("##################################################");
     Message("Placement skipped, not required");
     Message("##################################################");
@@ -5214,7 +5248,19 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement is being run with Custom Layout Generated Device!");
   }
 
-  int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
+  if (!clockRegionCommand) {
+    // An earlier clock-aware placement's outputs would otherwise outlive the device
+    // change and keep the Clock Regions report listed.
+    std::error_code stale_ec;
+    std::filesystem::remove_all(
+        std::filesystem::path(ProjManager()->projectPath()) / CLOCK_REGIONS_DIR, stale_ec);
+  }
+  // The driver runs VPR itself, with this command, so the decrypted device files
+  // must outlive it: CleanTempFiles() comes after either path.
+  const int status = clockRegionCommand
+                         ? (RunClockAwarePlacement(command, regionFile) ? 0 : 1)
+                         : ExecuteAndMonitorQtApplication(command->string(),
+                                                          IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -5222,6 +5268,10 @@ bool CompilerOpenFPGA_ql::Placement() {
     return false;
   } else {
     backend().storeTaskCommand(static_cast<int>(Action::Detailed), command);
+    if (clockRegionCommand) {
+      backend().storeTaskCommand(static_cast<int>(Action::Detailed), CLOCK_REGIONS_PROFILE,
+                                 clockRegionCommand);
+    }
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
@@ -11883,6 +11933,189 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   // }
 
   return command;
+}
+
+std::string CompilerOpenFPGA_ql::argvValue(const std::vector<std::string>& argv,
+                                           const std::string& option) {
+  for (size_t i = 0; i + 1 < argv.size(); ++i) {
+    if (argv[i] == option) {
+      return argv[i + 1];
+    }
+  }
+  const std::string prefix = option + "=";
+  for (const std::string& arg : argv) {
+    if (arg.rfind(prefix, 0) == 0) {
+      return arg.substr(prefix.size());
+    }
+  }
+  return {};
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::getClockRegionCommand(
+    const std::filesystem::path& regionFile, const CommandWrapperPtr& vprCommand) {
+  auto command = std::make_shared<CommandWrapper>("clock-region-place");
+  command->append("aurora");
+  // The installed file, never a decrypted copy: that copy has a new private name on
+  // every run and would make placement look required every time.
+  command->appendPath("--regions", regionFile);
+  const std::string placeFile = argvValue(vprCommand->argv(), "--place_file");
+  if (!placeFile.empty()) {
+    command->appendPath("--final", std::filesystem::path{placeFile});
+  }
+  return command;
+}
+
+bool CompilerOpenFPGA_ql::RunClockAwarePlacement(const CommandWrapperPtr& command,
+                                                 const std::filesystem::path& regionFile) {
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+  const std::string device = devices->convertToDeviceString(target);
+  const std::string prefix = "Clock-aware placement: device " + device + " declares clock regions";
+  if (QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+    ErrorMessage(prefix + ", which the analytical placer does not honour; uncheck analytical_place");
+    return false;
+  }
+  if (RpmAuthorProjectActive()) {
+    ErrorMessage(prefix + "; an RPM authoring project cannot be placed on it");
+    return false;
+  }
+#ifdef _WIN32
+  const std::filesystem::path driverName{"clock-region-place.exe"};
+#else
+  const std::filesystem::path driverName{"clock-region-place"};
+#endif
+  const std::filesystem::path driver = FileUtils::LocateExecFile(driverName);
+  if (driver.empty()) {
+    ErrorMessage(prefix + ", but " + driverName.string() +
+                 " is not installed (expected in Aurora's bin directory)");
+    return false;
+  }
+  std::error_code ec;
+  const std::filesystem::path projectPath =
+      std::filesystem::absolute(std::filesystem::path{ProjManager()->projectPath()}, ec);
+  const std::filesystem::path workdir = projectPath / CLOCK_REGIONS_DIR;
+  std::filesystem::create_directories(workdir, ec);
+  if (ec) {
+    ErrorMessage("Clock-aware placement: cannot create " + workdir.string() + ": " + ec.message());
+    return false;
+  }
+
+  // The region file as the driver reads it: the device's plaintext file, or a private
+  // decrypted copy that CleanTempFiles() removes once the driver has exited.
+  const bool regionEncrypted = devices->deviceFileIsEncrypted(regionFile);
+  std::filesystem::path regionPlain = regionFile;
+  if (regionEncrypted) {
+    regionPlain = GenerateTempFilePath();
+    if (regionPlain.empty() ||
+        !decryptDeviceFile(regionFile, regionPlain, devices->deviceTypeDirPath(target),
+                           devices->convertToDeviceTypeString(target))) {
+      return false;
+    }
+  }
+  // The driver asks the first VPR run for two echo files, place_macros.echo and
+  // device_grid.echo, and moves them from the project directory to these paths as soon as
+  // that run ends. The device grid lists the architecture's tiles: private when the
+  // architecture is.
+  const bool archEncrypted = devices->deviceFileIsEncrypted(devices->deviceVPRArchitectureFile(target));
+  const std::filesystem::path gridFile =
+      archEncrypted ? GenerateTempFilePath() : workdir / "device_grid.echo";
+  if (gridFile.empty()) {
+    return false;
+  }
+  // The per-iteration constraints files hold the regions' rectangles: with an encrypted
+  // region file they go to the private directory and are removed after the run.
+  std::filesystem::path privateWorkdir;
+  if (regionEncrypted) {
+    const std::filesystem::path privateDir = PrivateTempDir::path();
+    if (privateDir.empty()) {
+      ErrorMessage("Clock-aware placement: cannot create a private temporary directory under " +
+                   std::filesystem::temp_directory_path().string());
+      return false;
+    }
+    privateWorkdir = privateDir / CLOCK_REGIONS_DIR;
+    std::filesystem::remove_all(privateWorkdir, ec);
+    std::filesystem::create_directories(privateWorkdir, ec);
+    if (ec) {
+      ErrorMessage("Clock-aware placement: cannot create " + privateWorkdir.string() + ": " +
+                   ec.message());
+      return false;
+    }
+  }
+
+  // spec.json: the VPR command as FOEDAG would run it, and the paths of the flow.
+  const std::vector<std::string>& argv = command->argv();
+  const std::string netFile = argvValue(argv, "--net_file");
+  const std::string placeFile = argvValue(argv, "--place_file");
+  const std::string constraints = argvValue(argv, "--read_vpr_constraints");
+  if (netFile.empty() || placeFile.empty()) {
+    ErrorMessage("Clock-aware placement: the placement command names no --net_file or --place_file");
+    return false;
+  }
+  json spec;
+  spec["schema"] = 1;
+  spec["project_dir"] = projectPath.string();
+  spec["vpr_argv"] = argv;
+  spec["net_file"] = netFile;
+  spec["place_file"] = placeFile;
+  if (constraints.empty()) {
+    spec["vpr_constraints"] = nullptr;
+  } else {
+    spec["vpr_constraints"] = constraints;
+  }
+  spec["region_file"] = regionPlain.string();
+  spec["region_file_encrypted"] = regionEncrypted;
+  spec["macros_file"] = (std::filesystem::path(CLOCK_REGIONS_DIR) / "place_macros.echo").string();
+  spec["grid_file"] = gridFile.string();
+  spec["workdir"] = CLOCK_REGIONS_DIR;
+  if (privateWorkdir.empty()) {
+    spec["private_workdir"] = nullptr;
+  } else {
+    spec["private_workdir"] = privateWorkdir.string();
+  }
+  const std::filesystem::path specPath = workdir / "spec.json";
+  FileUtils::WriteToFile(specPath, spec.dump(1));
+  if (!FileUtils::FileExists(specPath)) {
+    ErrorMessage("Clock-aware placement: cannot write " + specPath.string());
+    return false;
+  }
+
+  // The verdict files of an earlier run must not pass for this run's: the driver writes
+  // new ones, but not when it stops before reading spec.json.
+  for (const char* name : {"result.json", "clock_regions.json", "clock_regions.rpt"}) {
+    std::filesystem::remove(workdir / name, ec);
+  }
+  Message(prefix + "; running " + driver.string());
+  // The driver's VPR runs inherit its environment, so the Qt platform VPR needs (offscreen
+  // unless the command asks for the GUI) is set for the driver as it is for a VPR run.
+  const int status = ExecuteAndMonitorQtApplication(driver.string() + " aurora " + specPath.string(),
+                                                    IsVprGuiCommand(command->string()));
+  if (!privateWorkdir.empty()) {
+    std::filesystem::remove_all(privateWorkdir, ec);
+  }
+
+  // The driver's verdict. A missing or unreadable result.json means it ended before
+  // writing one; the exit status is then all there is.
+  const std::filesystem::path resultPath = workdir / "result.json";
+  bool legal = false;
+  std::string reason;
+  if (FileUtils::FileExists(resultPath)) {
+    const json result = json::parse(FileUtils::GetFileContent(resultPath), nullptr, false);
+    if (result.is_object()) {
+      legal = result.value("legal", false);
+      if (result.contains("reason") && result["reason"].is_string()) {
+        reason = result["reason"].get<std::string>();
+      }
+    }
+  }
+  if (status == 0 && legal) {
+    return true;
+  }
+  if (reason.empty()) {
+    reason = driverName.string() + " exited with status " + std::to_string(status) +
+             " without a result";
+  }
+  ErrorMessage("Clock-aware placement: " + reason);
+  return false;
 }
 
 CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
