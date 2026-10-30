@@ -8816,9 +8816,13 @@ bool CompilerOpenFPGA_ql::DeviceIsEncrypted() {
   if (m_autoLayoutGenerationMode || m_customLayoutGenerationMode) {
     return true;
   }
-  const std::filesystem::path arch = QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
+  const std::filesystem::path arch = InstalledVPRArchitectureFile();
   // No architecture found: fail closed.
   return arch.empty() || QLDeviceManager::getInstance()->deviceFileIsEncrypted(arch);
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::InstalledVPRArchitectureFile() {
+  return QLDeviceManager::getInstance()->deviceVPRArchitectureFile();
 }
 
 bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {

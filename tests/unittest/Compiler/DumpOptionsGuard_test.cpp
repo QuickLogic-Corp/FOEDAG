@@ -226,3 +226,186 @@ TEST_F(DumpOptionsGuardTest, EncryptedDeviceAllowsCleanOpenFpgaScript) {
                          "vpr arch.xml top.blif --echo_file off --analysis\nexit\n");
   EXPECT_FALSE(refuses(m_openfpga.string() + " -batch -f top.openfpga"));
 }
+
+namespace {
+
+// A scratch directory per test, removed on scope exit.
+class ScratchDir {
+ public:
+  explicit ScratchDir(const std::string& name)
+      : m_path(fs::temp_directory_path() / ("refused_dump_options_" + name)) {
+    fs::remove_all(m_path);
+    fs::create_directories(m_path);
+  }
+  ~ScratchDir() { fs::remove_all(m_path); }
+  const fs::path& path() const { return m_path; }
+  fs::path write(const std::string& name, const std::string& content) const {
+    FileUtils::WriteToFile(m_path / name, content);
+    return m_path / name;
+  }
+
+ private:
+  fs::path m_path;
+};
+
+// The shape every shipped device template uses (ql-device-data EVAL-MSC-CUSTOM),
+// after FinishOpenFPGAScript substituted the VPR options.
+std::string deviceTemplate(const std::string& standardOpts, const std::string& vprOpts) {
+  return "# Run VPR for the design\n"
+         "vpr arch.xml top.blif \\\n"
+         "    --device FPGA0808 \\\n"
+         "    " + standardOpts + " \\\n"
+         "    " + vprOpts + "\n"
+         "\n"
+         "read_openfpga_arch -f openfpga.xml\n"
+         "exit\n";
+}
+
+}  // namespace
+
+TEST(RefusedDumpOptions, ProgramNamesAreCaseInsensitive) {
+  EXPECT_EQ(refused("C:/aurora/bin/VPR.EXE a.xml b.blif --write_rr_graph rr.bin"),
+            Tokens{"--write_rr_graph"});
+  const ScratchDir dir("case");
+  dir.write("x.openfpga", "vpr a.xml b.blif --echo_file on\n");
+  EXPECT_EQ(refused("C:/aurora/bin/OpenFPGA.exe -batch -f x.openfpga", false, dir.path()),
+            Tokens{"--echo_file on"});
+}
+
+TEST(RefusedDumpOptions, ScriptCommandsAreJoinedLikeTheOpenFpgaShell) {
+  EXPECT_EQ(openFpgaScriptCommands("# header\n"
+                                   "vpr a.xml \\\n"
+                                   "  --device X \\   \n"
+                                   "\n"
+                                   "# a comment inside the command\n"
+                                   "  --route # trailing comment\n"
+                                   "   exit  \n"
+                                   "vpr b.xml\\\n"
+                                   "--pack\n"),
+            (Tokens{"vpr a.xml   --device X   --route", "exit", "vpr b.xml--pack"}));
+  EXPECT_TRUE(openFpgaScriptCommands("").empty());
+  EXPECT_TRUE(openFpgaScriptCommands("# only\n   \n").empty());
+}
+
+TEST(RefusedDumpOptions, DumpOptionInSubstitutedTemplateOptionsIsFound) {
+  const ScratchDir dir("template_substituted");
+  dir.write("top.openfpga",
+            deviceTemplate("--clock_modeling ideal --write_rr_graph rr.xml --sdc_file top.sdc",
+                           "--route_chan_width 160"));
+  EXPECT_EQ(refused("openfpga -batch -f top.openfpga", false, dir.path()),
+            Tokens{"--write_rr_graph"});
+}
+
+TEST(RefusedDumpOptions, DumpOptionOnItsOwnContinuationLineIsFound) {
+  const ScratchDir dir("template_continuation");
+  dir.write("top.openfpga",
+            "vpr arch.xml top.blif \\\n"
+            "    --device FPGA0808 \\\n"
+            "    --echo_file on \\\n"
+            "    --write_router_lookahead=l.bin\n");
+  EXPECT_EQ(refused("openfpga -batch -f top.openfpga", false, dir.path()),
+            (Tokens{"--echo_file on", "--write_router_lookahead"}));
+}
+
+TEST(RefusedDumpOptions, CleanTemplateAndCommentedDumpOptionsFindNothing) {
+  const ScratchDir dir("template_clean");
+  dir.write("top.openfpga",
+            "# vpr arch.xml top.blif --write_rr_graph rr.xml\n" +
+                deviceTemplate("--clock_modeling ideal # --write_rr_graph rr.xml",
+                               "--echo_file off"));
+  EXPECT_TRUE(refused("openfpga -batch -f top.openfpga", false, dir.path()).empty());
+}
+
+TEST(RefusedDumpOptions, InlineSourceStreamIsScanned) {
+  const ScratchDir dir("source_inline");
+  dir.write("top.openfpga",
+            "source --command_stream \"read_openfpga_arch -f a.xml;"
+            "vpr arch.xml top.blif --write_rr_graph rr.xml ;exit\"\n");
+  EXPECT_EQ(refused("openfpga -batch -f top.openfpga", false, dir.path()),
+            Tokens{"--write_rr_graph"});
+}
+
+TEST(RefusedDumpOptions, SourcedFileIsScannedRelativeToTheWorkDir) {
+  const ScratchDir dir("source_file");
+  fs::create_directories(dir.path() / "sub");
+  dir.write("sub/vpr.openfpga", "vpr arch.xml top.blif \\\n    --echo_file on\n");
+  dir.write("top.openfpga", "source --command_stream sub/vpr.openfpga --from_file\nexit\n");
+  EXPECT_EQ(refused("openfpga -batch -f top.openfpga", false, dir.path()),
+            Tokens{"--echo_file on"});
+  // Without --from_file the stream is a command, not a file name.
+  dir.write("top.openfpga", "source --command_stream sub/vpr.openfpga\n");
+  EXPECT_TRUE(refused("openfpga -batch -f top.openfpga", false, dir.path()).empty());
+}
+
+TEST(RefusedDumpOptions, SourceCycleIsScannedOnce) {
+  const ScratchDir dir("source_cycle");
+  dir.write("a.openfpga", "source --command_stream b.openfpga --from_file\n");
+  dir.write("b.openfpga",
+            "vpr arch.xml top.blif --write_placement_delay_lookup d.bin\n"
+            "source --command_stream " + (dir.path() / "a.openfpga").string() + " --from_file\n");
+  EXPECT_EQ(refused("openfpga -batch -f a.openfpga", false, dir.path()),
+            Tokens{"--write_placement_delay_lookup"});
+}
+
+TEST(RefusedDumpOptions, SourceChainTooDeepIsRefused) {
+  const ScratchDir dir("source_deep");
+  constexpr int kFiles = 20;
+  for (int i = 0; i < kFiles; ++i) {
+    dir.write(std::to_string(i) + ".openfpga",
+              "source --command_stream " + std::to_string(i + 1) + ".openfpga --from_file\n");
+  }
+  const Tokens found = refused("openfpga -batch -f 0.openfpga", false, dir.path());
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_NE(found.front().find("source nested deeper"), std::string::npos);
+}
+
+namespace {
+
+// DeviceIsEncrypted() as shipped; only the installed-arch lookup is replaced.
+class ArchCompiler : public CompilerOpenFPGA_ql {
+ public:
+  ArchCompiler() { m_projManager = new ProjectManager(); }
+  bool encrypted(bool autoMode, bool customMode, const fs::path& arch) {
+    m_autoLayoutGenerationMode = autoMode;
+    m_customLayoutGenerationMode = customMode;
+    m_arch = arch;
+    const bool result = DeviceIsEncrypted();
+    m_autoLayoutGenerationMode = m_customLayoutGenerationMode = false;
+    return result;
+  }
+
+ protected:
+  std::filesystem::path InstalledVPRArchitectureFile() override { return m_arch; }
+
+ private:
+  fs::path m_arch;
+};
+
+ArchCompiler& archCompiler() {
+  static ArchCompiler* compiler = new ArchCompiler;  // see guardCompiler()
+  return *compiler;
+}
+
+}  // namespace
+
+TEST(DeviceIsEncrypted, GeneratedLayoutModesAreEncrypted) {
+  const ScratchDir dir("arch_modes");
+  const fs::path plain = dir.write("vpr.xml", "<architecture/>\n");
+  EXPECT_TRUE(archCompiler().encrypted(true, false, plain));
+  EXPECT_TRUE(archCompiler().encrypted(false, true, plain));
+}
+
+TEST(DeviceIsEncrypted, MissingArchitectureFailsClosed) {
+  EXPECT_TRUE(archCompiler().encrypted(false, false, {}));
+}
+
+TEST(DeviceIsEncrypted, EncryptedArchitectureIsEncrypted) {
+  const ScratchDir dir("arch_encrypted");
+  EXPECT_TRUE(archCompiler().encrypted(false, false, dir.write("vpr.xml.en", "anything")));
+  EXPECT_TRUE(archCompiler().encrypted(false, false, dir.write("vpr.xml", "QLEN\x01\x02")));
+}
+
+TEST(DeviceIsEncrypted, PlainArchitectureIsNotEncrypted) {
+  const ScratchDir dir("arch_plain");
+  EXPECT_FALSE(archCompiler().encrypted(false, false, dir.write("vpr.xml", "<architecture/>\n")));
+}

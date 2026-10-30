@@ -249,6 +249,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// True when VPR reads an encrypted architecture: the device's installed one,
   /// or the one pack generates in AUTO/CUSTOM layout mode, always saved as .en.
   virtual bool DeviceIsEncrypted();
+  /// The current device's VPR architecture as QLDeviceManager finds it; empty when
+  /// there is none.
+  virtual std::filesystem::path InstalledVPRArchitectureFile();
   virtual bool IPGenerate();
   virtual bool Analyze();
   virtual bool Synthesize();

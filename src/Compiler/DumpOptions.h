@@ -35,11 +35,19 @@ std::vector<std::string> splitCommandTokens(const std::string& command);
 /// "--echo_file on".
 std::vector<std::string> findDumpOptions(const std::vector<std::string>& tokens);
 
+/// The commands of an OpenFPGA script, read the way Shell<T>::run_script_mode
+/// reads them: a line that starts with '#' is skipped, '#' ends a line, and a
+/// line ending in a backslash continues on the next one (joined as is, without
+/// a space).
+std::vector<std::string> openFpgaScriptCommands(const std::string& script);
+
 /// The dump options `command` would hand to VPR, which an encrypted device must
 /// refuse: the command's own arguments when its program is vpr, or those of
-/// every `vpr` line of the script when it is `openfpga -f|--file <script>`
-/// (a relative script path is resolved against `workDir`, where the command
-/// runs). Any other program finds nothing.
+/// every `vpr` command of the script when it is `openfpga -f|--file <script>`,
+/// including the commands of `source --command_stream "<cmd>;<cmd>"` and of
+/// `source --command_stream <file> --from_file`. Relative script paths are
+/// resolved against `workDir`, where the command runs. Any other program finds
+/// nothing.
 ///
 /// `rpmAuthoringActive` exempts "--echo_file on", and nothing else, on a vpr
 /// place-only command (--place or --analytical_place, without --pack, --route
