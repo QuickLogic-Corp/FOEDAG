@@ -251,7 +251,11 @@ EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage,
 }
 
 std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::string& stage) {
-  static const std::vector<std::string> order{"synth", "pack", "place", "route"};
+  // Floorplan reads the layout pack resolves on AUTO/CUSTOM devices (aurora2 stages.graph).
+  const std::vector<std::string> order =
+      engineContext(stage).layoutResolvedInPack
+          ? std::vector<std::string>{"synth", "pack", "floorplan", "place", "route"}
+          : std::vector<std::string>{"synth", "floorplan", "pack", "place", "route"};
   const auto end = std::find(order.begin(), order.end(), stage);
   if (end == order.end()) {
     return {};
@@ -289,12 +293,22 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
       upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
     } else if (*it == "place") {
       upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
+    } else if (*it == "floorplan") {
+      FloorplanJob job;
+      const bool built = buildFloorplan(job);
+      // A device not yet packed has no floorplan to decide.
+      if (!built || !job.deferred) {
+        upstream.push_back({EngineBackend::FLOORPLAN_TASK, "", built ? job.command : nullptr});
+      }
     }
   }
   return upstream;
 }
 
-void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) { backend().taskStarted(); }
+void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) {
+  m_floorplanOutcome.reset();
+  backend().taskStarted();
+}
 
 bool CompilerOpenFPGA_ql::faultAfterTool(const std::string& stage) const {
   if (!m_engineSelected || !EngineBackend::faultRequested(stage)) {
@@ -305,6 +319,7 @@ bool CompilerOpenFPGA_ql::faultAfterTool(const std::string& stage) const {
 }
 
 void CompilerOpenFPGA_ql::AfterCompileTask(Action /*action*/, bool ok) {
+  m_floorplanOutcome.reset();
   backend().taskFinished(ok);
 }
 
@@ -4097,7 +4112,8 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
                 std::string(ProjManager()->projectName() + "_constraints.xml");
-  if (fs::exists(io_floor_planningpath)) {
+  // Under the engine, floorplan's own record decides whether it reruns.
+  if (!m_engineSelected && fs::exists(io_floor_planningpath)) {
     fs::remove(io_floor_planningpath);
     Message("Deleted the previous existing " + ProjManager()->projectName() + "_constraints.xml" + 
         " Before Packing");
@@ -8273,6 +8289,9 @@ std::filesystem::path CompilerOpenFPGA_ql::getDesignSourceNetlistPath() const {
 }
 
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
+  if (m_engineSelected) {
+    return engineFloorplan();
+  }
   std::filesystem::path io_floor_planningpath = std::filesystem::path(ProjManager()->projectPath()) / 
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
@@ -8305,6 +8324,60 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
             newerSource + "; regenerating it.");
   }
 
+  FloorplanJob job;
+  if (!buildFloorplan(job)) {
+    return false;
+  }
+  return job.deferred || runFloorplan(job) != 1;
+}
+
+bool CompilerOpenFPGA_ql::engineFloorplan() {
+  // One decision per task: STA builds its command once per corner profile.
+  if (m_floorplanOutcome) {
+    return *m_floorplanOutcome;
+  }
+  bool ok = false;
+  auto memo = sg::make_scope_guard([this, &ok] { m_floorplanOutcome = ok; });
+  FloorplanJob job;
+  if (!buildFloorplan(job)) {
+    return ok;
+  }
+  if (job.deferred) {
+    return ok = true;
+  }
+  if (!backend().isCompilationRequired(EngineBackend::FLOORPLAN_TASK, job.command)) {
+    Message("IO floorplanning skipped, not required");
+    return ok = true;
+  }
+  if (runFloorplan(job) == 1 || faultAfterTool("floorplan")) {
+    return ok;
+  }
+  backend().storeTaskCommand(EngineBackend::FLOORPLAN_TASK, job.command);
+  return ok = true;
+}
+
+int CompilerOpenFPGA_ql::runFloorplan(const FloorplanJob& job) {
+  // Drop a previous run's output so a run that generates nothing (a design with
+  // no clocks) cannot inherit it. The names are ours alone, so this can never
+  // delete a file the user supplied.
+  std::error_code repack_remove_ec;
+  for (const std::filesystem::path& stale : job.removeBeforeRun) {
+    fs::remove(stale, repack_remove_ec);
+  }
+
+  int status = FileUtils::ExecuteSystemCommand(job.python, job.args, m_out, /*timeout_ms*/-1).realCode;
+
+  if (status == 1) { //Failure
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                " IO Floor Plan Generation Failed!");
+  }
+  else if (status == 2){ //Skipped
+    Message("IO Floor Plan Generation Skipped!");
+  }
+  return status;
+}
+
+bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   if (!ProjManager()->HasDesign()) {
     ErrorMessage("No design specified");
     return false;
@@ -8341,8 +8414,10 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::filesystem::path netlist_path = getPostSynthBlifFilePath();
 
   if (!fs::exists(netlist_path)){
-    ErrorMessage("Post Synthesis blif Was Not Found!\n");
-    ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
+    if (!s_describeOnly) {
+      ErrorMessage("Post Synthesis blif Was Not Found!\n");
+      ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
+    }
     return false;
   }
 
@@ -8448,7 +8523,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
     if (!bottomStr.empty())
       bottomStr = std::string("bottom:" + bottomStr + ";");
 
-    if (leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
+    if (!s_describeOnly && leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
       Message("Warning: QDC file either does not contain a valid side/region or the side/region is empty.");
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
@@ -8511,9 +8586,12 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       // Skip instead - the caller already tolerates no constraints file being
       // written (see the pcf 'no set_clock' case above), and floorplanning
       // constraints simply regenerate once Packing has resolved the geometry.
-      WarningMessage("This device uses AUTO/RESOURCES layout sizing, so its fabric "
-                     "geometry is only known after Packing succeeds. Skipping IO "
-                     "Floor Plan Generation until then.");
+      if (!s_describeOnly) {
+        WarningMessage("This device uses AUTO/RESOURCES layout sizing, so its fabric "
+                       "geometry is only known after Packing succeeds. Skipping IO "
+                       "Floor Plan Generation until then.");
+      }
+      job.deferred = true;
       return true;
     }
     ErrorMessage("device_layout.json not found: " + deviceLayoutFile.string() +
@@ -8580,14 +8658,16 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // Drop a previous run's output so a run that generates nothing (a design with
   // no clocks) cannot inherit it. The name is ours alone, so this can never
   // delete a file the user supplied.
-  std::error_code repack_remove_ec;
-  fs::remove(repack_constraints_out, repack_remove_ec);
+  job.removeBeforeRun.push_back(repack_constraints_out);
   const std::filesystem::path repack_constraints_private =
       privateRepackConstraintsPath(ProjManager()->projectName());
   if (!repack_constraints_private.empty()) {
-    fs::remove(repack_constraints_private, repack_remove_ec);
+    job.removeBeforeRun.push_back(repack_constraints_private);
   }
 
+  // The engine knows a decrypted template by its encrypted file (REQ-012).
+  std::string repack_template_digest;
+  std::filesystem::path repack_template_key_db;
   std::filesystem::path repack_constraints_in =
       QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile(
           QLDeviceTarget(), /*device_only*/ true, /*report_missing*/ false);
@@ -8597,8 +8677,18 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       // (REQ-130); a plaintext device keeps it in the project as before.
       repack_constraints_out = repack_constraints_private;
       std::filesystem::path repack_constraints_en_path = repack_constraints_in;
-      repack_constraints_in = GenerateTempFilePath();
-      if (!decryptDeviceFile(repack_constraints_en_path, repack_constraints_in,
+      if (m_engineSelected) {
+        repack_template_digest = FlowEngineClient::sha256File(repack_constraints_en_path);
+        repack_template_key_db = QLDeviceManager::getInstance()->deviceTypeDirPath() /
+            (QLDeviceManager::getInstance()->convertToDeviceTypeString() + "_Supp.db");
+      }
+      if (s_describeOnly) {
+        repack_constraints_in = std::filesystem::temp_directory_path() / REPACK_TEMPLATE_MASK;
+      } else {
+        repack_constraints_in = GenerateTempFilePath();
+      }
+      if (!s_describeOnly &&
+          !decryptDeviceFile(repack_constraints_en_path, repack_constraints_in,
                              QLDeviceManager::getInstance()->deviceTypeDirPath(),
                              QLDeviceManager::getInstance()->convertToDeviceTypeString())) {
         // Not fatal: without a template we skip generating the per-design repack
@@ -8650,7 +8740,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
       args.push_back(user_repack_constraints.string());
     }
   }
-  else if (user_repack_constraints.empty()) {
+  else if (user_repack_constraints.empty() && !s_describeOnly) {
     // No device copy and nothing supplied with the design. Nothing will bind the
     // design clocks to the fabric global clock pins. Device templates written as
     // '${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}' degrade to a bare 'repack'; the
@@ -8662,20 +8752,40 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
             " pins, and bitstream generation might not work properly.");
   }
 
-  int status = FileUtils::ExecuteSystemCommand(command, args, m_out, /*timeout_ms*/-1).realCode;
-
-  if (status == 1) { //Failure
-    ErrorMessage("Design " + ProjManager()->projectName() +
-                " IO Floor Plan Generation Failed!");
-    return false;
-  }
-  else if (status == 2){ //Skipped
-    Message("IO Floor Plan Generation Skipped!");
+  job.python = command;
+  job.args = args;
+  if (!m_engineSelected) {
     return true;
   }
-  else { //Success
-    return true;
+  // The describe form: every input file declared, the decrypted template and the
+  // private output by their masks.
+  static const std::set<std::string> inputOptions{
+      "--blif_file",      "--clocks_file", "--device_layout_file",     "--pin_table_file",
+      "--fpga_io_map_xml", "--pcf_file",   "--user_repack_constraints"};
+  job.command = std::make_shared<CommandWrapper>(command);
+  job.command->appendPath(std::filesystem::path{args.front()});
+  for (size_t i = 1; i + 1 < args.size(); i += 2) {
+    const std::string& option = args[i];
+    const std::filesystem::path value{args[i + 1]};
+    if (inputOptions.count(option)) {
+      job.command->appendPath(option, value);
+    } else if (option == "--repack_constraints_in" && !repack_template_digest.empty()) {
+      job.command->appendPath(option, value, REPACK_TEMPLATE_MASK);
+      job.command->setHostDigest(value, repack_template_digest);
+      job.command->addKeyPath(repack_template_key_db);
+    } else if (option == "--repack_constraints_in") {
+      job.command->appendPath(option, value);
+    } else if (option == "--repack_constraints_out" && value == repack_constraints_private) {
+      job.command->append(option, args[i + 1]);
+      job.command->declareOutput(value, "repack_constraints_private");
+    } else {
+      job.command->append(option, args[i + 1]);
+    }
   }
+  if (fs::exists(floor_planning_constraint_filepath)) {
+    job.command->declarePath(floor_planning_constraint_filepath);
+  }
+  return true;
 }
 
 bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlistFile) {
@@ -12051,6 +12161,11 @@ bool CompilerOpenFPGA_ql::hasCompilationCache() const
 }
 
 void CompilerOpenFPGA_ql::onQdcFileSaved() {
+  // Floorplan is a stage of its own under the engine; a save only makes it stale.
+  if (m_engineSelected) {
+    invalidateTaskStatuses();
+    return;
+  }
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
     CleanTempFiles();
@@ -12066,6 +12181,10 @@ void CompilerOpenFPGA_ql::onQdcFileSaved() {
 }
 
 void CompilerOpenFPGA_ql::onPcfFileSaved() {
+  if (m_engineSelected) {
+    invalidateTaskStatuses();
+    return;
+  }
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
     CleanTempFiles();

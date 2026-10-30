@@ -153,7 +153,9 @@ TEST_F(EngineBackendTest, stage_names_and_profiles) {
   EXPECT_EQ(EngineBackend::stageName(ROUTE), "route");
   EXPECT_EQ(EngineBackend::stageName(STA), "sta");
   EXPECT_EQ(EngineBackend::stageName(static_cast<int>(Compiler::Action::Batch)), "");
+  EXPECT_EQ(EngineBackend::stageName(EngineBackend::FLOORPLAN_TASK), "floorplan");
   EXPECT_TRUE(EngineBackend::decides("route"));
+  EXPECT_TRUE(EngineBackend::decides("floorplan"));
   EXPECT_FALSE(EngineBackend::decides("sta"));
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "0"), "");
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "1"), "synplify");
@@ -383,6 +385,22 @@ TEST_F(EngineBackendTest, record_clears_later_cpp_cache_entries) {
   write(cache, entries.dump());
 
   backend(client)->storeTaskCommand(PACK, vprCommand());
+  const nlohmann::json left = nlohmann::json::parse(FileUtils::GetFileContent(cache));
+  EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
+}
+
+// The C++ cache has no floorplan entry; an engine floorplan record makes pack's
+// and every later entry stale.
+TEST_F(EngineBackendTest, a_floorplan_record_clears_cpp_entries_from_pack_on) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const fs::path cache = m_project / COMPILATION_CACHE_FILENAME;
+  nlohmann::json entries{{std::to_string(SYNTH) + "_0", 1}, {std::to_string(PACK), 1},
+                         {std::to_string(ROUTE), 1}};
+  write(cache, entries.dump());
+
+  backend(client)->storeTaskCommand(EngineBackend::FLOORPLAN_TASK, vprCommand());
+  EXPECT_EQ(calls().at(0)["request"]["stage"], "floorplan");
   const nlohmann::json left = nlohmann::json::parse(FileUtils::GetFileContent(cache));
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
 }

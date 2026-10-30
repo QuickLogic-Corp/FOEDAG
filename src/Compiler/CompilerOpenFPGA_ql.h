@@ -423,6 +423,20 @@ private:
   EngineStageContext engineContext(const std::string& stage, const std::string& profile = {});
   std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
   void invalidateEngineRecords(int taskId);
+  // IO floorplanning as its own engine stage (row 1.11): the builder, the run,
+  // and the decision, made once per task.
+  struct FloorplanJob {
+    std::string python;
+    std::vector<std::string> args;
+    CommandWrapperPtr command;  // describe form; built only under the engine
+    bool deferred = false;  // AUTO/RESOURCES device not yet packed: nothing to do
+    std::vector<std::filesystem::path> removeBeforeRun;
+  };
+  static constexpr const char* REPACK_TEMPLATE_MASK = "repack_template_mask";
+  std::optional<bool> m_floorplanOutcome;
+  bool buildFloorplan(FloorplanJob& job);
+  int runFloorplan(const FloorplanJob& job);
+  bool engineFloorplan();
   // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
   // the engine: the caller fails the task although its tool succeeded (T-015).
   bool faultAfterTool(const std::string& stage) const;

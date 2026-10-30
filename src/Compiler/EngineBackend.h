@@ -84,6 +84,8 @@ public:
 
   // The engine's name for a task; empty for a task with no stage.
   static std::string stageName(int taskId);
+  // Floorplanning has no Compiler::Action; this id stands for it.
+  static constexpr int FLOORPLAN_TASK = 1000;
   // Bitstream's encode sub-step is its own record (aurora2 stages.ENCODE_PROFILE).
   static constexpr const char* ENCODE_PROFILE = "encode";
   // Value options naming key material; the engine refuses to read their files.

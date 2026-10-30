@@ -70,6 +70,7 @@ EngineBackend::EngineBackend(Compiler* compiler, FlowEngineClient client,
     : m_compiler(compiler), m_client(std::move(client)), m_context(std::move(context)) {}
 
 std::string EngineBackend::stageName(int taskId) {
+  if (taskId == FLOORPLAN_TASK) return "floorplan";
   switch (static_cast<Action>(taskId)) {
     case Action::Synthesis:
       return "synth";
@@ -91,8 +92,9 @@ std::string EngineBackend::stageName(int taskId) {
 }
 
 bool EngineBackend::decides(const std::string& stage) {
-  // Floorplan, STA, power and bitstream join with row 1.11.
-  return stage == "synth" || stage == "pack" || stage == "place" || stage == "route";
+  // STA, power and bitstream join with row 1.11.
+  return stage == "synth" || stage == "floorplan" || stage == "pack" || stage == "place" ||
+         stage == "route";
 }
 
 std::string EngineBackend::profileName(int taskId, const std::string& profile) {
@@ -395,8 +397,11 @@ void EngineBackend::record(const Pending& pending) {
                           "); it runs next time");
       return;
     }
-    // REQ-125: the C++ cache's entries for this task and every later one are stale.
-    CppBackend::forgetTasks(m_projectPath, pending.taskId, static_cast<int>(Action::Bitstream));
+    // REQ-125: the C++ cache's entries for this task and every later one are
+    // stale; the C++ cache folds floorplanning into pack.
+    const int from =
+        pending.taskId == FLOORPLAN_TASK ? static_cast<int>(Action::Pack) : pending.taskId;
+    CppBackend::forgetTasks(m_projectPath, from, static_cast<int>(Action::Bitstream));
   } catch (const std::exception& e) {
     m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + e.what() +
                         "); it runs next time");
