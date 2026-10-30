@@ -420,7 +420,7 @@ private:
   void selectIncrementalBackend();
   std::unique_ptr<IncrementalBackend> makeCppBackend();
   std::filesystem::path engineInstallRoot() const;
-  EngineStageContext engineContext(const std::string& stage);
+  EngineStageContext engineContext(const std::string& stage, const std::string& profile = {});
   std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
   void invalidateEngineRecords(int taskId);
   // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under

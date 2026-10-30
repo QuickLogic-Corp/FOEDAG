@@ -117,11 +117,16 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
             name + "_post_synth.v",    name + "_post_synth.edif",
             name + "_post_synth.vhd",  name + ".clocks"};
   }
+  if (stage == "floorplan") {
+    return {name + "_repack_design_constraint.xml", name + "_constraints.xml",
+            name + "_rpm_constraints.xml"};
+  }
   if (stage == "pack") {
     std::vector<std::string> outputs{name + "_post_synth.net"};
     if (ctx.layoutResolvedInPack) {
-      for (const char* file : {"device_layout.json", "pack_layout.json", "vpr_generated.xml",
-                               "sb_maps_generated.yml"}) {
+      // Pack deletes the plaintext generated arch once it is encrypted.
+      for (const char* file : {"device_layout.json", "pack_layout.json", "vpr_generated.xml.en",
+                               "sb_maps_generated.yml", "sb_maps_generated.yml.en"}) {
         outputs.emplace_back(file);
       }
     }
@@ -129,7 +134,20 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
   }
   if (stage == "place") return {name + "_post_synth.place", name + "_place2pcf.pcf"};
   if (stage == "route") return {name + "_post_synth.route"};
+  if (stage == "bitstream") {
+    if (profile == ENCODE_PROFILE) {
+      return {name + "_fabric_bitstream.bch", name + "_fabric_bitstream.ascon",
+              name + "_fabric_bitstream.tag"};
+    }
+    return {"fabric_bitstream.bit"};
+  }
   return {};
+}
+
+const std::vector<std::string>& EngineBackend::keyOptions() {
+  static const std::vector<std::string> options{"--crypt_key_db", "--ascon_key", "--ascon_nonce",
+                                                "--ascon_ad"};
+  return options;
 }
 
 bool EngineBackend::hasRecords(const fs::path& project) {
@@ -160,7 +178,19 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
 
   std::vector<std::string> outputs;
   std::set<fs::path> owned;
+  nlohmann::json hostDigests = nlohmann::json::object();
   for (const std::string& output : ownedOutputs(stage, profile, ctx)) {
+    const fs::path path = absolute(output, ctx.project);
+    outputs.push_back(utf8(path));
+    owned.insert(path);
+    // A host digest stands for a file; a missing one must stay missing.
+    auto digest = ctx.outputHostDigests.find(output);
+    std::error_code ec;
+    if (digest != ctx.outputHostDigests.end() && fs::exists(path, ec)) {
+      hostDigests[utf8(path)] = digest->second;
+    }
+  }
+  for (const fs::path& output : command.declaredOutputs()) {
     const fs::path path = absolute(output, ctx.project);
     outputs.push_back(utf8(path));
     owned.insert(path);
@@ -196,7 +226,6 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     }
   }
 
-  nlohmann::json hostDigests = nlohmann::json::object();
   for (const auto& [path, digest] : command.hostDigests()) {
     hostDigests[utf8(absolute(path, ctx.project))] = digest;
   }
@@ -207,11 +236,17 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     keys.insert(absolute(path, ctx.project));
   }
   const std::vector<std::string>& argv = command.argv();
-  for (size_t i = 0; i + 1 < argv.size(); ++i) {
-    if (argv[i] == "--crypt_key_db") keys.insert(absolute(fs::u8path(argv[i + 1]), ctx.project));
+  for (size_t i = 0; i < argv.size(); ++i) {
+    for (const std::string& option : keyOptions()) {
+      if (argv[i] == option && i + 1 < argv.size()) {
+        keys.insert(absolute(fs::u8path(argv[i + 1]), ctx.project));
+      } else if (argv[i].rfind(option + "=", 0) == 0) {
+        keys.insert(absolute(fs::u8path(argv[i].substr(option.size() + 1)), ctx.project));
+      }
+    }
   }
   // The engine refuses to read key material (REQ-012), so a key input such as
-  // VPR's --crypt_key_db reaches it as a host digest.
+  // VPR's --crypt_key_db or an encoder key file reaches it as a host digest.
   for (const std::string& input : inputs) {
     const fs::path path = fs::u8path(input);
     if (hostDigests.contains(input) || !(keys.count(path) || isKeyDatabase(path))) continue;
@@ -227,6 +262,11 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
   req["key_paths"] = keyPaths;
   req["session_state"] = ctx.sessionState;
   req["external"] = ctx.external;
+  if (!ctx.metrics.is_null()) {
+    // The catalogue always goes with the metrics: without it the engine runs.
+    req["metrics"] = ctx.metrics;
+    req["metrics_catalogue"] = ctx.metricsCatalogue;
+  }
   return req;
 }
 
@@ -244,8 +284,8 @@ bool EngineBackend::upstreamStale(const std::string& stage,
   for (const UpstreamCommand& up : upstream) {
     if (!up.command) return true;  // an upstream command that cannot be built is stale
     const std::string name = stageName(up.taskId);
-    nlohmann::json item = request("plan", name, profileName(up.taskId, up.profile),
-                                  *up.command, m_context(name));
+    const std::string profile = profileName(up.taskId, up.profile);
+    nlohmann::json item = request("plan", name, profile, *up.command, m_context(name, profile));
     for (const char* key : {"v", "op", "project", "device_dir"}) item.erase(key);
     plan["stages"].push_back(std::move(item));
   }
@@ -286,7 +326,8 @@ bool EngineBackend::decide(int taskId, const std::string& profile,
                            const CommandWrapperPtr& command) const {
   const std::string stage = stageName(taskId);
   if (!command || !decides(stage)) return true;
-  const EngineStageContext ctx = m_context(stage);
+  const std::string engineProfile = profileName(taskId, profile);
+  const EngineStageContext ctx = m_context(stage, engineProfile);
   // Pack sets the generated-layout members only when it runs; restoring them
   // on a skip is row 1.10.
   if (stage == "pack" && ctx.layoutResolvedInPack) return true;
@@ -296,7 +337,7 @@ bool EngineBackend::decide(int taskId, const std::string& profile,
   }
 
   const bool inTask = this->inTask();
-  nlohmann::json req = request("check", stage, profileName(taskId, profile), *command, ctx);
+  nlohmann::json req = request("check", stage, engineProfile, *command, ctx);
   if (inTask) {
     req["begin"] = true;  // a stage about to run loses its record first
     req["upstream_stale"] = upstreamStale(stage, ctx);
@@ -326,8 +367,9 @@ void EngineBackend::storeTaskCommand(int taskId, const std::string& profile,
   if (!command || !decides(stage) || !m_client.usable()) return;
   Pending pending{taskId, {}};
   try {
+    const std::string engineProfile = profileName(taskId, profile);
     pending.request =
-        request("record", stage, profileName(taskId, profile), *command, m_context(stage));
+        request("record", stage, engineProfile, *command, m_context(stage, engineProfile));
   } catch (const std::exception& e) {
     m_compiler->Message("Warning: flow engine cannot record " + stage + " (" + e.what() +
                         "); it runs next time");

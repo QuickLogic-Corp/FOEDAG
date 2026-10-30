@@ -151,7 +151,9 @@ void CompilerOpenFPGA_ql::selectIncrementalBackend() {
     // REQ-143: the interpreter is looked up only now, when the switch selects it.
     auto engineBackend = std::make_unique<EngineBackend>(
         this, FlowEngineClient(installRoot),
-        [this](const std::string& stage) { return engineContext(stage); });
+        [this](const std::string& stage, const std::string& profile) {
+          return engineContext(stage, profile);
+        });
     engineBackend->setUpstreamProvider(
         [this](const std::string& stage) { return engineUpstream(stage); });
     m_incrementalBackend = std::move(engineBackend);
@@ -196,7 +198,8 @@ void CompilerOpenFPGA_ql::invalidateEngineRecords(int taskId) {
   }
 }
 
-EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage) {
+EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage,
+                                                      const std::string& profile) {
   EngineStageContext ctx;
   ctx.project = ProjManager()->projectPath();
   ctx.projectName = ProjManager()->projectName();
@@ -220,11 +223,22 @@ EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage) 
   if (stage == "synth") {
     state["synthesis_tool"] = static_cast<int>(ProjManager()->synthesisTool());
     state["verific"] = m_useVerific;
-  } else {
+  } else if (stage != "floorplan" && stage != "power") {
     state["netlist_type"] = static_cast<int>(GetNetlistType());
     state["channel_width"] = m_channel_width;
     state["pnr_options"] = PnROpt();
     if (stage == "place") state["pin_assign"] = static_cast<int>(PinAssignOpts());
+  }
+  if (stage == "bitstream") {
+    if (profile == EngineBackend::ENCODE_PROFILE) {
+      state["encode_stages"] = ResolveBitstreamEncodeStages();
+    } else {
+      state["bits_opt"] = static_cast<int>(BitsOpt());
+      state["pb_pin_fixup"] = m_pb_pin_fixup;
+      state["device_size"] = m_deviceSize;
+      // bitstream_config_files -repack; the other files come from the device.
+      state["repack_constraints"] = m_OpenFpgaRepackConstraintsFile.u8string();
+    }
   }
 
   // A user-supplied net/place/route file is never run over.

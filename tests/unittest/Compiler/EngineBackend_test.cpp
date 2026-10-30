@@ -117,7 +117,7 @@ protected:
 
   std::unique_ptr<EngineBackend> backend(FlowEngineClient client) {
     auto b = std::make_unique<EngineBackend>(&m_compiler, std::move(client),
-                                             [this](const std::string&) { return m_ctx; });
+                                             [this](const std::string&, const std::string&) { return m_ctx; });
     b->setProjectPath(m_project);
     return b;
   }
@@ -181,7 +181,67 @@ TEST_F(EngineBackendTest, owned_outputs_follow_the_ownership_table) {
   EXPECT_EQ(EngineBackend::ownedOutputs("pack", "", m_ctx).size(), 1u);
   m_ctx.layoutResolvedInPack = true;
   const auto pack = EngineBackend::ownedOutputs("pack", "", m_ctx);
-  EXPECT_NE(std::find(pack.begin(), pack.end(), "pack_layout.json"), pack.end());
+  const auto owns = [&pack](const std::string& file) {
+    return std::find(pack.begin(), pack.end(), file) != pack.end();
+  };
+  EXPECT_TRUE(owns("pack_layout.json"));
+  EXPECT_TRUE(owns("vpr_generated.xml.en"));
+  EXPECT_TRUE(owns("sb_maps_generated.yml"));
+  EXPECT_TRUE(owns("sb_maps_generated.yml.en"));
+  EXPECT_FALSE(owns("vpr_generated.xml"));  // deleted once encrypted
+  EXPECT_EQ(EngineBackend::ownedOutputs("floorplan", "", m_ctx),
+            (std::vector<std::string>{"counter_repack_design_constraint.xml",
+                                      "counter_constraints.xml", "counter_rpm_constraints.xml"}));
+  EXPECT_EQ(EngineBackend::ownedOutputs("bitstream", "", m_ctx),
+            std::vector<std::string>{"fabric_bitstream.bit"});
+  EXPECT_EQ(EngineBackend::ownedOutputs("bitstream", "encode", m_ctx).size(), 3u);
+  EXPECT_TRUE(EngineBackend::ownedOutputs("sta", "fast", m_ctx).empty());
+  EXPECT_TRUE(EngineBackend::ownedOutputs("power", "", m_ctx).empty());
+}
+
+// REQ-122: metrics always travel with their catalogue, null meaning the
+// installed default; a stage without metrics sends neither.
+TEST_F(EngineBackendTest, metrics_go_with_their_catalogue) {
+  const auto b = backend({});
+  nlohmann::json req = b->request("check", "power", "", *vprCommand(), m_ctx);
+  EXPECT_FALSE(req.contains("metrics"));
+  EXPECT_FALSE(req.contains("metrics_catalogue"));
+
+  m_ctx.metrics = {{"routing.num_input", "3"}};
+  req = b->request("check", "power", "", *vprCommand(), m_ctx);
+  EXPECT_EQ(req["metrics"], m_ctx.metrics);
+  ASSERT_TRUE(req.contains("metrics_catalogue"));
+  EXPECT_TRUE(req["metrics_catalogue"].is_null());
+
+  m_ctx.metricsCatalogue = (m_root / "my_metrics.json").string();
+  req = b->request("check", "power", "", *vprCommand(), m_ctx);
+  EXPECT_EQ(req["metrics_catalogue"], (m_root / "my_metrics.json").string());
+}
+
+// REQ-121: an encrypted owned output is known by its plaintext digest, but only
+// while it exists; outputs outside the project are keyed by their mask.
+TEST_F(EngineBackendTest, output_host_digests_and_private_outputs) {
+  m_ctx.layoutResolvedInPack = true;
+  const std::string plain = "sha256:" + std::string(64, 'b');
+  m_ctx.outputHostDigests["vpr_generated.xml.en"] = plain;
+  m_ctx.outputHostDigests["sb_maps_generated.yml.en"] = plain;
+  write(m_project / "vpr_generated.xml.en", "cipher");
+  const fs::path privateOut = m_root / "private" / "counter_repack.xml";
+  auto command = vprCommand();
+  command->declareOutput(privateOut, "repack_constraints_private");
+  command->declarePath(m_root / "data.csv");
+
+  const nlohmann::json req = backend({})->request("check", "pack", "", *command, m_ctx);
+  EXPECT_EQ(req["host_digests"][(m_project / "vpr_generated.xml.en").string()], plain);
+  EXPECT_FALSE(req["host_digests"].contains((m_project / "sb_maps_generated.yml.en").string()));
+  const auto& outputs = req["outputs"];
+  EXPECT_NE(std::find(outputs.begin(), outputs.end(), privateOut.string()), outputs.end());
+  EXPECT_EQ(req["temps"][privateOut.string()], "repack_constraints_private");
+  const auto& inputs = req["inputs"];
+  EXPECT_NE(std::find(inputs.begin(), inputs.end(), (m_root / "data.csv").string()), inputs.end());
+  EXPECT_EQ(std::find(inputs.begin(), inputs.end(), privateOut.string()), inputs.end());
+  // declarePath adds no argv token.
+  EXPECT_EQ(req["argv"], nlohmann::json(vprCommand()->argv()));
 }
 
 // The describe form: ordered argv, every declared path whether or not it
@@ -358,6 +418,26 @@ TEST_F(EngineBackendTest, key_material_inputs_carry_host_digests) {
   EXPECT_EQ(req["host_digests"][keyDb.string()], FlowEngineClient::sha256File(keyDb));
   EXPECT_EQ(req["host_digests"][other.string()], FlowEngineClient::sha256File(other));
   EXPECT_FALSE(req["host_digests"].contains((m_project / "counter_post_synth.net").string()));
+}
+
+// The encoder's ASCON key files are key material too, in either option form.
+TEST_F(EngineBackendTest, ascon_key_files_carry_host_digests) {
+  const fs::path key = write(m_root / "keys" / "key.txt", "k");
+  const fs::path nonce = write(m_root / "keys" / "nonce.txt", "n");
+  const fs::path ad = write(m_project / "ad.txt", "a");
+  auto command = std::make_shared<CommandWrapper>("python3");
+  command->append("--ascon_key", key.string());
+  command->declarePath(key);
+  command->append("--ascon_nonce=" + nonce.string());
+  command->declarePath(nonce);
+  command->append("--ascon_ad", "ad.txt");
+  command->declarePath(fs::path{"ad.txt"});
+
+  const nlohmann::json req =
+      backend({})->request("check", "bitstream", "encode", *command, m_ctx);
+  EXPECT_EQ(req["host_digests"][key.string()], FlowEngineClient::sha256File(key));
+  EXPECT_EQ(req["host_digests"][nonce.string()], FlowEngineClient::sha256File(nonce));
+  EXPECT_EQ(req["host_digests"][ad.string()], FlowEngineClient::sha256File(ad));
 }
 
 // A status query on another thread while a task runs neither removes records

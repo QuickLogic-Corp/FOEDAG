@@ -41,8 +41,16 @@ struct EngineStageContext {
   bool layoutResolvedInPack = false;
   bool external = false;  // the stage's output is a user-supplied file (REQ-018)
   nlohmann::json sessionState = nlohmann::json::object();  // REQ-017
+  // Parsed metric values the stage consumes (REQ-122); null when it consumes none.
+  nlohmann::json metrics = nullptr;
+  // Absolute path of the metrics catalogue read; null for the installed default.
+  nlohmann::json metricsCatalogue = nullptr;
+  // Digests of owned outputs the engine must not read as they are: encrypted
+  // files, identified by their plaintext (REQ-121). Project-relative keys.
+  std::map<std::string, std::string> outputHostDigests;
 };
-using EngineContextProvider = std::function<EngineStageContext(const std::string& stage)>;
+using EngineContextProvider =
+    std::function<EngineStageContext(const std::string& stage, const std::string& profile)>;
 struct UpstreamCommand {
   int taskId;
   std::string profile;  // as the call sites pass it
@@ -76,6 +84,10 @@ public:
 
   // The engine's name for a task; empty for a task with no stage.
   static std::string stageName(int taskId);
+  // Bitstream's encode sub-step is its own record (aurora2 stages.ENCODE_PROFILE).
+  static constexpr const char* ENCODE_PROFILE = "encode";
+  // Value options naming key material; the engine refuses to read their files.
+  static const std::vector<std::string>& keyOptions();
   // True for the stages this backend decides; the rest always run.
   static bool decides(const std::string& stage);
   // The engine's profile: synthesis keys Yosys as the stage's only profile.

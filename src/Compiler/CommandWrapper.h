@@ -536,6 +536,7 @@ public:
   // the host computes for decrypted or key-protected files. Never serialized.
   const std::vector<std::string>& argv() const { return m_argv; }
   const std::vector<std::filesystem::path>& declaredPaths() const { return m_declaredPaths; }
+  const std::vector<std::filesystem::path>& declaredOutputs() const { return m_declaredOutputs; }
   const std::map<std::string, std::string>& temps() const { return m_temps; }
   const std::map<std::string, std::string>& hostDigests() const { return m_hostDigests; }
   const std::vector<std::filesystem::path>& keyPaths() const { return m_keyPaths; }
@@ -548,6 +549,19 @@ public:
     m_hostDigests[path.string()] = digest;
   }
   void addKeyPath(const std::filesystem::path& path) { m_keyPaths.push_back(path); }
+  // An input the tool reads that no argv token names (a script's data file, say).
+  void declarePath(const std::filesystem::path& file, const std::string& mask = "") {
+    m_declaredPaths.push_back(file);
+    if (!mask.empty()) {
+      m_temps[file.string()] = mask;
+    }
+  }
+  // An output outside the project, keyed by its mask so its location does not
+  // matter; the engine sees it missing in a process that did not write it.
+  void declareOutput(const std::filesystem::path& file, const std::string& mask) {
+    m_declaredOutputs.push_back(file);
+    m_temps[file.string()] = mask;
+  }
 
   void append(const std::string& parameter, const std::string& value = "") {
     appendArgument(parameter, value);
@@ -589,6 +603,7 @@ private:
 
   std::vector<std::string> m_argv;
   std::vector<std::filesystem::path> m_declaredPaths;
+  std::vector<std::filesystem::path> m_declaredOutputs;
   std::map<std::string, std::string> m_temps;  // path -> role (its mask)
   std::map<std::string, std::string> m_hostDigests;
   std::vector<std::filesystem::path> m_keyPaths;
