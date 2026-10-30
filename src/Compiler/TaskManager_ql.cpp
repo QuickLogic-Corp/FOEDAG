@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/CompilerDefines.h"
 #include "Main/DialogProvider.h"
+#include "GuiTestFramework/GuiMilestone.h"
 #include "Reports/PackingReportManager.h"
 #include "Reports/PlacementReportManager.h"
 #include "Reports/RoutingReportManager.h"
@@ -237,6 +238,7 @@ TaskManager::TaskManager(Compiler *compiler, QObject *parent)
           &TaskManager::taskReportCreated);
   m_reportManagerRegistry.registerReportManager(POWER,
                                                 std::move(paReportManager));
+  GUI_TEST_BRIDGE(this);
 }
 
 TaskManager::~TaskManager() { qDeleteAll(m_tasks); }

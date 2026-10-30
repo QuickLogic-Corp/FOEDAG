@@ -56,6 +56,12 @@ void CommandLine::processArgs() {
         }
       } else
         ErrorAndExit("Specify a replay file!");
+    } else if (token == "--record") {
+      i++;
+      if (i < m_argc)
+        m_guiRecordFile = m_argv[i];
+      else
+        ErrorAndExit("Specify a file to record to!");
     } else if (token == "--verific") {
       m_useVerific = true;
     } else if (token == "--script") {

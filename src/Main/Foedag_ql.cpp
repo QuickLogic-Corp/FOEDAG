@@ -39,6 +39,7 @@ extern "C" {
 #include <QDir>
 #include <QGuiApplication>
 #include <QLabel>
+#include <QStyleFactory>
 #include <QThreadPool>
 //#include <QQmlApplicationEngine>
 //#include <QQmlContext>
@@ -56,6 +57,9 @@ extern "C" {
 #include "Console/TclWorker.h"
 #include "EventLoopProbe.h"
 #include "FoedagStyle.h"
+#include "GuiTestFramework/GuiRecorder.h"
+#include "GuiTestFramework/GuiTestHub.h"
+#include "GuiTestFramework/GuiTestMode.h"
 #include "Main/Foedag.h"
 #include "Main/ToolContext.h"
 #include "MainWindow/Session.h"
@@ -184,6 +188,8 @@ bool Foedag::initGui() {
 #endif
   // Gui mode with Qt Widgets
   int argc = m_cmdLine->Argc();
+  // Must run before the QApplication exists, to set its platform.
+  FOEDAG::GuiTestMode::prepareEnvironment(!m_cmdLine->GuiTestScript().empty());
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
   // Heap-allocate so the destructor can be called via std::atexit (registered
   // in aboutToQuit below). Tcl_MainEx calls C exit() which bypasses stack
@@ -192,7 +198,11 @@ bool Foedag::initGui() {
 #else
   QApplication app(argc, m_cmdLine->Argv());
 #endif
-  QApplication::setStyle(new FoedagStyle(QApplication::style()));
+  // Replay renders with Fusion, the same on every platform (REQ-014).
+  QApplication::setStyle(new FoedagStyle(
+      FOEDAG::GuiTestMode::isActive() ? QStyleFactory::create("Fusion")
+                                      : QApplication::style()));
+  FOEDAG::GuiTestMode::applyToApplication();
   FOEDAG::EventLoopProbe::fromEnvironment(qApp);
   FOEDAG::TclInterpreter* interpreter =
       new FOEDAG::TclInterpreter(m_cmdLine->Argv()[0]);
@@ -203,6 +213,24 @@ bool Foedag::initGui() {
   loadTclInitFile(commands, m_context->ExecutableName());
 
   QWidget* mainWin = nullptr;
+
+  // Before the main window, so objects it creates are bridged and recorded.
+  const bool replay = !m_cmdLine->GuiTestScript().empty();
+  const bool record = !m_cmdLine->GuiRecordFile().empty();
+  if (replay || record) {
+    FOEDAG::GuiTestHub::instance()->enable();
+    // Qt's own file dialog, so file choices are visible to the recorder and
+    // to the gui_* commands (REQ-027).
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+  }
+  if (record) {
+    QString error;
+    if (!FOEDAG::GuiRecorder::instance()->start(
+            QString::fromStdString(m_cmdLine->GuiRecordFile()), &error)) {
+      std::cerr << "ERROR: " << error.toStdString() << std::endl;
+      return false;
+    }
+  }
 
   GlobalSession = new FOEDAG::Session(nullptr, interpreter, commands, m_cmdLine,
                                       m_context, m_compiler, m_settings);
