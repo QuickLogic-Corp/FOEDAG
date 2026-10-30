@@ -44,13 +44,19 @@ void EngineStatusRefresh::request() {
   m_timer.start();
 }
 
+void EngineStatusRefresh::taskStarted() {
+  ++m_generation;
+  if (m_inFlight > 0) {
+    m_skippedForTask = true;
+  }
+}
+
 void EngineStatusRefresh::taskFinished() {
   QPointer<EngineStatusRefresh> self(this);
   QMetaObject::invokeMethod(
       qApp,
       [self] {
-        if (self && self->m_skippedForTask) {
-          self->m_skippedForTask = false;
+        if (self && self->m_skippedForTask.exchange(false)) {
           self->request();
         }
       },
@@ -68,6 +74,7 @@ void EngineStatusRefresh::fire() {
     return;
   }
   QPointer<EngineStatusRefresh> self(this);
+  ++m_inFlight;
   QThreadPool::globalInstance()->start([self, generation, work = std::move(work)] {
     nlohmann::json answer = work();
     // Delivered through the application object, which outlives this one.
@@ -81,6 +88,7 @@ void EngineStatusRefresh::fire() {
 }
 
 void EngineStatusRefresh::deliver(quint64 generation, const nlohmann::json& answer) {
+  --m_inFlight;
   if (generation != m_generation) {
     return;  // a newer query is on its way
   }

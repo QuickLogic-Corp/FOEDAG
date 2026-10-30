@@ -21,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "nlohmann_json/json.hpp"
 
 #include <QObject>
+#include <atomic>
 #include <QTimer>
 #include <functional>
 #include <string>
@@ -48,6 +49,9 @@ class EngineStatusRefresh : public QObject {
 
   // GUI thread. Each call restarts the debounce window.
   void request();
+  // Any thread: a task starts. A query already running answers for the state
+  // before the task, so its answer is dropped and it is asked again afterwards.
+  void taskStarted();
   // Any thread: a task ended; a query skipped meanwhile runs now.
   void taskFinished();
 
@@ -69,8 +73,9 @@ class EngineStatusRefresh : public QObject {
   Apply m_apply;
   Busy m_busy;
   QTimer m_timer;
-  quint64 m_generation = 0;
-  bool m_skippedForTask = false;
+  std::atomic<quint64> m_generation{0};
+  std::atomic<int> m_inFlight{0};
+  std::atomic<bool> m_skippedForTask{false};
 };
 
 }  // namespace FOEDAG

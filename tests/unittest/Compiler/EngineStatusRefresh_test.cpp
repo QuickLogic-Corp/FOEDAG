@@ -133,6 +133,27 @@ TEST(EngineStatusRefresh, an_answer_arriving_during_a_task_waits_for_it) {
   EXPECT_EQ(probe.applied, std::vector<int>{2});
 }
 
+// A short task that starts and ends while a query is out: the query saw the
+// state before the task, so its answer is dropped and it is asked again.
+TEST(EngineStatusRefresh, a_task_inside_a_running_query_makes_it_ask_again) {
+  Probe probe;
+  probe.workMs = 300;
+  auto refresh = probe.make(20);
+  refresh->request();
+  runEventLoop(100);  // the first query is now running on the worker
+  ASSERT_EQ(probe.describes, 1);
+  refresh->taskStarted();
+  refresh->taskFinished();
+  runEventLoop(1000);
+  EXPECT_EQ(probe.describes, 2);
+  EXPECT_EQ(probe.applied, std::vector<int>{2});
+
+  refresh->taskStarted();  // nothing out: nothing to ask again
+  refresh->taskFinished();
+  runEventLoop(200);
+  EXPECT_EQ(probe.describes, 2);
+}
+
 bool hasCommand(TclInterpreter& interp, const std::string& name) {
   return interp.evalCmd("info commands " + name) == name;
 }

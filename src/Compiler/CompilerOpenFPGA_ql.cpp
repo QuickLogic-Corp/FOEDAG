@@ -344,6 +344,9 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
 
 void CompilerOpenFPGA_ql::BeforeCompileTask(Action action) {
   m_floorplanOutcome.reset();
+  if (m_statusRefresh) {
+    m_statusRefresh->taskStarted();
+  }
   // A later stage run on its own needs the layout an earlier pack resolved.
   if (m_engineSelected && action > Action::Pack && action <= Action::Bitstream &&
       !m_autoLayoutGenerationMode && !m_customLayoutGenerationMode) {
