@@ -2355,6 +2355,11 @@ void MainWindow::floorPlanningActionTriggered()
         args.append("--show_arch_resources");
 
         QProcess* process = new QProcess;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("QT_QPA_PLATFORM",
+                   QString::fromStdString(Compiler::getQtPlatformPluginFor(
+                       Compiler::IsVprGuiCommand(args.join(" ").toStdString()))));
+        process->setProcessEnvironment(env);
         const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
         std::filesystem::current_path(projectPath);
         process->start(vpr_program, args);

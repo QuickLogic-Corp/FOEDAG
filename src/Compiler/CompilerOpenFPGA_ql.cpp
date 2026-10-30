@@ -4407,10 +4407,10 @@ bool CompilerOpenFPGA_ql::Packing() {
     FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command_size_search);
 
     Message("Packing is running in Auto Layout Generation Mode: searching the device size with '--disable_pack_retries on'\n");
-    status = ExecuteAndMonitorSystemCommand(command_size_search);
+    status = ExecuteAndMonitorQtApplication(command_size_search, IsVprGuiCommand(command_size_search));
   }
   else {
-    status = ExecuteAndMonitorSystemCommand(command->string());
+    status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
   }
 
 
@@ -4719,7 +4719,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
     std::filesystem::path logfile_generate_rr_graph = 
         std::filesystem::path(ProjManager()->projectPath()) / "generate_rr_graph.log";
-    int status_generate_rr_graph = ExecuteAndMonitorSystemCommand(command_generate_rr_graph,
+    int status_generate_rr_graph = ExecuteAndMonitorQtApplication(command_generate_rr_graph, IsVprGuiCommand(command_generate_rr_graph),
                                                                   logfile_generate_rr_graph.string());
 
     if (status_generate_rr_graph == 0) {
@@ -4871,7 +4871,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     if(m_customLayoutGenerationMode) {
       Message("Packing is being run with Custom Layout Generated Device!\n");
     }
-    status = ExecuteAndMonitorSystemCommand(command_rerun);
+    status = ExecuteAndMonitorQtApplication(command_rerun, IsVprGuiCommand(command_rerun));
 
     // the 'status' will be checked as in the usual flow, as for us, the usual flow
     // resumes, but in 'm_autoLayoutGenerationMode' or 'm_customLayoutGenerationMode'
@@ -5214,7 +5214,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement is being run with Custom Layout Generated Device!");
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command->string());
+  int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -5494,7 +5494,7 @@ bool CompilerOpenFPGA_ql::Route() {
     Message("Route is being run with Custom Layout Generated Device!");
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command->string());
+  int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
@@ -5858,7 +5858,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!taCommand) {
       return false;
     }
-    const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
+    const int status = ExecuteAndMonitorQtApplication(taCommand->string(), IsVprGuiCommand(taCommand->string()));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -5902,7 +5902,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
 
-    int status = ExecuteAndMonitorSystemCommand(command->string());
+    int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " timing analysis failed");
@@ -5963,7 +5963,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     return true;
   }
   FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
-  int status = ExecuteAndMonitorSystemCommand(taCommand->string());
+  int status = TimingAnalysisEngineOpt() == STAEngineOpt::Opensta
+                   ? ExecuteAndMonitorSystemCommand(taCommand->string())
+                   : ExecuteAndMonitorQtApplication(taCommand->string(), IsVprGuiCommand(taCommand->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -6256,7 +6258,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       taCommand += uniqueStaVprOptions();
     }
 
-    const int status = ExecuteAndMonitorSystemCommand(taCommand);
+    const int status = ExecuteAndMonitorQtApplication(taCommand, IsVprGuiCommand(taCommand));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -6286,7 +6288,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     std::string command = base_vpr_command + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
-    int status = ExecuteAndMonitorSystemCommand(command);
+    int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " timing analysis failed");
@@ -6371,7 +6373,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     ofs.close();
   }
 
-  int status = ExecuteAndMonitorSystemCommand(taCommand);
+  int status = TimingAnalysisEngineOpt() == STAEngineOpt::Opensta
+                   ? ExecuteAndMonitorSystemCommand(taCommand)
+                   : ExecuteAndMonitorQtApplication(taCommand, IsVprGuiCommand(taCommand));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -6569,7 +6573,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
              std::string("--analysis");
 
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -7680,7 +7684,7 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
           .string());
   ofs << command << std::endl;
   ofs.close();
-int status = ExecuteAndMonitorSystemCommand(command);
+int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
 #else // USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
   // process script
   std::string processedScript;
