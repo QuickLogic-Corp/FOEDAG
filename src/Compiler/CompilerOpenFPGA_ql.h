@@ -451,6 +451,32 @@ private:
   // Removes a stage's engine records (one profile, or all when empty).
   void invalidateEngineStage(const std::string& stage, const std::string& profile = {});
   void cleanRemovedStaProfiles(const std::map<std::string, QLDeviceTarget>& devices);
+  // Bitstream's describe form, gathered while FinishOpenFPGAScript() builds the
+  // script: decrypted files by mask and source digest, plain files as inputs.
+  struct EngineTemp {
+    std::filesystem::path path;
+    std::string mask;
+    std::string digest;
+  };
+  std::vector<EngineTemp> m_bitstreamTemps;
+  std::vector<std::filesystem::path> m_bitstreamInputs;
+  std::string m_bitstreamVprCommand;
+  void noteBitstreamTemp(const std::filesystem::path& temp, const std::string& mask,
+                         const std::filesystem::path& source);
+  CommandWrapperPtr describeBitstream(const std::string& command, const std::string& script);
+  // The secure encode post-process, built then run; bitstream@encode under the engine.
+  struct EncodeJob {
+    std::string python;
+    std::vector<std::string> args;
+    std::vector<std::string> keyFiles;  // --ascon_key/--ascon_nonce/--ascon_ad values
+    std::filesystem::path log;
+    std::filesystem::path out;
+    std::string banner;
+  };
+  bool buildBitstreamEncode(uint32_t stages, EncodeJob& job);
+  bool runBitstreamEncode(const EncodeJob& job);
+  CommandWrapperPtr describeBitstreamEncode(const EncodeJob& job);
+  void engineBitstreamEncode(uint32_t stages);
   CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
                                     const std::vector<std::string>& modes,
                                     const QLDeviceTarget& device);

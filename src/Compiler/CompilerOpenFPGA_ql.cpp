@@ -7280,6 +7280,9 @@ std::string CompilerOpenFPGA_ql::InitOpenFPGAScript() {
 }
 
 std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script) {
+  m_bitstreamTemps.clear();
+  m_bitstreamInputs.clear();
+  m_bitstreamVprCommand.clear();
 
   std::string result = script;
 
@@ -7352,6 +7355,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     
     std::filesystem::path openfpga_xml_en_path = m_OpenFpgaArchitectureFile;
     m_OpenFpgaArchitectureFile = GenerateTempFilePath();
+    noteBitstreamTemp(m_OpenFpgaArchitectureFile, "openfpga_arch_mask", openfpga_xml_en_path);
 
     if (!decryptDeviceFile(openfpga_xml_en_path, m_OpenFpgaArchitectureFile,
                            QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -7375,6 +7379,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     
     std::filesystem::path bitstream_annotation_xml_en_path = m_OpenFpgaBitstreamSettingFile;
     m_OpenFpgaBitstreamSettingFile = GenerateTempFilePath();
+    noteBitstreamTemp(m_OpenFpgaBitstreamSettingFile, "bitstream_setting_mask", bitstream_annotation_xml_en_path);
 
     if (!decryptDeviceFile(bitstream_annotation_xml_en_path, m_OpenFpgaBitstreamSettingFile,
                            QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -7411,6 +7416,10 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   if (!private_repack_constraints.empty() &&
       FileUtils::FileExists(private_repack_constraints)) {
     repack_constraints_file = private_repack_constraints;
+    if (m_engineSelected) {
+      m_bitstreamTemps.push_back({private_repack_constraints, "repack_constraints_private",
+                                  FlowEngineClient::sha256File(private_repack_constraints)});
+    }
   }
   else if (FileUtils::FileExists(generated_repack_constraints)) {
     repack_constraints_file = generated_repack_constraints;
@@ -7432,6 +7441,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       
       std::filesystem::path repack_design_contraint_xml_en_path = repack_constraints_file;
       repack_constraints_file = GenerateTempFilePath();
+      noteBitstreamTemp(repack_constraints_file, "repack_constraints_mask", repack_design_contraint_xml_en_path);
 
       if (!decryptDeviceFile(repack_design_contraint_xml_en_path, repack_constraints_file,
                              QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -7456,6 +7466,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
     
     std::filesystem::path fixed_sim_openfpga_xml_en_path = m_OpenFpgaSimSettingFile;
     m_OpenFpgaSimSettingFile = GenerateTempFilePath();
+    noteBitstreamTemp(m_OpenFpgaSimSettingFile, "sim_setting_mask", fixed_sim_openfpga_xml_en_path);
 
     if (!decryptDeviceFile(fixed_sim_openfpga_xml_en_path, m_OpenFpgaSimSettingFile,
                            QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -7476,6 +7487,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       
       std::filesystem::path fabric_key_xml_en_path = m_OpenFpgaFabricKeyFile;
       m_OpenFpgaFabricKeyFile = GenerateTempFilePath();
+      noteBitstreamTemp(m_OpenFpgaFabricKeyFile, "fabric_key_mask", fabric_key_xml_en_path);
 
       if (!decryptDeviceFile(fabric_key_xml_en_path, m_OpenFpgaFabricKeyFile,
                              QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -7497,6 +7509,7 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       
       std::filesystem::path bitstream_remapping_xml_en_path = m_OpenFpgaBitstreamRemappingFile;
       m_OpenFpgaBitstreamRemappingFile = GenerateTempFilePath();
+      noteBitstreamTemp(m_OpenFpgaBitstreamRemappingFile, "bitstream_remapping_mask", bitstream_remapping_xml_en_path);
 
       if (!decryptDeviceFile(bitstream_remapping_xml_en_path, m_OpenFpgaBitstreamRemappingFile,
                              QLDeviceManager::getInstance()->deviceTypeDirPath(),
@@ -7517,6 +7530,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
   std::string base_vpr_options = std::get<1>(baseVPRCommandTuple);
   std::string vpr_analysis_command = base_vpr_command;
+  if (m_engineSelected) {
+    m_bitstreamVprCommand = base_vpr_command;
+  }
   if(vpr_analysis_command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
     // empty string returned on error.
@@ -7761,7 +7777,66 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   openfpga_write_fabric_io_info_command += std::string(" --verbose");
   result = ReplaceAll(result, "${OPENFPGA_WRITE_FABRIC_IO_INFO_COMMAND}", openfpga_write_fabric_io_info_command);
 
+  if (m_engineSelected) {
+    for (const std::filesystem::path& file :
+         {m_OpenFpgaArchitectureFile, m_OpenFpgaSimSettingFile, m_OpenFpgaBitstreamSettingFile,
+          repack_constraints_file, m_OpenFpgaFabricKeyFile, m_OpenFpgaBitstreamRemappingFile}) {
+      const bool temp = std::any_of(m_bitstreamTemps.begin(), m_bitstreamTemps.end(),
+                                    [&file](const EngineTemp& t) { return t.path == file; });
+      if (!file.empty() && !temp) {
+        m_bitstreamInputs.push_back(file);
+      }
+    }
+  }
   return result;
+}
+
+void CompilerOpenFPGA_ql::noteBitstreamTemp(const std::filesystem::path& temp,
+                                            const std::string& mask,
+                                            const std::filesystem::path& source) {
+  if (m_engineSelected) {
+    m_bitstreamTemps.push_back({temp, mask, FlowEngineClient::sha256File(source)});
+  }
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::describeBitstream(const std::string& command,
+                                                         const std::string& script) {
+  // The script carries every decrypted file by its private path; the engine keys
+  // them by mask and by the digest of their encrypted source (REQ-012, REQ-130).
+  const QLDeviceTarget device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
+  CommandWrapperPtr vpr = wrapVprCommand(m_bitstreamVprCommand, device);
+  if (!vpr) {
+    return nullptr;
+  }
+  auto described = std::make_shared<CommandWrapper>();
+  for (const std::string& token : StringUtils::tokenize(command, " ")) {
+    described->append(token);
+  }
+  described->setScriptRenderer(std::make_shared<ScriptRenderer>(script));
+  described->setScriptName(ProjManager()->projectName() + ".openfpga");
+  for (const std::filesystem::path& path : vpr->declaredPaths()) {
+    auto mask = vpr->temps().find(path.string());
+    described->declarePath(path, mask == vpr->temps().end() ? std::string{} : mask->second);
+  }
+  for (const auto& [path, digest] : vpr->hostDigests()) {
+    described->setHostDigest(path, digest);
+  }
+  for (const std::filesystem::path& key : vpr->keyPaths()) {
+    described->addKeyPath(key);
+  }
+  for (const EngineTemp& temp : m_bitstreamTemps) {
+    described->declarePath(temp.path, temp.mask);
+    described->setHostDigest(temp.path, temp.digest);
+  }
+  if (!m_bitstreamTemps.empty()) {
+    described->addKeyPath(QLDeviceManager::getInstance()->deviceTypeDirPath(device) /
+                          (QLDeviceManager::getInstance()->convertToDeviceTypeString(device) +
+                           "_Supp.db"));
+  }
+  for (const std::filesystem::path& file : m_bitstreamInputs) {
+    described->declarePath(file);
+  }
+  return described;
 }
 
 bool CompilerOpenFPGA_ql::GenerateBitstream() {
@@ -7834,7 +7909,9 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
       return false;
     }
     const uint32_t stages = ResolveBitstreamEncodeStages();
-    if (stages != 0) {
+    if (stages != 0 && m_engineSelected) {
+      engineBitstreamEncode(stages);
+    } else if (stages != 0) {
       (void)RunBitstreamEncode(stages);
     } else {
       Message("bitstream encode: no stages enabled; nothing to do.");
@@ -7981,6 +8058,24 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
 
   std::string script_path = ProjManager()->projectName() + ".openfpga";
 
+  CommandWrapperPtr bitstream_command;
+  if (m_engineSelected) {
+    bitstream_command = describeBitstream(command, script);
+    if (!backend().isCompilationRequired(static_cast<int>(Action::Bitstream), bitstream_command)) {
+      CleanTempFiles();
+      Message("##################################################");
+      Message("Bitstream generation skipped, not required");
+      Message("##################################################");
+      const uint32_t encodeStages = ResolveBitstreamEncodeStages();
+      if (encodeStages != 0) {
+        engineBitstreamEncode(encodeStages);
+      }
+      ResetBitstreamEncode();
+      m_state = State::BistreamGenerated;
+      return true;
+    }
+  }
+
   std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) /
                           std::string("fabric_bitstream.bit"));
   std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) /
@@ -8074,9 +8169,23 @@ int status = ExecuteAndMonitorSystemCommand(command);
   // fail bitstream generation, since the plain fabric_bitstream.bit is valid
   // (§4.5). The encode request state is cleared so it does not leak to the next
   // bitstream run.
+  if (bitstream_command) {
+    // Until the OpenFPGA shell reports script errors (REQ-090), exit 0 proves
+    // nothing; the bitstream this run wrote does, as the old one was removed.
+    const bool wrote = FileUtils::FileExists(std::filesystem::path(ProjManager()->projectPath()) /
+                                             "fabric_bitstream.bit");
+    if (wrote && faultAfterTool("bitstream")) return false;
+    if (wrote) {
+      backend().storeTaskCommand(static_cast<int>(Action::Bitstream), bitstream_command);
+    }
+  }
   const uint32_t encodeStages = ResolveBitstreamEncodeStages();
   if (encodeStages != 0) {
-    (void)RunBitstreamEncode(encodeStages);
+    if (m_engineSelected) {
+      engineBitstreamEncode(encodeStages);
+    } else {
+      (void)RunBitstreamEncode(encodeStages);
+    }
   }
   ResetBitstreamEncode();
 
@@ -8132,6 +8241,55 @@ uint32_t CompilerOpenFPGA_ql::ResolveBitstreamEncodeStages() const {
 }
 
 bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
+  EncodeJob job;
+  return buildBitstreamEncode(stages, job) && runBitstreamEncode(job);
+}
+
+void CompilerOpenFPGA_ql::engineBitstreamEncode(uint32_t stages) {
+  EncodeJob job;
+  if (!buildBitstreamEncode(stages, job)) {
+    return;
+  }
+  const CommandWrapperPtr command = describeBitstreamEncode(job);
+  const int bitstream = static_cast<int>(Action::Bitstream);
+  if (!backend().isCompilationRequired(bitstream, EngineBackend::ENCODE_PROFILE, command)) {
+    Message("Secure bitstream post-process skipped, not required");
+    return;
+  }
+  // REQ-042: a failed encode stays non-fatal and leaves no record.
+  if (runBitstreamEncode(job)) {
+    backend().storeTaskCommand(bitstream, EngineBackend::ENCODE_PROFILE, command);
+  }
+}
+
+CommandWrapperPtr CompilerOpenFPGA_ql::describeBitstreamEncode(const EncodeJob& job) {
+  static const std::set<std::string> inputOptions{"--inp", "--xml"};
+  auto command = std::make_shared<CommandWrapper>(job.python);
+  command->appendPath(std::filesystem::path{job.args.front()});
+  for (size_t i = 1; i < job.args.size(); ++i) {
+    const std::string& arg = job.args[i];
+    if (inputOptions.count(arg) && i + 1 < job.args.size()) {
+      command->appendPath(arg, std::filesystem::path{job.args[++i]});
+    } else {
+      command->append(arg);
+    }
+  }
+  // The encoder runs in Aurora's working directory, not the project's, so a
+  // relative key file is found there; the engine must digest the same file.
+  std::error_code ec;
+  const std::filesystem::path cwd = std::filesystem::current_path(ec);
+  for (const std::string& key : job.keyFiles) {
+    std::filesystem::path file{key};
+    if (file.is_relative()) {
+      file = (cwd / file).lexically_normal();
+    }
+    command->declarePath(file);
+    command->addKeyPath(file);
+  }
+  return command;
+}
+
+bool CompilerOpenFPGA_ql::buildBitstreamEncode(uint32_t stages, EncodeJob& job) {
   const std::filesystem::path projectPath(ProjManager()->projectPath());
   const std::string projectName = ProjManager()->projectName();
 
@@ -8252,32 +8410,44 @@ bool CompilerOpenFPGA_ql::RunBitstreamEncode(uint32_t stages) {
     if (!asconKey.empty()) {
       args.push_back("--ascon_key");
       args.push_back(asconKey);
+      job.keyFiles.push_back(asconKey);
     }
     const std::string asconNonce =
         QLSettingsManager::getStringValue("openfpga", "general", "ascon_nonce_file");
     if (!asconNonce.empty()) {
       args.push_back("--ascon_nonce");
       args.push_back(asconNonce);
+      job.keyFiles.push_back(asconNonce);
     }
     const std::string asconAd =
         QLSettingsManager::getStringValue("openfpga", "general", "ascon_ad_file");
     if (!asconAd.empty()) {
       args.push_back("--ascon_ad");
       args.push_back(asconAd);
+      job.keyFiles.push_back(asconAd);
     }
   }
 
-  Message("Secure bitstream post-process [" + stageNames.substr(1) + "]: " +
-          command + " " + script.string());
+  job.banner = "Secure bitstream post-process [" + stageNames.substr(1) + "]: " +
+               command + " " + script.string();
+  job.python = command;
+  job.args = args;
+  job.log = log;
+  job.out = out;
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::runBitstreamEncode(const EncodeJob& job) {
+  Message(job.banner);
   const int status =
-      FileUtils::ExecuteSystemCommand(command, args, m_out, -1).realCode;
+      FileUtils::ExecuteSystemCommand(job.python, job.args, m_out, -1).realCode;
   if (status != 0) {
     // Non-fatal: the plain fabric_bitstream.bit is still valid (§4.5).
-    ErrorMessage("Secure bitstream post-process failed (see " + log.string() +
+    ErrorMessage("Secure bitstream post-process failed (see " + job.log.string() +
                  "). The plain fabric_bitstream.bit is unaffected.");
     return false;
   }
-  Message("Secure bitstream written: " + out.string());
+  Message("Secure bitstream written: " + job.out.string());
   return true;
 }
 

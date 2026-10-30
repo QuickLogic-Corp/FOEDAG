@@ -157,6 +157,7 @@ TEST_F(EngineBackendTest, stage_names_and_profiles) {
   EXPECT_TRUE(EngineBackend::decides("route"));
   EXPECT_TRUE(EngineBackend::decides("floorplan"));
   EXPECT_TRUE(EngineBackend::decides("power"));
+  EXPECT_TRUE(EngineBackend::decides("bitstream"));
   EXPECT_TRUE(EngineBackend::decides("sta"));
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "0"), "");
   EXPECT_EQ(EngineBackend::profileName(SYNTH, "1"), "synplify");
@@ -363,6 +364,26 @@ TEST_F(EngineBackendTest, a_text_command_line_wraps_into_the_describe_form) {
   EXPECT_EQ(command->declaredPaths(),
             (std::vector<fs::path>{"/tmp/x123", "counter_post_synth.blif", "counter.route"}));
   EXPECT_EQ(command->temps(), (std::map<std::string, std::string>{{"/tmp/x123", VPR_ARCH_FILE_MASK}}));
+}
+
+// Encode is bitstream's "encode" profile, recorded on its own.
+TEST_F(EngineBackendTest, encode_is_the_bitstream_encode_profile) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  setVerdict("run");
+  b->taskStarted();
+  EXPECT_TRUE(b->isCompilationRequired(static_cast<int>(Compiler::Action::Bitstream),
+                                       EngineBackend::ENCODE_PROFILE, vprCommand()));
+  b->storeTaskCommand(static_cast<int>(Compiler::Action::Bitstream),
+                      EngineBackend::ENCODE_PROFILE, vprCommand());
+  b->taskFinished(true);
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["request"]["stage"], "bitstream");
+  EXPECT_EQ(seen[0]["request"]["profile"], "encode");
+  EXPECT_EQ(seen[1]["request"]["profile"], "encode");
+  EXPECT_EQ(seen[1]["request"]["outputs"].size(), 3u);
 }
 
 // Each STA corner profile is its own record.
