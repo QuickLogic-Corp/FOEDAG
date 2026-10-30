@@ -127,6 +127,13 @@ public:
   // nothing when the engine could not answer.
   std::optional<std::string> verdictOf(const std::vector<UpstreamCommand>& stages,
                                        const std::string& stage) const;
+  // Where pack resolves the layout, floorplan follows pack, so pack runs without
+  // IO constraints and does not generate them (aurora2 stages.graph).
+  static bool packReadsIOConstraints(bool layoutResolvedInPack) { return !layoutResolvedInPack; }
+  // Only the CUSTOM arm of Packing() reads <project>/../custom_layout.yml: a
+  // CUSTOM device, or a package without DEVICE_TYPE whose layout is FPGA_CUSTOM.
+  static bool packReadsCustomLayout(bool deviceTypePresent, const std::string& deviceType,
+                                    const std::string& layoutName);
   // Only exit 0 (written) and 2 (nothing to do) are results worth a record.
   static bool floorplanRecords(int status) { return status == 0 || status == 2; }
   // True when `program` is on PATH; a lookup, no process is started (REQ-011).

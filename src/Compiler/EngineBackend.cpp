@@ -203,6 +203,11 @@ std::optional<std::string> EngineBackend::verdictOf(const std::vector<UpstreamCo
   return std::nullopt;
 }
 
+bool EngineBackend::packReadsCustomLayout(bool deviceTypePresent, const std::string& deviceType,
+                                          const std::string& layoutName) {
+  return deviceTypePresent ? deviceType == "CUSTOM" : layoutName == "FPGA_CUSTOM";
+}
+
 std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string& projectName) {
   return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
 }

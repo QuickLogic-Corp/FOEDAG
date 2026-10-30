@@ -444,6 +444,18 @@ TEST_F(EngineBackendTest, record_clears_later_cpp_cache_entries) {
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
 }
 
+// Where pack resolves the layout it takes no IO constraints, and only a CUSTOM
+// device's pack reads custom_layout.yml.
+TEST_F(EngineBackendTest, pack_inputs_follow_the_layout_kind) {
+  EXPECT_TRUE(EngineBackend::packReadsIOConstraints(false));
+  EXPECT_FALSE(EngineBackend::packReadsIOConstraints(true));
+  EXPECT_TRUE(EngineBackend::packReadsCustomLayout(true, "CUSTOM", "anything"));
+  EXPECT_FALSE(EngineBackend::packReadsCustomLayout(true, "FIXED", "FPGA_CUSTOM"));
+  EXPECT_TRUE(EngineBackend::packReadsCustomLayout(false, "", "FPGA_CUSTOM"));
+  EXPECT_FALSE(EngineBackend::packReadsCustomLayout(false, "", "FPGA_AUTO"));
+  EXPECT_FALSE(EngineBackend::packReadsCustomLayout(false, "", "castor_10x8"));
+}
+
 // Bitstream reads route's file: refused without it, or when route did not
 // produce it for the current inputs; never when route is known current.
 TEST_F(EngineBackendTest, bitstream_needs_a_current_route) {

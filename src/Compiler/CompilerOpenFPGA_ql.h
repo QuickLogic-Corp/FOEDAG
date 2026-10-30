@@ -439,6 +439,8 @@ private:
   bool buildFloorplan(FloorplanJob& job);
   int runFloorplan(const FloorplanJob& job);
   bool engineFloorplan();
+  // getPackingCommand() is building pack's command (BaseVprCommand's caller).
+  bool m_buildingPack = false;
   // Under the engine: route ran or was found current in this process, and no
   // synth, pack or place has run since (bitstream's route check).
   bool m_routeCurrent = false;

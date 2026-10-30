@@ -3733,7 +3733,14 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
 
   // The describe form declares the constraint files a run would pass; only a run
   // generates them.
-  if (s_describeOnly || GenerateIOFloorPlanConstraints()){
+  // Under the engine, where pack resolves the layout, a previous session's
+  // constraints must not reach pack, and floorplan is not run from here.
+  const bool pack_without_floorplan =
+      m_engineSelected && m_buildingPack &&
+      !EngineBackend::packReadsIOConstraints(layoutResolvedInPack());
+  if (pack_without_floorplan) {
+    // pack resolves the device geometry the IO constraints are made for
+  } else if (s_describeOnly || GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     PruneRelIpBlifs();
@@ -12498,6 +12505,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
 #if UPSTREAM_UNUSED
   std::string command = BaseVprCommand(QLDeviceTarget(), cfg) + " --pack";
 #endif // #if UPSTREAM_UNUSED
+  m_buildingPack = true;
+  auto buildingPack = sg::make_scope_guard([this] { m_buildingPack = false; });
   CommandWrapperPtr command = BaseVprCommand(QLDeviceTarget(), cfg);
   if(!command) {
     ErrorMessage("VPR Command is empty!");
@@ -12526,15 +12535,18 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
   command->append("--pack");
 
   if (m_engineSelected) {
+    QLDeviceManager* devices = QLDeviceManager::getInstance();
+    const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+    const QLDeviceLayoutSettings settings = devices->deviceLayoutSettings(target);
     std::filesystem::path custom_layout_yml;
-    if (!resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
+    // Outside the project: probe it only where pack reads it.
+    if (!EngineBackend::packReadsCustomLayout(settings.device_type_present, settings.device_type,
+                                              target.device_variant_layout.name) ||
+        !resolveCustomLayoutYMLPath(std::filesystem::path(ProjManager()->projectPath()),
                                     custom_layout_yml)) {
       custom_layout_yml.clear();
     }
-    QLDeviceManager* devices = QLDeviceManager::getInstance();
-    EngineBackend::declarePackLayoutInputs(
-        *command, custom_layout_yml,
-        devices->deviceLayoutSettings(devices->getCurrentDeviceTarget()).config_json_path);
+    EngineBackend::declarePackLayoutInputs(*command, custom_layout_yml, settings.config_json_path);
   }
   return command;
 }
