@@ -24,6 +24,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "gtest/gtest.h"
 
+#include <QThread>
+
 #include <filesystem>
 #include <string>
 
@@ -139,6 +141,29 @@ TEST_F(FlowEngineClientTest, sha256_of_a_file) {
   EXPECT_EQ(FlowEngineClient::sha256File(file),
             "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
   EXPECT_TRUE(FlowEngineClient::sha256File(m_dir / "none").empty());
+}
+
+// A file written within the racy window is hashed every time; once it is older
+// it is hashed once, until its size or times change.
+TEST_F(FlowEngineClientTest, sha256_is_cached_only_for_settled_files) {
+  const fs::path file = write("arch.xml.en", "cipher one");
+  const std::string first = FlowEngineClient::sha256File(file);
+  std::size_t before = FlowEngineClient::sha256FilesHashed();
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256FilesHashed(), before + 1);  // racy: hashed again
+
+  QThread::msleep(2200);
+  before = FlowEngineClient::sha256FilesHashed();
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256File(file), first);
+  EXPECT_EQ(FlowEngineClient::sha256FilesHashed(), before + 1);  // settled: hashed once
+
+  // Same size, mtime put back: the ctime still moves, so the change is seen.
+  const auto mtime = fs::last_write_time(file);
+  write("arch.xml.en", "cipher two");
+  fs::last_write_time(file, mtime);
+  EXPECT_NE(FlowEngineClient::sha256File(file), first);
 }
 
 TEST_F(FlowEngineClientTest, unusable_client_fails_without_starting_anything) {

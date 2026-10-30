@@ -58,7 +58,13 @@ public:
   // empty when missing. There is no system-Python fallback.
   static std::filesystem::path bundledInterpreter(const std::filesystem::path& installRoot);
   // "sha256:<hex>" of a file's bytes, the form of a host digest; empty if unreadable.
+  // Cached per process by (path, size, mtime, ctime), and only for a file whose
+  // mtime and ctime were more than 2 s old when it was hashed, as the engine's
+  // own digest cache (aurora2 design-install §1.2.3): a status query on the
+  // GUI thread then hashes a 13 MB encrypted architecture once, not per query.
   static std::string sha256File(const std::filesystem::path& path);
+  // Hashes actually computed by sha256File; for tests.
+  static std::size_t sha256FilesHashed();
 
   FlowEngineClient() = default;
   explicit FlowEngineClient(const std::filesystem::path& installRoot,

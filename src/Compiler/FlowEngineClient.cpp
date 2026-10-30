@@ -19,13 +19,19 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FlowEngineClient.h"
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>
+#include <atomic>
 #include <fstream>
+#include <map>
+#include <mutex>
 
 namespace fs = std::filesystem;
 
@@ -120,12 +126,53 @@ fs::path FlowEngineClient::bundledInterpreter(const fs::path& installRoot) {
   return {};
 }
 
+namespace {
+struct DigestEntry {
+  qint64 size;
+  qint64 mtime;
+  qint64 ctime;
+  std::string digest;
+};
+std::mutex s_digestMutex;
+std::map<QString, DigestEntry> s_digests;
+std::atomic<std::size_t> s_hashed{0};
+constexpr qint64 RACY_MS = 2000;
+}  // namespace
+
+std::size_t FlowEngineClient::sha256FilesHashed() { return s_hashed.load(); }
+
 std::string FlowEngineClient::sha256File(const fs::path& path) {
-  QFile file(toQString(path));
+  const QString name = toQString(path);
+  QFileInfo info(name);
+  info.setCaching(false);
+  if (!info.isFile()) return {};
+  const QString key = info.absoluteFilePath();
+  const qint64 size = info.size();
+  const qint64 mtime = info.lastModified().toMSecsSinceEpoch();
+  const qint64 ctime = info.fileTime(QFileDevice::FileMetadataChangeTime).toMSecsSinceEpoch();
+  {
+    std::lock_guard<std::mutex> lock(s_digestMutex);
+    auto it = s_digests.find(key);
+    if (it != s_digests.end() && it->second.size == size && it->second.mtime == mtime &&
+        it->second.ctime == ctime) {
+      return it->second.digest;
+    }
+  }
+  const qint64 hashedAt = QDateTime::currentMSecsSinceEpoch();
+  QFile file(name);
   if (!file.open(QIODevice::ReadOnly)) return {};
   QCryptographicHash hash(QCryptographicHash::Sha256);
   if (!hash.addData(&file)) return {};
-  return "sha256:" + hash.result().toHex().toStdString();
+  ++s_hashed;
+  const std::string digest = "sha256:" + hash.result().toHex().toStdString();
+  std::lock_guard<std::mutex> lock(s_digestMutex);
+  if (hashedAt - std::max(mtime, ctime) > RACY_MS) {
+    // Changed within the racy window, a later write could keep size and times.
+    s_digests[key] = {size, mtime, ctime, digest};
+  } else {
+    s_digests.erase(key);
+  }
+  return digest;
 }
 
 FlowEngineClient::FlowEngineClient(const fs::path& installRoot, int timeoutMs)
