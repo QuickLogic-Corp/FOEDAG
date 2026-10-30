@@ -2307,6 +2307,11 @@ void Compiler::finish() {
 }
 
 bool Compiler::RunCompileTask(Action action) {
+  if (m_forceFullRun) {
+    m_forceFullRun = false;
+    Message("--no-incremental: clearing the compilation cache; every stage runs");
+    clearCompilationCache();
+  }
   BeforeCompileTask(action);
   bool ok = false;
   try {

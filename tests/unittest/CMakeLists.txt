@@ -51,6 +51,7 @@ set (CPP_LIST
     Compiler/PackLayout_test.cpp
     Compiler/QLMetricsManager_test.cpp
     Compiler/EngineStatusRefresh_test.cpp
+    Compiler/NoIncremental_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     Compiler/FlowEngineClient_test.cpp

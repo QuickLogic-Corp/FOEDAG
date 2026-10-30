@@ -462,6 +462,9 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
          << std::endl;
   (*out) << "   --mute           : Mutes stdout in batch mode" << std::endl;
   (*out) << "   --verific        : Uses Verific parser" << std::endl;
+  (*out) << "   --no-incremental : Clear the compilation cache before the first task,"
+            " so every stage runs (as clear_compilation_cache)"
+         << std::endl;
   (*out) << "Tcl commands:" << std::endl;
   (*out) << "   help                       : This help" << std::endl;
   (*out) << "   copy_files_on_add <on/off> : sets whether to copy all the  "

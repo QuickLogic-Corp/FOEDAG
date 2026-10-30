@@ -93,6 +93,8 @@ void CommandLine::processArgs() {
       m_mute = true;
     } else if (token == "--synplify_license_wait") {
       m_synplify_license_wait = true;
+    } else if (token == "--no-incremental") {
+      m_noIncremental = true;
     } else {
       std::cout << "ERROR Unknown command line option: " << m_argv[i]
                 << std::endl;
@@ -118,4 +120,5 @@ void CommandLine::Clear()
   m_version = false;
   m_useVerific = false;
   m_mute = false;
+  m_noIncremental = false;
 }

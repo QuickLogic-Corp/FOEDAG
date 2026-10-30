@@ -287,6 +287,11 @@ class Compiler {
 
   virtual bool hasCompilationCache() const { return false; }
   virtual void clearCompilationCache() {}
+  // --no-incremental (REQ-126): the first compile task of this process clears
+  // the compilation cache first, as clear_compilation_cache does, so every
+  // stage runs. The project is not open at startup, hence the first task.
+  void ForceFullRun(bool on) { m_forceFullRun = on; }
+  bool ForceFullRunPending() const { return m_forceFullRun; }
   virtual void invalidateTaskStatuses() {}
 
  protected:
@@ -358,6 +363,7 @@ class Compiler {
   std::string m_result;
   TclInterpreterHandler* m_tclInterpreterHandler{nullptr};
   TaskManager* m_taskManager{nullptr};
+  bool m_forceFullRun = false;
   TclCommandIntegration* m_tclCmdIntegration{nullptr};
   Constraints* m_constraints = nullptr;
   std::string m_output;
