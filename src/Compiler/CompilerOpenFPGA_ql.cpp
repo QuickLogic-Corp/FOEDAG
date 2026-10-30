@@ -307,7 +307,19 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
       if (QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
         continue;
       }
+      // As Packing() builds it: without the layout an earlier pack resolved.
+      const bool autoMode = m_autoLayoutGenerationMode;
+      const bool customMode = m_customLayoutGenerationMode;
+      const std::string layoutName = m_autoLayoutGeneratedLayoutName;
+      const std::filesystem::path vprXml = m_autoLayoutGeneratedVPRXMLPath;
+      const std::filesystem::path sbMaps = m_autoLayoutGeneratedSBMapsYMLPath;
+      resetPackLayout();
       upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
+      m_autoLayoutGenerationMode = autoMode;
+      m_customLayoutGenerationMode = customMode;
+      m_autoLayoutGeneratedLayoutName = layoutName;
+      m_autoLayoutGeneratedVPRXMLPath = vprXml;
+      m_autoLayoutGeneratedSBMapsYMLPath = sbMaps;
     } else if (*it == "place") {
       upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
     } else if (*it == "route") {
@@ -8892,7 +8904,11 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     return false;
   }
 
-  m_blifParser.load(netlist_path);
+  // Only a QDC's set_region needs the netlist parsed; a status query on the GUI
+  // thread skips it otherwise.
+  if (!s_describeOnly || fs::exists(QLSettingsManager::getInstance()->getQDCFilePath())) {
+    m_blifParser.load(netlist_path);
+  }
   //m_blifParser.printHierachy(); // debug
   
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
