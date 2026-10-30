@@ -468,6 +468,23 @@ void EngineBackend::record(const Pending& pending) {
   }
 }
 
+void EngineBackend::forget(const std::string& stage, const std::string& profile) {
+  if (!hasRecords(m_projectPath)) return;
+  std::vector<std::string> args{"invalidate", "--stage", stage};
+  if (!profile.empty()) args.insert(args.end(), {"--profile", profile});
+  args.insert(args.end(), {"--project", utf8(m_projectPath)});
+  FlowEngineClient::Result result;
+  try {
+    result = m_client.call(args);
+  } catch (const std::exception& e) {
+    result.error = e.what();
+  }
+  if (!result.ok) {
+    m_compiler->Message("Warning: flow engine cannot clear the records of " + stage + ": " +
+                        result.error);
+  }
+}
+
 void EngineBackend::taskStarted() {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_pending[std::this_thread::get_id()].emplace_back();

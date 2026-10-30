@@ -3914,23 +3914,8 @@ CommandWrapperPtr CompilerOpenFPGA_ql::wrapVprCommand(const std::string& command
 
 void CompilerOpenFPGA_ql::invalidateEngineStage(const std::string& stage,
                                                 const std::string& profile) {
-  const std::filesystem::path project = ProjManager()->projectPath();
-  if (!EngineBackend::hasRecords(project)) {
-    return;
-  }
-  std::vector<std::string> args{"invalidate", "--stage", stage};
-  if (!profile.empty()) {
-    args.insert(args.end(), {"--profile", profile});
-  }
-  args.insert(args.end(), {"--project", project.u8string()});
-  FlowEngineClient::Result result;
-  try {
-    result = FlowEngineClient(engineInstallRoot()).call(args);
-  } catch (const std::exception& e) {
-    result.error = e.what();
-  }
-  if (!result.ok) {
-    Message("Warning: flow engine cannot clear the records of " + stage + ": " + result.error);
+  if (auto* engine = dynamic_cast<EngineBackend*>(m_incrementalBackend.get())) {
+    engine->forget(stage, profile);
   }
 }
 
@@ -6697,6 +6682,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       // is not cached.
       taCommand = setVprOptionValue(taCommand, "--route_file",
                                     ProjManager()->projectName() + sta_suffix + "_sta.route");
+      // A record from a run that did not re-route would otherwise outlive this
+      // run and match again once the inputs come back byte-identical.
+      invalidateEngineStage("sta", profile);
     } else if (m_engineSelected) {
       sta_command = wrapVprCommand(taCommand, current_device_sta);
       if (!backend().isCompilationRequired(static_cast<int>(Action::STA), profile, sta_command)) {
@@ -8103,6 +8091,8 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
   if (m_engineSelected) {
     bitstream_command = describeBitstream(command, script);
     if (!backend().isCompilationRequired(static_cast<int>(Action::Bitstream), bitstream_command)) {
+      // The guard would copy another stage's vpr_stdout.log over bitstream.rpt.
+      guard.dismiss();
       CleanTempFiles();
       Message("##################################################");
       Message("Bitstream generation skipped, not required");

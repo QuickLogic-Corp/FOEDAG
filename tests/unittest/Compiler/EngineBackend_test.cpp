@@ -494,6 +494,24 @@ TEST_F(EngineBackendTest, a_floorplan_record_clears_cpp_entries_from_pack_on) {
   EXPECT_EQ(left, nlohmann::json({{std::to_string(SYNTH) + "_0", 1}}));
 }
 
+// Forgetting asks the engine to remove one profile's records, or the stage's.
+TEST_F(EngineBackendTest, forget_removes_a_profile_or_the_stage) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const auto b = backend(client);
+  b->forget("sta", "fast");
+  EXPECT_TRUE(calls().empty());  // no records, nothing to start
+  write(m_project / ".aurora" / "state" / "sta@fast.json", "{}");
+  b->forget("sta", "fast");
+  b->forget("sta");
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["args"], nlohmann::json({"invalidate", "--stage", "sta", "--profile", "fast",
+                                             "--project", m_project.string(), "--json"}));
+  EXPECT_EQ(seen[1]["args"], nlohmann::json({"invalidate", "--stage", "sta", "--project",
+                                             m_project.string(), "--json"}));
+}
+
 TEST_F(EngineBackendTest, records_on_disk_decide_empty_and_clear) {
   FlowEngineClient client = fakeClient();
   if (!client.usable()) GTEST_SKIP() << "no python3";

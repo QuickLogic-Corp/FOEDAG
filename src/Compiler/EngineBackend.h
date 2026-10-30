@@ -84,6 +84,9 @@ public:
   void taskFinished(bool ok) override;
   bool taskRunning() const override;
   void setUpstreamProvider(UpstreamProvider upstream) { m_upstream = std::move(upstream); }
+  // Removes a stage's records: one profile, or every profile when empty. For a
+  // run the engine must not remember (re-routing STA) and for `clean`.
+  void forget(const std::string& stage, const std::string& profile = {});
 
   // The engine's name for a task; empty for a task with no stage.
   static std::string stageName(int taskId);
