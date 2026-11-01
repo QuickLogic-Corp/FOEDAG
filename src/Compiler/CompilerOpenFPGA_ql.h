@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 #include <QString>
@@ -32,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/Compiler.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
+#include "Compiler/EngineBackend.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -84,9 +86,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path getPostSynthVerilogFilePath() const;
   std::filesystem::path getPostSynthNetFilePath() const;
   std::filesystem::path getPostSynthBlifFilePath() const;
+  std::filesystem::path getDesignSourceNetlistPath() const;
 
   void setCustomYosysScript(const std::string& script) { m_customYosysScript = script; }
-  void OpenFPGAScript(const std::string& script) { m_openFPGAScript = script; }
   void OpenFpgaArchitectureFile(const std::filesystem::path& path) {
     m_OpenFpgaArchitectureFile = path;
   }
@@ -232,6 +234,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// GUI open_project in particular never passes through CreateDesign.
   void PruneRelIpBlifs();
 
+  /// Records an explicit `verific_parser on|off` from the Tcl script. For the
+  /// rest of the session that request takes priority over
+  /// `general > options > verific` in the settings JSON; see ResolveUseVerific().
+  void SetUseVerificFromTcl(bool on);
+
  protected:
   virtual bool IPGenerate();
   virtual bool Analyze();
@@ -265,8 +272,9 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// ?-catalog <dir>?` (a flag orthogonal to -type, which keeps meaning
   /// source kind + synthesis tool) and reset whenever a design is created. While
   /// active: the place stage emits the authoring inputs (--echo_file on,
-  /// --write_flat_place) and re-packages the IP on every success path of
-  /// Placement() except `place clean` (PackageRpmAuthorProject). The IP
+  /// --write_flat_place, --flat_place_verbosity 2) and re-packages the IP on
+  /// every success path of Placement() except `place clean`
+  /// (PackageRpmAuthorProject). The IP
   /// name IS the project name; REL_MACRO_TYPE derives from it. Session-only
   /// state, stamped with its project: a project switch expires it
   /// (RpmAuthorProjectActive), and re-running create_design re-establishes
@@ -379,7 +387,6 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::filesystem::path m_SBTemplatesDir = "";
   std::string m_deviceSize;
   std::string m_customYosysScript;
-  std::string m_openFPGAScript;
   std::string m_pb_pin_fixup;
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
@@ -391,13 +398,35 @@ class CompilerOpenFPGA_ql : public Compiler {
                                     std::string netlistFileName,
                                     std::string sdfFileName,
                                     std::string sdcFileName);
+  /// Decides whether Verific parses the design: never for a Synplify project,
+  /// else the explicit Tcl request if there was one, else the settings JSON.
+  bool ResolveUseVerific();
   bool m_keepAllSignals = false;
 
 private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
 
-  TaskCompilationStateManager m_taskCompilationStateManager;
+  /// Set only by the verific_parser Tcl command; unset means "not mentioned".
+  std::optional<bool> m_useVerificFromTcl;
+  std::unique_ptr<IncrementalBackend> m_incrementalBackend;
+  IncrementalBackend& backend() const { return *m_incrementalBackend; }
+
+  // AURORA_INCREMENTAL=engine selected the flow engine for this project.
+  bool m_engineSelected = false;
+  // Builders run in their describe form: no decryption, no floorplanning, no
+  // script files written (aurora2 docs/specs/aurora-flow-engine §1.2.6).
+  // Per thread: a GUI status query must not change a task running on the worker.
+  static thread_local bool s_describeOnly;
+  bool m_incrementalModeWarned = false;
+  void selectIncrementalBackend();
+  std::unique_ptr<IncrementalBackend> makeCppBackend();
+  std::filesystem::path engineInstallRoot() const;
+  EngineStageContext engineContext(const std::string& stage);
+  std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
+  void invalidateEngineRecords(int taskId);
+  void BeforeCompileTask(Action action) override;
+  void AfterCompileTask(Action action, bool ok) override;
 
   std::string BuildElaborationScript(const std::string& topModule);
   bool RunElaboration();

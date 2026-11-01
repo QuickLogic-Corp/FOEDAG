@@ -60,6 +60,8 @@ set (SRC_CPP_LIST
   Task.cpp
   TaskCompilationStateManager.cpp
   CommandWrapper.cpp
+  FlowEngineClient.cpp
+  EngineBackend.cpp
   TilesCfgParser.cpp
   #TaskManager.cpp
   TaskManager_ql.cpp
@@ -82,6 +84,8 @@ set (SRC_CPP_LIST
   Reports/PowerAnalysisReportManager_ql.cpp
   QLDeviceManager.cpp
   QLDeviceLayoutInfo.cpp
+  QLDevicePath.cpp
+  PrivateTempDir.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   WildcardFileFinder.cpp
@@ -99,6 +103,8 @@ set (SRC_H_INSTALL_LIST
   Task.h
   TaskCompilationStateManager.h
   CommandWrapper.h
+  FlowEngineClient.h
+  EngineBackend.h
   TilesCfgParser.h
   TaskManager.h
   CompilerDefines.h
@@ -120,6 +126,8 @@ set (SRC_H_INSTALL_LIST
   TaskGlobal.h
   QLDeviceManager.h
   QLDeviceLayoutInfo.h
+  PrivateTempDir.h
+  QLDevicePath.h
   QLSettingsManager.h
   QLMetricsManager.h
   WildcardFileFinder.h

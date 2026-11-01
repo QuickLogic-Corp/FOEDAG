@@ -23,6 +23,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QApplication>
 #include <QTextStream>
+#include <QTimer>
 #include <QtWidgets>
 #include <fstream>
 
@@ -1122,6 +1123,10 @@ void MainWindow::createActions() {
   connect(clearCompilationStatesAction, &QAction::triggered, this, &MainWindow::clearCompilationStates);
 
   aboutAction = new QAction(tr("About"), this);
+#ifdef __APPLE__
+  // Keep About in Help: Qt moves it to the app menu, leaving Help empty and hidden.
+  aboutAction->setMenuRole(QAction::NoRole);
+#endif
   connect(aboutAction, &QAction::triggered, this, [this]() {
     AboutWidget w(m_projectInfo, GlobalSession->Context()->BinaryPath(), this);
     w.exec();
@@ -1685,8 +1690,12 @@ QObject::connect(m_EULADialogNextButton, &QPushButton::released,
   else if(dialogCode == QDialog::Rejected) {
     m_EULADialog->deleteLater();
     forceStopCompilation();
-    Command cmd("gui_stop; exit");
-    GlobalSession->CmdStack()->push_and_exec(&cmd);
+    // Defer past QApplication::exec() starting: this runs inside Tcl_AppInit,
+    // before it, so exiting synchronously here would crash mid Qt startup.
+    QTimer::singleShot(0, []() {
+      Command cmd("gui_stop; exit");
+      GlobalSession->CmdStack()->push_and_exec(&cmd);
+    });
   }
 
 }

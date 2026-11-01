@@ -72,6 +72,7 @@ set (SRC_CPP_LIST ../Main/Foedag_ql.cpp
   CompilerNotifier.cpp
   ../MainWindow/PathEdit.cpp
   ../Main/DialogProvider.cpp
+  ../Main/EventLoopProbe.cpp
   ../MainWindow/MessageItemParser.cpp
   ../Widgets/MultiComboBox.cpp
   ../Widgets/SelectionDialog.cpp
@@ -108,6 +109,7 @@ set (SRC_H_LIST ../Main/Foedag.h
   ../Main/TclSimpleParser.h
   ../MainWindow/PathEdit.h
   ../Main/DialogProvider.h
+  ../Main/EventLoopProbe.h
   ../MainWindow/MessageItemParser.h
   ../Widgets/MultiComboBox.h
   ../Widgets/SelectionDialog.h

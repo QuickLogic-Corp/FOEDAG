@@ -1,7 +1,9 @@
 #include "QLDeviceManager.h"
+#include "QLDevicePath.h"
 
 #include <cstdlib>   // std::getenv
 #include <cctype>    // std::isspace
+#include <limits>    // std::numeric_limits
 
 #include <QObject>
 #include <QWidget>
@@ -1035,6 +1037,13 @@ void QLDeviceManager::parseDeviceData() {
   // shipped with the installation can never be shadowed by an externally installed one.
   for (const std::filesystem::path& root_device_data_dir_path : root_device_data_dir_path_list) {
 
+  // The four nested walks below take an error_code on construction only, so their operator++
+  // still throws if an entry disappears between readdir and the descend - reachable whenever
+  // a scan races installDevice or uninstallDevice, both of which remove_all a device tree.
+  // Catching per root gives that the same outcome the REQ-007 path below already chooses for
+  // an unreadable root: warn, skip it, carry on. Without it the throw kills the process.
+  try {
+
   // look at the directories inside the device_data_dir_path for 'family' entries
   // NOTE: the error_code overload is required here - a registered root that has been
   // deleted or made unreadable must warn and be skipped, never abort startup (REQ-007).
@@ -1140,6 +1149,16 @@ void QLDeviceManager::parseDeviceData() {
     }
   }
 
+  }
+  catch (const std::filesystem::filesystem_error& e) {
+    // Name the root and the error: a root that silently drops out of the scan is the
+    // "why is my flow using the wrong device data?" failure these walks warn about
+    // elsewhere. The next parseDeviceData() picks it up again if the cause was transient.
+    std::cout << "WARNING: skipping device data root after filesystem error: "
+              << root_device_data_dir_path.string() << " (" << e.what() << ")" << std::endl;
+    continue;
+  }
+
   } // for each device_data root
 
 
@@ -1216,15 +1235,31 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
   // [2][a] search for all vpr.xml/openfpga.xml files, and check the dir paths:
   std::vector<std::filesystem::path> vpr_xml_files;
   std::vector<std::filesystem::path> openfpga_xml_files;
-  for (const std::filesystem::directory_entry& dir_entry :
-      std::filesystem::recursive_directory_iterator(device_data_dir_path_c,
-                                                    std::filesystem::directory_options::skip_permission_denied,
-                                                    ec)) {
+  // increment(ec) rather than a range-for: the constructor's error_code overload does not
+  // cover operator++, so a range-for throws filesystem_error the moment an entry vanishes
+  // between readdir and the descend. installDevice and uninstallDevice both remove_all a
+  // device tree, and a root can be mutated by anything else on the machine, so a scan racing
+  // a removal is reachable. No frame between here and main() catches filesystem_error.
+  std::filesystem::recursive_directory_iterator dir_it(
+      device_data_dir_path_c,
+      std::filesystem::directory_options::skip_permission_denied,
+      ec);
+  if(ec) {
+    std::cout << std::string("failed listing contents of ") +
+                            device_data_dir_path_c.string() << std::endl;
+    return device_variants;
+  }
+  const std::filesystem::recursive_directory_iterator dir_end;
+  for (; dir_it != dir_end; dir_it.increment(ec)) {
+    // Fail closed. A truncated walk yields a partial XML list, which presents downstream as a
+    // device with corners silently missing rather than as an error.
     if(ec) {
-      std::cout << std::string("failed listing contents of ") +
-                              device_data_dir_path_c.string() << std::endl;
+      std::cout << std::string("failed walking ") + device_data_dir_path_c.string() +
+                              ": " + ec.message() << std::endl;
       return device_variants;
     }
+
+    const std::filesystem::directory_entry& dir_entry = *dir_it;
 
     if(dir_entry.is_regular_file(ec)) {
 
@@ -1358,26 +1393,6 @@ std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariantsInDeviceDirector
   return device_variants;
 }
 
-
-std::vector<QLDeviceVariant> QLDeviceManager::listDeviceVariants(
-    std::string family,
-    std::string foundry,
-    std::string node,
-    std::string devicename) {
-
-  // get to the device_data dir path of the root that owns THIS device (falls back to the
-  // first root when the device is not in device_list yet)
-  std::filesystem::path root_device_data_dir_path =
-     deviceTypeRootDirPath(family, foundry, node, devicename);
-
-  // calculate the device_data dir path for specified device
-  std::filesystem::path device_data_dir_path = root_device_data_dir_path / family / foundry / node / devicename;
-  // std::cout << "device_data dir: " + device_data_dir_path.string() << std::endl;
-
-  // query the variants from this path:
-  return listDeviceVariantsInDeviceDirectory(family, foundry, node, devicename, device_data_dir_path);
-
-}
 
 
 std::vector<QLDeviceVariantLayout> QLDeviceManager::listDeviceVariantLayouts(std::string family,
@@ -2342,9 +2357,13 @@ int QLDeviceManager::encryptDevice(std::string family, std::string foundry, std:
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
 
-          // include openfpga template script for copy (aurora_template_script.openfpga)
+          // include openfpga template scripts for copy (aurora_template_script.openfpga,
+          // and variants such as aurora_template_script_pack.openfpga). regex_match is a
+          // full-string match, so a name-suffixed variant needs the wildcard: without it
+          // the variant matches no encrypt/copy/exclude rule at all and device kit
+          // generation refuses the device outright.
           if (std::regex_match(dir_entry.path().filename().string(),
-                                std::regex("aurora_template_script\\.openfpga",
+                                std::regex("aurora_template_script.*\\.openfpga",
                                 std::regex::icase))) {
             source_device_data_file_list_to_copy.push_back(dir_entry.path().string());
           }
@@ -2994,64 +3013,6 @@ int compareAuroraVersions(const std::string& lhs, const std::string& rhs) {
   return 0;
 }
 
-// Expand a leading '~' or '~/' to the user's home directory.
-//
-// A Tcl command receives its arguments already word-split, so the shell never expands a tilde
-// inside `aurora --cmd "install_device kit.tar.gz -target ~/devices"` -- bash does not expand
-// '~' inside double quotes unless it starts the word. Without this, that documented form would
-// silently create a directory literally named '~' under the current directory. Only a LEADING
-// tilde is expanded; '~user' is not supported and is left alone.
-std::filesystem::path expandLeadingTilde(const std::filesystem::path& input_path) {
-
-  const std::string input_string = input_path.string();
-  if(input_string.empty() || input_string[0] != '~') {
-    return input_path;
-  }
-  // '~user/...' -- not ours to resolve; leave it untouched rather than guess.
-  if(input_string.size() > 1 && input_string[1] != '/' && input_string[1] != '\\') {
-    return input_path;
-  }
-
-  const char* home_dir = std::getenv("HOME");
-#ifdef _WIN32
-  if(home_dir == nullptr) { home_dir = std::getenv("USERPROFILE"); }
-#endif
-  if(home_dir == nullptr || *home_dir == '\0') {
-    return input_path;                       // no home to expand to: leave it as the user typed it
-  }
-
-  return std::filesystem::path(home_dir) / input_string.substr(input_string.size() > 1 ? 2 : 1);
-}
-
-// true when 'candidate' is inside 'ancestor' (or is it), after resolving symlinks and '..'.
-bool pathIsInside(const std::filesystem::path& candidate, const std::filesystem::path& ancestor) {
-
-  std::error_code ec;
-
-  // resolve as much of the candidate as exists: the target dir may not have been created yet.
-  std::filesystem::path candidate_existing = candidate;
-  while(!candidate_existing.empty() && !std::filesystem::exists(candidate_existing, ec)) {
-    std::filesystem::path parent = candidate_existing.parent_path();
-    if(parent == candidate_existing) {
-      break;
-    }
-    candidate_existing = parent;
-  }
-
-  std::filesystem::path candidate_c = std::filesystem::weakly_canonical(candidate_existing, ec);
-  if(ec) { candidate_c = candidate_existing; ec.clear(); }
-  std::filesystem::path ancestor_c = std::filesystem::weakly_canonical(ancestor, ec);
-  if(ec) { ancestor_c = ancestor; ec.clear(); }
-
-  auto candidate_it = candidate_c.begin();
-  auto ancestor_it = ancestor_c.begin();
-  for(; ancestor_it != ancestor_c.end(); ++ancestor_it, ++candidate_it) {
-    if(candidate_it == candidate_c.end() || *candidate_it != *ancestor_it) {
-      return false;
-    }
-  }
-  return true;
-}
 
 // run a command and return its stdout.
 //
@@ -4548,6 +4509,81 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::derive
 }
 
 
+// clb/bram/dsp/io for one layout, read verbatim from an already-parsed
+// resources.json document - the fallback for a package deriveResourceCounts()
+// cannot answer (issue #2370). Declines rather than guessing on anything
+// json's own exceptions would otherwise throw through: a missing layout
+// entry, a non-object entry, or a key that is present but not a usable count.
+std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::resourceCountsFromResourcesJson(
+    const json& resources_json, const std::string& layout_name, std::string* out_error) {
+
+  std::vector<std::tuple<std::string, std::optional<int>>> resources_vector;
+
+  const auto fail = [&](const std::string& reason) {
+    if(out_error) {
+      *out_error = reason;
+    }
+    // a partly-filled vector would read as success to the caller
+    resources_vector.clear();
+    return resources_vector;
+  };
+
+  if( !resources_json.contains(layout_name) ) {
+    return fail("resources.json has no entry for layout \"" + layout_name + "\"");
+  }
+
+  const json& layout_entry = resources_json[layout_name];
+  if( !layout_entry.is_object() ) {
+    return fail("resources.json entry for layout \"" + layout_name + "\" is not an object");
+  }
+
+  // resources.json is generated, and lists every resource type the fabric
+  // carries, so a key it omits means the device has none of that resource -
+  // a count of zero, not an unknown. EPSON-2024Q2-1209 ships no "bram" key
+  // because that fabric has no BRAM. A key that IS present has to be a
+  // usable count.
+  static const char* const kResourceKeys[] = {"clb", "bram", "dsp", "io"};
+  int keys_present = 0;
+  for(const char* key : kResourceKeys) {
+
+    if( !layout_entry.contains(key) ) {
+      resources_vector.push_back(std::make_tuple(std::string(key), std::optional<int>(0)));
+      continue;
+    }
+    ++keys_present;
+
+    const json& value = layout_entry[key];
+
+    // Range-check before narrowing: get<int>() on an out-of-range value wraps
+    // rather than refusing it, and json stores anything above INT64_MAX as
+    // unsigned, where get<int64_t>() would itself wrap back into range and
+    // slip past a signed bounds check.
+    const bool usable_count =
+        value.is_number_integer() &&
+        (value.is_number_unsigned()
+             ? (value.get<uint64_t>() <= static_cast<uint64_t>(std::numeric_limits<int>::max()))
+             : ((value.get<int64_t>() >= std::numeric_limits<int>::min()) &&
+                (value.get<int64_t>() <= std::numeric_limits<int>::max())));
+    if( !usable_count ) {
+      return fail("resources.json entry for layout \"" + layout_name + "\" has no usable \"" +
+                  std::string(key) + "\" key");
+    }
+
+    resources_vector.push_back(std::make_tuple(std::string(key),
+        std::optional<int>(value.get<int>())));
+  }
+
+  // An entry carrying none of the four is not a resource entry at all - say so
+  // rather than claiming a device with no clbs and no io.
+  if( keys_present == 0 ) {
+    return fail("resources.json entry for layout \"" + layout_name +
+                "\" has none of \"clb\", \"bram\", \"dsp\", \"io\"");
+  }
+
+  return resources_vector;
+}
+
+
 std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::deriveDeviceResourceInformation(
     QLDeviceTarget device_target, std::string* out_error) {
 
@@ -4598,9 +4634,49 @@ std::vector<std::tuple<std::string, std::optional<int>>> QLDeviceManager::device
   // known (e.g. an AUTO/RESOURCES device before Packing() has run):
   // [<"resourcename1",resourcecount1>,<"resourcename2",resourcecount2>,...]
 
+  // Resolve the default argument here rather than leaving each callee to do it:
+  // the fallback below reads the layout NAME off this target while
+  // deviceTypeDirPath() would resolve the directory off the current device, and
+  // the two must describe the same device.
+  if( !isDeviceTargetValid(device_target) ) {
+    device_target = this->device_target;
+  }
+
   std::string derive_error;
   std::vector<std::tuple<std::string, std::optional<int>>> resources_vector =
       deriveDeviceResourceInformation(device_target, &derive_error);
+
+  // config.json could not answer (not the "not yet known" case): fall back to
+  // this device type's resources.json, the vpr-generated file it shipped
+  // before deriveResourceCounts() replaced it (issue #2370) - old packages
+  // still missing a key the formula needs can still report what they always
+  // reported. config.json stays the primary source: this is only ever
+  // consulted after it has already failed.
+  if( resources_vector.empty() && !derive_error.empty() ) {
+
+    std::filesystem::path resources_json_path =
+        deviceTypeDirPath(device_target) / std::string("resources.json");
+
+    if(FileUtils::FileExists(resources_json_path)) {
+      std::string fallback_error;
+      try {
+        std::ifstream ifs(resources_json_path.string());
+        json resources_json = json::parse(ifs);
+        resources_vector = resourceCountsFromResourcesJson(
+            resources_json, device_target.device_variant_layout.name, &fallback_error);
+      }
+      catch(const std::exception& e) {
+        fallback_error = std::string("resources.json is not valid JSON: ") + e.what();
+      }
+
+      // the file is present, so its own problem is worth telling apart from
+      // "config.json can't answer and there was nothing else to try" - unlike
+      // a genuinely absent resources.json, this is something to go fix.
+      if( resources_vector.empty() && !fallback_error.empty() ) {
+        derive_error += "; resources.json fallback also failed: " + fallback_error;
+      }
+    }
+  }
 
   // the device is about to be shown with no resources at all, so say why rather
   // than leaving it unexplained. Silent when derive_error is empty: that means
@@ -6322,10 +6398,14 @@ bool QLDeviceManager::parseLayoutDimension(const std::string& value, long& out_v
 // Does the override ask for the fabric the device ALREADY HAS?
 //
 // REQ-005 refuses a re-shape that was actually requested. An override naming the
-// geometry already in the package requests nothing, and that is not a corner
-// case: the flow stamps every device it generates 'DEVICE_TYPE': 'FIXED', so on
-// the next run the very custom_layout.yml that shaped it is still beside the
-// project and lands on the gate (aurora2#2291).
+// geometry already in the package requests nothing, so refusing it would fail a
+// run that asked for the fabric it already has.
+//
+// The original driver (aurora2#2291 - the flow stamped its own generated devices
+// 'DEVICE_TYPE': 'FIXED', so the yml that shaped one was still beside the project
+// on the next run) is gone with the generated package (aurora2#2506). What remains
+// is a shipped FIXED part whose config geometry matches the user's yml, which
+// REQ-005's own wording says must not fail.
 //
 // Compared in the DEVICE CONFIG's space on both sides. The yml's keys and the
 // config's keys are the same keys - add_layout.py reads 'ARRAY_X' / 'BRAM_COLS'

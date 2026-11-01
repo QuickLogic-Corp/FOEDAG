@@ -438,12 +438,19 @@ class IPCatalog {
   bool addIP(IPDefinition* def);
   const std::vector<IPDefinition*>& Definitions() { return m_definitions; }
   IPDefinition* Definition(const std::string& name);
+  // Takes every definition whose generator lives under `root` (a catalog
+  // root directory) out of the catalog and returns how many. The definitions
+  // are retired, not deleted: IPInstance keeps raw pointers to them.
+  size_t removeDefinitionsUnder(const std::filesystem::path& root);
+  // True for a definition removeDefinitionsUnder took out of the catalog.
+  bool isRetired(const IPDefinition* def) const;
   void WriteCatalog(std::ostream& out);
   static std::filesystem::path getPythonPath(const std::filesystem::path& envsPath);
 
  protected:
   std::vector<IPDefinition*> m_definitions;
   std::map<std::string, IPDefinition*> m_definitionMap;
+  std::vector<IPDefinition*> m_retiredDefinitions;
 };
 
 struct VLNV {

@@ -56,6 +56,7 @@
 
 #include "Compiler/CompilerOpenFPGA_ql.h"
 #include "Compiler/Constraints.h"
+#include "Compiler/PrivateTempDir.h"
 #include "Compiler/TilesCfgParser.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
@@ -95,6 +96,7 @@ using json = nlohmann::ordered_json;
 
 using namespace FOEDAG;
 
+
 #ifdef HAS_POWER_CALC_RESOURCE
 static inline void initPowerCalcResource() {
   Q_INIT_RESOURCE(compiler_power_calc_resources);
@@ -102,18 +104,189 @@ static inline void initPowerCalcResource() {
 #endif
 
 #define USE_INCREMENTAL_COMPILATION
-#define GENERATE_NEW_DEVICE_FPGA_AUTO 1
 #define GENERATE_RR_GRAPH_FPGA_AUTO 0
 
 //#define USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
 
-CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_taskCompilationStateManager(this)
+// Where floorplanning writes the per-design repack constraints when the device's
+// template is encrypted: a fixed name in this process's private directory, so
+// FinishOpenFPGAScript can find it. Empty if that directory cannot be created.
+static std::filesystem::path privateRepackConstraintsPath(const std::string& projectName) {
+  const std::filesystem::path dir = PrivateTempDir::path();
+  return dir.empty() ? dir : dir / (projectName + "_repack_design_constraint.xml");
+}
+
+thread_local bool CompilerOpenFPGA_ql::s_describeOnly = false;
+
+CompilerOpenFPGA_ql::CompilerOpenFPGA_ql(): Compiler(), m_incrementalBackend(makeCppBackend())
 {
+  // Decrypted files of an Aurora that was cancelled or killed outlive it; remove them now.
+  std::error_code tmp_ec;
+  PrivateTempDir::sweepStale(std::filesystem::temp_directory_path(tmp_ec));
   QObject::connect(Project::Instance(), &Project::projectPathChanged, [this](){
     std::filesystem::path projectPath(Project::Instance()->projectPath().toStdString());
-    m_taskCompilationStateManager.setProjectPath(projectPath);
-    m_taskCompilationStateManager.load();
+    selectIncrementalBackend();
+    backend().setProjectPath(projectPath);
+    backend().load();
   });
+}
+
+void CompilerOpenFPGA_ql::selectIncrementalBackend() {
+  const std::filesystem::path installRoot = engineInstallRoot();
+  const char* env = std::getenv("AURORA_INCREMENTAL");
+  // Without an engine in the install and without the switch, cpp is the only choice.
+  if (installRoot.empty() && !env) {
+    m_engineSelected = false;
+    return;
+  }
+  const FlowEngineClient::ModeResult mode =
+      FlowEngineClient::incrementalMode(env, FlowEngineClient::defaultsFile(installRoot));
+  if (!mode.warning.empty() && !m_incrementalModeWarned) {
+    m_incrementalModeWarned = true;
+    Message("Warning: " + mode.warning);
+  }
+  const bool engine = mode.mode == FlowEngineClient::Mode::Engine;
+  if (engine == m_engineSelected) {
+    return;
+  }
+  m_engineSelected = engine;
+  if (engine) {
+    // REQ-143: the interpreter is looked up only now, when the switch selects it.
+    auto engineBackend = std::make_unique<EngineBackend>(
+        this, FlowEngineClient(installRoot),
+        [this](const std::string& stage) { return engineContext(stage); });
+    engineBackend->setUpstreamProvider(
+        [this](const std::string& stage) { return engineUpstream(stage); });
+    m_incrementalBackend = std::move(engineBackend);
+  } else {
+    m_incrementalBackend = makeCppBackend();
+  }
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::engineInstallRoot() const {
+  return GetSession() ? FlowEngineClient::findInstallRoot(GetSession()->Context()->DataPath())
+                      : std::filesystem::path{};
+}
+
+std::unique_ptr<IncrementalBackend> CompilerOpenFPGA_ql::makeCppBackend() {
+  auto cpp = std::make_unique<CppBackend>(this);
+  cpp->setRecordHook([this](int taskId) { invalidateEngineRecords(taskId); });
+  return cpp;
+}
+
+void CompilerOpenFPGA_ql::invalidateEngineRecords(int taskId) {
+  // REQ-125, and REQ-143: no engine records means nothing to clear and nothing to start.
+  const std::filesystem::path project = ProjManager()->projectPath();
+  const std::string stage = EngineBackend::stageName(taskId);
+  if (stage.empty() || !EngineBackend::hasRecords(project)) {
+    return;
+  }
+  FlowEngineClient::Result result;
+  try {
+    const FlowEngineClient client(engineInstallRoot());
+    std::vector<std::string> args{"invalidate", "--stage", stage, "--downstream"};
+    if (engineContext(stage).layoutResolvedInPack) {
+      args.emplace_back("--layout-resolved-in-pack");
+    }
+    args.insert(args.end(), {"--project", project.u8string()});
+    result = client.call(args);
+  } catch (const std::exception& e) {
+    result.error = e.what();
+  }
+  if (!result.ok) {
+    Message("Warning: flow engine records from " + stage +
+            " on may be stale and could not be cleared: " + result.error);
+  }
+}
+
+EngineStageContext CompilerOpenFPGA_ql::engineContext(const std::string& stage) {
+  EngineStageContext ctx;
+  ctx.project = ProjManager()->projectPath();
+  ctx.projectName = ProjManager()->projectName();
+  ctx.top = ProjManager()->DesignTopModule();
+
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+  if (devices->isDeviceTargetValid(target)) {
+    ctx.deviceDir = devices->deviceTypeDirPath(target);
+    ctx.layoutResolvedInPack = QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
+        devices->deviceLayoutSettings(target), target);
+    ctx.sessionState["device"] = devices->convertToDeviceString(target);
+  }
+
+  // Tcl-set and session values the command line does not show (REQ-017).
+  nlohmann::json& state = ctx.sessionState;
+  std::vector<std::string> relIps;
+  for (const auto& blif : m_relIpBlifs) relIps.push_back(blif.u8string());
+  state["rel_ip_blifs"] = relIps;
+  state["project_type"] = static_cast<int>(ProjManager()->projectType());
+  if (stage == "synth") {
+    state["synthesis_tool"] = static_cast<int>(ProjManager()->synthesisTool());
+    state["verific"] = m_useVerific;
+  } else {
+    state["netlist_type"] = static_cast<int>(GetNetlistType());
+    state["channel_width"] = m_channel_width;
+    state["pnr_options"] = PnROpt();
+    if (stage == "place") state["pin_assign"] = static_cast<int>(PinAssignOpts());
+  }
+
+  // A user-supplied net/place/route file is never run over.
+  const char* userFile = stage == "pack"    ? "net_file"
+                         : stage == "place" ? "place_file"
+                         : stage == "route" ? "route_file"
+                                            : nullptr;
+  ctx.external = userFile && !QLSettingsManager::getStringValue("vpr", "filename", userFile).empty();
+  return ctx;
+}
+
+std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::string& stage) {
+  static const std::vector<std::string> order{"synth", "pack", "place", "route"};
+  const auto end = std::find(order.begin(), order.end(), stage);
+  if (end == order.end()) {
+    return {};
+  }
+  // Runs inside a task: describe without side effects, and leave the task's
+  // own builder state as it was.
+  const bool describeOnly = s_describeOnly;
+  const std::filesystem::path architectureFile = m_architectureFile;
+  const std::filesystem::path sbMapsFile = m_SBMapsFile;
+  const std::filesystem::path sbTemplatesDir = m_SBTemplatesDir;
+  s_describeOnly = true;
+  auto restore = sg::make_scope_guard([&] {
+    s_describeOnly = describeOnly;
+    m_architectureFile = architectureFile;
+    m_SBMapsFile = sbMapsFile;
+    m_SBTemplatesDir = sbTemplatesDir;
+  });
+
+  std::vector<UpstreamCommand> upstream;
+  for (auto it = order.begin(); it != end; ++it) {
+    if (*it == "synth") {
+      if (ProjManager()->projectType() == PostSynth) continue;
+      const auto commands = getSynthesisCommands();
+      if (commands.empty()) {
+        upstream.push_back({static_cast<int>(Action::Synthesis), "", nullptr});
+      }
+      for (const auto& [id, command] : commands) {
+        upstream.push_back({static_cast<int>(Action::Synthesis), std::to_string(id), command});
+      }
+    } else if (*it == "pack") {
+      // Analytical placement skips pack, which then never has a record.
+      if (QLSettingsManager::getStringValue("general", "options", "analytical_place") == "checked") {
+        continue;
+      }
+      upstream.push_back({static_cast<int>(Action::Pack), "", getPackingCommand()});
+    } else if (*it == "place") {
+      upstream.push_back({static_cast<int>(Action::Detailed), "", getPlacementCommand()});
+    }
+  }
+  return upstream;
+}
+
+void CompilerOpenFPGA_ql::BeforeCompileTask(Action /*action*/) { backend().taskStarted(); }
+
+void CompilerOpenFPGA_ql::AfterCompileTask(Action /*action*/, bool ok) {
+  backend().taskFinished(ok);
 }
 
 void CompilerOpenFPGA_ql::Version(std::ostream* out) {
@@ -131,6 +304,7 @@ void CompilerOpenFPGA_ql::Version(std::ostream* out) {
 
 CompilerOpenFPGA_ql::~CompilerOpenFPGA_ql() {
   CleanTempFiles();
+  PrivateTempDir::removeOwn();
 }
 
 // True when `p` equals `base` or lies underneath it. Component-wise (via
@@ -196,10 +370,6 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
   (*out) << "   set_device_size XxY        : Device fabric size selection"
          << std::endl;
   (*out) << "   custom_synth_script <file> : Uses a custom Yosys templatized "
-            "script"
-         << std::endl;
-  (*out) << "   custom_openfpga_script <file> : Uses a custom OpenFPGA "
-            "templatized "
             "script"
          << std::endl;
   (*out) << "   set_channel_width <int>    : VPR Routing channel setting"
@@ -271,7 +441,9 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
           << std::endl;
   (*out) << "   delete_ip <name>           : Delete IP by name"
           << std::endl;
-  (*out) << "   verific_parser <on/off>    : Turns on/off Verific parser"
+  (*out) << "   verific_parser <on/off>    : Turns on/off Verific parser; "
+            "takes priority over general > options > verific in the "
+            "settings JSON"
          << std::endl;
   (*out) << "   message_severity <message_id> <ERROR/WARNING/INFO/IGNORE> : "
             "Upgrade/downgrade RTL compilation message severity"
@@ -608,45 +780,6 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   };
   interp->registerCmd("bitstream_config_files", set_bitstream_config_files,
                       this, 0);
-
-  auto custom_openfpga_script = [](void* clientData, Tcl_Interp* interp,
-                                   int argc, const char* argv[]) -> int {
-    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-    std::string name;
-    if (argc != 2) {
-      compiler->ErrorMessage("Specify an OpenFPGA script");
-      return TCL_ERROR;
-    }
-
-    std::string expandedFile = argv[1];
-    bool use_orig_path = false;
-    if (FileUtils::FileExists(expandedFile)) {
-      use_orig_path = true;
-    }
-
-    if ((!use_orig_path) &&
-        (!compiler->GetSession()->CmdLine()->Script().empty())) {
-      std::filesystem::path script =
-          compiler->GetSession()->CmdLine()->Script();
-      std::filesystem::path scriptPath = script.parent_path();
-      std::filesystem::path fullPath = scriptPath;
-      fullPath.append(argv[1]);
-      expandedFile = fullPath.string();
-    }
-    std::ifstream stream(expandedFile);
-    if (!stream.good()) {
-      compiler->ErrorMessage("Cannot find OpenFPGA script: " +
-                             std::string(expandedFile));
-      return TCL_ERROR;
-    }
-    std::string script((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
-    stream.close();
-    compiler->OpenFPGAScript(script);
-    return TCL_OK;
-  };
-  interp->registerCmd("custom_openfpga_script", custom_openfpga_script, this,
-                      0);
 
   auto custom_synth_script = [](void* clientData, Tcl_Interp* interp, int argc,
                                 const char* argv[]) -> int {
@@ -1123,13 +1256,17 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
   auto verific_parser = [](void* clientData, Tcl_Interp* interp, int argc,
                            const char* argv[]) -> int {
     CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
-    std::string name;
     if (argc != 2) {
       compiler->ErrorMessage("Specify on/off");
       return TCL_ERROR;
     }
     std::string arg = argv[1];
-    compiler->SetUseVerific((arg == "on") ? true : false);
+    if (arg != "on" && arg != "off") {
+      compiler->ErrorMessage("verific_parser: expected on or off, got '" +
+                             arg + "'");
+      return TCL_ERROR;
+    }
+    compiler->SetUseVerificFromTcl(arg == "on");
     return TCL_OK;
   };
   interp->registerCmd("verific_parser", verific_parser, this, 0);
@@ -2050,6 +2187,37 @@ std::string CompilerOpenFPGA_ql::FinishAnalyzeScript(const std::string& script) 
   return result;
 }
 
+void CompilerOpenFPGA_ql::SetUseVerificFromTcl(bool on) {
+  m_useVerificFromTcl = on;
+  SetUseVerific(on);
+  Message(std::string("Verific parser ") + (on ? "on" : "off") +
+          " (verific_parser Tcl command; takes priority over "
+          "general > options > verific in the settings JSON)");
+  if (m_projManager != nullptr &&
+      (m_projManager->synthesisTool() == Synplify ||
+       m_projManager->projectType() == PostMapSynplify)) {
+    Message("verific_parser has no effect on a Synplify project: Synplify "
+            "is its own frontend");
+  }
+}
+
+bool CompilerOpenFPGA_ql::ResolveUseVerific() {
+  // Synplify is its own frontend and reads VHDL/SystemVerilog natively, so
+  // Verific is never used for a Synplify or post-map Synplify project,
+  // whatever the settings JSON or the Tcl script asked for.
+  if (m_projManager->synthesisTool() == Synplify ||
+      m_projManager->projectType() == PostMapSynplify) {
+    return false;
+  }
+  // An explicit `verific_parser on|off` in the Tcl script wins over the JSON.
+  if (m_useVerificFromTcl.has_value()) {
+    return m_useVerificFromTcl.value();
+  }
+  // Default: `general > options > verific` in the project settings JSON.
+  return QLSettingsManager::getStringValue("general", "options", "verific") ==
+         "checked";
+}
+
 bool CompilerOpenFPGA_ql::Analyze() {
 
   return true;
@@ -2132,12 +2300,7 @@ bool CompilerOpenFPGA_ql::Analyze() {
   }
 
 
-  if( QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  }
-  else {
-    m_useVerific = false;
-  }
+  m_useVerific = ResolveUseVerific();
 
   std::string analysisScript = InitAnalyzeScript();
   analysisScript = FinishAnalyzeScript(analysisScript);
@@ -2953,7 +3116,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       return false;
     }
     CommandWrapperPtr command = it->second;
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
+    if (backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command)) {
       Message("Synthesis command: " + command->string());
       int status = ExecuteAndMonitorSystemCommand(command->string());
       CleanTempFiles();
@@ -2965,7 +3128,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       } else {
         m_state = State::Synthesized;
         Message("Design " + ProjManager()->projectName() + " is synthesized");
-        m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
+        backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Synplify), command);
       }
     } else {
       Message("##################################################");
@@ -3003,7 +3166,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     return false;
   }
   CommandWrapperPtr command = it->second;
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command)) {
     Message("##################################################");
     Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
@@ -3034,7 +3197,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   } else {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
     // [aurora2#1725 stage P4] validation gate -- grade every instance against the
     // synthesis output just produced. Best-effort.
     RunValidateInstances();
@@ -3595,23 +3758,11 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
       break;
   }
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -4008,23 +4159,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       break;
   }
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 #if UPSTREAM_UNUSED
   std::string pnrOptions;
@@ -4110,16 +4249,30 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     return nullptr;
   }
 
+  // The engine identifies a decrypted architecture by its encrypted file and never
+  // reads the key database (REQ-012, REQ-130).
+  std::string arch_host_digest;
+  std::filesystem::path arch_key_db;
   if(QLDeviceManager::getInstance()->deviceFileIsEncrypted(m_architectureFile)) {
-    
-    std::filesystem::path vpr_xml_en_path = m_architectureFile;
-    m_architectureFile = GenerateTempFilePath();
 
-    if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
-                           QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
-                           QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
-      // empty string returned on error.
-      return nullptr;
+    std::filesystem::path vpr_xml_en_path = m_architectureFile;
+    if (m_engineSelected) {
+      arch_host_digest = FlowEngineClient::sha256File(vpr_xml_en_path);
+      arch_key_db = QLDeviceManager::getInstance()->deviceTypeDirPath(device_target) /
+                    (QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target) + "_Supp.db");
+    }
+    if (s_describeOnly) {
+      // A name for the file a run would decrypt; nothing is written there.
+      m_architectureFile = std::filesystem::temp_directory_path() / VPR_ARCH_FILE_MASK;
+    } else {
+      m_architectureFile = GenerateTempFilePath();
+
+      if (!decryptDeviceFile(vpr_xml_en_path, m_architectureFile,
+                             QLDeviceManager::getInstance()->deviceTypeDirPath(device_target),
+                             QLDeviceManager::getInstance()->convertToDeviceTypeString(device_target))) {
+        // empty string returned on error.
+        return nullptr;
+      }
     }
   }
 
@@ -4138,7 +4291,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   return command;
 #endif // #if UPSTREAM_UNUSED
 
-  if (GenerateIOFloorPlanConstraints()){
+  // The describe form declares the constraint files a run would pass; only a run
+  // generates them.
+  if (s_describeOnly || GenerateIOFloorPlanConstraints()){
     std::filesystem::path fp_constraint_filepath = ProjManager()->projectName() + "_constraints.xml";
     std::filesystem::path fp_constraint_filepath_absolute = std::filesystem::path(ProjManager()->projectPath()) / fp_constraint_filepath;
     PruneRelIpBlifs();
@@ -4147,7 +4302,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
       // constraints (derived from the annotated netlist) with the IO
       // constraints into a separate file. The default flow's
       // <project>_constraints.xml is left untouched.
-      if (!GenerateRelMacroConstraints(netlistFile)) {
+      if (!s_describeOnly && !GenerateRelMacroConstraints(netlistFile)) {
         return nullptr;
       }
       command->appendPath("--read_vpr_constraints", std::filesystem::path{ProjManager()->projectName() + "_rpm_constraints.xml"});
@@ -4166,7 +4321,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   command->prependFile(std::filesystem::path{netlistFile});
   command->prependFile(m_architectureFile, VPR_ARCH_FILE_MASK);
   command->prepend(m_vprExecutablePath.string());
-  
+  if (!arch_host_digest.empty()) {
+    command->setHostDigest(m_architectureFile, arch_host_digest);
+    command->addKeyPath(arch_key_db);
+  }
+
   return command;
 }
 
@@ -4268,6 +4427,35 @@ static std::string removeVprOption(const std::string& options, const std::string
 }
 
 
+// Set a "--flag on|off" pair in a whitespace-separated option string. An existing
+// occurrence has its value rewritten in place, otherwise the pair is appended.
+// Token-exact like removeVprOption(), so the flag does not match a value or a
+// differently named flag that merely contains the same text.
+static std::string setVprOnOffOption(const std::string& options, const std::string& flag, bool on) {
+  const std::string value = on ? "on" : "off";
+  std::vector<std::string> tokens = StringUtils::tokenize(options, " ");
+  bool found = false;
+  for(size_t i = 0; i < tokens.size(); ++i) {
+    if(tokens[i] != flag) {
+      continue;
+    }
+    found = true;
+    if(i + 1 < tokens.size() && tokens[i + 1].rfind("--", 0) != 0) {
+      tokens[i + 1] = value;  // rewrite the flag's value
+    }
+    else {
+      tokens.insert(tokens.begin() + i + 1, value);  // flag had no value
+    }
+    ++i;  // the value is settled, do not look at it as a flag
+  }
+  if(!found) {
+    tokens.push_back(flag);
+    tokens.push_back(value);
+  }
+  return StringUtils::join(tokens, " ");
+}
+
+
 // Name of a generated (re-shaped) layout: '<prefix>FPGA<width>x<height>'. The 'x' is
 // load-bearing: plain concatenation makes 12x10 read as 'AUTOFPGA1210', equally 1x210
 // and 121x0. Every construction site goes through here so they cannot drift apart.
@@ -4275,55 +4463,6 @@ static std::string generatedLayoutName(const std::string& prefix, int width, int
 
   return prefix + std::string("FPGA") +
          std::to_string(width) + std::string("x") + std::to_string(height);
-}
-
-
-// A per-run token for the generated device DIRECTORY, which is what concurrent runs race on.
-//
-// The generated package is written into the SHARED device_data tree as a sibling of the
-// source device. Two runs resolving to the same fabric size targeted one directory and raced
-// on the delete-then-copy that installs it: one run's recursive delete lands in the middle of
-// another's copy. The benchmark suite runs many designs, and several synthesis tools per
-// design, against one device_data, so that is its normal operating condition.
-//
-// The project path is the natural key -- it is exactly what distinguishes one concurrent
-// aurora invocation from another. Hashed because a path cannot go in a directory name, in hex
-// to keep it short, and stable for a given project so a re-run reuses its own directory.
-//
-// It goes on the device name and NOT the layout name: the layout name reaches
-// <fixed_layout name=...> and vpr's --device, where uniqueness buys nothing, and REQ-014
-// fixes it as AUTOFPGA<W>x<H>.
-static std::string generatedDeviceRunToken(const std::string& project_path) {
-
-  std::ostringstream token;
-  token << std::hex << std::hash<std::string>{}(project_path);
-  return std::string("_") + token.str();
-}
-
-
-// Directory name (== devicename) of the device package generated from a re-shaped
-// layout.
-//
-// Substitute when the source layout name is embedded in the source devicename -
-// 'TURNKEY-FPGA_AUTO' with layout 'FPGA_AUTO' becomes 'TURNKEY-AUTOFPGA16x14',
-// which is what pre-2026.3 kits have always produced. Otherwise append, because
-// a device is identified by its package DIRECTORY LEAF and a current package
-// names that leaf after the part rather than after its layout:
-// 'EVAL2-CCFF-CUSTOM' with layout 'FPGA0808' becomes
-// 'EVAL2-CCFF-CUSTOM-AUTOFPGA16x14'.
-// Appending is not a nicety. With substitution alone the derived name would come
-// back unchanged, the clone target would resolve to the shipped package
-// directory, and the caller deletes that directory before copying into it.
-static std::string generatedDeviceName(const std::string& source_devicename,
-                                       const std::string& source_layout_name,
-                                       const std::string& generated_layout_name) {
-
-  if(!source_layout_name.empty() &&
-     source_devicename.find(source_layout_name) != std::string::npos) {
-    return StringUtils::replaceAll(source_devicename, source_layout_name, generated_layout_name);
-  }
-
-  return source_devicename + std::string("-") + generated_layout_name;
 }
 
 
@@ -4665,7 +4804,7 @@ bool CompilerOpenFPGA_ql::Packing() {
   if(!command) {
     return false;
   }
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Pack), command)) {
     Message("##################################################");
     Message("Packing skipped, not required");
     Message("##################################################");
@@ -4962,8 +5101,34 @@ bool CompilerOpenFPGA_ql::Packing() {
     // don't run packing command, we need to run the python script
     // to generate the device first.
   }
+  else if(m_autoLayoutGenerationMode) {
+    // Device size search. This run packs the design against the template layout
+    // only so that add_layout.py can size a device from the resource requirements
+    // vpr reports in vpr_stdout.log. Those counts must come from the pack options
+    // as given: left to itself, the packer repacks a design that does not fit with
+    // progressively denser settings (unrelated clustering, balanced block type
+    // utilization, full external pin utilization) and reports the counts of that
+    // denser clustering, which sizes a device the re-run below - packing with the
+    // options as given - then may not fit at its first pass.
+    // '--disable_pack_retries on' makes the packer stop after the first pass, so
+    // the counts it reports are the ones the generated device has to hold. It is
+    // forced even over a value from the pack custom vpr options, because this run
+    // has no other purpose than sizing; the user's value still applies to the
+    // re-run against the generated device.
+    if(command->string().find("--disable_pack_retries") != std::string::npos) {
+      Message("[WARNING] The device size search forces '--disable_pack_retries on'; the value from "
+              "the pack custom vpr options applies to the re-run against the generated device.\n");
+    }
+    std::string command_size_search =
+        setVprOnOffOption(command->string(), "--disable_pack_retries", true);
+
+    FileUtils::WriteToFile(std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_pack.cmd"), command_size_search);
+
+    Message("Packing is running in Auto Layout Generation Mode: searching the device size with '--disable_pack_retries on'\n");
+    status = ExecuteAndMonitorQtApplication(command_size_search, IsVprGuiCommand(command_size_search));
+  }
   else {
-    status = ExecuteAndMonitorSystemCommand(command->string());
+    status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
   }
 
 
@@ -4984,12 +5149,13 @@ bool CompilerOpenFPGA_ql::Packing() {
       Message("Packing is running in Custom Layout Generation Mode!\n");
     }
 
-    // Regardless of the status (whether the design fits into the base auto layout or not)
-    // we generate a device package.
-    // A device that resolved to a generation mode is a template for shaping a
-    // fabric, not something the rest of the flow can target directly, so even
-    // when the design fits we emit a device package with the devicename and
-    // layoutname taken from the generated layout.
+    // Regardless of the status (whether the design fits into the base auto layout or
+    // not) we generate a layout. A device that resolved to a generation mode is a
+    // template for shaping a fabric, not something the rest of the flow can target
+    // directly, so even when the design fits we re-pack against a generated layout.
+    //
+    // The generated fabric is per-run: no device package is written (aurora2#2506).
+    // Only the layout name and the project-local arch outlive this block.
 
     // m_architectureFile -> decrypted vpr.xml of current device target.
     std::filesystem::path generated_vpr_xml_path = 
@@ -5063,8 +5229,72 @@ bool CompilerOpenFPGA_ql::Packing() {
 
       std::string add_layout_script_generated_layout_name;
 
-      std::string command_auto_device = 
-          std::string("python3") + std::string(" ") +
+      // Pick an interpreter that can actually run add_layout.py.
+      //
+      // The script does `import yaml` and `from lxml import etree`. Running a bare
+      // `python3` off PATH means whichever interpreter the environment happens to
+      // resolve, and on a stock host that one has neither -- the flow then dies here
+      // with "ModuleNotFoundError: No module named 'yaml'", which reads like a broken
+      // device rather than a missing module (aurora2#2409, and what 2026.3-rc1 shipped).
+      //
+      // So probe for the MODULES, not for the interpreter: availability is not
+      // capability, and IsSystemCommandAvailable("python3") passes on exactly the hosts
+      // that fail here. The probe imports for real because lxml.etree is a C extension
+      // that can be present as a file and still refuse to load.
+      //
+      // The fallback is the interpreter aurora2 provisions with these two modules
+      // (envs/python3.8). Located the way the rel-macro script is further down this
+      // file: DataPath() varies with the install layout, so probe both plausible roots.
+      // Deliberately not IPCatalog::getPythonPath() -- that resolves to envs/litex
+      // paired with PYTHONHOME, which imports neither module.
+#ifdef _WIN32
+      std::string add_layout_python_exec{"python.exe"};
+#else // _WIN32
+      std::string add_layout_python_exec{"python3"};
+#endif // _WIN32
+      {
+        const std::vector<std::string> probe_args{"-c", "import yaml, lxml.etree"};
+        auto can_run = [&probe_args](const std::string& exec) {
+          std::ostringstream sink;
+          return FileUtils::ExecuteSystemCommand(exec, probe_args, &sink, 30000)
+                     .code == 0;
+        };
+        if (!can_run(add_layout_python_exec)) {
+          const std::filesystem::path data_path =
+              GetSession()->Context()->DataPath();
+#ifdef _WIN32
+          const std::filesystem::path bundled_rel =
+              std::filesystem::path("envs") / "python.exe";
+#else // _WIN32
+          const std::filesystem::path bundled_rel =
+              std::filesystem::path("envs") / "python3.8" / "bin" / "python3";
+#endif // _WIN32
+          for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+            const std::filesystem::path candidate =
+                (root / bundled_rel).lexically_normal();
+            if (!std::filesystem::exists(candidate)) {
+              continue;
+            }
+            if (can_run(candidate.string())) {
+              add_layout_python_exec = candidate.string();
+              Message("Auto Layout Generation: using the bundled python at " +
+                      candidate.string() + "\n");
+            } else {
+              // Both are short. Say so now, naming the modules, rather than letting
+              // the traceback below read like a device problem.
+              ErrorMessage(
+                  "Neither the system " + add_layout_python_exec + " nor the bundled python at " +
+                  candidate.string() + " can import 'yaml' and 'lxml.etree', which " +
+                  add_layout_script_path.filename().string() +
+                  " requires. Layout generation will fail.\n");
+            }
+            break;
+          }
+        }
+      }
+
+      std::string command_auto_device =
+          add_layout_python_exec + std::string(" ") +
           add_layout_script_path.string() + std::string(" ") +
           std::string("--arch_file ") + m_architectureFile.string() + std::string(" ") +
           std::string("--output ") + generated_vpr_xml_path.string() + std::string(" ") +
@@ -5208,7 +5438,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
     std::filesystem::path logfile_generate_rr_graph = 
         std::filesystem::path(ProjManager()->projectPath()) / "generate_rr_graph.log";
-    int status_generate_rr_graph = ExecuteAndMonitorSystemCommand(command_generate_rr_graph,
+    int status_generate_rr_graph = ExecuteAndMonitorQtApplication(command_generate_rr_graph, IsVprGuiCommand(command_generate_rr_graph),
                                                                   logfile_generate_rr_graph.string());
 
     if (status_generate_rr_graph == 0) {
@@ -5339,6 +5569,15 @@ bool CompilerOpenFPGA_ql::Packing() {
       command_rerun = ReplaceAll(command_rerun, m_SBMapsFile.string(), m_autoLayoutGeneratedSBMapsYMLPath.string());
     }
 
+    // Final device size: pack with retries allowed again, so a first pass that
+    // does not fit the generated device still gets the denser repacks before
+    // failing. The size search above forced '--disable_pack_retries on' on its
+    // own copy of the command only; here the flag is set to 'off' unless the pack
+    // custom vpr options carry a value, which is kept.
+    if(command_rerun.find("--disable_pack_retries") == std::string::npos) {
+      command_rerun = setVprOnOffOption(command_rerun, "--disable_pack_retries", false);
+    }
+
     std::ofstream ofs((std::filesystem::path(ProjManager()->projectPath()) /
                       std::string(ProjManager()->projectName() + "_pack.cmd"))
                           .string());
@@ -5351,397 +5590,11 @@ bool CompilerOpenFPGA_ql::Packing() {
     if(m_customLayoutGenerationMode) {
       Message("Packing is being run with Custom Layout Generated Device!\n");
     }
-    status = ExecuteAndMonitorSystemCommand(command_rerun);
+    status = ExecuteAndMonitorQtApplication(command_rerun, IsVprGuiCommand(command_rerun));
 
     // the 'status' will be checked as in the usual flow, as for us, the usual flow
     // resumes, but in 'm_autoLayoutGenerationMode' or 'm_customLayoutGenerationMode'
 
-
-#if GENERATE_NEW_DEVICE_FPGA_AUTO
-    // DEVICE CREATION LOGIC ++
-    // At this point, (if) the packing is completed with the generated device vpr xml, and we can create a usable device
-    // 1 copy <device>: as a copy of the source device parallel to the device (device_data location)
-    //   where devicename: derived from the generated layout name
-    // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
-    // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
-    // -OR-
-    // 3 SB_MAPS.yml/CSV : copy the generated SB_MAPS.yml, and the CSVs need not change.
-    // 4 cryptdb: rename after the generated devicename
-    // 5 settings.json, retarget devicename and layout name onto the generated device
-    // 5b config.json: mark the generated device non-reshapable
-    // 6 example logs: if currently running design within examples, clean up logs
-    // 7 remove other files: add_layout.py, add_layout_params.json if existing
-    if(status == 0) {
-      // packing succeeded with the generated vpr xml, package the device
-
-      // 1 copy the source device directory recursively to create new device.
-      //   and derive the new devicename from the generated layoutname.
-      std::string target_device_copy_devicename =
-          generatedDeviceName(source_devicename, source_layout_name, m_autoLayoutGeneratedLayoutName) +
-          generatedDeviceRunToken(ProjManager()->projectPath());
-
-      // Backstop. If the derived name did not change, the "new" device directory
-      // IS the source device directory, and the code just below deletes an
-      // existing target with RmDirRecursively() before copying into it - i.e. it
-      // would delete the installed device package and then copy from a directory
-      // that no longer exists. Never let that fall through.
-      if(target_device_copy_devicename == source_devicename) {
-        ErrorMessage("Cannot generate a device for '" + source_devicename + "' (layout '" +
-                     source_layout_name + "'): the generated device name is identical to the "
-                     "source device name, and generating it would overwrite the installed "
-                     "device package.\n");
-        return false;
-      }
-
-      std::filesystem::path source_device_copy_dirpath = 
-          QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target);
-
-      std::filesystem::path target_device_copy_dirpath = 
-          source_device_copy_dirpath / 
-          std::string("..") / 
-          target_device_copy_devicename;
-
-      // if the same name device is already generated previously, then we replace that
-      // with the new device.
-      // 1. if this is not desirable, we would need to add additional data to the name, and
-      //    that means communicating this with the script, maybe as a parameter?
-      // 2. the other option is prompting user to enter a 'suffix' or 'prefix' for the devicename.
-      //    this is complicated, as we need to handle both batch mode and gui mode for the prompt.
-      // this is a decision for future releases.
-      if(FileUtils::FileExists(target_device_copy_dirpath)) {
-        Message("[WARNING] Device Already Exists: " + target_device_copy_devicename +"\n");
-        Message("[WARNING] Deleting the Existing Device, It will be regenerated.\n");
-
-        FileUtils::RmDirRecursively(target_device_copy_dirpath);
-      }
-
-      try {
-        std::filesystem::copy(source_device_copy_dirpath,
-                              target_device_copy_dirpath,
-                              std::filesystem::copy_options::recursive);
-      }
-      catch (const fs::filesystem_error& e) {
-        ErrorMessage("Error Copying Device 1\n");
-        // std::cerr << "Filesystem error: " << e.what() << std::endl;
-        // std::cerr << "Path 1: " << e.path1() << std::endl;
-        // std::cerr << "Path 2: " << e.path2() << std::endl;
-        return false;
-      }
-      catch (const std::exception& e) {
-          ErrorMessage("Error Copying Device 2\n");
-          // std::cerr << "General error: " << e.what() << std::endl;
-          return false;
-      }
-
-
-      // 2 vpr.xml.en: copy encrypted vpr.xml.en and replace existing vpr.xml.en
-      std::filesystem::path target_device_vpr_xml_filepath =
-          target_device_copy_dirpath / 
-          current_device_target.device_variant.voltage_threshold /
-          current_device_target.device_variant.p_v_t_corner /
-          "vpr.xml.en";
-      FileUtils::overwriteFile(m_autoLayoutGeneratedVPRXMLPath, target_device_vpr_xml_filepath);
-
-      // Step 1 copied the source corner wholesale, so its plaintext vpr.xml is still
-      // beside the vpr.xml.en just written. Device discovery globs 'vpr\.xml.*' and
-      // refuses a device carrying more VPR XMLs than OpenFPGA XMLs
-      // (QLDeviceManager.cpp:1262), so leaving both makes every generated device
-      // unselectable as a target: "Mismatched number of VPR XML(s) w.r.t OPENFPGA
-      // XML(s)". Only drop it once the encrypted arch is actually in place.
-      if(FileUtils::FileExists(target_device_vpr_xml_filepath)) {
-        std::filesystem::path stale_source_vpr_xml =
-            target_device_vpr_xml_filepath.parent_path() / "vpr.xml";
-        if(FileUtils::FileExists(stale_source_vpr_xml)) {
-          std::error_code stale_remove_ec;
-          std::filesystem::remove(stale_source_vpr_xml, stale_remove_ec);
-          if(stale_remove_ec) {
-            ErrorMessage("Could not remove the source arch left in the generated device: " +
-                         stale_source_vpr_xml.string() + " (" + stale_remove_ec.message() +
-                         "). The device would not resolve as a target.\n");
-            return false;
-          }
-        }
-      }
-
-#if GENERATE_RR_GRAPH_FPGA_AUTO
-      // 3 rr_graph.bin/router_lookahead.bin: copy the generated bin files parallel to the vpr.xml.en
-      std::filesystem::path target_device_rr_graph_filepath =
-          target_device_vpr_xml_filepath.parent_path() /
-          "rr_graph.bin";
-      FileUtils::overwriteFile(m_autoLayoutGeneratedRRGraphBinPath, target_device_rr_graph_filepath);
-
-      std::filesystem::path target_device_router_lookahead_filepath =
-          target_device_vpr_xml_filepath.parent_path() /
-          "router_lookahead.bin";
-      FileUtils::overwriteFile(m_autoLayoutGeneratedRouterLookaheadBinPath, target_device_router_lookahead_filepath);
-#endif // #if GENERATE_RR_GRAPH_FPGA_AUTO
-
-      // 3 SB_MAPS.yml and SB_TEMPLATES dir: copy the output SB_MAPS.yml and the SB_TEMPLATES directory of the current device:
-      // SB_MAPS.yml should be copied into the aurora/ directory, overwriting existing one.
-      // SB_TEMPLATES dir is copied parallel to the vpr.xml.en (this is probably not required at all!, as it will remain same as current device.)
-      std::filesystem::path target_device_sb_maps_yml_filepath =
-          target_device_copy_dirpath / "aurora" / "SB_MAPS.yml";
-      // The generated SB_MAPS may have been encrypted (.en) to stay consistent
-      // with the device's encrypted CSV switchbox templates. Preserve that
-      // suffix on the copy so the regenerated device's SB_MAPS file name matches
-      // its (encrypted) content; deviceSBMAPSFile() resolves the '.en' variant
-      // and VPR keys CRR decryption off that suffix. Without this the cached
-      // device would carry encrypted bytes under a plaintext '.yml' name and
-      // fail to decrypt on reuse.
-      if(m_autoLayoutGeneratedSBMapsYMLPath.extension() == ".en") {
-        target_device_sb_maps_yml_filepath += ".en";
-      }
-      FileUtils::overwriteFile(m_autoLayoutGeneratedSBMapsYMLPath, target_device_sb_maps_yml_filepath);
-
-      // 4 cryptdb: rename it after the generated device
-      std::filesystem::path source_device_cryptdb_filepath =
-          (QLDeviceManager::getInstance()->deviceTypeDirPath()) /
-          (QLDeviceManager::getInstance()->convertToDeviceTypeString() + "_Supp.db");
-      std::string source_device_cryptdb_filename = 
-          source_device_cryptdb_filepath.filename().string();
-
-      // The key database is looked up as '<family>_<foundry>_<node>_<devicename>_Supp.db',
-      // so it has to follow the DEVICENAME and not the layout name: on a package
-      // whose directory leaf is not named after its layout, substituting the
-      // layout name leaves the file called after the source device and the
-      // generated device then has no key database at all.
-      std::string target_device_copy_cryptdb_filename =
-          StringUtils::replaceAll(source_device_cryptdb_filename,
-                                  source_devicename,
-                                  target_device_copy_devicename);
-
-      std::filesystem::path target_device_copy_cryptdb_filepath_original = 
-          target_device_copy_dirpath / source_device_cryptdb_filename;
-
-      std::filesystem::path target_device_copy_cryptdb_filepath_renamed = 
-          target_device_copy_dirpath / target_device_copy_cryptdb_filename;
-
-      try {
-        std::filesystem::rename(target_device_copy_cryptdb_filepath_original,
-                                target_device_copy_cryptdb_filepath_renamed);
-      }
-      catch (const std::filesystem::filesystem_error& e) {
-        ErrorMessage("Error Renaming File 1\n");
-        //std::cerr << "Error renaming file: " << e.what() << std::endl;
-        return false;
-      }
-
-
-      // 5 settings.json, retarget devicename and layout name onto the generated device
-      {
-        std::regex filename_pattern(".+\\.json");
-
-        std::vector<std::filesystem::path> filepath_list;
-
-        // this will include settings.json, settings_template.json, config.json
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(target_device_copy_dirpath)) {
-          if (entry.is_regular_file() && std::regex_match(entry.path().filename().string(), filename_pattern)) {
-            filepath_list.push_back(entry.path());
-          }
-        }
-
-        // TWO axes, and both are needed. A device is identified by the pair
-        // (devicename, layout), and the layout side is enumerated from the clone's own
-        // vpr.xml - so a clone whose settings still name the SOURCE devicename resolves
-        // back to the source package, which has no such layout, and the examples shipped
-        // inside the generated device fail to open. Devicename first: the layout pass
-        // would otherwise leave appended-name occurrences behind.
-        for(auto filepath: filepath_list) {
-          FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_devicename), target_device_copy_devicename);
-          FileUtils::findAndReplaceInFile(filepath, regexEscapeLiteral(source_layout_name), m_autoLayoutGeneratedLayoutName);
-        }
-      }
-
-      // 5b the generated device is a fixed-size copy: its fabric has already been
-      // shaped and its add_layout.py is removed below, so it must not resolve to
-      // a generation mode again on the next run. Rewrite its own config.json the
-      // way the silicon release task writes a non-reshapable part - 'DEVICE_TYPE':
-      // 'FIXED' with the layout settings dropped - and record the geometry that
-      // was actually built, which the copied-from-the-seed file otherwise still
-      // describes. The rest of the file (BRAM_SIZE, DSP_SIZE, IO_CAPACITY,
-      // DSP_TYPE, ...) is left alone.
-      // A pre-contract package carries neither DEVICE_TYPE key, so the stamping
-      // writes nothing for it; the geometry keys are descriptive and are written
-      // either way.
-      {
-        std::filesystem::path target_device_config_json_filepath =
-            target_device_copy_dirpath / "config.json";
-
-        if(FileUtils::FileExists(target_device_config_json_filepath)) {
-          std::ifstream target_device_config_json_ifstream(target_device_config_json_filepath.string());
-          json target_device_config_json;
-          try {
-            target_device_config_json = json::parse(target_device_config_json_ifstream);
-          }
-          catch (const json::exception& e) {
-            ErrorMessage("Failed to parse '" + target_device_config_json_filepath.string() +
-                         "': " + e.what());
-            return false;
-          }
-          target_device_config_json_ifstream.close();
-
-          bool target_device_config_json_modified = false;
-
-          if(target_device_config_json.is_object() &&
-             (target_device_config_json.contains("DEVICE_TYPE") ||
-              target_device_config_json.contains("DEVICE_TYPE_SETTINGS"))) {
-            target_device_config_json["DEVICE_TYPE"] = "FIXED";
-            target_device_config_json.erase("DEVICE_TYPE_SETTINGS");
-            target_device_config_json_modified = true;
-          }
-
-          if(target_device_config_json.is_object()) {
-            // The geometry the generated device's own config.json has to
-            // record, taken from the fabric that was just built. The clone
-            // above starts from a copy of the SEED package, so without this a
-            // device generated at 30x30 still claims the seed's 'DEVICE_SIZE'
-            // ("8x6") and the seed's resource columns - a package describing a
-            // fabric that is not the one it ships. Read from the
-            // already-resolved current-run layout - the same resize event
-            // QLDeviceLayoutInfo has just observed via auto_device.log.
-            const QLDeviceLayoutInfo generated_layout_info(
-                QLDeviceManager::getInstance()->getCurrentDeviceTarget());
-            if(generated_layout_info.resolved()) {
-              const QLDeviceLayout& generated_layout = generated_layout_info.layout();
-              target_device_config_json["DEVICE_SIZE"] =
-                  std::to_string(generated_layout.arrayX) + "x" +
-                  std::to_string(generated_layout.arrayY);
-              // written even when empty: no BRAM column is a fact about this
-              // fabric, and an absent key would read as 'unknown'.
-              std::string bram_cols_text;
-              for(int col : generated_layout_info.bramCols()) {
-                bram_cols_text += (bram_cols_text.empty() ? "" : ",") + std::to_string(col);
-              }
-              std::string dsp_cols_text;
-              for(int col : generated_layout_info.dspCols()) {
-                dsp_cols_text += (dsp_cols_text.empty() ? "" : ",") + std::to_string(col);
-              }
-              target_device_config_json["BRAM_COLS"] = bram_cols_text;
-              target_device_config_json["DSP_COLS"] = dsp_cols_text;
-              target_device_config_json_modified = true;
-            }
-            else {
-              // not fatal - the fabric is built and usable either way - but
-              // absent beats inherited-and-wrong: the seed's geometry and
-              // column lists say nothing about this device, and anything
-              // reading them as its own would be reading a lie.
-              Message("[WARNING] Could not resolve the layout of '" +
-                      m_autoLayoutGeneratedLayoutName +
-                      "'; the generated device's config.json will not record "
-                      "its geometry or resource columns.\n");
-              if(target_device_config_json.erase("DEVICE_SIZE") > 0) {
-                target_device_config_json_modified = true;
-              }
-              if(target_device_config_json.erase("BRAM_COLS") > 0) {
-                target_device_config_json_modified = true;
-              }
-              if(target_device_config_json.erase("DSP_COLS") > 0) {
-                target_device_config_json_modified = true;
-              }
-            }
-          }
-
-          if(target_device_config_json_modified) {
-            std::ofstream target_device_config_json_ofstream(target_device_config_json_filepath.string());
-            if(!target_device_config_json_ofstream.is_open()) {
-              ErrorMessage("Failed to write '" + target_device_config_json_filepath.string() + "'\n");
-              return false;
-            }
-            target_device_config_json_ofstream << target_device_config_json.dump(2) << std::endl;
-            target_device_config_json_ofstream.close();
-          }
-        }
-      }
-
-
-      // 6 example logs: if currently running design within examples, clean up logs
-      // cleanup the currently run example files in the copied device (logs/working_directory etc.)
-      // **if** it is part of the examples in the FPGA_AUTO device.
-      // <example_dir>/<project_dir>
-      // <example_dir>/*.log
-      // <example_dir>/aurora*.tcl
-      std::filesystem::path current_project_path = 
-          std::filesystem::path(ProjManager()->projectPath());
-
-      std::filesystem::path current_project_expected_device_dirpath = 
-          current_project_path.parent_path().parent_path().parent_path();
-
-      if(std::filesystem::equivalent(current_project_expected_device_dirpath, source_device_copy_dirpath)) {
-
-        // then we are running an example within the FPGA_AUTO device itself, the logs need to be cleaned up
-        // where it has been copied into the newly created device
-
-        std::string current_project_name = current_project_path.filename().string();
-
-        std::filesystem::path current_example_path = 
-            current_project_path.parent_path();
-
-        try {
-          current_example_path = std::filesystem::canonical(current_example_path);
-          source_device_copy_dirpath = std::filesystem::canonical(source_device_copy_dirpath);
-          target_device_copy_dirpath = std::filesystem::canonical(target_device_copy_dirpath);
-        }
-        catch (const std::filesystem::filesystem_error& e) {
-          ErrorMessage("Error Canonicalizing Directory Paths\n");
-          //std::cerr << "Error: " << e.what() << std::endl;
-          return false;
-        }
-
-        std::filesystem::path current_example_path_relative = 
-            std::filesystem::relative(current_example_path, source_device_copy_dirpath);
-
-        std::filesystem::path current_example_path_target_device = 
-            target_device_copy_dirpath / current_example_path_relative;
-
-        FileUtils::RmDirRecursively(current_example_path_target_device / current_project_name );
-        FileUtils::removeFile(current_example_path_target_device / "aurora_perf.log");
-        FileUtils::removeFile(current_example_path_target_device / "aurora.log");
-        FileUtils::removeFile(current_example_path_target_device / "aurora_cmd.tcl");
-      }
-
-      // 7 remove other files: add_layout.py, add_layout_params.json if existing
-      FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout.py");
-      FileUtils::removeFile(target_device_copy_dirpath / "aurora" / "add_layout_params.json");
-
-      // 8 remove all other corners if they exist in the new device, except for the one we are currently using.
-      // get all the device_variants for this device:
-      std::vector<QLDeviceVariant> device_variants = 
-          QLDeviceManager::getInstance()->listDeviceVariants(current_device_target.device_variant.family,
-                                                             current_device_target.device_variant.foundry,
-                                                             current_device_target.device_variant.node,
-                                                             current_device_target.device_variant.devicename);
-
-      std::error_code ec;
-      std::vector<std::filesystem::path> list_of_dirs_to_delete = {};
-
-      for (QLDeviceVariant device_variant: device_variants) {
-        if(device_variant.voltage_threshold == current_device_target.device_variant.voltage_threshold &&
-           device_variant.p_v_t_corner == current_device_target.device_variant.p_v_t_corner) {
-
-          // keep the current variant directory.
-        }
-        else {
-          // mark all other variant directories for deletion
-          std::filesystem::path dirpath = target_device_copy_dirpath / device_variant.voltage_threshold / device_variant.p_v_t_corner;
-          list_of_dirs_to_delete.push_back(dirpath);
-        }
-      }
-
-      for(std::filesystem::path dir_path_to_delete: list_of_dirs_to_delete) {
-
-        std:: cout << std::string("deleting path: ") + dir_path_to_delete.string() << std::endl;
-        FileUtils::RmDirRecursively(dir_path_to_delete );
-      }
-
-
-      // (re)parse device data to ensure Aurora can 'see' the newly generated device immediately.
-      QLDeviceManager::getInstance()->parseDeviceData();
-
-      Message("\n\n >> Generating Device ok: " + target_device_copy_devicename +"\n");
-      Message(" >> Device in Aurora Install: " + target_device_copy_dirpath.string() +"\n");
-    }
-    // DEVICE CREATION LOGIC --
-#endif // #if GENERATE_NEW_DEVICE_FPGA_AUTO
   }
   // FPGA_AUTO device logic --
 
@@ -5751,7 +5604,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Pack), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
   // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
@@ -5963,23 +5816,11 @@ bool CompilerOpenFPGA_ql::Placement() {
 
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
 
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
 
   std::string command = BaseVprCommand() + " --place";
@@ -6062,7 +5903,7 @@ bool CompilerOpenFPGA_ql::Placement() {
   if(!command) {
     return false;
   }
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Detailed), command)) {
     Message("##################################################");
     Message("Placement skipped, not required");
     Message("##################################################");
@@ -6100,14 +5941,14 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement is being run with Custom Layout Generated Device!");
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command->string());
+  int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " placement failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Detailed), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Detailed), command);
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
@@ -6362,7 +6203,7 @@ bool CompilerOpenFPGA_ql::Route() {
   if (!command) {
     return false;
   }
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::Routing), command)) {
     Message("##################################################");
     Message("Routing skipped, not required");
     Message("##################################################");
@@ -6388,13 +6229,13 @@ bool CompilerOpenFPGA_ql::Route() {
     Message("Route is being run with Custom Layout Generated Device!");
   }
 
-  int status = ExecuteAndMonitorSystemCommand(command->string());
+  int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() + " routing failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::Routing), command);
+    backend().storeTaskCommand(static_cast<int>(Action::Routing), command);
   }
   m_state = State::Routed;
   Message("Design " + ProjManager()->projectName() + " is routed");
@@ -6752,7 +6593,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if (!taCommand) {
       return false;
     }
-    const int status = ExecuteAndMonitorSystemCommand(taCommand->string());
+    const int status = ExecuteAndMonitorQtApplication(taCommand->string(), IsVprGuiCommand(taCommand->string()));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -6782,7 +6623,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       return false;
     }
 
-    if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+    if (!backend().isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
       Message("##################################################");
       if (profile.empty()) {
         Message("timing analysis skipped, not required");
@@ -6796,13 +6637,13 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
 
-    int status = ExecuteAndMonitorSystemCommand(command->string());
+    int status = ExecuteAndMonitorQtApplication(command->string(), IsVprGuiCommand(command->string()));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " timing analysis failed");
       return false;
     } else {
-      m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, command);
+      backend().storeTaskCommand(static_cast<int>(Action::STA), profile, command);
     }
     // find files
     std::string libFileName =
@@ -6846,7 +6687,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     }
   }
 
-  if (!m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
+  if (!backend().isCompilationRequired(static_cast<int>(Action::STA), profile, taCommand)) {
     Message("##################################################");
     if (profile.empty()) {
       Message("timing analysis skipped, not required");
@@ -6857,14 +6698,16 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     return true;
   }
   FileUtils::WriteToFile(sta_cmd_filepath, taCommand->string());
-  int status = ExecuteAndMonitorSystemCommand(taCommand->string());
+  int status = TimingAnalysisEngineOpt() == STAEngineOpt::Opensta
+                   ? ExecuteAndMonitorSystemCommand(taCommand->string())
+                   : ExecuteAndMonitorQtApplication(taCommand->string(), IsVprGuiCommand(taCommand->string()));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " timing analysis failed");
     return false;
   } else {
-    m_taskCompilationStateManager.storeTaskCommand(static_cast<int>(Action::STA), profile, taCommand);
+    backend().storeTaskCommand(static_cast<int>(Action::STA), profile, taCommand);
   }
 
   Message("Design " + ProjManager()->projectName() + " is timing analysed");
@@ -7150,7 +6993,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
       taCommand += uniqueStaVprOptions();
     }
 
-    const int status = ExecuteAndMonitorSystemCommand(taCommand);
+    const int status = ExecuteAndMonitorQtApplication(taCommand, IsVprGuiCommand(taCommand));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " place and route view failed");
@@ -7180,7 +7023,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     std::string command = base_vpr_command + " --gen_post_synthesis_netlist on";
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
-    int status = ExecuteAndMonitorSystemCommand(command);
+    int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
     if (status) {
       ErrorMessage("Design " + ProjManager()->projectName() +
                    " timing analysis failed");
@@ -7265,7 +7108,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     ofs.close();
   }
 
-  int status = ExecuteAndMonitorSystemCommand(taCommand);
+  int status = TimingAnalysisEngineOpt() == STAEngineOpt::Opensta
+                   ? ExecuteAndMonitorSystemCommand(taCommand)
+                   : ExecuteAndMonitorQtApplication(taCommand, IsVprGuiCommand(taCommand));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -7463,7 +7308,7 @@ bool CompilerOpenFPGA_ql::PowerAnalysis() {
              std::string("--analysis");
 
 
-  int status = ExecuteAndMonitorSystemCommand(command);
+  int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
   CleanTempFiles();
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -7804,47 +7649,46 @@ exit
 )";
 
 std::string CompilerOpenFPGA_ql::InitOpenFPGAScript() {
-  // Default or custom OpenFPGA script
-  if (m_openFPGAScript.empty()) {
+  // The device's own template script, else the built-in fallback.
+  std::string openFPGAScript;
 #if UPSTREAM_UNUSED
-    if (BitsOpt() == BitstreamOpt::EnableSimulation) {
-      m_openFPGAScript = simulationOpenFPGABitstreamScript;
-    } else {
-    m_openFPGAScript = basicOpenFPGABitstreamScript;
-	}
+  if (BitsOpt() == BitstreamOpt::EnableSimulation) {
+    openFPGAScript = simulationOpenFPGABitstreamScript;
+  } else {
+    openFPGAScript = basicOpenFPGABitstreamScript;
+  }
 #endif // #if UPSTREAM_UNUSED
 
-    bool use_external_template_openfpga = false;
-    std::string aurora_template_script_openfpga;
+  bool use_external_template_openfpga = false;
+  std::string aurora_template_script_openfpga;
 
-    // check if we have the device aurora template script available:
-    if(FileUtils::FileExists(m_aurora_template_script_openfpga_path)) {
-        
-      // get it into a ifstream
-      std::ifstream stream(m_aurora_template_script_openfpga_path.string());
-        
-      if (stream.good()) {
-        aurora_template_script_openfpga = 
-          std::string((std::istreambuf_iterator<char>(stream)),
-                       std::istreambuf_iterator<char>());
-          stream.close();
-          use_external_template_openfpga = true;
-        }
-    }
+  // check if we have the device aurora template script available:
+  if(FileUtils::FileExists(m_aurora_template_script_openfpga_path)) {
 
-    if(use_external_template_openfpga) {
-      Message("Using External OpenFPGA Template Script: " +
-                                std::string(m_aurora_template_script_openfpga_path.string()));
-      m_openFPGAScript = aurora_template_script_openfpga;
-    }
-    else {
-      Message("Cannot load OpenFPGA Template Script: " +
-                                std::string(m_aurora_template_script_openfpga_path.string()));
-      Message("Using Internal OpenFPGA Template Script.");
-      m_openFPGAScript = qlOpenFPGABitstreamScript;
-    }
+    // get it into a ifstream
+    std::ifstream stream(m_aurora_template_script_openfpga_path.string());
+
+    if (stream.good()) {
+      aurora_template_script_openfpga =
+        std::string((std::istreambuf_iterator<char>(stream)),
+                     std::istreambuf_iterator<char>());
+        stream.close();
+        use_external_template_openfpga = true;
+      }
   }
-  return m_openFPGAScript;
+
+  if(use_external_template_openfpga) {
+    Message("Using External OpenFPGA Template Script: " +
+                              std::string(m_aurora_template_script_openfpga_path.string()));
+    openFPGAScript = aurora_template_script_openfpga;
+  }
+  else {
+    Message("Cannot load OpenFPGA Template Script: " +
+                              std::string(m_aurora_template_script_openfpga_path.string()));
+    Message("Using Internal OpenFPGA Template Script.");
+    openFPGAScript = qlOpenFPGABitstreamScript;
+  }
+  return openFPGAScript;
 }
 
 std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script) {
@@ -7973,8 +7817,14 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::filesystem::path generated_repack_constraints =
       std::filesystem::path(ProjManager()->projectPath()) /
       (ProjManager()->projectName() + "_repack_design_constraint.xml");
+  const std::filesystem::path private_repack_constraints =
+      privateRepackConstraintsPath(ProjManager()->projectName());
   std::filesystem::path repack_constraints_file;
-  if (FileUtils::FileExists(generated_repack_constraints)) {
+  if (!private_repack_constraints.empty() &&
+      FileUtils::FileExists(private_repack_constraints)) {
+    repack_constraints_file = private_repack_constraints;
+  }
+  else if (FileUtils::FileExists(generated_repack_constraints)) {
     repack_constraints_file = generated_repack_constraints;
   }
   else if (!m_OpenFpgaRepackConstraintsFile.empty()) {
@@ -8173,23 +8023,11 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       netlistFile = ProjManager()->projectName() + "_post_synth.blif";
       break;
   }
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
   result = ReplaceAll(result, "${VPR_TESTBENCH_BLIF}", netlistFile);
 
@@ -8581,7 +8419,7 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
           .string());
   ofs << command << std::endl;
   ofs.close();
-int status = ExecuteAndMonitorSystemCommand(command);
+int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
 #else // USE_EXPEREMENTAL_BITSTREAM_OPENFPGA_SHELL_TEMPLATE
   // process script
   std::string processedScript;
@@ -8985,23 +8823,11 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
 
   ///////////////////////////////////////////////////////////////// NETLIST ++
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VERILOG_NETLIST:
-      case Design::Language::BLIF:
-      case Design::Language::EBLIF: {
-        netlistFile = lang_file.second;
-        std::filesystem::path the_path = netlistFile;
-        if (!the_path.is_absolute()) {
-          netlistFile =
-              std::filesystem::path(std::filesystem::path("..") / netlistFile)
-                  .string();
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  if (const std::filesystem::path designNetlist = getDesignSourceNetlistPath();
+      !designNetlist.empty()) {
+    // VPR and OpenFPGA run with the project directory as their working directory.
+    netlistFile =
+        FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
   ///////////////////////////////////////////////////////////////// NETLIST --
 
@@ -9118,7 +8944,49 @@ std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthBlifFilePath() const {
-  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.blif");
+  const std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  // Only a post-synthesis project supplies the netlist as a design source. An
+  // RTL project may carry a BLIF too, but there the synthesis output is what
+  // the flow must use. Issue #2354.
+  if (ProjManager()->projectType() == PostSynth) {
+    for (const auto& lang_file : ProjManager()->DesignFiles()) {
+      if (lang_file.first.language != Design::Language::BLIF &&
+          lang_file.first.language != Design::Language::EBLIF)
+        continue;
+      // DesignFiles() hands back the compilation-unit path: project-relative
+      // when copy_files_on_add is set, otherwise relative to the directory the
+      // project sits in.
+      const std::filesystem::path resolved = FileUtils::ResolveInDirs(
+          lang_file.second, {projectPath, projectPath.parent_path()});
+      if (!resolved.empty()) return resolved;
+    }
+  }
+
+  return projectPath / std::string(ProjManager()->projectName() + "_post_synth.blif");
+}
+
+// Netlist a post-synthesis project feeds to VPR and OpenFPGA, absolute so it
+// does not depend on the working directory the tool is launched in. Empty for
+// any other project type, which uses the synthesis output instead.
+std::filesystem::path CompilerOpenFPGA_ql::getDesignSourceNetlistPath() const {
+  if (ProjManager()->projectType() != PostSynth) return {};
+
+  const std::filesystem::path projectPath{ProjManager()->projectPath()};
+  for (const auto& lang_file : ProjManager()->DesignFiles()) {
+    switch (lang_file.first.language) {
+      case Design::Language::VERILOG_NETLIST:
+      case Design::Language::BLIF:
+      case Design::Language::EBLIF:
+        break;
+      default:
+        continue;
+    }
+    const std::filesystem::path resolved = FileUtils::ResolveInDirs(
+        lang_file.second, {projectPath, projectPath.parent_path()});
+    if (!resolved.empty()) return resolved;
+  }
+  return {};
 }
 
 bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
@@ -9126,9 +8994,32 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   std::string(ProjManager()->projectName() + "_constraints.xml");
   
   if (!forceOverwrite && fs::exists(io_floor_planningpath)){
-    Message(ProjManager()->projectName() + "_constraints.xml" + 
-            " Already Exists. Using the Existing Constraint File.");
-    return true;
+    // Packing() deletes this file, so a run through packing always rebuilds
+    // it. A later stage run on its own (place after editing the .qdc, say)
+    // would otherwise keep the constraints of the old .qdc or .pcf.
+    std::string newerSource;
+    std::error_code ec;
+    const auto generated = fs::last_write_time(io_floor_planningpath, ec);
+    if (!ec) {
+      QLSettingsManager* settings = QLSettingsManager::getInstance();
+      for (const std::filesystem::path& source :
+           {settings->getQDCFilePath(), settings->getPCFFilePath()}) {
+        std::error_code sec;
+        if (source.empty() || !fs::exists(source, sec)) continue;
+        const auto edited = fs::last_write_time(source, sec);
+        if (!sec && edited > generated) {
+          newerSource = source.string();
+          break;
+        }
+      }
+    }
+    if (newerSource.empty()) {
+      Message(ProjManager()->projectName() + "_constraints.xml" +
+              " Already Exists. Using the Existing Constraint File.");
+      return true;
+    }
+    Message(ProjManager()->projectName() + "_constraints.xml is older than " +
+            newerSource + "; regenerating it.");
   }
 
   if (!ProjManager()->HasDesign()) {
@@ -9395,7 +9286,7 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   }
       
       
-  std::filesystem::path netlistFile = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_post_synth.blif");
+  std::filesystem::path netlistFile = getPostSynthBlifFilePath();
   std::filesystem::path clocksFile  = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + ".clocks");
   std::filesystem::path output_path = std::filesystem::path(ProjManager()->projectPath()) / (ProjManager()->projectName() + "_constraints.xml");
   #ifdef _WIN32
@@ -9517,12 +9408,20 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
   // delete a file the user supplied.
   std::error_code repack_remove_ec;
   fs::remove(repack_constraints_out, repack_remove_ec);
+  const std::filesystem::path repack_constraints_private =
+      privateRepackConstraintsPath(ProjManager()->projectName());
+  if (!repack_constraints_private.empty()) {
+    fs::remove(repack_constraints_private, repack_remove_ec);
+  }
 
   std::filesystem::path repack_constraints_in =
       QLDeviceManager::getInstance()->deviceOpenFPGARepackDesignConstraintFile(
           QLDeviceTarget(), /*device_only*/ true, /*report_missing*/ false);
   if (!repack_constraints_in.empty()) {
     if (QLDeviceManager::getInstance()->deviceFileIsEncrypted(repack_constraints_in)) {
+      // The output then carries the decrypted template, so it stays private
+      // (REQ-130); a plaintext device keeps it in the project as before.
+      repack_constraints_out = repack_constraints_private;
       std::filesystem::path repack_constraints_en_path = repack_constraints_in;
       repack_constraints_in = GenerateTempFilePath();
       if (!decryptDeviceFile(repack_constraints_en_path, repack_constraints_in,
@@ -9748,9 +9647,10 @@ bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {
   // The authoring inputs — the flat placement with primitive site paths and
   // the echo files — were produced by the place-stage invocation this call
   // rides on (getPlacementCommand() appends --echo_file on /
-  // --write_flat_place for authoring projects): a real run just wrote them,
-  // and a task-cache skip proved them consistent by the same hash-diff that
-  // allowed the skip. A hand-deleted file fails loudly in the driver.
+  // --write_flat_place / --flat_place_verbosity 2 for authoring projects): a
+  // real run just wrote them, and a task-cache skip proved them consistent by
+  // the same hash-diff that allowed the skip. A hand-deleted file fails loudly
+  // in the driver.
   const std::filesystem::path fplace_filepath =
       project_path / (project_name + "_rpm_author.fplace");
   const std::filesystem::path macros_echo_filepath =
@@ -10125,49 +10025,18 @@ std::pair<std::filesystem::path, std::string> CompilerOpenFPGA_ql::findCurrentDe
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::GenerateTempFilePath(bool managedOutside) {
-
-    // remember where we are
-    std::filesystem::path current_path = std::filesystem::current_path();
-
-    // get a guaranteed temp directory
-    std::filesystem::path temp_dir_path = std::filesystem::temp_directory_path();
-
-    // change to the temp directory before generating a temp file name
-    std::filesystem::current_path(temp_dir_path);
-
-    // generate a temp file path in the system temp directory
-    std::filesystem::path temp_file_path;
-#if defined(_WIN32)
-    // in windows, the tmpnam only generates the file name (with a '\' in the front), and we need to append this
-    // to the temp_directory_path() to make a complete path.
-    std::string temp_file_path_str = std::tmpnam(nullptr);
-    // convert the string into a std::filesystem::path
-    temp_file_path = temp_file_path_str;
-    // tmpnam() returns a filepath that starts with a '\' and is hence an absolute path
-    // using the '/' operator with 2 absolute paths, results in replacement, than append!
-    // https://stackoverflow.com/questions/55214156/why-does-stdfilesystempathappend-replace-the-current-path-if-p-starts-with
-    // hence, we should convert the temp_file_path into a relative path first, and then
-    // append it to the temp_dir_path to get the absolute path we need on Windows.
-    temp_file_path = temp_file_path.relative_path();
-    temp_file_path = temp_dir_path / temp_file_path;
-#else // #if defined(_WIN32)
-    // in linux, the tmpnam generates the file path including the current dir path
-    // so, we can use this as the final path as is.
-    std::string temp_file_path_str = std::tmpnam(nullptr);
-    temp_file_path = temp_file_path_str;
-#endif // #if defined(_WIN32)
-
-    // change back to the original path we came from
-    std::filesystem::current_path(current_path);
-
-    // add to our cleanup list
+    // Decrypted device files land here, so never in the shared temp directory: a
+    // name in this process's private directory, or empty (the caller's decrypt then
+    // fails) when that directory cannot be created.
+    std::filesystem::path temp_file_path = PrivateTempDir::newFile();
+    if (temp_file_path.empty()) {
+      ErrorMessage("cannot create a private temporary directory under " +
+                   std::filesystem::temp_directory_path().string());
+      return temp_file_path;
+    }
     if (!managedOutside) {
       m_TempFileList.push_back(temp_file_path);
     }
-
-    //std::cout << "generate tmp file" << temp_file_path << " managedOutside=" << managedOutside << " total tmp files num=" <<  m_TempFileList.size() << std::endl;
-
-    // return the temp file path we obtained
     return temp_file_path;
 }
 
@@ -10217,18 +10086,13 @@ bool CompilerOpenFPGA_ql::decryptDeviceFile(
     return false;
   }
 
-  std::ofstream out(dst_plain, std::ios::binary);
-  if (!out) {
+  // Owner-only whatever the umask, and every write checked: a short write (ENOSPC)
+  // must fail here rather than hand the tools a truncated device file.
+  if (!PrivateTempDir::writePrivate(dst_plain, plaintext)) {
     ErrorMessage(std::string("cannot write decrypted output: ") + dst_plain.string());
     return false;
   }
-  out.write(plaintext.data(), static_cast<std::streamsize>(plaintext.size()));
-  // Close before testing the stream: an ofstream flushes on destruction, so
-  // returning out.good() while it is still open reports a write that failed at
-  // flush time (ENOSPC on a full disk) as success, leaving the caller to use a
-  // truncated device file.
-  out.close();
-  return out.good();
+  return true;
 }
 
 
@@ -10295,7 +10159,6 @@ int CompilerOpenFPGA_ql::CleanTempFiles() {
 
 void CompilerOpenFPGA_ql::CleanScripts() {
   m_customYosysScript = "";
-  m_openFPGAScript = "";
 }
 
 std::filesystem::path CompilerOpenFPGA_ql::configurePowerCalculatorInput(QLDeviceTarget device)
@@ -12008,17 +11871,19 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
         ErrorMessage(error);
       }
     }
-    std::ofstream ofs(synplify_script_path);
-    ofs << synplify_script_content;
+    if (!s_describeOnly) {
+      std::ofstream ofs(synplify_script_path);
+      ofs << synplify_script_content;
 #ifdef _WIN32
-    ofs << "\n";
-    ofs << "# Run all implementations of the active project.\n";
-    ofs << "run -all\n";
-    ofs << "\n";
-    ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
-    ofs << "program_terminate\n";
+      ofs << "\n";
+      ofs << "# Run all implementations of the active project.\n";
+      ofs << "run -all\n";
+      ofs << "\n";
+      ofs << "# Immediately terminates the tool session without prompting (fix windows shell awaiting user input).\n";
+      ofs << "program_terminate\n";
 #endif
-    ofs.close();
+      ofs.close();
+    }
 
 #ifdef _WIN32
     // it looks like synplify_base for windows is a GUI application, it does not write output to stdout by default,
@@ -12042,6 +11907,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
     CommandWrapperPtr command = std::make_shared<CommandWrapper>();
     command->setScriptRenderer(synplifyScript);
+    command->setScriptName(ProjManager()->projectName() + ".prj");
 #ifdef _WIN32
     // synplify_base_console -licensetype synplifybase_quicklogic $(SYNPLIFY_PRJ_FILE_AREA) -log  $(SYNPLIFY_LOG_FILE)
     command->append(synplifyExecName);
@@ -12081,11 +11947,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // init synthesis script from the right location according to the selected device.
   ScriptRendererPtr yosysScript = std::make_shared<ScriptRenderer>(GetYosysScriptTemplate());
 
-  if(QLSettingsManager::getStringValue("general", "options", "verific") == "checked" && m_projManager->synthesisTool() != Synplify && m_projManager->projectType() != PostMapSynplify) {
-    m_useVerific = true;
-  } else {
-    m_useVerific = false;
-  }
+  m_useVerific = ResolveUseVerific();
  
   if(m_projManager->synthesisTool() != Synplify)
   {
@@ -12171,7 +12033,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
       for (std::filesystem::path yosys_module_path : yosys_modules_pathlist) {
 
-        std::string sim_verilog_pattern = ".*_sim\\.v";
+        std::string sim_verilog_pattern = ".*(_sim|_macros)\\.v";
 
         if (std::regex_match(yosys_module_path.filename().string(),
                             std::regex(sim_verilog_pattern, std::regex::icase))) {
@@ -12838,9 +12700,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     }
   }
 
-  std::ofstream ofs(script_path);
-  ofs << yosys_script_content;
-  ofs.close();
+  if (!s_describeOnly) {
+    std::ofstream ofs(script_path);
+    ofs << yosys_script_content;
+    ofs.close();
+  }
 #if UPSTREAM_UNUSED
   if (!FileUtils::FileExists(m_yosysExecutablePath)) {
     ErrorMessage("Cannot find executable: " + m_yosysExecutablePath.string());
@@ -12850,18 +12714,27 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 
 
   std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-#if(AURORA_USE_TABBYCAD == 1)
   if(m_useVerific) {
+#if(AURORA_USE_TABBYCAD == 1)
     yosys_executable_path = GetSession()->Context()->BinaryPath() /
                             ".." /
                             "tabby" /
                             "bin" /
                             "yosys_verific";
-  }
+    if (!FileUtils::FileExists(yosys_executable_path)) {
+      ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
+                   "found: " + yosys_executable_path.string());
+      return {};
+    }
+#else
+    Message("Verific parser requested but this build was configured without "
+            "TabbyCAD; synthesis uses " + yosys_executable_path.string());
 #endif // #if(AURORA_USE_TABBYCAD == 1)
+  }
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   command->setScriptRenderer(yosysScript);
+  command->setScriptName(ProjManager()->projectName() + ".ys");
   command->append(yosys_executable_path.string());
   command->append("-s");
   command->append(ProjManager()->projectName() + ".ys");
@@ -12950,8 +12823,11 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
 
   // RPM authoring support: an rpm_ip project's placement run must emit the
   // authoring inputs the packaging hook consumes — the flat placement (with
-  // primitive site paths) and the echo files. Skipped when the user already
-  // passed either option through custom_vpr_options_str above.
+  // primitive site paths) and the echo files. VPR writes each atom's site path
+  // into the flat placement only at --flat_place_verbosity 2 or higher; without
+  // it the packaged IP carries no SITE_PATH and cannot be packed when consumed.
+  // Each option is skipped when the user already passed it through
+  // custom_vpr_options_str above.
   if (RpmAuthorProjectActive()) {
     if (command->string().find("--echo_file") == std::string::npos) {
       command->append("--echo_file on");
@@ -12959,6 +12835,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
     if (command->string().find("--write_flat_place") == std::string::npos) {
       command->append("--write_flat_place " + ProjManager()->projectName() +
                       "_rpm_author.fplace");
+    }
+    if (command->string().find("--flat_place_verbosity") == std::string::npos) {
+      command->append("--flat_place_verbosity 2");
     }
   }
 
@@ -12998,6 +12877,16 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
   if(found_router_initial_acc_cost_chan_congestion_weight == std::string::npos) {
     std::string vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string = "--router_initial_acc_cost_chan_congestion_weight 0.0";
     command->append(vpr_found_router_initial_acc_cost_chan_congestion_weight_param_string);
+  }
+
+  // `--routing_failure_predictor off`
+  // by default, vpr uses the "safe" predictor, which aborts routing early when it
+  // predicts the routing is unlikely to succeed. we route at a fixed channel width,
+  // so we want the router to keep trying until max_router_iterations is reached
+  // instead of giving up early on a design that may still converge.
+  std::size_t found_routing_failure_predictor = command->string().find("routing_failure_predictor");
+  if(found_routing_failure_predictor == std::string::npos) {
+    command->append("--routing_failure_predictor", "off");
   }
 
   command->append("--skip_sync_clustering_and_routing_results on");
@@ -13097,12 +12986,12 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
 
 void CompilerOpenFPGA_ql::clearCompilationCache()
 {
-  m_taskCompilationStateManager.clear();
+  backend().clear();
 }
 
 bool CompilerOpenFPGA_ql::hasCompilationCache() const
 {
-  return !m_taskCompilationStateManager.isEmpty();
+  return !backend().isEmpty();
 }
 
 void CompilerOpenFPGA_ql::onQdcFileSaved() {
@@ -13151,7 +13040,18 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
     }
   }
 
+  // Under engine, no status query while a task runs (row 1.12): its answer
+  // would be stale the moment the task records.
+  if (m_engineSelected && backend().taskRunning()) {
+    return;
+  }
+
   CompilationFilesScopedSession compilationFilesScopedSession;
+
+  // A status query must not write or decrypt anything (REQ-011); under cpp the
+  // builders keep today's behaviour.
+  s_describeOnly = m_engineSelected;
+  auto describeGuard = sg::make_scope_guard([this] { s_describeOnly = false; });
 
   if (!isSynthesisStatusActual()) {
     GetTaskManager()->tryMarkDirtyFrom(SYNTHESIS);
@@ -13219,9 +13119,13 @@ void CompilerOpenFPGA_ql::invalidateTaskStatuses()
 
 bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 {
+  // A post-synthesis project has no synthesis stage to track, and building its
+  // commands errors out on the netlist design source. See issue #2354.
+  if (ProjManager() && ProjManager()->projectType() == PostSynth) return true;
+
   std::unordered_map<int, CommandWrapperPtr> commands = getSynthesisCommands();
   for (const auto& [id, command]: commands) {
-    if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
+    if (backend().isCompilationRequired(static_cast<int>(Action::Synthesis), std::to_string(id), command)) {
       return false;
     }
   }
@@ -13231,19 +13135,19 @@ bool CompilerOpenFPGA_ql::isSynthesisStatusActual()
 bool CompilerOpenFPGA_ql::isPackingStatusActual()
 {
   CommandWrapperPtr command = getPackingCommand();
-  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Pack), command);
+  return !backend().isCompilationRequired(static_cast<int>(Action::Pack), command);
 }
 
 bool CompilerOpenFPGA_ql::isPlacementStatusActual()
 {
   CommandWrapperPtr command = getPlacementCommand();
-  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Detailed), command);
+  return !backend().isCompilationRequired(static_cast<int>(Action::Detailed), command);
 }
 
 bool CompilerOpenFPGA_ql::isRoutingStatusActual()
 {
   CommandWrapperPtr command = getRoutingCommand();
-  return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::Routing), command);
+  return !backend().isCompilationRequired(static_cast<int>(Action::Routing), command);
 }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
@@ -13254,7 +13158,7 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
     // handle sta multicorner case
     for (const auto& [profile, device]: devices) {
       CommandWrapperPtr command = getTimingAnalysisCommand(device, "");
-      if (m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
+      if (backend().isCompilationRequired(static_cast<int>(Action::STA), profile, command)) {
         return false;
       }
     }
@@ -13263,7 +13167,7 @@ bool CompilerOpenFPGA_ql::isTimingAnalysysStatusActual()
     // regular sta case
     QLDeviceTarget current_device = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
     CommandWrapperPtr command = getTimingAnalysisCommand(current_device, "");
-    return !m_taskCompilationStateManager.isCompilationRequired(static_cast<int>(Action::STA), command);
+    return !backend().isCompilationRequired(static_cast<int>(Action::STA), command);
   }
 }
 #endif // ENABLE_INCREMENTAL_COMPILATION_FOR_STA

@@ -46,8 +46,14 @@ set (CPP_LIST
     Compiler/CompilerDefines_test.cpp
     Compiler/QLDeviceManager_test.cpp
     Compiler/QLDeviceLayoutInfo_test.cpp
+    Compiler/QLDevicePath_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
+    Compiler/FlowEngineClient_test.cpp
+    Compiler/EngineBackend_test.cpp
+    Compiler/PrivateTempDir_test.cpp
+    Main/EventLoopProbe_test.cpp
+    ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp

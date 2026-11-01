@@ -54,6 +54,7 @@ extern "C" {
 #include "CommandLine.h"
 #include "Console/StreamBuffer.h"
 #include "Console/TclWorker.h"
+#include "EventLoopProbe.h"
 #include "FoedagStyle.h"
 #include "Main/Foedag.h"
 #include "Main/ToolContext.h"
@@ -192,6 +193,7 @@ bool Foedag::initGui() {
   QApplication app(argc, m_cmdLine->Argv());
 #endif
   QApplication::setStyle(new FoedagStyle(QApplication::style()));
+  FOEDAG::EventLoopProbe::fromEnvironment(qApp);
   FOEDAG::TclInterpreter* interpreter =
       new FOEDAG::TclInterpreter(m_cmdLine->Argv()[0]);
   Config::Instance()->dataPath(m_context->DataPath());

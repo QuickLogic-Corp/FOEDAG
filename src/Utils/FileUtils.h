@@ -51,6 +51,10 @@ class FileUtils final {
                           std::filesystem::path* result);
   static std::filesystem::path GetPathName(const std::filesystem::path& path);
   static std::filesystem::path Basename(const std::filesystem::path& str);
+  // path expressed relative to base, or path unchanged when no relative form
+  // exists. Neither argument has to exist on disk.
+  static std::filesystem::path RelativeTo(const std::filesystem::path& path,
+                                          const std::filesystem::path& base);
   static uint64_t FileSize(const std::filesystem::path& name);
 
   static std::string GetFileContent(const std::filesystem::path& name, bool* ok = nullptr);
@@ -79,6 +83,12 @@ class FileUtils final {
       const std::string& filename,
       const std::vector<std::filesystem::path>& searchPaths,
       bool caseInsensitive);
+
+  // file joined with the first of searchPaths under which it exists. Returns
+  // file unchanged when it is already absolute, or {} when no path matches.
+  static std::filesystem::path ResolveInDirs(
+      const std::filesystem::path& file,
+      const std::vector<std::filesystem::path>& searchPaths);
 
   static std::filesystem::path FindFileByExtension(
       const std::filesystem::path& path, const std::string& extension);

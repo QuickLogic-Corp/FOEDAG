@@ -189,6 +189,11 @@ class Compiler {
   const std::set<std::string>& LoadedIpCatalogRoots() const {
     return m_loadedIpCatalogRoots;
   }
+  // Drops a root from that record, so the next lazy load scans it again
+  // (IPGenerator::SyncDeviceCatalog, after unloading the root's IPs).
+  void ForgetIpCatalogRoot(const std::filesystem::path& root) {
+    m_loadedIpCatalogRoots.erase(std::filesystem::weakly_canonical(root).string());
+  }
 
   // VPR, Yosys generic opt
   void ChannelWidth(uint32_t width) { m_channel_width = width; }
@@ -288,6 +293,11 @@ class Compiler {
   virtual void clearCompilationCache() {}
   virtual void invalidateTaskStatuses() {}
 
+  /// QT_QPA_PLATFORM for a child Qt application; empty keeps Qt's default.
+  static std::string getQtPlatformPluginFor(bool gui);
+  /// VPR shows its GUI only with --disp on.
+  static bool IsVprGuiCommand(const std::string& command);
+
  protected:
   /* Methods that can be customized for each new compiler flow */
   virtual bool IPGenerate();
@@ -317,12 +327,19 @@ class Compiler {
   /* Compiler class utilities */
   bool RunBatch();
   bool RunCompileTask(Action action);
+  bool RunCompileTaskGuarded(Action action);
+  // Around each compile task; AfterCompileTask runs after RunCompileTask's guard.
+  virtual void BeforeCompileTask(Action /*action*/) {}
+  virtual void AfterCompileTask(Action /*action*/, bool /*ok*/) {}
 
   void SetEnvironmentVariable(const std::string variable,
                               const std::string value);
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
       bool appendLog = false, bool quiet = false);
+  int ExecuteAndMonitorQtApplication(const std::string& command, bool gui,
+                                     const std::string logFile = std::string{},
+                                     bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(

@@ -365,7 +365,28 @@ std::filesystem::path IPGenerator::DeviceCatalogPath() const {
   return devices->deviceTypeDirPath(target) / "aurora" / "IP_Catalog";
 }
 
+void IPGenerator::SyncDeviceCatalog() {
+  const std::filesystem::path deviceRoot = DeviceCatalogPath();
+  const std::filesystem::path current =
+      deviceRoot.empty() ? std::filesystem::path{}
+                         : std::filesystem::weakly_canonical(deviceRoot);
+  if (current == m_deviceCatalogRoot) return;
+  if (!m_deviceCatalogRoot.empty()) {
+    const size_t removed = m_catalog->removeDefinitionsUnder(m_deviceCatalogRoot);
+    m_compiler->ForgetIpCatalogRoot(m_deviceCatalogRoot);
+    if (removed > 0) {
+      m_compiler->Message("IP Catalog, target device changed: unloaded " +
+                          std::to_string(removed) + " IP(s) of " +
+                          m_deviceCatalogRoot.string());
+    }
+  }
+  m_deviceCatalogRoot = current;
+}
+
 void IPGenerator::LoadDefaultCatalogs() {
+  // Before the device root is looked up below: a previous device's IPs must
+  // be out of the catalog before the current device's catalog is scanned.
+  SyncDeviceCatalog();
   const std::filesystem::path defaultRoot = DefaultIPCatalogPath();
   const std::filesystem::path deviceRoot = DeviceCatalogPath();
   const std::filesystem::path userRoot = ProjectUserCatalogPath();
@@ -1154,6 +1175,20 @@ bool IPGenerator::Generate() {
     }
 
     const IPDefinition* def = inst->Definition();
+    // An instance configured before the target device changed points at the
+    // previous device's definition, which SyncDeviceCatalog unloaded. Do not
+    // generate from it (or from a same-named IP of the new device: the
+    // instance keeps the output location it was configured with, which may
+    // belong to another project); configuring it again binds it to the
+    // current device's IP.
+    if (m_catalog->isRetired(def)) {
+      compiler->ErrorMessage(
+          "IP Generate, " + inst->ModuleName() + ": IP '" + def->Name() +
+          "' was configured from the IP catalog of a previous target device; "
+          "configure it again with configure_ip for the current device");
+      status = false;
+      continue;
+    }
     switch (def->Type()) {
       case IPDefinition::IPType::Other: {
         break;
