@@ -332,6 +332,13 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
     fullCmd += QString(" --port %1").arg(portNum);
     fullCmd += " --disp on";
 
+    const std::string platform = Compiler::getQtPlatformPluginFor(
+        Compiler::IsVprGuiCommand(fullCmd.toStdString()));
+    if (!platform.empty()) {
+      QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+      env.insert("QT_QPA_PLATFORM", QString::fromStdString(platform));
+      m_vprProcess.setProcessEnvironment(env);
+    }
     m_vprProcess.start(fullCmd);
   } else {
     emit vprProcessErrorOccured("P&R View is not found");
