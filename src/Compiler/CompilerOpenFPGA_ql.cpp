@@ -3208,6 +3208,30 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 }
 
+// [aurora2#1725] Device templates synced from silicon drop the floorplanning hooks, and
+// without them synthesis writes no atom-set file. Insert each missing hook around the
+// synthesis line; a template with no such line is returned unchanged.
+static std::string withFloorplanningHooks(const std::string& script) {
+  const std::string pre = "${FLOORPLANNING_PRE_SYNTH}";
+  const std::string post = "${FLOORPLANNING_POST_SYNTH}";
+  const std::string synth = "${QL_SYNTH_PASS_NAME}";
+  size_t start = 0;
+  while (start < script.size()) {
+    size_t end = script.find('\n', start);
+    if (end == std::string::npos) end = script.size();
+    const size_t first = script.find_first_not_of(" \t", start);
+    if (first < end && script.compare(first, synth.size(), synth) == 0) {
+      std::string result = script.substr(0, start);
+      if (script.find(pre) == std::string::npos) result += pre + "\n";
+      result += script.substr(start, end - start);
+      if (script.find(post) == std::string::npos) result += "\n" + post;
+      return result + script.substr(end);
+    }
+    start = end + 1;
+  }
+  return script;
+}
+
 std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
   std::string scriptTemplate;
 
@@ -3241,7 +3265,9 @@ std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
                                 std::string(m_aurora_template_script_yosys_path.string()));
       Message("Using Internal Yosys Template Script.");
       scriptTemplate = qlYosysScript;
-    } 
+    }
+    // A user's own script is left as written: the Floor Planning panel reports it there.
+    scriptTemplate = withFloorplanningHooks(scriptTemplate);
   } else {
     scriptTemplate = m_customYosysScript;
   }
@@ -12323,15 +12349,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   }
   
   yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
-
-  // Aurora's floorplanning runs after synthesis (scripts/generate_floorplanning.py
-  // feeding VPR's --read_vpr_constraints), so these Yosys-level hooks have nothing
-  // to emit; substitute empty until such a feature exists. EVAL-MSC-CUSTOM ships
-  // them in its .ys, and without this every Yosys flow on it dies in yosys with
-  // "No such command: ${FLOORPLANNING_PRE_SYNTH}". Templates omitting them are
-  // unaffected: apply() on an absent placeholder is a no-op.
-  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}", std::string(""));
-  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}", std::string(""));
 
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
