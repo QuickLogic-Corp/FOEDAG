@@ -2326,14 +2326,20 @@ bool MainWindow::loadFloorPlanningData(QString& error)
 
   // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
   // atoms belonging to it, straight from atomsets.json (floorplanning_atomsets.tcl,
-  // in-session, stage P3). Absent on a device whose template carries no P2/P3 blocks, in
-  // which case setAtomNames() is simply not called and every leaf stays visible (see
-  // SynthResourceHierarchyWidget::populateAtomColumns()'s early-return on
-  // !m_hasAtomNames). Must run before loadNetList()/build() below: build() calls
-  // populateAtomColumns() itself, so the atom-name map has to already be set.
+  // in-session, stage P3). Required: without it the Atoms and Tiles tabs silently report
+  // zero, so the panel refuses to open instead. Must run before loadNetList()/build()
+  // below: build() calls populateAtomColumns() itself, so the atom-name map has to
+  // already be set.
   std::filesystem::path atomsetsJsonPath =
       fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
                                 compiler->ProjManager()->projectName(), "atomsets.json");
+  if (!std::filesystem::exists(atomsetsJsonPath)) {
+    error = tr("Cannot load floorplanning data: synthesis did not produce %1. The device's "
+               "aurora_template_script.ys probably lacks the ${FLOORPLANNING_PRE_SYNTH} / "
+               "${FLOORPLANNING_POST_SYNTH} hooks.")
+                .arg(QString::fromStdString(atomsetsJsonPath.filename().string()));
+    return false;
+  }
   {
     // Shared with the batch checker (REQ-004), so the panel and a headless run read the
     // same file the same way -- including atoms_per_tile, which is the divisor behind every
@@ -2342,13 +2348,16 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     fp::AtomNameMap atomNames;
     fp::AtomResourceMap atomResources;
     int atomsPerTile = fp::Partition::atomsPerTile();  // A.13.3 default unless the file says
-    if (fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile)) {
-      m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
-      m_floorPlanningWidget->setAtomNames(std::move(atomNames));
-      // The same file's "resources" map: the cell types behind those atoms, which the
-      // Atoms tab of "Selected RTL Resources" reports.
-      m_floorPlanningWidget->setAtomResources(std::move(atomResources));
+    if (!fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile)) {
+      error = tr("Cannot load floorplanning data: %1 is unreadable or malformed.")
+                  .arg(QString::fromStdString(atomsetsJsonPath.string()));
+      return false;
     }
+    m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
+    m_floorPlanningWidget->setAtomNames(std::move(atomNames));
+    // The same file's "resources" map: the cell types behind those atoms, which the
+    // Atoms tab of "Selected RTL Resources" reports.
+    m_floorPlanningWidget->setAtomResources(std::move(atomResources));
   }
 
   // [aurora2#2377] Each atom's real Yosys cell type, from the write_json dump
