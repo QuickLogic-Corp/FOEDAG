@@ -11,8 +11,8 @@
 namespace fp {
 
 // Classifies an atom by the hard-block primitive embedded in its name (see
-// dspv2_sim.v / brams_final_map.v in the device data): every DSP primitive variant
-// is named "QL_DSPV<N>*" (QL_DSPV2 today; QL_DSPV4 is coming), and every BRAM macro
+// dspv2_sim.v / QL_DSP4_leaves.v / brams_final_map.v in the device data): every DSP
+// primitive is named "QL_DSP*" (QL_DSPV2, and the QL_DSP4_* leaves), and every BRAM macro
 // techmaps down to "TDP_ECC36K". Anything else (luts, adder_carry, sdffre, ...) packs
 // into ordinary CLB fabric.
 //
@@ -28,7 +28,7 @@ namespace fp {
 // running clb/dsp/bram counts, so the two can never disagree on what an atom is.
 inline QString classifyAtomType(const std::string& atomName, const std::string& realType = "") {
     const std::string& probe = !realType.empty() ? realType : atomName;
-    if (probe.find("QL_DSPV") != std::string::npos) return "dsp";
+    if (probe.find("QL_DSP") != std::string::npos) return "dsp";
     if (probe.find("TDP_ECC36K") != std::string::npos) return "bram";
     return "clb";
 }
