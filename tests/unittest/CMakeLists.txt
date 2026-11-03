@@ -48,6 +48,10 @@ set (CPP_LIST
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp
     Compiler/BlifParser_test.cpp
+    Compiler/PackLayout_test.cpp
+    Compiler/QLMetricsManager_test.cpp
+    Compiler/EngineStatusRefresh_test.cpp
+    Compiler/NoIncremental_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     Compiler/FlowEngineClient_test.cpp

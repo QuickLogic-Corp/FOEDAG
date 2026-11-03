@@ -92,6 +92,8 @@ set (SRC_CPP_LIST
   BlifParser.cpp
   WildcardFileFinder.cpp
   DialogUtils.cpp
+  PackLayout.cpp
+  EngineStatusRefresh.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -136,6 +138,8 @@ set (SRC_H_INSTALL_LIST
   BlifParser.h
   WildcardFileFinder.h
   DialogUtils.h
+  PackLayout.h
+  EngineStatusRefresh.h
 )
 
 set (SRC_H_LIST
