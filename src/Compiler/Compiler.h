@@ -339,6 +339,16 @@ class Compiler {
   // Around each compile task; AfterCompileTask runs after RunCompileTask's guard.
   virtual void BeforeCompileTask(Action /*action*/) {}
   virtual void AfterCompileTask(Action /*action*/, bool /*ok*/) {}
+  // Around all of RunCompileTask: the run-wide lock (aurora2 REQ-015). False
+  // refuses the task; `held` says whether EndRun must follow.
+  virtual bool BeginRun(bool& held) {
+    held = false;
+    return true;
+  }
+  virtual void EndRun() {}
+  // A GUI task sequence (TaskManager started() .. done()).
+  virtual void TaskSequenceStarted() {}
+  virtual void TaskSequenceDone() {}
 
   void SetEnvironmentVariable(const std::string variable,
                               const std::string value);

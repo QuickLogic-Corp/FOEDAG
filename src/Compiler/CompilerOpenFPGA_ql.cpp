@@ -31,6 +31,8 @@
 #include <unistd.h>
 #endif
 
+#include <QCoreApplication>
+#include <QThreadPool>
 #include <QDebug>
 #include <QDomDocument>
 #include <QFile>
@@ -40,7 +42,9 @@
 #include <QDirIterator>
 #include <QTemporaryFile>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -454,6 +458,45 @@ void CompilerOpenFPGA_ql::AfterCompileTask(Action /*action*/, bool ok) {
   backend().taskFinished(ok);
   if (m_statusRefresh) {
     m_statusRefresh->taskFinished();
+  }
+}
+
+bool CompilerOpenFPGA_ql::batchScriptSession() const {
+  Session* session = GetSession();
+  return session && session->GuiType() == GUI_TYPE::GT_NONE &&
+         (!session->CmdLine()->Script().empty() || !session->CmdLine()->TclCmd().empty());
+}
+
+bool CompilerOpenFPGA_ql::BeginRun(bool& held) {
+  held = false;
+  if (!m_engineSelected || !hasOpenProject()) return true;
+  const FlowEngineClient client(engineInstallRoot());
+  if (!client.usable()) return true;  // the backend warns once; every stage runs
+  const std::filesystem::path project = ProjManager()->projectPath();
+  const EngineRunLock::Result result = m_runHolds.begin(
+      client, project, QCoreApplication::applicationPid(), batchScriptSession());
+  if (result.outcome == EngineRunLock::Outcome::Refused) {
+    ErrorMessage("Aurora run refused: " + result.message);
+    return false;
+  }
+  if (result.outcome == EngineRunLock::Outcome::Unavailable && !m_runLockWarned.exchange(true)) {
+    Message("Warning: flow engine cannot lock " + (project / ".aurora" / "lock").u8string() +
+            " (" + result.message + "); runs continue without the run-wide lock");
+  }
+  held = true;
+  static std::once_flag atExit;
+  std::call_once(atExit, [] { std::atexit([] { EngineRunLock::instance().releaseAtExit(); }); });
+  return true;
+}
+
+void CompilerOpenFPGA_ql::EndRun() { m_runHolds.end(); }
+
+void CompilerOpenFPGA_ql::TaskSequenceStarted() { m_runHolds.sequenceStarted(); }
+
+// done() arrives on the GUI thread; the unlock runs the engine, so not there.
+void CompilerOpenFPGA_ql::TaskSequenceDone() {
+  if (m_runHolds.sequenceDone()) {
+    QThreadPool::globalInstance()->start([]() { EngineRunLock::instance().drop(); });
   }
 }
 

@@ -22,9 +22,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QStandardPaths>
 
 #include "Compiler/Compiler.h"
+#include "Compiler/EngineRunLock.h"
+#include "Compiler/TaskManager.h"
 #include "Utils/FileUtils.h"
 #include "gtest/gtest.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -84,6 +87,22 @@ elif op == 'plan':
         for r in req['stages']]}))
 elif op == 'record':
     print(json.dumps({'v': 1, 'stage': req['stage'], 'profile': '', 'recorded': True, 'key': 'k'}))
+elif op in ('lock', 'unlock'):
+    # <op>.txt: 'held' refuses, 'broken' fails; otherwise the run lock is taken or released.
+    state_file = here / (op + '.txt')
+    state = state_file.read_text().strip() if state_file.exists() else ''
+    if state == 'held':
+        print(json.dumps({'v': 1, 'error': {'code': 'lock-held', 'message':
+              'another Aurora run holds /p/.aurora/lock: pid 7 on host h'}}))
+        sys.exit(4)
+    if state == 'slow':
+        import time
+        time.sleep(1.5)
+    if state == 'broken':
+        print(json.dumps({'v': 1, 'error': {'code': 'io', 'message': 'disk full'}}))
+        sys.exit(4)
+    print(json.dumps({'v': 1, 'lock': '/p/.aurora/lock', 'token': 'ab' * 16} if op == 'lock'
+                     else {'v': 1, 'released': True}))
 else:
     print(json.dumps({'v': 1, 'invalidated': []}))
 )";
@@ -827,6 +846,319 @@ TEST_F(EngineBackendTest, a_nested_task_on_another_thread_has_its_own_records) {
   EXPECT_EQ(seen[0]["request"]["begin"], true);  // the inner task is in a task
   EXPECT_EQ(seen[1]["request"]["begin"], true);
   EXPECT_EQ(seen[2]["args"][0], "record");  // only the task that succeeded
+}
+
+// --- run-wide lock (aurora2 REQ-015, row 1.15a) -----------------------------------
+
+const std::string OTHER_TOKEN(32, 'a');  // another run's
+// The token the fake engine's lock answers.
+std::string fakeToken() {
+  std::string t;
+  for (int i = 0; i < 16; ++i) t += "ab";
+  return t;
+}
+
+// What the compiler library sends: UTF-8 bytes in a std::string (it builds as C++17;
+// this test builds as C++20, where u8string() is std::u8string).
+std::string utf8Bytes(const fs::path& path) {
+  const auto bytes = path.u8string();
+  return std::string(bytes.begin(), bytes.end());
+}
+
+std::vector<std::string> opsOf(const std::vector<nlohmann::json>& seen) {
+  std::vector<std::string> ops;
+  for (const nlohmann::json& call : seen) ops.push_back(call["args"][0]);
+  return ops;
+}
+
+TEST_F(EngineBackendTest, the_first_hold_locks_for_its_owner_and_the_last_drop_unlocks) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  const EngineRunLock::Result held = lock.hold(client, m_project, 4242);
+  EXPECT_EQ(held.outcome, EngineRunLock::Outcome::Held);
+  EXPECT_EQ(lock.token(m_project), fakeToken());
+  EXPECT_EQ(lock.hold(client, m_project, 4242).outcome, EngineRunLock::Outcome::Held);
+  lock.drop();
+  EXPECT_EQ(lock.token(m_project), fakeToken());  // one holder left
+  lock.drop();
+  EXPECT_EQ(lock.token(m_project), "");
+  EXPECT_EQ(lock.count(), 0);
+  const auto seen = calls();
+  ASSERT_EQ(seen.size(), 2u);
+  EXPECT_EQ(seen[0]["args"], nlohmann::json({"lock", "--project", utf8Bytes(m_project),
+                                             "--owner-pid", "4242", "--json"}));
+  EXPECT_EQ(seen[1]["args"], nlohmann::json({"unlock", "--project", utf8Bytes(m_project),
+                                             "--token", fakeToken(), "--json"}));
+}
+
+TEST_F(EngineBackendTest, a_refused_hold_holds_nothing_and_the_next_one_asks_again) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  write(m_engineDir / "lock.txt", "held");
+  const EngineRunLock::Result refused = lock.hold(client, m_project, 1);
+  EXPECT_EQ(refused.outcome, EngineRunLock::Outcome::Refused);
+  EXPECT_EQ(refused.message, "another Aurora run holds /p/.aurora/lock: pid 7 on host h");
+  EXPECT_EQ(lock.count(), 0);
+  EXPECT_EQ(lock.token(m_project), "");
+  lock.drop();  // nothing held: no unlock
+  write(m_engineDir / "lock.txt", "");
+  EXPECT_EQ(lock.hold(client, m_project, 1).outcome, EngineRunLock::Outcome::Held);
+  EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock", "lock"}));
+}
+
+// REQ-006: an engine that cannot answer never stops a run.
+TEST_F(EngineBackendTest, an_engine_failure_on_lock_runs_without_a_token) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  write(m_engineDir / "lock.txt", "broken");
+  const EngineRunLock::Result r = lock.hold(client, m_project, 1);
+  EXPECT_EQ(r.outcome, EngineRunLock::Outcome::Unavailable);
+  EXPECT_EQ(r.message, "io: disk full");
+  EXPECT_EQ(lock.count(), 1);
+  EXPECT_EQ(lock.hold(client, m_project, 1).outcome, EngineRunLock::Outcome::Held);
+  EXPECT_EQ(lock.token(m_project), "");
+  lock.drop();
+  lock.drop();
+  EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock"}));  // asked once, no unlock
+}
+
+TEST_F(EngineBackendTest, a_new_project_under_a_hold_moves_the_lock) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  const fs::path other = m_root / "other";
+  lock.hold(client, m_project, 1);
+  lock.hold(client, other, 1);
+  EXPECT_EQ(lock.token(m_project), "");
+  EXPECT_EQ(lock.token(other), fakeToken());
+  EXPECT_EQ(lock.count(), 2);
+  const auto seen = calls();
+  EXPECT_EQ(opsOf(seen), (std::vector<std::string>{"lock", "unlock", "lock"}));
+  EXPECT_EQ(seen[2]["args"][2], utf8Bytes(other));
+}
+
+// Leaving a project whose unlock failed must not keep it locked against other runs.
+TEST_F(EngineBackendTest, a_failed_unlock_on_a_project_change_still_frees_the_old_lock) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  const fs::path file = m_project / ".aurora" / "lock";
+  lock.hold(client, m_project, 1);
+  write(file, R"({"pid": 1, "host": "h", "start": 0, "token": ")" + fakeToken() + "\"}");
+  write(m_engineDir / "unlock.txt", "broken");
+  lock.hold(client, m_root / "other", 1);
+  EXPECT_FALSE(fs::exists(file));
+  EXPECT_EQ(lock.token(m_root / "other"), fakeToken());
+}
+
+// A lock that could not be removed is still this process's: the next run adopts it.
+TEST_F(EngineBackendTest, a_failed_unlock_keeps_the_lock_for_the_next_hold) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  lock.hold(client, m_project, 1);
+  write(m_engineDir / "unlock.txt", "broken");
+  lock.drop();
+  EXPECT_EQ(lock.token(m_project), fakeToken());
+  EXPECT_EQ(lock.hold(client, m_project, 1).outcome, EngineRunLock::Outcome::Held);
+  EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock", "unlock"}));
+}
+
+TEST_F(EngineBackendTest, release_at_exit_removes_only_this_runs_lock) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  const fs::path file = m_project / ".aurora" / "lock";
+  EngineRunLock lock;
+  lock.hold(client, m_project, 1);
+  write(file, R"({"pid": 1, "host": "h", "start": 0, "token": ")" + OTHER_TOKEN + "\"}");
+  lock.releaseAtExit();
+  EXPECT_TRUE(fs::exists(file));  // someone else's token
+  EXPECT_EQ(lock.count(), 0);
+
+  lock.hold(client, m_project, 1);
+  write(file, R"({"pid": 1, "host": "h", "start": 0, "token": ")" + fakeToken() + "\"}");
+  lock.releaseAtExit();
+  EXPECT_FALSE(fs::exists(file));
+  EXPECT_EQ(lock.token(m_project), "");
+  EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock", "lock"}));  // no engine at exit
+}
+
+TEST_F(EngineBackendTest, the_runs_own_writers_present_the_token) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  const auto b = backend(client);
+  b->setRunLock(&lock);
+  write(m_project / ".aurora" / "state" / "pack.json", "{}");
+  setVerdict("run");
+
+  b->taskStarted();
+  b->isCompilationRequired(PACK, vprCommand());  // before the hold: no token
+  b->taskFinished(false);
+  lock.hold(client, m_project, 1);
+  b->taskStarted();
+  b->isCompilationRequired(PACK, vprCommand());
+  b->storeTaskCommand(PACK, vprCommand());
+  b->taskFinished(true);
+  b->forget("pack");
+  b->clear();
+
+  const auto seen = calls();
+  ASSERT_EQ(opsOf(seen),
+            (std::vector<std::string>{"check", "lock", "check", "record", "invalidate",
+                                      "invalidate"}));
+  EXPECT_FALSE(seen[0]["request"].contains("lock_token"));
+  EXPECT_EQ(seen[2]["request"]["lock_token"], fakeToken());
+  EXPECT_EQ(seen[3]["request"]["lock_token"], fakeToken());
+  for (int i : {4, 5}) {
+    const auto& args = seen[i]["args"];
+    const auto at = std::find(args.begin(), args.end(), "--lock-token");
+    ASSERT_NE(at, args.end()) << args.dump();
+    EXPECT_EQ(*(at + 1), fakeToken());
+  }
+}
+
+// Status queries need no token: a plan never carries one.
+TEST_F(EngineBackendTest, a_plan_carries_no_token) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  const auto b = backend(client);
+  b->setRunLock(&lock);
+  lock.hold(client, m_project, 1);
+  std::vector<std::string> unbuilt;
+  const nlohmann::json plan = b->planRequest({{PACK, "", vprCommand()}}, &unbuilt);
+  EXPECT_FALSE(plan.contains("lock_token"));
+  EXPECT_FALSE(plan["stages"][0].contains("lock_token"));
+}
+
+// A GUI sequence holds the lock from its first task to done(); a batch script
+// to exit, although TaskManager says done() after each of its tasks.
+TEST_F(EngineBackendTest, a_gui_sequence_and_a_batch_script_hold_their_whole_span) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  {
+    EngineRunHolds holds(lock);
+    holds.begin(client, m_project, 1, false);  // a console command: no span
+    holds.end();
+    EXPECT_EQ(lock.count(), 0);
+    holds.sequenceStarted();
+    holds.begin(client, m_project, 1, false);
+    holds.end();
+    EXPECT_EQ(lock.count(), 1);  // between two stages of the sequence
+    holds.begin(client, m_project, 1, false);
+    holds.end();
+    if (holds.sequenceDone()) holds.end();
+    EXPECT_EQ(lock.count(), 0);
+  }
+  EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock", "unlock", "lock", "unlock"}));
+  {
+    EngineRunHolds holds(lock);
+    holds.begin(client, m_project, 1, true);
+    holds.end();
+    if (holds.sequenceDone()) holds.end();
+    EXPECT_EQ(lock.count(), 1);
+    holds.begin(client, m_project, 1, true);
+    holds.end();
+    EXPECT_EQ(lock.count(), 1);
+    lock.releaseAtExit();
+  }
+  EXPECT_EQ(opsOf(calls()).size(), 5u);  // one more lock, released at exit
+}
+
+// The GUI thread reads the token for status checks while a worker may be inside
+// a lock call: reading never waits for the engine.
+TEST_F(EngineBackendTest, reading_the_token_does_not_wait_for_a_lock_call) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  write(m_engineDir / "lock.txt", "slow");
+  std::thread worker([&] { lock.hold(client, m_project, 1); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_EQ(lock.token(m_project), "");
+  EXPECT_EQ(lock.count(), 0);
+  const auto waited = std::chrono::steady_clock::now() - start;
+  worker.join();
+  EXPECT_LT(waited, std::chrono::milliseconds(500));
+  EXPECT_EQ(lock.token(m_project), fakeToken());
+}
+
+TEST_F(EngineBackendTest, a_refused_task_takes_no_span) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  EngineRunHolds holds(lock);
+  holds.sequenceStarted();
+  write(m_engineDir / "lock.txt", "held");
+  EXPECT_EQ(holds.begin(client, m_project, 1, false).outcome, EngineRunLock::Outcome::Refused);
+  EXPECT_EQ(lock.count(), 0);
+  EXPECT_FALSE(holds.sequenceDone());  // no span to end
+  EXPECT_EQ(lock.count(), 0);
+  EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock"}));
+}
+
+// RunCompileTask brackets the whole task with BeginRun / EndRun.
+class RunHookCompiler : public SilentCompiler {
+public:
+  bool BeginRun(bool& held) override {
+    ++begun;
+    held = holds;
+    return admit;
+  }
+  void EndRun() override { ++ended; }
+  void TaskSequenceStarted() override { ++sequences; }
+  void TaskSequenceDone() override { ++sequencesDone; }
+  bool IPGenerate() override {
+    ++ran;
+    if (fail == "throw") throw std::runtime_error("boom");
+    return fail.empty();
+  }
+  bool admit = true;
+  bool holds = true;
+  std::string fail;
+  int begun = 0, ended = 0, ran = 0, sequences = 0, sequencesDone = 0;
+};
+
+TEST(RunHooks, a_refused_run_runs_nothing) {
+  RunHookCompiler compiler;
+  auto* tasks = new TaskManager(&compiler);  // the compiler deletes it
+  compiler.setTaskManager(tasks);
+  compiler.admit = false;
+  EXPECT_FALSE(compiler.Compile(Compiler::Action::IPGen));
+  EXPECT_EQ(compiler.ran, 0);
+  EXPECT_EQ(compiler.ended, 0);
+}
+
+TEST(RunHooks, the_run_ends_after_success_failure_and_exception) {
+  RunHookCompiler compiler;
+  auto* tasks = new TaskManager(&compiler);  // the compiler deletes it
+  compiler.setTaskManager(tasks);
+  EXPECT_TRUE(compiler.Compile(Compiler::Action::IPGen));
+  compiler.fail = "fail";
+  EXPECT_FALSE(compiler.Compile(Compiler::Action::IPGen));
+  compiler.fail = "throw";
+  EXPECT_THROW(compiler.Compile(Compiler::Action::IPGen), std::runtime_error);
+  EXPECT_EQ(compiler.ran, 3);
+  EXPECT_EQ(compiler.ended, 3);
+  compiler.holds = false;  // nothing held: nothing to end
+  compiler.fail.clear();
+  EXPECT_TRUE(compiler.Compile(Compiler::Action::IPGen));
+  EXPECT_EQ(compiler.ended, 3);
+}
+
+TEST(RunHooks, task_manager_sequences_reach_the_compiler) {
+  RunHookCompiler compiler;
+  auto* tasks = new TaskManager(&compiler);  // the compiler deletes it
+  compiler.setTaskManager(tasks);
+  emit tasks->started();
+  emit tasks->done();
+  EXPECT_EQ(compiler.sequences, 1);
+  EXPECT_EQ(compiler.sequencesDone, 1);
 }
 
 }  // namespace
