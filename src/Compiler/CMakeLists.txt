@@ -62,6 +62,7 @@ set (SRC_CPP_LIST
   CommandWrapper.cpp
   FlowEngineClient.cpp
   EngineBackend.cpp
+  EngineRunLock.cpp
   TilesCfgParser.cpp
   #TaskManager.cpp
   TaskManager_ql.cpp
@@ -109,6 +110,7 @@ set (SRC_H_INSTALL_LIST
   CommandWrapper.h
   FlowEngineClient.h
   EngineBackend.h
+  EngineRunLock.h
   TilesCfgParser.h
   TaskManager.h
   CompilerDefines.h

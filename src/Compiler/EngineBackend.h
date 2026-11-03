@@ -18,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include "EngineRunLock.h"
 #include "FlowEngineClient.h"
 #include "TaskCompilationStateManager.h"
 
@@ -85,6 +86,8 @@ public:
   void taskFinished(bool ok) override;
   bool taskRunning() const override;
   void setUpstreamProvider(UpstreamProvider upstream) { m_upstream = std::move(upstream); }
+  // The run-wide lock whose token check, record and invalidate present; for tests.
+  void setRunLock(const EngineRunLock* runLock) { m_runLock = runLock; }
   // Removes a stage's records: one profile, or every profile when empty. For a
   // run the engine must not remember (re-routing STA) and for `clean`.
   void forget(const std::string& stage, const std::string& profile = {});
@@ -194,6 +197,9 @@ private:
   bool upstreamStale(const std::string& stage, const EngineStageContext& ctx) const;
 
   UpstreamProvider m_upstream;
+  const EngineRunLock* m_runLock = &EngineRunLock::instance();
+  // `invalidate` arguments plus --lock-token when this process holds the project.
+  std::vector<std::string> withLockToken(std::vector<std::string> args) const;
 };
 
 }  // namespace FOEDAG

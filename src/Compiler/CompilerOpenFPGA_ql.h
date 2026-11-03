@@ -514,6 +514,15 @@ private:
   bool faultAfterTool(const std::string& stage) const;
   void BeforeCompileTask(Action action) override;
   void AfterCompileTask(Action action, bool ok) override;
+  // The run-wide lock (REQ-015, row 1.15a), under the engine only (NFR-001).
+  bool BeginRun(bool& held) override;
+  void EndRun() override;
+  void TaskSequenceStarted() override;
+  void TaskSequenceDone() override;
+  // A --batch --script or --cmd run: it holds the lock from its first task to exit.
+  bool batchScriptSession() const;
+  EngineRunHolds m_runHolds{EngineRunLock::instance()};
+  std::atomic<bool> m_runLockWarned{false};
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();

@@ -365,7 +365,17 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     req["metrics"] = ctx.metrics;
     req["metrics_catalogue"] = ctx.metricsCatalogue;
   }
+  if (m_runLock && (op == "check" || op == "record")) {
+    const std::string token = m_runLock->token(ctx.project);
+    if (!token.empty()) req["lock_token"] = token;
+  }
   return req;
+}
+
+std::vector<std::string> EngineBackend::withLockToken(std::vector<std::string> args) const {
+  const std::string token = m_runLock ? m_runLock->token(m_projectPath) : std::string{};
+  if (!token.empty()) args.insert(args.end(), {"--lock-token", token});
+  return args;
 }
 
 nlohmann::json EngineBackend::planRequest(const std::vector<UpstreamCommand>& stages,
@@ -520,7 +530,7 @@ void EngineBackend::forget(const std::string& stage, const std::string& profile)
   args.insert(args.end(), {"--project", utf8(m_projectPath)});
   FlowEngineClient::Result result;
   try {
-    result = m_client.call(args);
+    result = m_client.call(withLockToken(args));
   } catch (const std::exception& e) {
     result.error = e.what();
   }
@@ -565,7 +575,7 @@ bool EngineBackend::clear() {
   if (!hasRecords(m_projectPath)) return true;
   FlowEngineClient::Result result;
   try {
-    result = m_client.call({"invalidate", "--all", "--project", utf8(m_projectPath)});
+    result = m_client.call(withLockToken({"invalidate", "--all", "--project", utf8(m_projectPath)}));
   } catch (const std::exception& e) {
     result.error = e.what();
   }
