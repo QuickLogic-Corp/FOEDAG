@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "<binary> --replay", one run dir each.
 # usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
-#   GUI_TEST_FRAMEWORK_TARGET_BIN: the GUI application to test; no scenarios: all here
+#   GUI_TEST_FRAMEWORK_TARGET_BIN: the GUI application to test, a path or a name on PATH; no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
 #   --interactive: as --show, and run each line only after Space is pressed
 #     --timeout ms: or once a line has waited that long (default -1: wait for Space)
@@ -51,12 +51,22 @@ if [ -z "${GUI_TEST_FRAMEWORK_TARGET_BIN:-}" ]; then
   echo "[error] set GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>, the GUI application to test" >&2
   exit 1
 fi
-binary=$(cd "$(dirname "$GUI_TEST_FRAMEWORK_TARGET_BIN")" && pwd)/$(basename "$GUI_TEST_FRAMEWORK_TARGET_BIN")
+# Each run starts in its own dir, so the binary needs an absolute path.
+case "$GUI_TEST_FRAMEWORK_TARGET_BIN" in
+  */*) binary=$(cd "$(dirname "$GUI_TEST_FRAMEWORK_TARGET_BIN")" && pwd)/$(basename "$GUI_TEST_FRAMEWORK_TARGET_BIN") ;;
+  *)
+    binary=$(type -P "$GUI_TEST_FRAMEWORK_TARGET_BIN") || {
+      echo "[error] $GUI_TEST_FRAMEWORK_TARGET_BIN is not on PATH" >&2
+      exit 1
+    }
+    ;;
+esac
 echo "binary: $binary"
 here=$(cd "$(dirname "$0")" && pwd)
 if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
 out=${GUI_TEST_FRAMEWORK_OUT_DIR:-$PWD/gui-scenarios}
 mkdir -p "$out"
+out=$(cd "$out" && pwd)
 
 # A paused interactive session must not be killed by the time limit.
 limit=""

@@ -11,7 +11,8 @@ GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> tests/GuiScenarios/run_scenarios.sh --int
 ```
 
 `<binary>` is the GUI application under test, for example `build/bin/aurora`
-in this repository. `make test/gui-scenarios` sets
+in this repository. It is a path, or a name found on `PATH` such as `aurora`.
+`make test/gui-scenarios` sets
 `GUI_TEST_FRAMEWORK_TARGET_BIN` for you; set it yourself when you run
 `run_scenarios.sh` directly.
 
