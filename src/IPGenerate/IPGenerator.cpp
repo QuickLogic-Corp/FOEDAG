@@ -139,6 +139,8 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
 
     // Keep the generated file's mode: the temporary is created with
     // 0666 & ~umask, so renaming it over a read-only wrapper would widen it.
+    // The mode goes back on after the rename, not onto the temporary: Windows
+    // can neither replace nor delete a read-only file.
     std::error_code error;
     const auto mode = std::filesystem::status(wrapper, error).permissions();
     const bool haveMode = !error;
@@ -161,19 +163,26 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
         continue;
       }
     }
-    if (haveMode) {
-      std::filesystem::permissions(temporary, mode,
-                                   std::filesystem::perm_options::replace,
-                                   error);
-      if (error) {
-        discardTemporary();
-        continue;
-      }
+    const bool readOnly =
+        haveMode && (mode & std::filesystem::perms::owner_write) ==
+                        std::filesystem::perms::none;
+    std::error_code ignored;
+    if (readOnly) {
+      std::filesystem::permissions(wrapper, std::filesystem::perms::owner_write,
+                                   std::filesystem::perm_options::add, ignored);
     }
     std::filesystem::rename(temporary, wrapper, error);
     if (error) {
+      if (readOnly) {
+        std::filesystem::permissions(
+            wrapper, mode, std::filesystem::perm_options::replace, ignored);
+      }
       discardTemporary();
       continue;
+    }
+    if (haveMode) {
+      std::filesystem::permissions(
+          wrapper, mode, std::filesystem::perm_options::replace, ignored);
     }
     stamped = true;
   }

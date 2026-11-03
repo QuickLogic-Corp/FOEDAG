@@ -115,7 +115,10 @@ fs::path FlowEngineClient::findInstallRoot(const fs::path& dataPath) {
   // also holds scripts/aurora_engine.py. macOS keeps the install under Contents/.
   for (const fs::path& root : {dataPath / "..", dataPath / ".." / "..",
                                dataPath / ".." / ".." / "Contents"}) {
-    const fs::path candidate = root.lexically_normal();
+    fs::path candidate = root.lexically_normal();
+    // "<dir>/.." normalises to "<dir>/"; Windows cannot stat a directory with
+    // the trailing separator, so return the plain form.
+    if (!candidate.has_filename()) candidate = candidate.parent_path();
     if (isFile(candidate / "scripts" / "aurora_engine.py")) return candidate;
   }
   return {};
