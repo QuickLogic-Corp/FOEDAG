@@ -80,9 +80,10 @@ std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames);
 struct ResourceTally {
     int clbAtoms = 0;   // luts, flops, carries -- many to a tile
     int clbTiles = 0;   // clbAtoms over atomsPerTile, rounded up: an estimate, see Partition
-    int dsp = 0;        // one atom, one tile
+    int dspAtoms = 0;
+    int dsp = 0;        // tiles: see countsAsDspTile()
     int bram = 0;       // one atom, one tile
-    int atoms() const { return clbAtoms + dsp + bram; }
+    int atoms() const { return clbAtoms + dspAtoms + bram; }
 };
 
 // Counts by type. Pass atoms as a set: an atom named by two selected instances -- a parent

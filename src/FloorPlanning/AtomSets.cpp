@@ -109,11 +109,11 @@ ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPe
     ResourceTally tally;
     for (const std::string& atom : atomNames) {
         const auto typeIt = atomTypes.find(atom);
-        const QString type = (typeIt != atomTypes.end())
-            ? classifyAtomType(atom, typeIt->second)
-            : classifyAtomType(atom);
+        const std::string realType = (typeIt != atomTypes.end()) ? typeIt->second : "";
+        const QString type = classifyAtomType(atom, realType);
         if (type == "dsp") {
-            ++tally.dsp;
+            ++tally.dspAtoms;
+            if (countsAsDspTile(realType)) ++tally.dsp;
         } else if (type == "bram") {
             ++tally.bram;
         } else {

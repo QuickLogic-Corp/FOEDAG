@@ -85,11 +85,11 @@ public:
         // what the partition's regions physically have room for.
         for (const std::string& atomName : element.vprNames) {
             const auto typeIt = s_atomTypes.find(atomName);
-            const QString type = (typeIt != s_atomTypes.end())
-                ? classifyAtomType(atomName, typeIt->second)
-                : classifyAtomType(atomName);
-            if (type == "dsp") ++m_dspRequiredCount;
-            else if (type == "bram") ++m_bramRequiredCount;
+            const std::string realType = (typeIt != s_atomTypes.end()) ? typeIt->second : "";
+            const QString type = classifyAtomType(atomName, realType);
+            if (type == "dsp") {
+                if (countsAsDspTile(realType)) ++m_dspRequiredCount;
+            } else if (type == "bram") ++m_bramRequiredCount;
             else ++m_clbAtomCount;
         }
     }

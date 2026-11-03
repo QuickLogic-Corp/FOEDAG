@@ -993,6 +993,29 @@ TEST(PartitionResources, AtomsAreTheOnlySourceOfTheRequiredColumns)
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
+TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
+{
+    // One DSP-V4 is several QL_DSP4_* leaf atoms in one tile; only its QL_DSP4_MULT
+    // counts, in both the partition column and the selection tally.
+    const std::set<std::string> atoms{"u.QL_DSP4.u_mult", "u.QL_DSP4.g_acc.ff",
+                                      "u.QL_DSP4.g_add.u_alu"};
+    const fp::AtomTypeMap types{{"u.QL_DSP4.u_mult", "QL_DSP4_MULT"},
+                                {"u.QL_DSP4.g_acc.ff", "QL_DSP4_ACC_DFFRE_64"},
+                                {"u.QL_DSP4.g_add.u_alu", "QL_DSP4_ALU_ADD"}};
+    fp::Partition::setAtomTypes(types);
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"u", /*isLeaf*/ true, atoms});
+    EXPECT_EQ(partition.dspRequiredCount(), 1);
+    EXPECT_EQ(partition.clbRequiredCount(), 0);
+
+    const fp::ResourceTally tally = fp::tallyResources(atoms, 14, types);
+    EXPECT_EQ(tally.dsp, 1);
+    EXPECT_EQ(tally.atoms(), 3);
+
+    fp::Partition::setAtomTypes(fp::AtomTypeMap{});
+}
+
 TEST(PartitionResources, DesignResourceEntriesNeverFeedThePerPartitionTally)
 {
     // The entries NEST -- an ancestor's counts already include its descendants' -- so adding
