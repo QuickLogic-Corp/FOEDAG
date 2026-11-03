@@ -47,6 +47,7 @@ extern "C" {
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -107,12 +108,22 @@ void loadTclInitFile(CommandStack* commandStack,
       std::filesystem::path(QDir::homePath().toStdString());
   std::filesystem::path localDir =
       std::filesystem::path(QDir::currentPath().toStdString());
-  std::vector<std::filesystem::path> searchPaths{homeDir, localDir};
+  // Install dir first so user (home, cwd) init files can override it
+  std::filesystem::path installShareDir =
+      PathUtils::instance().installDir() / "share" / "aurora";
+  std::vector<std::filesystem::path> searchPaths{installShareDir, homeDir,
+                                                 localDir};
 
   // Search for and load/source each file match in searchPaths
   std::string fileName = initFilePrefix + "_init.tcl";
+  std::set<std::filesystem::path> sourced;
   for (auto path : FileUtils::FindFileInDirs(fileName, searchPaths, true)) {
-    std::string cmd = "source " + path.string();
+    // Overlapping dirs (home == cwd, cwd == install) must source once
+    std::error_code ec;
+    auto canonical = std::filesystem::weakly_canonical(path, ec);
+    if (!sourced.insert(ec ? path : canonical).second) continue;
+    // Braces keep paths with spaces intact
+    std::string cmd = "source {" + path.string() + "}";
     commandStack->push_and_exec(new Command(cmd));
   }
 }
