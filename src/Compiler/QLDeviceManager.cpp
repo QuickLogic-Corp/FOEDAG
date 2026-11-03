@@ -5245,6 +5245,53 @@ std::filesystem::path QLDeviceManager::deviceOpenFPGARepackDesignConstraintFile(
 }
 
 
+std::filesystem::path QLDeviceManager::clockRegionFileIn(const std::filesystem::path& device_dir,
+                                                         const json& config,
+                                                         const std::string& device,
+                                                         std::string* error) {
+  if (!config.is_object() || !config.contains("CLOCK_REGIONS") ||
+      !config["CLOCK_REGIONS"].is_string()) {
+    return {};
+  }
+  const std::string value = config["CLOCK_REGIONS"].get<std::string>();
+  if (value.empty()) {
+    return {};
+  }
+  std::filesystem::path file = device_dir / value;
+  if (FileUtils::FileExists(file)) {
+    return file;
+  }
+  file += ".en";
+  if (FileUtils::FileExists(file)) {
+    return file;
+  }
+  if (error) {
+    *error = "device " + device + ": config.json CLOCK_REGIONS names " + value +
+             ", which is not in " + device_dir.string() + " (plaintext or .en)";
+  }
+  return {};
+}
+
+std::filesystem::path QLDeviceManager::deviceClockRegionFile(QLDeviceTarget device_target,
+                                                             std::string* error) {
+  if (!isDeviceTargetValid(device_target)) {
+    device_target = this->device_target;
+  }
+  json config;
+  std::string parse_error;
+  if (!loadDeviceConfigJSON(device_target, config, &parse_error)) {
+    if (!parse_error.empty() && error) {
+      // the file is there but unreadable: the device may well declare clock regions
+      *error = "device " + convertToDeviceString(device_target) +
+               ": config.json does not parse: " + parse_error;
+    }
+    // otherwise legacy device data (< v2.8.0): no config.json, so no clock regions
+    return {};
+  }
+  return clockRegionFileIn(deviceTypeDirPath(device_target), config,
+                           convertToDeviceString(device_target), error);
+}
+
 std::filesystem::path QLDeviceManager::deviceOpenFPGAFixedSimFile(QLDeviceTarget device_target) {
 
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(GlobalSession->GetCompiler());
