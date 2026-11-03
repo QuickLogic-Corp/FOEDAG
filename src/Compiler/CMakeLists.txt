@@ -86,11 +86,14 @@ set (SRC_CPP_LIST
   QLDeviceLayoutInfo.cpp
   QLDevicePath.cpp
   PrivateTempDir.cpp
+  DumpOptions.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   BlifParser.cpp
   WildcardFileFinder.cpp
   DialogUtils.cpp
+  PackLayout.cpp
+  EngineStatusRefresh.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -128,12 +131,15 @@ set (SRC_H_INSTALL_LIST
   QLDeviceManager.h
   QLDeviceLayoutInfo.h
   PrivateTempDir.h
+  DumpOptions.h
   QLDevicePath.h
   QLSettingsManager.h
   QLMetricsManager.h
   BlifParser.h
   WildcardFileFinder.h
   DialogUtils.h
+  PackLayout.h
+  EngineStatusRefresh.h
 )
 
 set (SRC_H_LIST
