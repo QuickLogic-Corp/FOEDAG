@@ -57,10 +57,13 @@ public:
   int count() const;
 
 private:
-  // With m_mutex held. False when the engine could not remove the lock.
-  bool unlockLocked();
+  // With m_callMutex held. False when the engine could not remove the lock.
+  bool unlockCalling();
 
-  mutable std::mutex m_mutex;
+  // One lock or unlock call at a time. The engine runs under this one only, so
+  // token(), count() and releaseAtExit() never wait for an engine process.
+  std::mutex m_callMutex;
+  mutable std::mutex m_stateMutex;  // the fields below
   int m_count = 0;
   std::filesystem::path m_project;
   std::string m_token;
@@ -80,7 +83,9 @@ public:
                               bool batchScript);
   void end();
   void sequenceStarted();
-  void sequenceDone();
+  // True when the caller must end() the sequence's span; the GUI calls it on its
+  // own thread, so it leaves the engine call to the caller.
+  bool sequenceDone();
 
 private:
   EngineRunLock& m_lock;

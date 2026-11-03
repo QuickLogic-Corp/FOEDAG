@@ -35,31 +35,40 @@ EngineRunLock& EngineRunLock::instance() {
 
 EngineRunLock::Result EngineRunLock::hold(const FlowEngineClient& client, const fs::path& project,
                                           qint64 ownerPid) {
-  std::lock_guard<std::mutex> guard(m_mutex);
-  // A lock already held here, or kept after an unlock that failed.
-  if (normal(project) == m_project && (m_count > 0 || !m_token.empty())) {
-    ++m_count;
-    return {Outcome::Held, {}};
+  std::lock_guard<std::mutex> call(m_callMutex);
+  {
+    std::lock_guard<std::mutex> state(m_stateMutex);
+    // A lock already held here, or kept after an unlock that failed.
+    if (normal(project) == m_project && (m_count > 0 || !m_token.empty())) {
+      ++m_count;
+      return {Outcome::Held, {}};
+    }
   }
-  // The project changed under a hold: its old lock goes, the new one is taken.
-  unlockLocked();
-  m_token.clear();
-  m_project.clear();
+  // The project changed under a hold: its old lock goes, the new one is taken. An
+  // old lock that stays is the engine's to replace when this process asks again.
+  unlockCalling();
+  {
+    std::lock_guard<std::mutex> state(m_stateMutex);
+    m_token.clear();
+    m_project.clear();
+  }
 
   const FlowEngineClient::Result result =
       client.call({"lock", "--project", project.u8string(), "--owner-pid", std::to_string(ownerPid)});
   Result out;
+  std::string token;
   if (result.ok) {
-    const auto token = result.doc.find("token");
-    m_token = token != result.doc.end() && token->is_string() ? token->get<std::string>()
-                                                              : std::string{};
-    out.outcome = m_token.empty() ? Outcome::Unavailable : Outcome::Held;
-    if (m_token.empty()) out.message = "the engine's lock answer has no token";
+    const auto answer = result.doc.find("token");
+    if (answer != result.doc.end() && answer->is_string()) token = answer->get<std::string>();
+    out.outcome = token.empty() ? Outcome::Unavailable : Outcome::Held;
+    if (token.empty()) out.message = "the engine's lock answer has no token";
   } else if (result.error.rfind(LOCK_HELD, 0) == 0) {
     return {Outcome::Refused, result.error.substr(LOCK_HELD.size())};
   } else {
     out.message = result.error;
   }
+  std::lock_guard<std::mutex> state(m_stateMutex);
+  m_token = token;
   m_project = normal(project);
   m_client = client;
   ++m_count;
@@ -67,23 +76,39 @@ EngineRunLock::Result EngineRunLock::hold(const FlowEngineClient& client, const 
 }
 
 void EngineRunLock::drop() {
-  std::lock_guard<std::mutex> guard(m_mutex);
-  if (m_count == 0 || --m_count > 0) return;
+  std::lock_guard<std::mutex> call(m_callMutex);
+  {
+    std::lock_guard<std::mutex> state(m_stateMutex);
+    if (m_count == 0 || --m_count > 0) return;
+  }
   // A lock that could not be removed is kept: the next hold here adopts it.
-  if (unlockLocked()) m_project.clear();
+  if (unlockCalling()) {
+    std::lock_guard<std::mutex> state(m_stateMutex);
+    m_project.clear();
+  }
 }
 
-bool EngineRunLock::unlockLocked() {
-  if (m_token.empty()) return true;
+bool EngineRunLock::unlockCalling() {
+  std::string token;
+  fs::path project;
+  FlowEngineClient client;
+  {
+    std::lock_guard<std::mutex> state(m_stateMutex);
+    token = m_token;
+    project = m_project;
+    client = m_client;
+  }
+  if (token.empty()) return true;
   const FlowEngineClient::Result result =
-      m_client.call({"unlock", "--project", m_project.u8string(), "--token", m_token});
+      client.call({"unlock", "--project", project.u8string(), "--token", token});
   if (!result.ok) return false;
+  std::lock_guard<std::mutex> state(m_stateMutex);
   m_token.clear();
   return true;
 }
 
 void EngineRunLock::releaseAtExit() {
-  std::lock_guard<std::mutex> guard(m_mutex);
+  std::lock_guard<std::mutex> state(m_stateMutex);
   if (!m_token.empty()) {
     const fs::path file = m_project / ".aurora" / "lock";
     std::ifstream in(file);
@@ -104,12 +129,12 @@ void EngineRunLock::releaseAtExit() {
 }
 
 std::string EngineRunLock::token(const fs::path& project) const {
-  std::lock_guard<std::mutex> guard(m_mutex);
+  std::lock_guard<std::mutex> state(m_stateMutex);
   return normal(project) == m_project ? m_token : std::string{};
 }
 
 int EngineRunLock::count() const {
-  std::lock_guard<std::mutex> guard(m_mutex);
+  std::lock_guard<std::mutex> state(m_stateMutex);
   return m_count;
 }
 
@@ -131,9 +156,9 @@ void EngineRunHolds::end() { m_lock.drop(); }
 void EngineRunHolds::sequenceStarted() { m_spanWanted = true; }
 
 // TaskManager also says done() after every batch task; a batch span ends at exit.
-void EngineRunHolds::sequenceDone() {
+bool EngineRunHolds::sequenceDone() {
   m_spanWanted = false;
-  if (!m_spanUntilExit && m_spanHeld.exchange(false)) m_lock.drop();
+  return !m_spanUntilExit && m_spanHeld.exchange(false);
 }
 
 }  // namespace FOEDAG

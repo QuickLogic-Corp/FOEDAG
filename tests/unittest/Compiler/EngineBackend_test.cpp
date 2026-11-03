@@ -27,6 +27,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Utils/FileUtils.h"
 #include "gtest/gtest.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -94,6 +95,9 @@ elif op in ('lock', 'unlock'):
         print(json.dumps({'v': 1, 'error': {'code': 'lock-held', 'message':
               'another Aurora run holds /p/.aurora/lock: pid 7 on host h'}}))
         sys.exit(4)
+    if state == 'slow':
+        import time
+        time.sleep(1.5)
     if state == 'broken':
         print(json.dumps({'v': 1, 'error': {'code': 'io', 'message': 'disk full'}}))
         sys.exit(4)
@@ -1027,7 +1031,7 @@ TEST_F(EngineBackendTest, a_gui_sequence_and_a_batch_script_hold_their_whole_spa
     EXPECT_EQ(lock.count(), 1);  // between two stages of the sequence
     holds.begin(client, m_project, 1, false);
     holds.end();
-    holds.sequenceDone();
+    if (holds.sequenceDone()) holds.end();
     EXPECT_EQ(lock.count(), 0);
   }
   EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock", "unlock", "lock", "unlock"}));
@@ -1035,7 +1039,7 @@ TEST_F(EngineBackendTest, a_gui_sequence_and_a_batch_script_hold_their_whole_spa
     EngineRunHolds holds(lock);
     holds.begin(client, m_project, 1, true);
     holds.end();
-    holds.sequenceDone();
+    if (holds.sequenceDone()) holds.end();
     EXPECT_EQ(lock.count(), 1);
     holds.begin(client, m_project, 1, true);
     holds.end();
@@ -1043,6 +1047,24 @@ TEST_F(EngineBackendTest, a_gui_sequence_and_a_batch_script_hold_their_whole_spa
     lock.releaseAtExit();
   }
   EXPECT_EQ(opsOf(calls()).size(), 5u);  // one more lock, released at exit
+}
+
+// The GUI thread reads the token for status checks while a worker may be inside
+// a lock call: reading never waits for the engine.
+TEST_F(EngineBackendTest, reading_the_token_does_not_wait_for_a_lock_call) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  write(m_engineDir / "lock.txt", "slow");
+  std::thread worker([&] { lock.hold(client, m_project, 1); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  const auto start = std::chrono::steady_clock::now();
+  EXPECT_EQ(lock.token(m_project), "");
+  EXPECT_EQ(lock.count(), 0);
+  const auto waited = std::chrono::steady_clock::now() - start;
+  worker.join();
+  EXPECT_LT(waited, std::chrono::milliseconds(500));
+  EXPECT_EQ(lock.token(m_project), fakeToken());
 }
 
 TEST_F(EngineBackendTest, a_refused_task_takes_no_span) {
@@ -1054,7 +1076,7 @@ TEST_F(EngineBackendTest, a_refused_task_takes_no_span) {
   write(m_engineDir / "lock.txt", "held");
   EXPECT_EQ(holds.begin(client, m_project, 1, false).outcome, EngineRunLock::Outcome::Refused);
   EXPECT_EQ(lock.count(), 0);
-  holds.sequenceDone();
+  EXPECT_FALSE(holds.sequenceDone());  // no span to end
   EXPECT_EQ(lock.count(), 0);
   EXPECT_EQ(opsOf(calls()), (std::vector<std::string>{"lock"}));
 }

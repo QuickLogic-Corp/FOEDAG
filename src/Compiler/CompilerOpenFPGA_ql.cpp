@@ -32,6 +32,7 @@
 #endif
 
 #include <QCoreApplication>
+#include <QThreadPool>
 #include <QDebug>
 #include <QDomDocument>
 #include <QFile>
@@ -492,7 +493,12 @@ void CompilerOpenFPGA_ql::EndRun() { m_runHolds.end(); }
 
 void CompilerOpenFPGA_ql::TaskSequenceStarted() { m_runHolds.sequenceStarted(); }
 
-void CompilerOpenFPGA_ql::TaskSequenceDone() { m_runHolds.sequenceDone(); }
+// done() arrives on the GUI thread; the unlock runs the engine, so not there.
+void CompilerOpenFPGA_ql::TaskSequenceDone() {
+  if (m_runHolds.sequenceDone()) {
+    QThreadPool::globalInstance()->start([this]() { m_runHolds.end(); });
+  }
+}
 
 void CompilerOpenFPGA_ql::Version(std::ostream* out) {
   (*out) << "QuickLogic Aurora"
