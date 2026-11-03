@@ -496,7 +496,7 @@ void CompilerOpenFPGA_ql::TaskSequenceStarted() { m_runHolds.sequenceStarted(); 
 // done() arrives on the GUI thread; the unlock runs the engine, so not there.
 void CompilerOpenFPGA_ql::TaskSequenceDone() {
   if (m_runHolds.sequenceDone()) {
-    QThreadPool::globalInstance()->start([this]() { m_runHolds.end(); });
+    QThreadPool::globalInstance()->start([]() { EngineRunLock::instance().drop(); });
   }
 }
 
