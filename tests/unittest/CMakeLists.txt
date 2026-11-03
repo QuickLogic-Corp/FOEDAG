@@ -53,6 +53,8 @@ set (CPP_LIST
     Compiler/FlowEngineClient_test.cpp
     Compiler/EngineBackend_test.cpp
     Compiler/PrivateTempDir_test.cpp
+    Compiler/DumpOptions_test.cpp
+    Compiler/DumpOptionsGuard_test.cpp
     Main/EventLoopProbe_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
