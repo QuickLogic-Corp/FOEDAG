@@ -163,14 +163,20 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
         continue;
       }
     }
+    std::error_code ignored;
+#ifdef _WIN32
+    // Only Windows needs the target writable to replace it; on POSIX a link
+    // target would keep the added bit.
     const bool readOnly =
         haveMode && (mode & std::filesystem::perms::owner_write) ==
                         std::filesystem::perms::none;
-    std::error_code ignored;
     if (readOnly) {
       std::filesystem::permissions(wrapper, std::filesystem::perms::owner_write,
                                    std::filesystem::perm_options::add, ignored);
     }
+#else
+    const bool readOnly = false;
+#endif
     std::filesystem::rename(temporary, wrapper, error);
     if (error) {
       if (readOnly) {
@@ -182,7 +188,12 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
     }
     if (haveMode) {
       std::filesystem::permissions(
-          wrapper, mode, std::filesystem::perm_options::replace, ignored);
+          wrapper, mode, std::filesystem::perm_options::replace, error);
+      if (error && compiler) {
+        compiler->WarningMessage(
+            "IP Generate, could not restore the mode of " + wrapper.string() +
+            " after stamping it: " + error.message());
+      }
     }
     stamped = true;
   }
