@@ -50,6 +50,19 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // The .qdc carries RTL names only (REQ-002), so the elements arrive without atoms and
     // every required count would be zero -- nothing could ever look under-provisioned.
     // Attach them the same way the panel does, through the shared lookup.
+    RtlInstanceModel rtlModel;
+    const bool haveInstances = rtlModel.loadInstances(
+        floorplanningArtifact(projectPath, projectName, "instances.json"));
+
+    // Real cell types, as the panel loads them: without them a BRAM named after its RTL
+    // instance (core.u_mem.mem.0.0) is classified by name and counted as CLB logic. Set
+    // even when empty, so a previous project's types are not reused.
+    AtomTypeMap atomTypes;
+    if (haveInstances) {
+        loadAtomTypes(projectPath / (rtlModel.top() + "_post_synth_debug.json"), atomTypes);
+    }
+    Partition::setAtomTypes(std::move(atomTypes));
+
     AtomNameMap atomNames;
     int atomsPerTile = Partition::atomsPerTile();
     const bool haveAtoms =
@@ -71,9 +84,7 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
 
     // Instances synthesis deleted entirely: a .qdc may still name one, and such a constraint
     // matches no atom.
-    RtlInstanceModel rtlModel;
-    if (rtlModel.loadInstances(
-            floorplanningArtifact(projectPath, projectName, "instances.json"))) {
+    if (haveInstances) {
         rtlModel.mergeVerdicts(
             floorplanningArtifact(projectPath, projectName, "validation.json"));
         std::unordered_set<std::string> deleted;
