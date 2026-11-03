@@ -118,6 +118,8 @@ TEST_F(FlowEngineClientTest, install_root_and_interpreter_are_found_or_empty) {
   EXPECT_TRUE(FlowEngineClient::findInstallRoot({}).empty());
 
   write("scripts/aurora_engine.py", "");
+  // No trailing separator: Windows cannot stat "<dir>\" (Linux can, so check the form).
+  EXPECT_TRUE(FlowEngineClient::findInstallRoot(dataPath).has_filename());
   EXPECT_TRUE(fs::equivalent(FlowEngineClient::findInstallRoot(dataPath), m_dir));
   // Aurora's data path is <install>/device_data, and the install may sit inside a
   // checkout that has its own scripts/aurora_engine.py.
