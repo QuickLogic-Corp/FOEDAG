@@ -476,7 +476,7 @@ bool CompilerOpenFPGA_ql::BeginRun(bool& held) {
   const EngineRunLock::Result result = m_runHolds.begin(
       client, project, QCoreApplication::applicationPid(), batchScriptSession());
   if (result.outcome == EngineRunLock::Outcome::Refused) {
-    ErrorMessage("the project is in use by another Aurora run: " + result.message);
+    ErrorMessage("Aurora run refused: " + result.message);
     return false;
   }
   if (result.outcome == EngineRunLock::Outcome::Unavailable && !m_runLockWarned.exchange(true)) {

@@ -28,6 +28,21 @@ static const std::string LOCK_HELD = "lock-held: ";
 
 static fs::path normal(const fs::path& path) { return path.lexically_normal(); }
 
+// The engine's unlock rule without the engine: remove the lock only if it carries
+// `token`. For the exit path and for an unlock the engine could not do.
+static void removeIfMine(const fs::path& project, const std::string& token) {
+  if (token.empty()) return;
+  const fs::path file = project / ".aurora" / "lock";
+  std::ifstream in(file);
+  const nlohmann::json held = nlohmann::json::parse(in, nullptr, false);
+  in.close();
+  const auto found = held.is_object() ? held.find("token") : held.end();
+  if (found != held.end() && found->is_string() && found->get<std::string>() == token) {
+    std::error_code ec;
+    fs::remove(file, ec);
+  }
+}
+
 EngineRunLock& EngineRunLock::instance() {
   static EngineRunLock lock;
   return lock;
@@ -44,11 +59,12 @@ EngineRunLock::Result EngineRunLock::hold(const FlowEngineClient& client, const 
       return {Outcome::Held, {}};
     }
   }
-  // The project changed under a hold: its old lock goes, the new one is taken. An
-  // old lock that stays is the engine's to replace when this process asks again.
-  unlockCalling();
+  // The project changed under a hold: its old lock goes, the new one is taken. A
+  // lock left naming this live process would refuse every other run there.
+  const bool unlocked = unlockCalling();
   {
     std::lock_guard<std::mutex> state(m_stateMutex);
+    if (!unlocked) removeIfMine(m_project, m_token);
     m_token.clear();
     m_project.clear();
   }
@@ -65,6 +81,8 @@ EngineRunLock::Result EngineRunLock::hold(const FlowEngineClient& client, const 
   } else if (result.error.rfind(LOCK_HELD, 0) == 0) {
     return {Outcome::Refused, result.error.substr(LOCK_HELD.size())};
   } else {
+    // A timed-out call may still have written a lock naming this pid; the
+    // engine replaces it when this process next asks.
     out.message = result.error;
   }
   std::lock_guard<std::mutex> state(m_stateMutex);
@@ -109,20 +127,7 @@ bool EngineRunLock::unlockCalling() {
 
 void EngineRunLock::releaseAtExit() {
   std::lock_guard<std::mutex> state(m_stateMutex);
-  if (!m_token.empty()) {
-    const fs::path file = m_project / ".aurora" / "lock";
-    std::ifstream in(file);
-    const nlohmann::json held = nlohmann::json::parse(in, nullptr, false);
-    in.close();
-    // The engine's unlock rule: only a lock carrying this run's token is removed.
-    const auto token = held.is_object() ? held.find("token") : held.end();
-    const bool mine =
-        token != held.end() && token->is_string() && token->get<std::string>() == m_token;
-    if (mine) {
-      std::error_code ec;
-      fs::remove(file, ec);
-    }
-  }
+  removeIfMine(m_project, m_token);
   m_token.clear();
   m_project.clear();
   m_count = 0;

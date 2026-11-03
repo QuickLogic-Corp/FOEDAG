@@ -858,6 +858,13 @@ std::string fakeToken() {
   return t;
 }
 
+// What the compiler library sends: UTF-8 bytes in a std::string (it builds as C++17;
+// this test builds as C++20, where u8string() is std::u8string).
+std::string utf8Bytes(const fs::path& path) {
+  const auto bytes = path.u8string();
+  return std::string(bytes.begin(), bytes.end());
+}
+
 std::vector<std::string> opsOf(const std::vector<nlohmann::json>& seen) {
   std::vector<std::string> ops;
   for (const nlohmann::json& call : seen) ops.push_back(call["args"][0]);
@@ -879,9 +886,9 @@ TEST_F(EngineBackendTest, the_first_hold_locks_for_its_owner_and_the_last_drop_u
   EXPECT_EQ(lock.count(), 0);
   const auto seen = calls();
   ASSERT_EQ(seen.size(), 2u);
-  EXPECT_EQ(seen[0]["args"], nlohmann::json({"lock", "--project", m_project.string(),
+  EXPECT_EQ(seen[0]["args"], nlohmann::json({"lock", "--project", utf8Bytes(m_project),
                                              "--owner-pid", "4242", "--json"}));
-  EXPECT_EQ(seen[1]["args"], nlohmann::json({"unlock", "--project", m_project.string(),
+  EXPECT_EQ(seen[1]["args"], nlohmann::json({"unlock", "--project", utf8Bytes(m_project),
                                              "--token", fakeToken(), "--json"}));
 }
 
@@ -930,7 +937,21 @@ TEST_F(EngineBackendTest, a_new_project_under_a_hold_moves_the_lock) {
   EXPECT_EQ(lock.count(), 2);
   const auto seen = calls();
   EXPECT_EQ(opsOf(seen), (std::vector<std::string>{"lock", "unlock", "lock"}));
-  EXPECT_EQ(seen[2]["args"][2], other.string());
+  EXPECT_EQ(seen[2]["args"][2], utf8Bytes(other));
+}
+
+// Leaving a project whose unlock failed must not keep it locked against other runs.
+TEST_F(EngineBackendTest, a_failed_unlock_on_a_project_change_still_frees_the_old_lock) {
+  FlowEngineClient client = fakeClient();
+  if (!client.usable()) GTEST_SKIP() << "no python3";
+  EngineRunLock lock;
+  const fs::path file = m_project / ".aurora" / "lock";
+  lock.hold(client, m_project, 1);
+  write(file, R"({"pid": 1, "host": "h", "start": 0, "token": ")" + fakeToken() + "\"}");
+  write(m_engineDir / "unlock.txt", "broken");
+  lock.hold(client, m_root / "other", 1);
+  EXPECT_FALSE(fs::exists(file));
+  EXPECT_EQ(lock.token(m_root / "other"), fakeToken());
 }
 
 // A lock that could not be removed is still this process's: the next run adopts it.
