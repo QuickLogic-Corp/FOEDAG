@@ -488,6 +488,9 @@ void DeviceGridWidget::loadQdc()
     m_qdcSerializer.load(m_device);
     emit unselectPartitionRequested();
     reportPartitionChanges();
+    // A .qdc has no atom names, so the check inside reportPartitionChanges() saw zero
+    // required tiles; the partitionsChanged listeners have filled them in by now.
+    checkIssues();
     update();
 }
 
