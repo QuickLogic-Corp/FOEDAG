@@ -746,6 +746,33 @@ TEST(SynthResourceHierarchyTree, TopModuleIsTheRootAndChildrenKeepUnprefixedPath
               QString("core.u_mem"));
 }
 
+TEST(SynthResourceHierarchyTree, AParentListsTheAtomsNoChildHolds)
+{
+    // aurora2#2376: block_inst holds a LUT of its own beside its FIFO_INST child. The
+    // resources table counts that LUT, so the tree has to show a row for it too.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setAtomNames({
+        {"block_inst", {"block_inst.Async_Flush_$lut_Y", "block_inst.FIFO_INST.U1"}},
+        {"block_inst.FIFO_INST", {"block_inst.FIFO_INST.U1"}},
+    });
+    widget.build(fp::NaturalStringSet{"top", "block_inst", "block_inst.FIFO_INST"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    QStandardItem* blockItem = childNamed(model->invisibleRootItem()->child(0, 0), "block_inst");
+    ASSERT_NE(blockItem, nullptr);
+
+    QStringList atomRows;
+    for (int row = 0; row < blockItem->rowCount(); ++row) {
+        if (blockItem->child(row, 0)->text().isEmpty()) {
+            atomRows << blockItem->child(row, 1)->text();
+        }
+    }
+    EXPECT_EQ(atomRows, QStringList{"block_inst.Async_Flush_$lut_Y"});
+    EXPECT_NE(childNamed(blockItem, "FIFO_INST"), nullptr);
+}
+
 TEST(SynthResourceHierarchyTree, FlatDesignShowsTheTopAsItsOnlyRow)
 {
     // The case the whole feature exists for, and the reason the tree is rooted at all: a

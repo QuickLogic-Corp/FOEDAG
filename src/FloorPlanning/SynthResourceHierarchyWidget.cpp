@@ -1237,9 +1237,27 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         return primitive;
     };
 
+    // One child row per atom, so each can be selected and copied.
+    auto appendAtomRows = [&atomTile, &atomPrimitive](QStandardItem* parent,
+                                                      const std::vector<std::string>& atoms,
+                                                      const std::map<std::string, int>& resourceTypes) {
+        for (const auto& n : atoms) {
+            auto* col0 = new QStandardItem();
+            col0->setFlags(Qt::ItemIsEnabled);
+            col0->setData(true, kVprDisplayRowRole);
+            auto* col1 = new QStandardItem(QString::fromStdString(n));
+            col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            auto* col2 = new QStandardItem(atomTile(n));
+            col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            auto* col5 = new QStandardItem(atomPrimitive(n, resourceTypes));
+            col5->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            parent->appendRow({col0, col1, col2, new QStandardItem(), new QStandardItem(), col5});
+        }
+    };
+
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this, &atomTile, &atomPrimitive](QStandardItem* item,
-                                                              const std::string& prefix)
+        [&populateRecursive, this, &atomTile, &atomPrimitive, &appendAtomRows](QStandardItem* item,
+                                                                               const std::string& prefix)
     {
         if (!item) return;
         const int rows = item->rowCount();
@@ -1294,24 +1312,27 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                         for (const auto& n : names) tiles.insert(atomTile(n));
                         if (QStandardItem* typeItem = item->child(row, Column::AtomType))
                             typeItem->setText(QStringList(tiles.begin(), tiles.end()).join(", "));
-                        // Multiple atoms: one child row each so each can be selected and copied
-                        for (const auto& n : names) {
-                            auto* col0 = new QStandardItem();
-                            col0->setFlags(Qt::ItemIsEnabled);
-                            col0->setData(true, kVprDisplayRowRole);
-                            auto* col1 = new QStandardItem(QString::fromStdString(n));
-                            col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            auto* col2 = new QStandardItem(atomTile(n));
-                            col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            auto* col5 = new QStandardItem(atomPrimitive(n, resourceTypes));
-                            col5->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            child->appendRow({col0, col1, col2, new QStandardItem(),
-                                              new QStandardItem(), col5});
+                        appendAtomRows(child, names, resourceTypes);
+                    }
+                } else {
+                    // Non-leaf: its own Atom List/Type cells stay empty, but the atoms no
+                    // child instance holds (aurora2#2376: a LUT beside FIFO_INST) get rows,
+                    // or the resources table counts atoms the tree never shows.
+                    std::set<std::string> heldByChildren;
+                    for (int r = 0; r < child->rowCount(); ++r) {
+                        QStandardItem* grandchild = child->child(r, Column::Netlist);
+                        if (grandchild && !isVprDisplayRow(grandchild)) {
+                            heldByChildren.merge(atomNamesFor(buildChildPath(path, grandchild)));
                         }
                     }
+                    std::vector<std::string> own;
+                    for (const auto& n : names) {
+                        if (heldByChildren.count(n) == 0) own.push_back(n);
+                    }
+                    populateRecursive(child, path);
+                    appendAtomRows(child, own, resourceTypes);
+                    continue;
                 }
-                // Non-leaf: Atom List/Type cells are intentionally left empty —
-                // a comma-separated list of all descendant atoms is unreadable.
             }
             populateRecursive(child, path);
         }
