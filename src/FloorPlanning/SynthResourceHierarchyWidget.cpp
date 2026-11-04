@@ -30,6 +30,7 @@
 #include <QPointer>
 #include <QStyleOptionButton>
 #include <QStyledItemDelegate>
+#include <QScopedValueRollback>
 
 #include <QDebug>
 
@@ -340,6 +341,43 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     m_lbView->setVisible(false); // optionally activated by method
 
     m_view->setModel(m_model);
+    // Every cell is read-only data: an RTL path, an atom name or a type.
+    m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    // Dragging a border takes the width from the next resizable column, not from the whole
+    // row, so one column can be widened without scrolling. The last section already
+    // stretches to fill, so it is left to Qt.
+    connect(m_view->header(), &QHeaderView::sectionResized, this,
+            [this](int logical, int oldSize, int newSize) {
+        if (m_fittingColumns) {
+            return;
+        }
+        QHeaderView* header = m_view->header();
+        int lastVisual = header->count() - 1;
+        while ((lastVisual > 0) && header->isSectionHidden(header->logicalIndex(lastVisual))) {
+            --lastVisual;
+        }
+        for (int visual = header->visualIndex(logical) + 1; visual < lastVisual; ++visual) {
+            const int next = header->logicalIndex(visual);
+            if (header->isSectionHidden(next) ||
+                (header->sectionResizeMode(next) == QHeaderView::Fixed)) {
+                continue;
+            }
+            QScopedValueRollback<bool> guard(m_fittingColumns, true);
+            header->resizeSection(next, std::max(header->minimumSectionSize(),
+                                                 header->sectionSize(next) - (newSize - oldSize)));
+            return;
+        }
+    });
+    // Expanding shows deeper names; widen the name column for them, never narrow it.
+    connect(m_view, &QTreeView::expanded, this, [this]() {
+        QScopedValueRollback<bool> guard(m_fittingColumns, true);
+        const int current = m_view->header()->sectionSize(Column::Netlist);
+        m_view->resizeColumnToContents(Column::Netlist);
+        if (m_view->header()->sectionSize(Column::Netlist) < current) {
+            m_view->header()->resizeSection(Column::Netlist, current);
+        }
+    });
 
     // [aurora2#1725] "Selected RTL Resources", under the tree it reports on.
     //
@@ -433,18 +471,13 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     }
 
     QHeaderView* header = m_view->header();
-    // Why is the last logical section, so stretching the last one would stretch the "?"
-    // column; AtomList and Partitions are Stretch and absorb the slack instead.
-    header->setStretchLastSection(false);
-    header->setSectionResizeMode(Column::Netlist, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(Column::AtomList, QHeaderView::Stretch);
-    header->setSectionResizeMode(Column::AtomType, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(Column::Primitive, QHeaderView::ResizeToContents);
+    // Interactive so the user can drag the borders; fitColumns() gives the first widths.
+    // The last visible section in visual order fills the remaining width.
+    header->setStretchLastSection(true);
+    header->setSectionResizeMode(QHeaderView::Interactive);
     header->setSectionResizeMode(Column::Why, QHeaderView::Fixed);
     header->resizeSection(Column::Why, m_view->style()->pixelMetric(QStyle::PM_SmallIconSize) + 12);
-    if (!isPartitionsColumnHidden()) {
-        header->setSectionResizeMode(Column::Partitions, QHeaderView::Stretch);
-    } else {
+    if (isPartitionsColumnHidden()) {
         m_view->setColumnHidden(Column::Partitions, true);
     }
     // Sits immediately right of the name, where the icon it explains is. Logical order is
@@ -1078,6 +1111,24 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
         }
     };
     applyRecursive(m_model->invisibleRootItem());
+    fitColumns();
+}
+
+void SynthResourceHierarchyWidget::fitColumns()
+{
+    QScopedValueRollback<bool> guard(m_fittingColumns, true);
+    for (const int column : {Column::Netlist, Column::AtomType, Column::Primitive}) {
+        if (!m_view->isColumnHidden(column)) {
+            m_view->resizeColumnToContents(column);
+        }
+    }
+    // Atom lists can be very long; cap the first width instead of pushing the other
+    // columns off screen. The user can still drag it wider.
+    if (!m_view->isColumnHidden(Column::AtomList)) {
+        m_view->resizeColumnToContents(Column::AtomList);
+        m_view->header()->resizeSection(Column::AtomList,
+            std::min(m_view->header()->sectionSize(Column::AtomList), m_view->viewport()->width() / 3));
+    }
 }
 
 void SynthResourceHierarchyWidget::applyInstanceVerdicts()
@@ -1188,9 +1239,27 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         return primitive;
     };
 
+    // One child row per atom, so each can be selected and copied.
+    auto appendAtomRows = [&atomTile, &atomPrimitive](QStandardItem* parent,
+                                                      const std::vector<std::string>& atoms,
+                                                      const std::map<std::string, int>& resourceTypes) {
+        for (const auto& n : atoms) {
+            auto* col0 = new QStandardItem();
+            col0->setFlags(Qt::ItemIsEnabled);
+            col0->setData(true, kVprDisplayRowRole);
+            auto* col1 = new QStandardItem(QString::fromStdString(n));
+            col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            auto* col2 = new QStandardItem(atomTile(n));
+            col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            auto* col5 = new QStandardItem(atomPrimitive(n, resourceTypes));
+            col5->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            parent->appendRow({col0, col1, col2, new QStandardItem(), new QStandardItem(), col5});
+        }
+    };
+
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this, &atomTile, &atomPrimitive](QStandardItem* item,
-                                                              const std::string& prefix)
+        [&populateRecursive, this, &atomTile, &atomPrimitive, &appendAtomRows](QStandardItem* item,
+                                                                               const std::string& prefix)
     {
         if (!item) return;
         const int rows = item->rowCount();
@@ -1245,24 +1314,27 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                         for (const auto& n : names) tiles.insert(atomTile(n));
                         if (QStandardItem* typeItem = item->child(row, Column::AtomType))
                             typeItem->setText(QStringList(tiles.begin(), tiles.end()).join(", "));
-                        // Multiple atoms: one child row each so each can be selected and copied
-                        for (const auto& n : names) {
-                            auto* col0 = new QStandardItem();
-                            col0->setFlags(Qt::ItemIsEnabled);
-                            col0->setData(true, kVprDisplayRowRole);
-                            auto* col1 = new QStandardItem(QString::fromStdString(n));
-                            col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            auto* col2 = new QStandardItem(atomTile(n));
-                            col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            auto* col5 = new QStandardItem(atomPrimitive(n, resourceTypes));
-                            col5->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-                            child->appendRow({col0, col1, col2, new QStandardItem(),
-                                              new QStandardItem(), col5});
+                        appendAtomRows(child, names, resourceTypes);
+                    }
+                } else {
+                    // Non-leaf: its own Atom List/Type cells stay empty, but the atoms no
+                    // child instance holds (aurora2#2376: a LUT beside FIFO_INST) get rows,
+                    // or the resources table counts atoms the tree never shows.
+                    std::set<std::string> heldByChildren;
+                    for (int r = 0; r < child->rowCount(); ++r) {
+                        QStandardItem* grandchild = child->child(r, Column::Netlist);
+                        if (grandchild && !isVprDisplayRow(grandchild)) {
+                            heldByChildren.merge(atomNamesFor(buildChildPath(path, grandchild)));
                         }
                     }
+                    std::vector<std::string> own;
+                    for (const auto& n : names) {
+                        if (heldByChildren.count(n) == 0) own.push_back(n);
+                    }
+                    populateRecursive(child, path);
+                    appendAtomRows(child, own, resourceTypes);
+                    continue;
                 }
-                // Non-leaf: Atom List/Type cells are intentionally left empty —
-                // a comma-separated list of all descendant atoms is unreadable.
             }
             populateRecursive(child, path);
         }
