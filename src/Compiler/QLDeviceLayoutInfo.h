@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <functional>
 #include <set>
 #include <string>
 
@@ -47,14 +48,11 @@ class QLDeviceLayout {
 // stays false and nothing is written. Nothing here can fail a compile.
 class QLDeviceLayoutInfo {
  public:
-  // packing_just_succeeded: set only by Packing()'s own tail call, right after
-  // add_layout.py has run and before Compile() has had a chance to mark the
-  // PACKING task Success - the task still reads InProgress at that point, so
-  // without this the constructor would refuse to trust the auto_device.log it
-  // is itself the source of. Every other caller leaves it false and relies on
-  // the task's real status, e.g. after a project reopen.
-  explicit QLDeviceLayoutInfo(QLDeviceTarget device_target = QLDeviceTarget(),
-                              bool packing_just_succeeded = false);
+  explicit QLDeviceLayoutInfo(QLDeviceTarget device_target = QLDeviceTarget())
+      : QLDeviceLayoutInfo(device_target, /*packSucceeded*/ false) {}
+  // `packSucceeded`: the caller knows this session's pack just succeeded, though
+  // its task is not marked so yet (the flow engine records the layout then).
+  QLDeviceLayoutInfo(QLDeviceTarget device_target, bool packSucceeded);
   // Wrap an already-resolved layout. Lets the pure parsers below be exercised
   // through the same accessors the flow uses.
   explicit QLDeviceLayoutInfo(const QLDeviceLayout& layout) : m_layout(layout) {}
@@ -73,15 +71,23 @@ class QLDeviceLayoutInfo {
   // <projectPath>/device_layout.json. Empty when there is no project.
   static std::filesystem::path deviceLayoutJSONPath();
   bool writeDeviceLayoutJSON() const;
+  // What writeDeviceLayoutJSON() writes, without the trailing newline; empty
+  // when unresolved.
+  std::string deviceLayoutJSONContents() const;
   // Drop a file left by an earlier run, so an unresolved layout reads as "not
   // known yet" rather than as last run's geometry.
   static void removeStaleDeviceLayoutJSON();
 
   // Resolve for the current device and write device_layout.json when the answer
   // exists; otherwise remove any stale file. The whole feature's entry point.
-  // See the constructor for packing_just_succeeded.
+  // `packSucceeded`: as for the constructor; Packing()'s own tail passes true.
   static void refresh(QLDeviceTarget device_target = QLDeviceTarget(),
-                      bool packing_just_succeeded = false);
+                      bool packSucceeded = false);
+  // Under the flow engine: the device_layout.json content the last pack left,
+  // for a layout resolved in pack that this session has not packed yet; empty
+  // for none. refresh() writes it instead of removing the file.
+  using PackedLayoutSource = std::function<std::string(const QLDeviceTarget& device_target)>;
+  static void setPackedLayoutSource(PackedLayoutSource source);
 
   // auto_device.log names no device - it is just whatever Packing() last ran
   // add_layout.py for. Call before switching the current device: if the
@@ -111,7 +117,7 @@ class QLDeviceLayoutInfo {
  private:
   bool resolveFromDeviceConfig(const QLDeviceLayoutSettings& layout_settings,
                                QLDeviceTarget device_target);
-  bool resolveFromAutoDeviceLog(bool packing_just_succeeded);
+  bool resolveFromAutoDeviceLog();
   // bramSize/dspSize/ioCapacity are static properties of the package, not the
   // layout, so AUTO/RESOURCES devices - whose geometry comes from
   // auto_device.log, not config.json - still need this separate fetch to
@@ -121,6 +127,7 @@ class QLDeviceLayoutInfo {
 
   QLDeviceLayout m_layout;
   std::string m_error;
+  bool m_packSucceeded = false;
 };
 
 }  // namespace FOEDAG

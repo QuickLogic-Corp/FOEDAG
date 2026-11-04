@@ -2311,7 +2311,27 @@ void Compiler::finish() {
   if (m_tclInterpreterHandler) m_tclInterpreterHandler->notifyFinish();
 }
 
+bool Compiler::hasOpenProject() const {
+  return m_projManager && !m_projManager->projectPath().empty();
+}
+
 bool Compiler::RunCompileTask(Action action) {
+  bool held = false;
+  if (!BeginRun(held)) return false;
+  auto endRun = sg::make_scope_guard([this, held] {
+    if (held) EndRun();
+  });
+  // Until a project is open there is nothing to clear, so the flag waits.
+  if (m_forceFullRun && hasOpenProject()) {
+    Message("--no-incremental: clearing the compilation cache; every stage runs");
+    if (!forceClearCompilationCache()) {
+      // The user asked for a full run; an incremental one would not be that.
+      ErrorMessage("--no-incremental: the compilation cache could not be cleared, so " +
+                   std::string("the task does not run"));
+      return false;
+    }
+    m_forceFullRun = false;
+  }
   BeforeCompileTask(action);
   bool ok = false;
   try {
@@ -2386,6 +2406,10 @@ bool Compiler::RunCompileTaskGuarded(Action action) {
 void Compiler::setTaskManager(TaskManager* newTaskManager) {
   m_taskManager = newTaskManager;
   if (m_taskManager) {
+    QObject::connect(m_taskManager, &TaskManager::started, m_taskManager,
+                     [this]() { TaskSequenceStarted(); });
+    QObject::connect(m_taskManager, &TaskManager::done, m_taskManager,
+                     [this]() { TaskSequenceDone(); });
     m_taskManager->bindTaskCommand(IP_GENERATE, []() {
       GlobalSession->CmdStack()->push_and_exec(new Command("ipgenerate"));
     });

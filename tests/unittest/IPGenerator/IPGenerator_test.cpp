@@ -877,18 +877,19 @@ TEST(IPWrapperStamp, StampsTheGeneratedWrapperInPlace) {
   EXPECT_TRUE(
       IPGenerator::StampWrapperComment(&compiler, dir, "inst1_v2_0", line));
 
-  std::ifstream in(wrapper.string());
-  std::stringstream body;
-  body << in.rdbuf();
-  EXPECT_EQ(body.str(), line + "\nmodule inst1();\nendmodule\n");
+  // Closed before returning: Windows cannot replace or delete an open file.
+  auto contents = [&wrapper] {
+    std::ifstream in(wrapper.string());
+    std::stringstream body;
+    body << in.rdbuf();
+    return body.str();
+  };
+  EXPECT_EQ(contents(), line + "\nmodule inst1();\nendmodule\n");
 
   // Re-stamping is a no-op rather than a second copy of the line.
   EXPECT_TRUE(
       IPGenerator::StampWrapperComment(&compiler, dir, "inst1_v2_0", line));
-  std::ifstream again(wrapper.string());
-  std::stringstream body2;
-  body2 << again.rdbuf();
-  EXPECT_EQ(body2.str(), line + "\nmodule inst1();\nendmodule\n");
+  EXPECT_EQ(contents(), line + "\nmodule inst1();\nendmodule\n");
 
   // The un-versioned name is what the first implementation looked for; it must
   // now report the miss instead of succeeding silently.

@@ -48,7 +48,8 @@ public:
   virtual void storeTaskCommand(int taskId, const std::string& profile,
                                 const CommandWrapperPtr& command) = 0;
   virtual bool isEmpty() const = 0;
-  virtual void clear() = 0;
+  // False when records may remain (the flow engine could not remove them).
+  virtual bool clear() = 0;
   virtual void load() = 0;
   virtual void setProjectPath(const std::filesystem::path& path) = 0;
   // Around each compile task; a record made inside one is kept only if the task,
@@ -125,7 +126,7 @@ public:
 
   bool isEmpty() const override { return m_taskCommandsMap.empty(); }
 
-  void clear() override {
+  bool clear() override {
     m_taskCommandsMap.clear();
     if (!FileUtils::removeFile(m_filePath)) {
       if (CommandWrapper::projectPath().empty()) {
@@ -134,6 +135,7 @@ public:
 "immediately before the compilation task, after the project folder has been instantiated.");
       }
     }
+    return true;  // the in-memory map is what decides, and it is empty
   }
 
   void load() override {

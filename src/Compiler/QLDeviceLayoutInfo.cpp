@@ -164,8 +164,8 @@ bool QLDeviceLayoutInfo::layoutIsResolvedDuringPacking(
   return false;
 }
 
-QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target,
-                                       bool packing_just_succeeded) {
+QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target, bool packSucceeded)
+    : m_packSucceeded(packSucceeded) {
   QLDeviceManager* device_manager = QLDeviceManager::getInstance();
   if (device_manager == nullptr) {
     return;
@@ -208,7 +208,7 @@ QLDeviceLayoutInfo::QLDeviceLayoutInfo(QLDeviceTarget device_target,
     return;
   }
 
-  const bool ok = deferred ? resolveFromAutoDeviceLog(packing_just_succeeded)
+  const bool ok = deferred ? resolveFromAutoDeviceLog()
                            : resolveFromDeviceConfig(layout_settings, device_target);
   if (!ok) {
     return;
@@ -373,23 +373,17 @@ bool QLDeviceLayoutInfo::parseAutoDeviceLog(const std::string& log_text,
   return true;
 }
 
-bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog(bool packing_just_succeeded) {
+bool QLDeviceLayoutInfo::resolveFromAutoDeviceLog() {
   // auto_device.log outlives the run that wrote it - a prior session's
   // Packing(), or a design change since, leaves it on disk describing a
   // fabric this session has not actually rebuilt. Trust it only while this
   // session's own Packing task is still green: TaskStatus::Success is the run
   // that just wrote it, and any other status (None on a fresh launch before
   // Packing has been run this session, Dirty once something upstream
-  // invalidates it, Fail) means the log's contents are not backed by a
-  // Packing run this session can vouch for.
-  //
-  // packing_just_succeeded bypasses this: it is set only by the call from
-  // Packing()'s own tail, made after add_layout.py has run but before
-  // Compile() has had a chance to mark the task Success (that only happens
-  // once Packing() itself returns), so the task still reads InProgress at
-  // that exact point despite the log being the freshest it will ever be.
-  if (!packing_just_succeeded) {
-    Compiler* c = compiler();
+  // invalidates it, Fail, InProgress) means the log's contents are not backed
+  // by a Packing run this session can vouch for.
+  Compiler* c = compiler();
+  if (!m_packSucceeded) {
     TaskManager* task_manager = (c != nullptr) ? c->GetTaskManager() : nullptr;
     Task* packing_task = (task_manager != nullptr) ? task_manager->task(PACKING) : nullptr;
     if ((packing_task == nullptr) || (packing_task->status() != TaskStatus::Success)) {
@@ -438,15 +432,10 @@ std::filesystem::path QLDeviceLayoutInfo::deviceLayoutJSONPath() {
   return project_path / "device_layout.json";
 }
 
-bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
+std::string QLDeviceLayoutInfo::deviceLayoutJSONContents() const {
   if (!m_layout.resolved) {
-    return false;
+    return {};
   }
-  const std::filesystem::path filepath = deviceLayoutJSONPath();
-  if (filepath.empty()) {
-    return false;
-  }
-
   json layout_json;
   layout_json["width"] = m_layout.width;
   layout_json["height"] = m_layout.height;
@@ -464,7 +453,19 @@ bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
   layout_json["layout_mode"] = m_layout.layoutMode;
   layout_json["source"] = m_layout.source;
 
-  const std::string contents = layout_json.dump(2);
+  return layout_json.dump(2);
+}
+
+bool QLDeviceLayoutInfo::writeDeviceLayoutJSON() const {
+  if (!m_layout.resolved) {
+    return false;
+  }
+  const std::filesystem::path filepath = deviceLayoutJSONPath();
+  if (filepath.empty()) {
+    return false;
+  }
+
+  const std::string contents = deviceLayoutJSONContents();
 
   // setCurrentDeviceTarget() is reached again from every
   // QLSettingsManager::getInstance(), so an unconditional write would rewrite this
@@ -514,14 +515,38 @@ void QLDeviceLayoutInfo::invalidateStaleAutoDeviceLog(
   std::filesystem::remove(project_path / "auto_device.log", ec);
 }
 
-void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target, bool packing_just_succeeded) {
+namespace {
+QLDeviceLayoutInfo::PackedLayoutSource s_packedLayoutSource;
+}  // namespace
+
+void QLDeviceLayoutInfo::setPackedLayoutSource(PackedLayoutSource source) {
+  s_packedLayoutSource = std::move(source);
+}
+
+void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target, bool packSucceeded) {
   if (projectPath().empty()) {
     // No project: device selection in the new-project wizard has nowhere to write
     // and nothing to invalidate.
     return;
   }
-  QLDeviceLayoutInfo layout_info(device_target, packing_just_succeeded);
+  QLDeviceLayoutInfo layout_info(device_target, packSucceeded);
   if (!layout_info.resolved()) {
+    // Under the engine, a pack whose outputs are still as it wrote them vouches
+    // for the layout they were made for.
+    static thread_local bool asking = false;
+    if (s_packedLayoutSource && !asking) {
+      asking = true;
+      const std::string packed = s_packedLayoutSource(device_target);
+      asking = false;
+      const std::filesystem::path filepath = deviceLayoutJSONPath();
+      if (!packed.empty() && !filepath.empty()) {
+        bool ok = false;
+        if (FileUtils::GetFileContent(filepath, &ok) != packed + "\n" || !ok) {
+          FileUtils::WriteToFile(filepath, packed);
+        }
+        return;
+      }
+    }
     // AUTO/RESOURCES before packing, or a package that states no geometry. Either
     // way the previous run's file must not be left behind to be read as current.
     removeStaleDeviceLayoutJSON();
