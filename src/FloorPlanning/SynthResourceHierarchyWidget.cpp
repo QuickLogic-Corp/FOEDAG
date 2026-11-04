@@ -341,6 +341,8 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     m_lbView->setVisible(false); // optionally activated by method
 
     m_view->setModel(m_model);
+    // Every cell is read-only data: an RTL path, an atom name or a type.
+    m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     // Dragging a border takes the width from the next resizable column, not from the whole
     // row, so one column can be widened without scrolling. The last section already

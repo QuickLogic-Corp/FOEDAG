@@ -773,6 +773,17 @@ TEST(SynthResourceHierarchyTree, AParentListsTheAtomsNoChildHolds)
     EXPECT_NE(childNamed(blockItem, "FIFO_INST"), nullptr);
 }
 
+TEST(SynthResourceHierarchyTree, RtlNamesCannotBeEdited)
+{
+    // A row's text is an RTL path; renaming it in the panel would point at no instance.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.build(fp::NaturalStringSet{"dut", "dut.memSys"});
+
+    auto* view = widget.findChild<QTreeView*>();
+    ASSERT_NE(view, nullptr);
+    EXPECT_EQ(view->editTriggers(), QAbstractItemView::NoEditTriggers);
+}
+
 TEST(SynthResourceHierarchyTree, FlatDesignShowsTheTopAsItsOnlyRow)
 {
     // The case the whole feature exists for, and the reason the tree is rooted at all: a
