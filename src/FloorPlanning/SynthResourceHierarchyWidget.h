@@ -36,7 +36,10 @@ class SynthResourceHierarchyWidget : public QWidget {
       // [aurora2#1725 stage P7] Clickable "?" for rows that have something to explain --
       // a partial placement or an instance synthesis optimised out. Last logically so the
       // existing column indices are untouched; moved next to the name visually in build().
-      Why = 4
+      Why = 4,
+      // An atom's Yosys cell type ("TDP_ECC36K_...", "QL_DSP4_MULT"), shown with the atom
+      // list; moved next to Type visually in build().
+      Primitive = 5
     };
 public:
     enum Flag {
@@ -80,9 +83,10 @@ public:
     // this existed.
     void setAtomTypes(AtomTypeMap atomTypes);
 
-    // [aurora2#1725] "Show Atom List and Type columns" from the Options menu. Off by
-    // default: the atom names are long and mostly of interest when debugging a mapping.
-    void setAtomColumnsVisible(bool visible);
+    // [aurora2#1725] "Show Atom List column" from the Options menu. Off by default: the
+    // atom names are long and mostly of interest when debugging a mapping. Shows the
+    // Primitive column with it; the Type column is always shown.
+    void setAtomListVisible(bool visible);
 
     // [aurora2#1725] What build() found while matching RTL leaves to atoms: the leaves with
     // no atoms at all, split by whether stage P4 accounts for them. Reported by
@@ -148,7 +152,7 @@ private:
 
     std::map<std::string, InstanceVerdict> m_verdicts;
     std::map<std::string, InstancePlacement> m_placements;
-    bool m_atomColumnsVisible = false;
+    bool m_atomListVisible = false;
     AtomMappingReport m_atomMappingReport;
     std::vector<std::string> m_untypedAtoms;
 

@@ -30,7 +30,7 @@ namespace {
 // [aurora2#1725] floorplanning.cfg keys. Grouped, so the file reads as a FloorPlanning
 // section rather than QSettings' anonymous "[General]".
 constexpr auto kCfgTreatWarningsAsErrors = "FloorPlanning/treat_warnings_as_errors";
-constexpr auto kCfgShowAtomColumns = "FloorPlanning/show_atom_list_and_type_columns";
+constexpr auto kCfgShowAtomList = "FloorPlanning/show_atom_list_column";
 
 // [aurora2#1725] QToolBar's default icon size is the style's large one, noticeably bigger
 // than the QPushButtons this toolbar used to hold. Match what was there.
@@ -285,13 +285,14 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
         saveOptions();
     });
 
-    m_actShowAtomColumns = optionsMenu->addAction(tr("Show Atom List and Type columns"));
-    m_actShowAtomColumns->setCheckable(true);
-    m_actShowAtomColumns->setToolTip(
-        tr("Show each instance's netlist atom names and their clb/dsp/bram type."));
-    connect(m_actShowAtomColumns, &QAction::toggled, this, [this](bool on) {
-        m_synthResourcesWidget->setAtomColumnsVisible(on);
-        m_partitionResourcesWidget->setAtomColumnsVisible(on);
+    m_actShowAtomList = optionsMenu->addAction(tr("Show Atom List column"));
+    m_actShowAtomList->setCheckable(true);
+    m_actShowAtomList->setToolTip(
+        tr("Debug: show each instance's netlist atom names, and each atom's primitive\n"
+           "after its type."));
+    connect(m_actShowAtomList, &QAction::toggled, this, [this](bool on) {
+        m_synthResourcesWidget->setAtomListVisible(on);
+        m_partitionResourcesWidget->setAtomListVisible(on);
         saveOptions();
     });
 
@@ -399,7 +400,7 @@ void FloorPlanningWidget::loadOptions()
 {
     QSettings cfg(QString::fromStdString(m_optionsFilePath.string()), QSettings::IniFormat);
     const bool treatWarningsAsErrors = cfg.value(kCfgTreatWarningsAsErrors, false).toBool();
-    const bool showAtomColumns = cfg.value(kCfgShowAtomColumns, false).toBool();
+    const bool showAtomList = cfg.value(kCfgShowAtomList, false).toBool();
 
     // Set the actions without firing toggled(): those handlers write the file back, and a
     // freshly read value has nothing to save. The effects are applied explicitly instead,
@@ -407,14 +408,14 @@ void FloorPlanningWidget::loadOptions()
     // would emit nothing at all.
     {
         QSignalBlocker blockWarnings(m_actTreatWarningsAsErrors);
-        QSignalBlocker blockColumns(m_actShowAtomColumns);
+        QSignalBlocker blockAtomList(m_actShowAtomList);
         m_actTreatWarningsAsErrors->setChecked(treatWarningsAsErrors);
-        m_actShowAtomColumns->setChecked(showAtomColumns);
+        m_actShowAtomList->setChecked(showAtomList);
     }
 
     m_deviceWidget->setTreatWarningsAsErrors(treatWarningsAsErrors);
-    m_synthResourcesWidget->setAtomColumnsVisible(showAtomColumns);
-    m_partitionResourcesWidget->setAtomColumnsVisible(showAtomColumns);
+    m_synthResourcesWidget->setAtomListVisible(showAtomList);
+    m_partitionResourcesWidget->setAtomListVisible(showAtomList);
 }
 
 void FloorPlanningWidget::saveOptions() const
@@ -425,7 +426,7 @@ void FloorPlanningWidget::saveOptions() const
 
     QSettings cfg(QString::fromStdString(m_optionsFilePath.string()), QSettings::IniFormat);
     cfg.setValue(kCfgTreatWarningsAsErrors, m_actTreatWarningsAsErrors->isChecked());
-    cfg.setValue(kCfgShowAtomColumns, m_actShowAtomColumns->isChecked());
+    cfg.setValue(kCfgShowAtomList, m_actShowAtomList->isChecked());
     cfg.sync();
 }
 

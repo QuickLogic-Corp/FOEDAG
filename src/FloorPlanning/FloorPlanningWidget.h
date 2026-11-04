@@ -130,7 +130,7 @@ private:
     // The actions are the single source of truth for the values -- they are what the user
     // sets and what saveOptions() reads back.
     QAction* m_actTreatWarningsAsErrors{nullptr};
-    QAction* m_actShowAtomColumns{nullptr};
+    QAction* m_actShowAtomList{nullptr};
     std::filesystem::path m_optionsFilePath;
 
     void loadOptions();
