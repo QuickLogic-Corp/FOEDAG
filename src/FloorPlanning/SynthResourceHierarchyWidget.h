@@ -183,6 +183,10 @@ private:
     void filterRawElemenets(const std::string& pattern);
     void fillPartitionWithSelectedElements(const PartitionPtr& partition) const;
     void populateAtomColumns();
+    // Sizes the data columns to their contents; after that the user drags them.
+    void fitColumns();
+    // Set while the code itself resizes a column, so only a user's drag moves the neighbour.
+    bool m_fittingColumns = false;
     void applyInstanceVerdicts();
     void applyPlacementVerdicts();
     // Fills the Why cell of one row and stores the text its popup shows.

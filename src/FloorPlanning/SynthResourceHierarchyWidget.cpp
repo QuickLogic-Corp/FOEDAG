@@ -30,6 +30,7 @@
 #include <QPointer>
 #include <QStyleOptionButton>
 #include <QStyledItemDelegate>
+#include <QScopedValueRollback>
 
 #include <QDebug>
 
@@ -341,6 +342,41 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
 
     m_view->setModel(m_model);
 
+    // Dragging a border takes the width from the next resizable column, not from the whole
+    // row, so one column can be widened without scrolling. The last section already
+    // stretches to fill, so it is left to Qt.
+    connect(m_view->header(), &QHeaderView::sectionResized, this,
+            [this](int logical, int oldSize, int newSize) {
+        if (m_fittingColumns) {
+            return;
+        }
+        QHeaderView* header = m_view->header();
+        int lastVisual = header->count() - 1;
+        while ((lastVisual > 0) && header->isSectionHidden(header->logicalIndex(lastVisual))) {
+            --lastVisual;
+        }
+        for (int visual = header->visualIndex(logical) + 1; visual < lastVisual; ++visual) {
+            const int next = header->logicalIndex(visual);
+            if (header->isSectionHidden(next) ||
+                (header->sectionResizeMode(next) == QHeaderView::Fixed)) {
+                continue;
+            }
+            QScopedValueRollback<bool> guard(m_fittingColumns, true);
+            header->resizeSection(next, std::max(header->minimumSectionSize(),
+                                                 header->sectionSize(next) - (newSize - oldSize)));
+            return;
+        }
+    });
+    // Expanding shows deeper names; widen the name column for them, never narrow it.
+    connect(m_view, &QTreeView::expanded, this, [this]() {
+        QScopedValueRollback<bool> guard(m_fittingColumns, true);
+        const int current = m_view->header()->sectionSize(Column::Netlist);
+        m_view->resizeColumnToContents(Column::Netlist);
+        if (m_view->header()->sectionSize(Column::Netlist) < current) {
+            m_view->header()->resizeSection(Column::Netlist, current);
+        }
+    });
+
     // [aurora2#1725] "Selected RTL Resources", under the tree it reports on.
     //
     // Selection drives it, not the checkboxes: checking an instance assigns it to the
@@ -433,18 +469,13 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     }
 
     QHeaderView* header = m_view->header();
-    // Why is the last logical section, so stretching the last one would stretch the "?"
-    // column; AtomList and Partitions are Stretch and absorb the slack instead.
-    header->setStretchLastSection(false);
-    header->setSectionResizeMode(Column::Netlist, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(Column::AtomList, QHeaderView::Stretch);
-    header->setSectionResizeMode(Column::AtomType, QHeaderView::ResizeToContents);
-    header->setSectionResizeMode(Column::Primitive, QHeaderView::ResizeToContents);
+    // Interactive so the user can drag the borders; fitColumns() gives the first widths.
+    // The last visible section in visual order fills the remaining width.
+    header->setStretchLastSection(true);
+    header->setSectionResizeMode(QHeaderView::Interactive);
     header->setSectionResizeMode(Column::Why, QHeaderView::Fixed);
     header->resizeSection(Column::Why, m_view->style()->pixelMetric(QStyle::PM_SmallIconSize) + 12);
-    if (!isPartitionsColumnHidden()) {
-        header->setSectionResizeMode(Column::Partitions, QHeaderView::Stretch);
-    } else {
+    if (isPartitionsColumnHidden()) {
         m_view->setColumnHidden(Column::Partitions, true);
     }
     // Sits immediately right of the name, where the icon it explains is. Logical order is
@@ -1078,6 +1109,24 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
         }
     };
     applyRecursive(m_model->invisibleRootItem());
+    fitColumns();
+}
+
+void SynthResourceHierarchyWidget::fitColumns()
+{
+    QScopedValueRollback<bool> guard(m_fittingColumns, true);
+    for (const int column : {Column::Netlist, Column::AtomType, Column::Primitive}) {
+        if (!m_view->isColumnHidden(column)) {
+            m_view->resizeColumnToContents(column);
+        }
+    }
+    // Atom lists can be very long; cap the first width instead of pushing the other
+    // columns off screen. The user can still drag it wider.
+    if (!m_view->isColumnHidden(Column::AtomList)) {
+        m_view->resizeColumnToContents(Column::AtomList);
+        m_view->header()->resizeSection(Column::AtomList,
+            std::min(m_view->header()->sectionSize(Column::AtomList), m_view->viewport()->width() / 3));
+    }
 }
 
 void SynthResourceHierarchyWidget::applyInstanceVerdicts()
