@@ -285,11 +285,11 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
         saveOptions();
     });
 
-    m_actShowAtomList = optionsMenu->addAction(tr("Show Atom List column"));
+    m_actShowAtomList = optionsMenu->addAction(tr("Show Atom List and Primitive columns"));
     m_actShowAtomList->setCheckable(true);
     m_actShowAtomList->setToolTip(
-        tr("Debug: show each instance's netlist atom names, and each atom's primitive\n"
-           "after its type."));
+        tr("Debug: show each instance's netlist atom names, and each atom's\n"
+           "primitive (its Yosys cell type)."));
     connect(m_actShowAtomList, &QAction::toggled, this, [this](bool on) {
         m_synthResourcesWidget->setAtomListVisible(on);
         m_partitionResourcesWidget->setAtomListVisible(on);

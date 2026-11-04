@@ -83,9 +83,9 @@ public:
     // this existed.
     void setAtomTypes(AtomTypeMap atomTypes);
 
-    // [aurora2#1725] "Show Atom List column" from the Options menu. Off by default: the
-    // atom names are long and mostly of interest when debugging a mapping. Shows the
-    // Primitive column with it; the Type column is always shown.
+    // [aurora2#1725] "Show Atom List and Primitive columns" from the Options menu. Off by
+    // default: the atom names are long and mostly of interest when debugging a mapping.
+    // The Type column is always shown.
     void setAtomListVisible(bool visible);
 
     // [aurora2#1725] What build() found while matching RTL leaves to atoms: the leaves with
