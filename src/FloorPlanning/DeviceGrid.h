@@ -8,6 +8,7 @@
 
 #include <unordered_map>
 #include <map>
+#include <set>
 
 namespace fp {
 
@@ -85,6 +86,12 @@ public:
         m_deletedInstances = std::move(deletedInstances);
     }
 
+    // Every RTL instance path, from instances.json. checkIssues() flags a partition element
+    // that is neither one of them nor a parent of one. Empty skips that check.
+    void setRtlInstances(std::set<std::string> rtlInstances) {
+        m_rtlInstances = std::move(rtlInstances);
+    }
+
     // [aurora2#1725] "Treat warnings as errors" from the Options menu. Every advisory then
     // counts as an error, which is what makes it block saving the .qdc -- hasErrors() is the
     // gate. Off by default: the advisories are estimates and the packer is the authority.
@@ -110,6 +117,8 @@ private:
 
     std::map<std::string, int> m_ownAtomCounts;
     std::unordered_set<std::string> m_deletedInstances;
+    std::set<std::string> m_rtlInstances;
+    bool isRtlInstanceOrParent(const std::string& path) const;
     bool m_treatWarningsAsErrors = false;
 
     std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;

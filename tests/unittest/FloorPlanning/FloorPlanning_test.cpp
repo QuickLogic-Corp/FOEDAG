@@ -1346,6 +1346,85 @@ TEST(FloorplanIssues, ARegionWithRoomToSpareIsNoIssueAtAll)
     EXPECT_FALSE(mentions(issues->warnings, "little packing slack"));
 }
 
+namespace {
+
+// One partition naming `paths`, constrained to clb(2,2):clb(2,9).
+fp::PartitionPtr constrainNames(fp::DeviceGrid& device, const std::vector<std::string>& paths)
+{
+    fp::RegionPtr region = std::make_shared<fp::Region>(
+        findBottomLeftTilePoint(device, {2, 2}).value(),
+        findTopRightTilePoint(device, {2, 9}).value());
+    region->setTiles(device.findTiles(region->rect()));
+
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p");
+    for (const std::string& path: paths) {
+        partition->addElement(fp::HierarhyElement{path, /*isLeaf*/ true});
+    }
+    partition->addRegion(region);
+    device.addPartition(partition);
+    return partition;
+}
+
+}  // namespace
+
+TEST(FloorplanIssues, ANameOutsideTheRtlHierarchyIsAnError)
+{
+    // A hand-edited .qdc with a typo: VPR skips the name ("was not found, skipping atom"),
+    // so the constraint does nothing.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "dut", "dut.i_a"});
+    constrainNames(device, {"dut.i_typo"});
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(mentions(issues->errors, "names 'dut.i_typo', which is not in the RTL hierarchy"));
+}
+
+TEST(FloorplanIssues, AConstantDriverIsAWarningNotAnError)
+{
+    // $false/$true/$undef are atoms synthesis adds to drive constants. VPR places them, but
+    // the panel has no row for them and shows their partition empty.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "dut", "dut.i_a"});
+    constrainNames(device, {"$false"});
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(mentions(issues->warnings, "names '$false', a constant driver"));
+    EXPECT_FALSE(mentions(issues->errors, "$false"));
+}
+
+TEST(FloorplanIssues, InstancesTheirParentsAndGlobsAreKnownNames)
+{
+    // "cluster[0]" is a generate label: never an instance itself, only the parent of one.
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "dut", "dut.i_a", "cluster[0].clb"});
+    constrainNames(device, {"top", "dut.i_a", "cluster[0]", "clust*[0]"});
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_FALSE(mentions(issues->errors, "RTL hierarchy"));
+    EXPECT_FALSE(mentions(issues->warnings, "RTL hierarchy"));
+}
+
+TEST(FloorplanIssues, WithoutAnInstanceListNoNameIsChecked)
+{
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGrid device(genTestDescriptor());
+    constrainNames(device, {"dut.i_typo"});
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_FALSE(mentions(issues->errors, "RTL hierarchy"));
+}
+
 // [aurora2#1725] QdcSerializer round-trip safety. This file persists the user's floorplan,
 // so a defect here loses work rather than merely reporting the wrong number.
 

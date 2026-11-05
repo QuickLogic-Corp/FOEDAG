@@ -484,6 +484,7 @@ void FloorPlanningWidget::setTopInstance(const std::string& path)
 
 void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
 {
+    m_deviceWidget->setRtlInstances({elements.begin(), elements.end()});
     m_synthResourcesWidget->build(elements);
     m_partitionResourcesWidget->build(elements);
     m_busyOverlayWidget->hide();

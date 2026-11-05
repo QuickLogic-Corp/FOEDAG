@@ -66,6 +66,10 @@ public:
         m_device.setDeletedInstances(std::move(deletedInstances));
     }
 
+    void setRtlInstances(std::set<std::string> rtlInstances) {
+        m_device.setRtlInstances(std::move(rtlInstances));
+    }
+
     // [aurora2#1725] Options menu. Re-checks straight away, so the issues list and the Save
     // QDC button reflect the new severity without waiting for the next edit.
     void setTreatWarningsAsErrors(bool treatWarningsAsErrors) {

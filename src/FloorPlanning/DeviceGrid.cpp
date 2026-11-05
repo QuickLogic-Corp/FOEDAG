@@ -263,6 +263,18 @@ const TilePtr& DeviceGrid::tile(const Tile::Index& index) const
     return m_nullPtrTile;
 }
 
+bool DeviceGrid::isRtlInstanceOrParent(const std::string& path) const
+{
+    if (m_rtlInstances.count(path) != 0) {
+        return true;
+    }
+    // A generate label ("cluster[0]") is only the parent of instances; they sort right after
+    // "<path>." in the set.
+    const std::string prefix = path + ".";
+    const auto next = m_rtlInstances.lower_bound(prefix);
+    return (next != m_rtlInstances.end()) && (next->compare(0, prefix.size(), prefix) == 0);
+}
+
 const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
 {
     m_issues->clear();
@@ -380,6 +392,30 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                                        "atom'. They are shown greyed out in the tree and cannot "
                                        "be checked; editing this partition and saving the .qdc "
                                        "drops them."});
+        }
+
+        // A name the RTL hierarchy does not have reaches VPR as a literal atom name. Only the
+        // constant drivers synthesis adds are such atoms; anything else matches nothing.
+        if (!m_rtlInstances.empty()) {
+            for (const HierarhyElement& element: partition->elements()) {
+                const std::string& path = element.path;
+                if ((path.find('*') != std::string::npos) || isRtlInstanceOrParent(path)) {
+                    continue;
+                }
+                if ((path == "$false") || (path == "$true") || (path == "$undef")) {
+                    m_issues->warnings.insert({"Partition '" + partition->name() + "' names '" +
+                                               path + "', a constant driver, not an RTL instance",
+                                               "Synthesis adds this atom to drive a constant "
+                                               "value. VPR places it, but it is not in the RTL "
+                                               "hierarchy, so the panel shows no atoms for it."});
+                } else {
+                    m_issues->errors.insert({"Partition '" + partition->name() + "' names '" +
+                                             path + "', which is not in the RTL hierarchy",
+                                             "No RTL instance has this name, so the constraint "
+                                             "matches nothing and VPR skips it. Check the "
+                                             "spelling, or remove it from the partition."});
+                }
+            }
         }
 
         // [aurora2#1725] Collect instances whose sub-instances are constrained while they

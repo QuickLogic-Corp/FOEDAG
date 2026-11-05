@@ -88,12 +88,15 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
         rtlModel.mergeVerdicts(
             floorplanningArtifact(projectPath, projectName, "validation.json"));
         std::unordered_set<std::string> deleted;
+        std::set<std::string> paths;
         for (const RtlInstance& instance : rtlModel.instances()) {
+            paths.insert(instance.path);
             if (instance.status == "deleted") {
                 deleted.insert(instance.path);
             }
         }
         device.setDeletedInstances(std::move(deleted));
+        device.setRtlInstances(std::move(paths));
     }
 
     // A region's tiles are computed lazily against its rect, and QdcSerializer restores
