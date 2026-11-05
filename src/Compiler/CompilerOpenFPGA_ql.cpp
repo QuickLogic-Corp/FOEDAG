@@ -9875,6 +9875,8 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     };
 
     std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
+    // Counts every set_region line, as the Floor Planning panel numbers its partitions.
+    int setRegionIndex = 0;
 
     std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
     for (std::string line: lines) {
@@ -9965,10 +9967,15 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
         std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
         iss >> partitionName;
         bool hasPartitionName = !iss.fail();
+        const int partitionIndex = setRegionIndex++;
 
         if (hasPartition) {
           StringUtils::toLower(partition);
-          std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
+          // An unnamed partition gets the name the panel shows for it.
+          if (!hasPartitionName) {
+            partitionName = "partition" + std::to_string(partitionIndex);
+          }
+          const std::string partitionKey = partitionName + "|" + partition;
           if (partitionMap.find(partitionKey) == partitionMap.end()) {
             partitionMap[partitionKey] = {};
           }
