@@ -9392,7 +9392,20 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     }
   }
 
-  if (!repack_constraints_in.empty()) {
+  // A project may switch the clock pin assignment off (general > options >
+  // clock_pin_assignment = unchecked) to pack, place and route a design with
+  // more clocks than the device has clock pins. The default, and a project
+  // without the setting, binds every clock as before.
+  const bool clock_pin_assignment =
+      QLSettingsManager::getStringValue("general", "options", "clock_pin_assignment") != "unchecked";
+  if (!clock_pin_assignment) {
+    Message("Clock pin assignment is off (clock_pin_assignment = unchecked): the design"
+            " clocks are not bound to the device clock pins, and a bitstream will not"
+            " be valid for them.");
+    args.push_back("--clock_pin_assignment");
+    args.push_back("off");
+  }
+  else if (!repack_constraints_in.empty()) {
     args.push_back("--repack_constraints_in");
     args.push_back(repack_constraints_in.string());
     args.push_back("--repack_constraints_out");
