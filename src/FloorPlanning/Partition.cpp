@@ -19,6 +19,7 @@ DesignResources Partition::s_designResources{};
 // [aurora2#2377] Empty until <top>_post_synth_debug.json is read; addElement() falls back
 // to classifyAtomType()'s name-substring guess for any atom with no entry here.
 AtomTypeMap Partition::s_atomTypes{};
+DspTileMap Partition::s_dspTiles{};
 
 Partition::Partition(const std::string& name): m_name(name) {
   m_id = s_idGenerator++;

@@ -85,6 +85,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "FloorPlanning/FloorPlanningWidget.h"
 #include "FloorPlanning/FloorplanningPaths.h"
 #include "FloorPlanning/RtlInstanceModel.h"
+#include "FloorPlanning/Partition.h"
 #include "nlohmann_json/json.hpp"
 
 using namespace FOEDAG;
@@ -2374,7 +2375,9 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     std::filesystem::path debugJsonPath =
         std::filesystem::path(compiler->ProjManager()->projectPath()) /
         (compiler->ProjManager()->DesignTopModule() + "_post_synth_debug.json");
-    fp::loadAtomTypes(debugJsonPath, atomTypes);
+    fp::DspTileMap dspTiles;
+    fp::loadAtomTypes(debugJsonPath, atomTypes, dspTiles);
+    fp::Partition::setDspTiles(std::move(dspTiles));
     m_floorPlanningWidget->setAtomTypes(std::move(atomTypes));
   }
 

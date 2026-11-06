@@ -1168,6 +1168,106 @@ TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
     fp::Partition::setAtomTypes(fp::AtomTypeMap{});
 }
 
+namespace {
+
+// Two DSP-V4 tiles as flattening names them: each leaf lands in whichever scope its net
+// name came from, so tile A's multiplier sits in "core", not "core.u_mul0". Tile A's
+// accumulator feeds tile B's multiplier, which must not merge the two.
+const char* kTwoDspTilesNetlist = R"({"modules": {"top": {"cells": {
+  "core.acc_QL_DSP4_MULT_I0": {"type": "QL_DSP4_MULT",
+    "port_directions": {"I0": "input", "U": "output", "V": "output"},
+    "connections": {"I0": [2], "U": [10], "V": [11]}},
+  "core.u_mul0.alu": {"type": "QL_DSP4_ALU_ADD",
+    "port_directions": {"X": "input", "Y": "input", "ALU_OUT": "output"},
+    "connections": {"X": [10], "Y": [11], "ALU_OUT": [12]}},
+  "core.u_mul0.p_QL_DSP4_ACC_DFFRE_64_Q": {"type": "QL_DSP4_ACC_DFFRE_64",
+    "port_directions": {"D": "input", "E": "input", "Q": "output"},
+    "connections": {"D": [12], "E": ["1"], "Q": [13]}},
+  "din_QL_DSP4_MULT_I0": {"type": "QL_DSP4_MULT",
+    "port_directions": {"I0": "input", "U": "output", "V": "output"},
+    "connections": {"I0": [13], "U": [20], "V": [21]}},
+  "core.u_mul1.alu": {"type": "QL_DSP4_ALU_ADD",
+    "port_directions": {"X": "input", "Y": "input", "Z": "input", "ALU_OUT": "output"},
+    "connections": {"X": [20], "Y": [21], "Z": [23], "ALU_OUT": [22]}},
+  "core.u_mul1.p_QL_DSP4_ACC_DFFRE_64_Q": {"type": "QL_DSP4_ACC_DFFRE_64",
+    "port_directions": {"D": "input", "Q": "output"},
+    "connections": {"D": [22], "Q": [23]}},
+  "core.n0_$lut": {"type": "$lut",
+    "port_directions": {"A": "input", "Y": "output"},
+    "connections": {"A": [23], "Y": [30]}}
+}}}})";
+
+const std::string kMulA = "core.acc_QL_DSP4_MULT_I0";
+const std::string kAluA = "core.u_mul0.alu";
+const std::string kAccA = "core.u_mul0.p_QL_DSP4_ACC_DFFRE_64_Q";
+const std::string kMulB = "din_QL_DSP4_MULT_I0";
+const std::string kAluB = "core.u_mul1.alu";
+const std::string kAccB = "core.u_mul1.p_QL_DSP4_ACC_DFFRE_64_Q";
+
+struct TwoDspTiles {
+    fp::AtomTypeMap types;
+    fp::DspTileMap tiles;
+    bool loaded = false;
+
+    TwoDspTiles()
+    {
+        QTemporaryDir dir;
+        const std::filesystem::path path =
+            std::filesystem::path(dir.path().toStdString()) / "top_post_synth_debug.json";
+        std::ofstream(path) << kTwoDspTilesNetlist;
+        loaded = fp::loadAtomTypes(path, types, tiles);
+    }
+};
+
+}  // namespace
+
+TEST(DspTiles, LeafCellsAreGroupedIntoTheTileTheyShare)
+{
+    const TwoDspTiles netlist;
+    ASSERT_TRUE(netlist.loaded);
+    const auto& tiles = netlist.tiles;
+    ASSERT_EQ(tiles.size(), 6u);
+    EXPECT_EQ(tiles.at(kMulA), tiles.at(kAluA));
+    EXPECT_EQ(tiles.at(kMulA), tiles.at(kAccA));
+    EXPECT_EQ(tiles.at(kMulB), tiles.at(kAluB));
+    EXPECT_EQ(tiles.at(kMulB), tiles.at(kAccB));
+    EXPECT_NE(tiles.at(kMulA), tiles.at(kMulB));
+}
+
+TEST(DspTiles, ASelectionWithoutTheMultiplierStillCountsItsTile)
+{
+    const TwoDspTiles netlist;
+    ASSERT_TRUE(netlist.loaded);
+
+    EXPECT_EQ(fp::tallyResources({kAccA}, 14, netlist.types, netlist.tiles).dsp, 1);
+    EXPECT_EQ(fp::tallyResources({kAccA, kAluB}, 14, netlist.types, netlist.tiles).dsp, 2);
+    EXPECT_EQ(fp::tallyResources({kMulA, kAluA, kAccA, kMulB, kAluB, kAccB}, 14,
+                                 netlist.types, netlist.tiles).dsp,
+              2);
+}
+
+TEST(DspTiles, APartitionCountsEachTileOnceAcrossItsElements)
+{
+    const TwoDspTiles netlist;
+    ASSERT_TRUE(netlist.loaded);
+    fp::Partition::setAtomTypes(netlist.types);
+    fp::Partition::setDspTiles(netlist.tiles);
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"core.u_mul0", true, {kAccA}});
+    EXPECT_EQ(partition.dspRequiredCount(), 1);
+    partition.addElement(fp::HierarhyElement{"core", true, {kMulA, kAluA}});
+    EXPECT_EQ(partition.dspRequiredCount(), 1);
+    partition.addElement(fp::HierarhyElement{"core.u_mul1", true, {kAccB}});
+    EXPECT_EQ(partition.dspRequiredCount(), 2);
+
+    partition.clearElemenets();
+    EXPECT_EQ(partition.dspRequiredCount(), 0);
+
+    fp::Partition::setDspTiles(fp::DspTileMap{});
+    fp::Partition::setAtomTypes(fp::AtomTypeMap{});
+}
+
 TEST(PartitionResources, DesignResourceEntriesNeverFeedThePerPartitionTally)
 {
     // The entries NEST -- an ancestor's counts already include its descendants' -- so adding

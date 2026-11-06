@@ -4,6 +4,7 @@
 
 #include <nlohmann_json/json.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <regex>
 #include <string_view>
@@ -172,22 +173,28 @@ std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames)
 }
 
 ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
-                             const AtomTypeMap& atomTypes)
+                             const AtomTypeMap& atomTypes, const DspTileMap& dspTiles)
 {
     ResourceTally tally;
+    std::set<std::string> dspTileIds;
     for (const std::string& atom : atomNames) {
         const auto typeIt = atomTypes.find(atom);
         const std::string realType = (typeIt != atomTypes.end()) ? typeIt->second : "";
         const QString type = classifyAtomType(atom, realType);
         if (type == "dsp") {
             ++tally.dspAtoms;
-            if (countsAsDspTile(realType)) ++tally.dsp;
+            if (const auto tile = dspTiles.find(atom); tile != dspTiles.end()) {
+                dspTileIds.insert(tile->second);
+            } else if (countsAsDspTile(realType)) {
+                ++tally.dsp;
+            }
         } else if (type == "bram") {
             ++tally.bram;
         } else {
             ++tally.clbAtoms;
         }
     }
+    tally.dsp += static_cast<int>(dspTileIds.size());
     const int perTile = (atomsPerTile > 0) ? atomsPerTile : 1;
     tally.clbTiles = (tally.clbAtoms + perTile - 1) / perTile;
     return tally;
@@ -232,7 +239,101 @@ std::map<std::string, int> tallyAtomResources(const AtomResourceMap& atomResourc
     return totals;
 }
 
+namespace {
+
+// Whether a net from a `driverType` leaf into a `sinkType` leaf stays inside one DSP-V4
+// tile (dsp4_logical_map.v). A tile's results leave through ACC.Q, RSS.ACC_OUT, CO.Q, or
+// an unregistered ALU output, and may feed another tile; inside a tile, an ALU output
+// goes only to the ACC, RSS or CO register.
+bool staysInDspTile(const std::string& driverType, const std::string& sinkType)
+{
+    if ((driverType == "QL_DSP4_ACC_DFFRE_64") || (driverType == "QL_DSP4_RSS") ||
+        (driverType == "QL_DSP4_CO_DFFR_4")) {
+        return false;
+    }
+    if (driverType.rfind("QL_DSP4_ALU_", 0) == 0) {
+        return (sinkType == "QL_DSP4_ACC_DFFRE_64") || (sinkType == "QL_DSP4_RSS") ||
+               (sinkType == "QL_DSP4_CO_DFFR_4");
+    }
+    return true;
+}
+
+void groupDspTiles(const nlohmann::json& cells, DspTileMap& outDspTiles)
+{
+    std::map<std::string, std::string> types;
+    for (auto cell = cells.begin(); cell != cells.end(); ++cell) {
+        const std::string type = cell.value().value("type", "");
+        if (type.rfind("QL_DSP4_", 0) == 0) {
+            types[cell.key()] = type;
+        }
+    }
+
+    // Union-find, rooted at the smallest name so a tile's id does not depend on order.
+    std::map<std::string, std::string> parent;
+    for (const auto& [name, type] : types) {
+        parent[name] = name;
+    }
+    auto find = [&parent](std::string name) {
+        while (parent[name] != name) {
+            name = parent[name] = parent[parent[name]];
+        }
+        return name;
+    };
+
+    auto bitsOf = [&cells](const std::string& name, const std::string& direction) {
+        std::vector<int> bits;
+        const auto& cell = cells[name];
+        if (!cell.contains("port_directions") || !cell.contains("connections")) {
+            return bits;
+        }
+        for (auto port = cell["port_directions"].begin(); port != cell["port_directions"].end();
+             ++port) {
+            if ((port.value() != direction) || !cell["connections"].contains(port.key())) {
+                continue;
+            }
+            for (const auto& bit : cell["connections"][port.key()]) {
+                if (bit.is_number_integer()) {
+                    bits.push_back(bit.get<int>());
+                }
+            }
+        }
+        return bits;
+    };
+
+    std::map<int, std::string> drivers;
+    for (const auto& [name, type] : types) {
+        for (const int bit : bitsOf(name, "output")) {
+            drivers[bit] = name;
+        }
+    }
+    for (const auto& [sink, sinkType] : types) {
+        for (const int bit : bitsOf(sink, "input")) {
+            const auto driver = drivers.find(bit);
+            if ((driver == drivers.end()) || !staysInDspTile(types[driver->second], sinkType)) {
+                continue;
+            }
+            const std::string a = find(driver->second);
+            const std::string b = find(sink);
+            if (a != b) {
+                parent[std::max(a, b)] = std::min(a, b);
+            }
+        }
+    }
+    for (const auto& [name, type] : types) {
+        outDspTiles[name] = find(name);
+    }
+}
+
+}  // namespace
+
 bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes)
+{
+    DspTileMap ignored;
+    return loadAtomTypes(debugJsonPath, outTypes, ignored);
+}
+
+bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes,
+                   DspTileMap& outDspTiles)
 {
     std::ifstream stream(debugJsonPath);
     if (!stream) {
@@ -260,6 +361,7 @@ bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outT
                 outTypes[cell.key()] = cell.value()["type"].get<std::string>();
             }
         }
+        groupDspTiles(module["cells"], outDspTiles);
     }
     return true;
 }

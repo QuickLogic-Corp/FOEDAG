@@ -18,6 +18,7 @@ class Partition {
     static int s_atomsPerTile;
     static DesignResources s_designResources;
     static AtomTypeMap s_atomTypes;
+    static DspTileMap s_dspTiles;
 public:
     static void resetIdGenerator() { s_idGenerator = 0; }
 
@@ -47,6 +48,8 @@ public:
     // instance name (a BRAM, say) as CLB.
     static void setAtomTypes(AtomTypeMap atomTypes) { s_atomTypes = std::move(atomTypes); }
     static const AtomTypeMap& atomTypes() { return s_atomTypes; }
+    static void setDspTiles(DspTileMap dspTiles) { s_dspTiles = std::move(dspTiles); }
+    static const DspTileMap& dspTiles() { return s_dspTiles; }
 
     Partition(const std::string& name = "");
 
@@ -74,6 +77,7 @@ public:
     void clearElemenets() {
         m_elements.clear();
         m_clbAtomCount = m_dspRequiredCount = m_bramRequiredCount = 0;
+        m_dspTileIds.clear();
     }
     void addElement(const HierarhyElement& element) {
         m_elements.insert(element);
@@ -88,7 +92,9 @@ public:
             const std::string realType = (typeIt != s_atomTypes.end()) ? typeIt->second : "";
             const QString type = classifyAtomType(atomName, realType);
             if (type == "dsp") {
-                if (countsAsDspTile(realType)) ++m_dspRequiredCount;
+                if (const auto tile = s_dspTiles.find(atomName); tile != s_dspTiles.end()) {
+                    if (m_dspTileIds.insert(tile->second).second) ++m_dspRequiredCount;
+                } else if (countsAsDspTile(realType)) ++m_dspRequiredCount;
             } else if (type == "bram") ++m_bramRequiredCount;
             else ++m_clbAtomCount;
         }
@@ -200,6 +206,7 @@ private:
     std::map<int, RegionPtr> m_regions;
     int m_clbAtomCount = 0;
     int m_dspRequiredCount = 0;
+    std::set<std::string> m_dspTileIds;
     int m_bramRequiredCount = 0;
 
     void updateRect();

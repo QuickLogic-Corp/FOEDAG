@@ -56,6 +56,15 @@ using AtomTypeMap = std::map<std::string, std::string>;
 // "resources" field today.
 bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes);
 
+// DSP-V4 leaf atom (QL_DSP4_*) -> an id shared by every leaf of the same physical tile.
+// Flattening names each leaf after a net, so one tile's leaves can sit under different
+// instances, and only one of them is the QL_DSP4_MULT that countsAsDspTile() counts.
+using DspTileMap = std::map<std::string, std::string>;
+
+// As above, and groups the netlist's DSP-V4 leaves into tiles by the nets inside a tile.
+bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes,
+                   DspTileMap& outDspTiles);
+
 // Every atom belonging to `path`, its sub-instances included.
 //
 // An instance with no entry of its own does NOT mean no atoms: floorplanning_atomsets.tcl derives
@@ -101,7 +110,8 @@ struct ResourceTally {
 // what an atom is, so the caller passes Partition::atomTypes() rather than this defaulting
 // to some second, independent source of the same map.
 ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
-                             const AtomTypeMap& atomTypes = {});
+                             const AtomTypeMap& atomTypes = {},
+                             const DspTileMap& dspTiles = {});
 
 // [aurora2#1725] Cell type -> count over everything `paths` covers.
 //

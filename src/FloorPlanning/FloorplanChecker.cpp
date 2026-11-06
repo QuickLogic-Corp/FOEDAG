@@ -58,10 +58,13 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // instance (core.u_mem.mem.0.0) is classified by name and counted as CLB logic. Set
     // even when empty, so a previous project's types are not reused.
     AtomTypeMap atomTypes;
+    DspTileMap dspTiles;
     if (haveInstances) {
-        loadAtomTypes(projectPath / (rtlModel.top() + "_post_synth_debug.json"), atomTypes);
+        loadAtomTypes(projectPath / (rtlModel.top() + "_post_synth_debug.json"), atomTypes,
+                      dspTiles);
     }
     Partition::setAtomTypes(std::move(atomTypes));
+    Partition::setDspTiles(std::move(dspTiles));
 
     AtomNameMap atomNames;
     int atomsPerTile = Partition::atomsPerTile();
