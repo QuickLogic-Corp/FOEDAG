@@ -5,6 +5,8 @@
 #include <nlohmann_json/json.hpp>
 
 #include <fstream>
+#include <regex>
+#include <string_view>
 
 namespace fp {
 
@@ -68,6 +70,16 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
 
 std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::string& path)
 {
+    if (isElementPattern(path)) {
+        std::set<std::string> names;
+        for (const auto& [candidate, atoms] : atomNames) {
+            if (elementPatternCovers(path, candidate)) {
+                names.insert(atoms.begin(), atoms.end());
+            }
+        }
+        return names;
+    }
+
     if (const auto it = atomNames.find(path); it != atomNames.end()) {
         return {it->second.begin(), it->second.end()};
     }
@@ -82,6 +94,62 @@ std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::stri
         }
     }
     return names;
+}
+
+bool isElementPattern(const std::string& element)
+{
+    return element.find('*') != std::string::npos;
+}
+
+namespace {
+
+// generate_floorplanning.py's glob rules, applied to instance paths: "[*]" is any index,
+// any other "*" is any text, dots included. The trailing ".*" means "and its subtree",
+// which elementPatternCovers() handles by walking up the path instead.
+const std::regex& patternRegex(const std::string& pattern)
+{
+    static std::map<std::string, std::regex> cache;
+    if (const auto it = cache.find(pattern); it != cache.end()) {
+        return it->second;
+    }
+    std::string base = pattern;
+    if ((base.size() >= 2) && (base.compare(base.size() - 2, 2, ".*") == 0)) {
+        base.resize(base.size() - 2);
+    }
+    std::string expr = "^";
+    for (std::size_t i = 0; i < base.size(); ++i) {
+        if (base.compare(i, 3, "[*]") == 0) {
+            expr += "\\[\\d+\\]";
+            i += 2;
+        } else if (base[i] == '*') {
+            expr += ".*";
+        } else {
+            if (std::string_view("\\^$.|?+()[]{}").find(base[i]) != std::string_view::npos) {
+                expr += '\\';
+            }
+            expr += base[i];
+        }
+    }
+    expr += "$";
+    return cache.emplace(pattern, std::regex(expr)).first->second;
+}
+
+}  // namespace
+
+bool elementPatternCovers(const std::string& pattern, const std::string& path)
+{
+    const std::regex& re = patternRegex(pattern);
+    std::string candidate = path;
+    while (true) {
+        if (std::regex_match(candidate, re)) {
+            return true;
+        }
+        const std::size_t dot = candidate.rfind('.');
+        if (dot == std::string::npos) {
+            return false;
+        }
+        candidate.resize(dot);
+    }
 }
 
 std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames)

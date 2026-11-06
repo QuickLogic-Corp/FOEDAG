@@ -1,4 +1,6 @@
 #include "QdcSerializer.h"
+
+#include "AtomSets.h"
 #include "DeviceGrid.h"
 #include "HierarhyElement.h"
 #include "Utils/FileUtils.h"
@@ -255,7 +257,12 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
             // which it was -- so it never decides anything outside the panel, which recomputes
             // it from the rows it actually has (see fillPartitionWithSelectedElements()).
             for (std::string path: pathesDirtyTokens) {
-                if (FOEDAG::StringUtils::endsWith(path, ".*")) {
+                const bool subtree = FOEDAG::StringUtils::endsWith(path, ".*");
+                if (isElementPattern(subtree ? path.substr(0, path.size() - 2) : path)) {
+                    // A pattern stays as written: without its ".*" the flow would match
+                    // only atoms named exactly like it.
+                    partition->addElement(HierarhyElement{path, false});
+                } else if (subtree) {
                     FOEDAG::StringUtils::removeSuffix(path, ".*");
                     partition->addElement(HierarhyElement{path, false});
                 } else {

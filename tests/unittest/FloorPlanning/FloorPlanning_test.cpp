@@ -527,6 +527,50 @@ TEST(QdcSerializer, ALegacyWildcardLoadsAsTheRtlNameAndIsNormalisedOnSave)
     EXPECT_NE(content.find("dut.instPerm20009"), std::string::npos);
 }
 
+// A pattern is kept as written. Stripping its ".*" like a plain instance's would save
+// "cluster[*]", which the flow turns into ^cluster\[\d+\]$ and which matches no atom.
+TEST(QdcSerializer, APatternIsKeptAsWrittenThroughASave)
+{
+    fp::Partition::resetIdGenerator();
+    fp::Region::resetIdGenerator();
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer qdc;
+    qdc.load(device, std::vector<std::string>{"set_region cluster[*].* clb(2,2):clb(4,4) p1"});
+
+    ASSERT_EQ(1u, device.partitions().size());
+    EXPECT_TRUE(device.partitions().at(0)->elements().contains("cluster[*].*"));
+    EXPECT_NE(qdc.serialize(device).find("cluster[*].*"), std::string::npos);
+}
+
+TEST(ElementPattern, MatchesTheInstancesTheFlowWould)
+{
+    EXPECT_TRUE(fp::isElementPattern("cluster[*].*"));
+    EXPECT_TRUE(fp::isElementPattern("clust*[0].*"));
+    EXPECT_FALSE(fp::isElementPattern("dut.i_a"));
+
+    // [*] is any index; the trailing ".*" covers the subtree.
+    EXPECT_TRUE(fp::elementPatternCovers("cluster[*].*", "cluster[0]"));
+    EXPECT_TRUE(fp::elementPatternCovers("cluster[*].*", "cluster[12].clb"));
+    EXPECT_FALSE(fp::elementPatternCovers("cluster[*].*", "cluster_b[0]"));
+    EXPECT_FALSE(fp::elementPatternCovers("cluster[*].*", "cluster"));
+
+    // A bare * is any text.
+    EXPECT_TRUE(fp::elementPatternCovers("clust*[0].*", "cluster[0].clb"));
+    EXPECT_FALSE(fp::elementPatternCovers("clust*[0].*", "cluster[1].clb"));
+}
+
+TEST(ElementPattern, CollectsTheAtomsOfEveryInstanceItMatches)
+{
+    const fp::AtomNameMap atomNames{
+        {"cluster[0].clb", {"cluster[0].clb.q"}},
+        {"cluster[1].clb", {"cluster[1].clb.q"}},
+        {"other", {"other.q"}},
+    };
+    EXPECT_EQ(fp::atomNamesFor(atomNames, "cluster[*].*"),
+              (std::set<std::string>{"cluster[0].clb.q", "cluster[1].clb.q"}));
+}
+
 // ---------------------------------------------------------------------------
 // [aurora2#1725 stage P0b/P1] RtlInstanceModel -- the RTL instance tree the panel shows.
 // ---------------------------------------------------------------------------
@@ -782,6 +826,76 @@ TEST(SynthResourceHierarchyTree, RtlNamesCannotBeEdited)
     auto* view = widget.findChild<QTreeView*>();
     ASSERT_NE(view, nullptr);
     EXPECT_EQ(view->editTriggers(), QAbstractItemView::NoEditTriggers);
+}
+
+namespace {
+
+QStandardItem* itemWithPath(QStandardItem* parent, const QString& path)
+{
+    for (int row = 0; row < parent->rowCount(); ++row) {
+        QStandardItem* child = parent->child(row, 0);
+        if (!child) continue;
+        if (child->data(kRtlPathRoleForTest).toString() == path) return child;
+        if (QStandardItem* found = itemWithPath(child, path)) return found;
+    }
+    return nullptr;
+}
+
+struct PatternTree {
+    fp::SynthResourceHierarchyWidget widget;
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p");
+    QStandardItem* root = nullptr;
+
+    PatternTree()
+    {
+        widget.setTopInstance("top");
+        widget.setAtomNames({
+            {"cluster[0].clb", {"cluster[0].clb.q"}},
+            {"cluster[1].clb", {"cluster[1].clb.q"}},
+            {"other", {"other.q"}},
+            {"spare", {"spare.q"}},
+        });
+        widget.build(fp::NaturalStringSet{"top", "cluster[0].clb", "cluster[1].clb", "other",
+                                          "spare"});
+        partition->addElement(fp::HierarhyElement{"cluster[*].*", false});
+        widget.onPartitionsChanged({{0, partition}});
+        widget.selectPartition(partition);
+        root = widget.findChild<QStandardItemModel*>()->invisibleRootItem();
+    }
+};
+
+}  // namespace
+
+TEST(SynthResourceHierarchyTree, APatternPartitionTicksTheRowsItMatches)
+{
+    PatternTree tree;
+    ASSERT_NE(itemWithPath(tree.root, "cluster[0].clb"), nullptr);
+    EXPECT_EQ(itemWithPath(tree.root, "cluster[0].clb")->checkState(), Qt::Checked);
+    EXPECT_EQ(itemWithPath(tree.root, "cluster[1].clb")->checkState(), Qt::Checked);
+    EXPECT_EQ(itemWithPath(tree.root, "other")->checkState(), Qt::Unchecked);
+
+    // Its atoms are the matched instances', so the tile counts are real.
+    const fp::HierarhyElement& element = *tree.partition->elements().begin();
+    EXPECT_EQ(element.vprNames,
+              (std::set<std::string>{"cluster[0].clb.q", "cluster[1].clb.q"}));
+}
+
+TEST(SynthResourceHierarchyTree, EditingAPatternPartitionExpandsThePattern)
+{
+    PatternTree tree;
+    QStandardItem* other = itemWithPath(tree.root, "other");
+    ASSERT_NE(other, nullptr);
+    other->setCheckState(Qt::Checked);
+
+    const fp::HierarhyElements& elements = tree.partition->elements();
+    EXPECT_FALSE(elements.contains("cluster[*].*"));
+    EXPECT_TRUE(elements.contains("other"));
+    std::set<std::string> atoms;
+    for (const fp::HierarhyElement& element: elements) {
+        atoms.insert(element.vprNames.begin(), element.vprNames.end());
+    }
+    EXPECT_EQ(atoms,
+              (std::set<std::string>{"cluster[0].clb.q", "cluster[1].clb.q", "other.q"}));
 }
 
 TEST(SynthResourceHierarchyTree, FlatDesignShowsTheTopAsItsOnlyRow)

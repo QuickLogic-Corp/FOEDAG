@@ -566,9 +566,13 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
 
     // intermediate data be captured in lambda: path -> the partitions naming that exact path
     std::map<std::string, std::set<std::string>> data;
+    // pattern -> the partitions naming it; matched against each row's path in the walk
+    std::map<std::string, std::set<std::string>> patterns;
     for (const auto& [id, partition]: partitions) {
         for (const HierarhyElement& element: partition->elements()) {
-            data[element.path].insert(partition->name());
+            auto& names = isElementPattern(element.path) ? patterns[element.path]
+                                                         : data[element.path];
+            names.insert(partition->name());
         }
     }
 
@@ -584,7 +588,7 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
     // -- unsatisfiable for VPR, since a cluster cannot sit in two regions -- was invisible.
     // Inherited names are threaded down the walk rather than re-derived per row.
     std::function<void(QStandardItem*, const std::string&, const std::set<std::string>&)> setPartitionRecursive =
-        [&data, &setPartitionRecursive, isPartitionsColumnVisible](QStandardItem* item,
+        [&data, &patterns, &setPartitionRecursive, isPartitionsColumnVisible](QStandardItem* item,
                                                                   const std::string& prefix,
                                                                   const std::set<std::string>& fromAncestors)
     {
@@ -604,6 +608,11 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
             std::set<std::string> covering{fromAncestors};
             if (auto it = data.find(fullPath); it != data.end()) {
                 covering.insert(it->second.begin(), it->second.end());
+            }
+            for (const auto& [pattern, names]: patterns) {
+                if (elementPatternCovers(pattern, fullPath)) {
+                    covering.insert(names.begin(), names.end());
+                }
             }
 
             if (isPartitionsColumnVisible) {
@@ -658,6 +667,13 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
 
     ExpansionKeeper keepExpansion(m_view, m_model, m_bnExpandCollapse->isChecked());
 
+    std::vector<std::string> patterns;
+    for (const HierarhyElement& element: partition->elements()) {
+        if (isElementPattern(element.path)) {
+            patterns.push_back(element.path);
+        }
+    }
+
     // check only requested elements + set partition label
     std::function<void(QStandardItem*, const std::string&)> checkAndPartitionRecursive =
         [&](QStandardItem* item, const std::string& prefix)
@@ -682,7 +698,11 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
             // path agrees with (every one of them is isCheckable()-gated, so the tick
             // silently vanished again on the next selection change). The row stays greyed,
             // and DeviceGrid reports that the partition names dead instances.
-            if (partition->elements().contains(fullPath) && child->isCheckable()) {
+            const bool named = partition->elements().contains(fullPath)
+                || std::any_of(patterns.begin(), patterns.end(), [&](const std::string& pattern) {
+                       return elementPatternCovers(pattern, fullPath);
+                   });
+            if (named && child->isCheckable()) {
                 child->setCheckState(Qt::Checked);
                 onItemChanged(child, /*reportChanges*/false); // update ancestor and descendant item states
                 // Deliberately does NOT expand the matched item any more: selecting a

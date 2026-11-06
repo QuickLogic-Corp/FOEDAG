@@ -65,6 +65,12 @@ bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outT
 // subtree-inclusive, so the union over descendants is the full set.
 std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::string& path);
 
+// A .qdc element with a "*" in it ("cluster[*].*", "clust*[0].*"): a pattern the flow turns
+// into a regex, not an instance path.
+bool isElementPattern(const std::string& element);
+// True when `path` is an instance the pattern selects, or lies inside one.
+bool elementPatternCovers(const std::string& pattern, const std::string& path);
+
 // RTL path -> atoms belonging to that instance DIRECTLY, i.e. sitting in it rather than in
 // one of its sub-instances. DeviceGrid warns when a partition takes an instance's
 // sub-instances and leaves this logic unconstrained.
