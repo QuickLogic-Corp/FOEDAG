@@ -1268,6 +1268,40 @@ TEST(PartitionResources, SiblingsOnDifferentBranchesStillAddUp)
     fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
+TEST(PartitionResources, APatternSumsTheMeasuredTilesOfTheInstancesItMatches)
+{
+    fp::Partition::setDesignResources(makeResources(2, {
+        {"cluster[0]", entryWithActual(2, 2)},
+        {"cluster[0].clb", entryWithActual(2, 2)},
+        {"cluster[1]", entryWithActual(2, 3)},
+        {"other", entryWithActual(5, 5)},
+    }));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"cluster[*].*", false});
+
+    const auto contribution = partition.resourceContribution();
+    EXPECT_TRUE(contribution.hasActual);
+    EXPECT_EQ(contribution.clbActual, 5);
+    EXPECT_FALSE(contribution.actualPartial);
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
+TEST(PartitionResources, APatternThatMatchesNothingIsPartial)
+{
+    fp::Partition::setDesignResources(makeResources(2, {{"other", entryWithActual(5, 5)}}));
+
+    fp::Partition partition("p");
+    partition.addElement(fp::HierarhyElement{"cluster[*].*", false});
+
+    const auto contribution = partition.resourceContribution();
+    EXPECT_FALSE(contribution.hasActual);
+    EXPECT_TRUE(contribution.actualPartial);
+
+    fp::Partition::setDesignResources(fp::DesignResources{});
+}
+
 TEST(PartitionResources, MeasuredTilesAreReportedSeparatelyFromTheEstimate)
 {
     // clb_actual is a measurement and clb_est a projection; they must not be conflated.

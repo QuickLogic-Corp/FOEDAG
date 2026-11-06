@@ -117,13 +117,24 @@ public:
         }
         std::set<std::string> paths;
         for (const HierarhyElement& element : m_elements) {
-            paths.insert(element.path);
+            if (!isElementPattern(element.path)) {
+                paths.insert(element.path);
+                continue;
+            }
+            bool matched = false;
+            for (const auto& [instance, entry] : s_designResources.instances) {
+                if (elementPatternCovers(element.path, instance)) {
+                    paths.insert(instance);
+                    matched = true;
+                }
+            }
+            out.actualPartial = out.actualPartial || !matched;
         }
-        for (const HierarhyElement& element : m_elements) {
-            if (hasAncestorIn(element.path, paths)) {
+        for (const std::string& path : paths) {
+            if (hasAncestorIn(path, paths)) {
                 continue;  // already accounted for by the ancestor, since entries nest
             }
-            const auto it = s_designResources.instances.find(element.path);
+            const auto it = s_designResources.instances.find(path);
             if (it == s_designResources.instances.end()) {
                 out.actualPartial = true;
                 continue;
