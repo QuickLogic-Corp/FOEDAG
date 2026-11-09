@@ -3133,6 +3133,12 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
     args.push_back("--synth-log");
     args.push_back(synth_log_path.string());
   }
+  const std::filesystem::path blif_path =
+      projectPath / (ProjManager()->projectName() + "_post_synth.blif");
+  if (FileUtils::FileExists(blif_path)) {
+    args.push_back("--blif");
+    args.push_back(blif_path.string());
+  }
   args.push_back("-o");
   args.push_back(validation_json_path.string());
 

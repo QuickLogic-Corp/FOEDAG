@@ -1303,8 +1303,16 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
                         lines << QString();
                         lines << tr("%n atom(s) where the name and the Yosys scope disagree:",
                                     nullptr, static_cast<int>(graded.conflicts.size()));
+                        std::string example;  // a VPR name to show the .qdc line with
                         for (const AtomConflict& conflict : graded.conflicts) {
-                            lines << QStringLiteral("  ") + QString::fromStdString(conflict.atom);
+                            const QString cell = QString::fromStdString(conflict.atom);
+                            if (conflict.vprName.empty()) {
+                                lines << QStringLiteral("  ") + cell;
+                            } else {
+                                if (example.empty()) example = conflict.vprName;
+                                lines << tr("  %1  (Yosys cell %2)")
+                                             .arg(QString::fromStdString(conflict.vprName), cell);
+                            }
                             lines << tr("    counted in %1 (by name)")
                                          .arg(QString::fromStdString(conflict.assignedTo));
                             lines << tr("    scope says %1")
@@ -1312,9 +1320,18 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
                         }
                         lines << QString();
                         lines << tr("Synthesis moved or merged these cells across the boundary.");
-                        lines << tr("Each one is pinned with the instance that counts it.");
-                        lines << tr("Usually harmless. To keep one with the other instance, "
-                                    "add the atom to that partition by name.");
+                        lines << tr("Each one is placed with the instance that counts it.");
+                        lines << tr("Usually harmless.");
+                        if (!example.empty()) {
+                            lines << QString();
+                            lines << tr("To place one with the other instance, add a line to "
+                                        "the .qdc with that instance's region and partition:");
+                            lines << tr("  set_region %1 <region> <partition>")
+                                         .arg(QString::fromStdString(example));
+                            lines << tr("If the instance that counts it is in a partition too, "
+                                        "VPR keeps the partition listed last in "
+                                        "<design>_constraints.xml.");
+                        }
                     }
                     setExplanation(item->child(row, Column::Why),
                                    tr("Why partial: %1").arg(QString::fromStdString(path)),

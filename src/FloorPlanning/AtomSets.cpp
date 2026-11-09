@@ -17,30 +17,6 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames, int
     return loadAtomSets(path, atomNames, ignored, atomsPerTile);
 }
 
-bool loadAtomConflicts(const std::filesystem::path& path, std::vector<AtomConflict>& conflicts)
-{
-    std::ifstream stream(path);
-    if (!stream) {
-        return false;
-    }
-    nlohmann::json doc;
-    try {
-        stream >> doc;
-    } catch (const std::exception&) {
-        return false;
-    }
-    if (!doc.contains("conflicts") || !doc["conflicts"].is_array()) {
-        return true;
-    }
-    for (const auto& entry : doc["conflicts"]) {
-        if (!entry.is_object()) continue;
-        conflicts.push_back({entry.value("atom", std::string{}),
-                             entry.value("assigned_to", std::string{}),
-                             entry.value("scopename_claims", std::string{})});
-    }
-    return true;
-}
-
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
                   AtomResourceMap& atomResources, int& atomsPerTile)
 {

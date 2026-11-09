@@ -616,7 +616,11 @@ const char* kValidationJson = R"JSON({
                       "reason": "no atoms in the netlist; synthesis reported 'Deleting now unused module serial_mul_default'" },
     "i_mul_24.i_inner": { "verdict": "partial", "atom_count": 12,
                           "warnings": ["check 3 not run: [6] unavailable",
-                                       "check 2b: 1 atom(s) where prefix and scopename disagree"] }
+                                       "check 2b: 1 atom(s) where prefix and scopename disagree"],
+                          "conflicts": [{ "atom": "i_mul_24.i_inner.q_sdffre_Q",
+                                          "assigned_to": "i_mul_24.i_inner",
+                                          "scopename_claims": "i_mul_24",
+                                          "vpr_name": "i_mul_24.i_inner.q" }] }
   }
 })JSON";
 
@@ -1226,6 +1230,11 @@ TEST(RtlInstanceModel, MergedVerdictsDriveWhatThePanelCanShow)
     EXPECT_TRUE(partial->constrainable());
     EXPECT_NE(partial->statusReason.find("scopename"), std::string::npos);
     EXPECT_EQ(partial->statusReason.find("not run"), std::string::npos);
+    ASSERT_EQ(partial->conflicts.size(), 1u);
+    EXPECT_EQ(partial->conflicts[0].atom, "i_mul_24.i_inner.q_sdffre_Q");
+    EXPECT_EQ(partial->conflicts[0].assignedTo, "i_mul_24.i_inner");
+    EXPECT_EQ(partial->conflicts[0].scopeClaims, "i_mul_24");
+    EXPECT_EQ(partial->conflicts[0].vprName, "i_mul_24.i_inner.q");
 }
 
 TEST(RtlInstanceModel, DeletedInstancesAreNotOfferedAsConstraintTargets)
@@ -2679,32 +2688,6 @@ TEST(PackOverflow, APlacedDesignHasNoUnplacedBlocks)
                     .empty());
 }
 
-TEST(AtomSets, ConflictsNameTheAtomAndBothInstances)
-{
-    const auto path = writeQdc("fp_atomsets_conflicts", R"({
-      "atomsets": {},
-      "conflicts": [
-        {"atom": "system_cpu._zz_143_sdffre_Q", "assigned_to": "system_cpu",
-         "scopename_claims": "systemDebugger_1"}
-      ]
-    })");
-
-    std::vector<fp::AtomConflict> conflicts;
-    ASSERT_TRUE(fp::loadAtomConflicts(path, conflicts));
-    ASSERT_EQ(conflicts.size(), 1u);
-    EXPECT_EQ(conflicts[0].atom, "system_cpu._zz_143_sdffre_Q");
-    EXPECT_EQ(conflicts[0].assignedTo, "system_cpu");
-    EXPECT_EQ(conflicts[0].scopeClaims, "systemDebugger_1");
-}
-
-TEST(AtomSets, AFileWithNoConflictsHasNone)
-{
-    const auto path = writeQdc("fp_atomsets_no_conflicts", R"({"atomsets": {}})");
-    std::vector<fp::AtomConflict> conflicts;
-    EXPECT_TRUE(fp::loadAtomConflicts(path, conflicts));
-    EXPECT_TRUE(conflicts.empty());
-}
-
 namespace {
 
 constexpr int kExplanationRoleForTest = Qt::UserRole + 102;
@@ -2728,7 +2711,7 @@ TEST(SynthResourceHierarchyTree, APartialRowExplainsItsDisputedAtoms)
     // murax: one flop is counted in system_cpu by its name, but Yosys's scope puts it in
     // systemDebugger_1. Both rows are partial; the "?" has to name the atom and both sides.
     const fp::AtomConflict conflict{"system_cpu._zz_143_sdffre_Q", "system_cpu",
-                                    "systemDebugger_1"};
+                                    "systemDebugger_1", "system_cpu._zz_143"};
     const std::string warning = "check 2b: 1 atom(s) where prefix and scopename disagree";
     fp::SynthResourceHierarchyWidget widget;
     widget.setTopInstance("Murax");
@@ -2748,7 +2731,34 @@ TEST(SynthResourceHierarchyTree, APartialRowExplainsItsDisputedAtoms)
         EXPECT_TRUE(body.contains("system_cpu._zz_143_sdffre_Q")) << body.toStdString();
         EXPECT_TRUE(body.contains("counted in system_cpu")) << body.toStdString();
         EXPECT_TRUE(body.contains("scope says systemDebugger_1")) << body.toStdString();
+        // The advice names the file and the name VPR matches, not the Yosys cell.
+        EXPECT_TRUE(body.contains(".qdc")) << body.toStdString();
+        EXPECT_TRUE(body.contains("set_region system_cpu._zz_143 ")) << body.toStdString();
+        EXPECT_FALSE(body.contains("set_region system_cpu._zz_143_sdffre_Q"));
+        // Both partitions then claim the atom; VPR keeps the last one in the XML.
+        EXPECT_TRUE(body.contains("_constraints.xml")) << body.toStdString();
     }
+}
+
+TEST(SynthResourceHierarchyTree, WithoutVprNamesThePopupOffersNoQdcLine)
+{
+    // An older validation.json has no VPR names; a set_region with the cell name matches
+    // nothing, so the popup must not suggest one.
+    const fp::AtomConflict conflict{"system_cpu._zz_143_sdffre_Q", "system_cpu",
+                                    "systemDebugger_1", ""};
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("Murax");
+    widget.setInstanceVerdicts(
+        {{"system_cpu", fp::InstanceVerdict{"partial", "check 2b", {conflict}}}});
+    widget.build(fp::NaturalStringSet{"Murax", "system_cpu"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    QStandardItem* why = whyCellOf(model, "system_cpu");
+    ASSERT_NE(why, nullptr);
+    const QString body = why->data(kExplanationRoleForTest).toString();
+    EXPECT_TRUE(body.contains("system_cpu._zz_143_sdffre_Q")) << body.toStdString();
+    EXPECT_FALSE(body.contains("set_region")) << body.toStdString();
 }
 
 TEST(SynthResourceHierarchyTree, APartialRowsTooltipNamesTheFailedCheck)

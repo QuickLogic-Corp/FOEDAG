@@ -173,6 +173,16 @@ bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
         const auto& verdict = it.value();
         instance.status = verdict.value("verdict", std::string{"unknown"});
         instance.atomCount = verdict.value("atom_count", -1);
+        instance.conflicts.clear();
+        if (verdict.contains("conflicts") && verdict["conflicts"].is_array()) {
+            for (const auto& entry : verdict["conflicts"]) {
+                if (!entry.is_object()) continue;
+                instance.conflicts.push_back({entry.value("atom", std::string{}),
+                                              entry.value("assigned_to", std::string{}),
+                                              entry.value("scopename_claims", std::string{}),
+                                              entry.value("vpr_name", std::string{})});
+            }
+        }
         if (verdict.contains("reason") && verdict["reason"].is_string()) {
             instance.statusReason = verdict["reason"].get<std::string>();
         } else if (verdict.contains("warnings") && verdict["warnings"].is_array()
