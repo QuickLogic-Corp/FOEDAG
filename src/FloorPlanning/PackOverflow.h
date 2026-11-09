@@ -25,7 +25,23 @@ std::vector<PackOverflow> findPackOverflows(const std::string& vprLog,
 
 std::string packOverflowMessage(const PackOverflow& overflow);
 
-// Why the floorplan check passed a region the packer then could not fill.
+// [aurora2#1725] A packed block VPR found no free tile for in its initial placement.
+struct UnplacedBlock {
+    std::string block;
+    std::string tileType;
+    std::vector<std::string> partitions;  // those naming any atom the block holds
+};
+
+// The blocks VPR's last initial-placement iteration in `vprLog` could not place, with the
+// partitions that pin them: a block's atoms come from `netXml` (<project>_post_synth.net) and
+// are matched against `constraintsXml`'s add_atom patterns as VPR matches them.
+std::vector<UnplacedBlock> findUnplacedBlocks(const std::string& vprLog,
+                                              const std::string& netXml,
+                                              const std::string& constraintsXml);
+
+std::string unplacedBlockMessage(const UnplacedBlock& block);
+
+// Why the floorplan check passed a region the packer or placer then could not fill.
 std::string packOverflowNote();
 
 }  // namespace fp

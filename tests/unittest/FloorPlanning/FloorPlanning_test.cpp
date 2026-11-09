@@ -2572,8 +2572,8 @@ TEST(PackOverflow, TheMessageSaysWhichPartitionToExtend)
 {
     const fp::PackOverflow overflow{"p_brams", "clb", 5, 4, {}};
     EXPECT_EQ(fp::packOverflowMessage(overflow),
-              "Partition 'p_brams' needs 5 clb tiles after packing but only 4 available. "
-              "Extend its regions.");
+              "Partition 'p_brams' packs into 5 clb blocks but its regions have only 4 clb "
+              "tiles. Give it at least 5, plus spare tiles for placement.");
 }
 
 TEST(PackOverflow, RegionsInNoPartitionAreListedInstead)
@@ -2583,8 +2583,9 @@ TEST(PackOverflow, RegionsInNoPartitionAreListedInstead)
     ASSERT_EQ(found.size(), 1u);
     EXPECT_EQ(found[0].partition, "");
     EXPECT_EQ(fp::packOverflowMessage(found[0]),
-              "Partition with regions (10,20):(10,37) (11,34):(11,37) needs 5 clb tiles after "
-              "packing but only 4 available. Extend its regions.");
+              "Partition with regions (10,20):(10,37) (11,34):(11,37) packs into 5 clb blocks "
+              "but its regions have only 4 clb tiles. Give it at least 5, plus spare tiles for "
+              "placement.");
 }
 
 TEST(PackOverflow, ALogWithoutOverfullRegionsFindsNothing)
@@ -2599,4 +2600,81 @@ TEST(PackOverflow, TheNoteExplainsWhyTheCheckCouldNotTell)
     EXPECT_NE(note.find("Note:"), std::string::npos);
     EXPECT_NE(note.find("atoms"), std::string::npos);
     EXPECT_NE(note.find("pins"), std::string::npos);
+    EXPECT_NE(note.find("carry"), std::string::npos) << "why placement needs spare tiles";
+}
+
+// picosoc_regions' failed placement on 2026-11-09, with p_brams given exactly the 5 clb
+// tiles packing asked for: the cluster mixes 18 free cpu atoms with one of p_brams'.
+namespace {
+
+const char* kUnplacedLog = R"(## Initial Placement
+Initial placement iteration 0 has finished with 2 unplaced blocks
+Block soc.cpu.early (# 7) of type clb could not be placed during initial placement iteration 0
+Block soc.cpu.mem_la_addr[13] (# 135) of type clb could not be placed during initial placement iteration 0
+Initial placement iteration 1 has finished with 1 unplaced blocks
+Block soc.cpu.mem_la_addr[13] (# 135) of type clb could not be placed during initial placement iteration 1
+Error 1: 
+Message: 1 blocks could not be placed during initial placement; no spaces were available for them on the grid.
+)";
+
+const char* kUnplacedNet = R"(<block name="picosoc_regions_post_synth.net" instance="FPGA_packed_netlist[0]">
+    <block name="soc.cpu.mem_la_addr[13]" instance="clb[135]" mode="default">
+        <block name="soc.cpu.mem_la_addr[13]" instance="fle[0]">
+            <block name="soc.cpu.mem_la_addr[13]" instance="lut[0]"/>
+        </block>
+        <block name="open" instance="fle[1]"/>
+        <block name="soc.progmem.o_ready_dffre_Q_D_$lut_Y_A_$lut_A_A_1" instance="fle[2]"/>
+    </block>
+    <block name="soc.cpu.early" instance="clb[7]" mode="default">
+        <block name="soc.cpu.early" instance="fle[0]"/>
+    </block>
+</block>
+)";
+
+const char* kUnplacedConstraints = R"(<vpr_constraints tool_name="vpr">
+    <partition_list>
+        <partition name="p_brams">
+            <add_atom name_pattern="^soc\.memory(\..*)?$" is_regex="true"/>
+            <add_atom name_pattern="^soc\.progmem(\..*)?$" is_regex="true"/>
+            <add_region x_low="11" x_high="11" y_low="33" y_high="37" subtile="-1"/>
+        </partition>
+        <partition name="p_cpu">
+            <add_atom name_pattern="soc.cpu.mem_la_addr[13]"/>
+            <add_region x_low="2" x_high="9" y_low="2" y_high="13" subtile="-1"/>
+        </partition>
+    </partition_list>
+</vpr_constraints>
+)";
+
+}  // namespace
+
+TEST(PackOverflow, NamesThePartitionOfABlockVprCouldNotPlace)
+{
+    const std::vector<fp::UnplacedBlock> found =
+        fp::findUnplacedBlocks(kUnplacedLog, kUnplacedNet, kUnplacedConstraints);
+    ASSERT_EQ(found.size(), 1u) << "soc.cpu.early was placed on the last iteration";
+    EXPECT_EQ(found[0].block, "soc.cpu.mem_la_addr[13]");
+    EXPECT_EQ(found[0].tileType, "clb");
+    EXPECT_EQ(found[0].partitions, (std::vector<std::string>{"p_brams", "p_cpu"}))
+        << "a regex and a literal both pin this cluster";
+    EXPECT_EQ(fp::unplacedBlockMessage(found[0]),
+              "Block 'soc.cpu.mem_la_addr[13]' of partition 'p_brams', 'p_cpu' found no free clb "
+              "tile in its regions. Extend its regions.");
+}
+
+TEST(PackOverflow, ABlockInNoPartitionIsStillReported)
+{
+    const std::vector<fp::UnplacedBlock> found =
+        fp::findUnplacedBlocks(kUnplacedLog, kUnplacedNet, "<vpr_constraints/>");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_TRUE(found[0].partitions.empty());
+    EXPECT_EQ(fp::unplacedBlockMessage(found[0]),
+              "Block 'soc.cpu.mem_la_addr[13]' of type clb found no free tile.");
+}
+
+TEST(PackOverflow, APlacedDesignHasNoUnplacedBlocks)
+{
+    EXPECT_TRUE(fp::findUnplacedBlocks("## Initial Placement\nVPR succeeded\n", kUnplacedNet,
+                                       kUnplacedConstraints)
+                    .empty());
 }

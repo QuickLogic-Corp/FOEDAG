@@ -5089,6 +5089,13 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
 }
 
 
+namespace {
+std::string readWholeFile(const fs::path& path) {
+  std::ifstream in(path);
+  return std::string(std::istreambuf_iterator<char>(in), {});
+}
+}  // namespace
+
 // [aurora2#1725] Names the partitions VPR could not pack into their regions, so the user
 // knows which one to extend.
 void CompilerOpenFPGA_ql::reportPackOverflows() {
@@ -5096,16 +5103,32 @@ void CompilerOpenFPGA_ql::reportPackOverflows() {
   const fs::path log = dir / "vpr_stdout.log";
   const fs::path constraints = dir / (ProjManager()->projectName() + "_constraints.xml");
   if (!fs::exists(log) || !fs::exists(constraints)) return;
-  const auto read = [](const fs::path& path) {
-    std::ifstream in(path);
-    return std::string(std::istreambuf_iterator<char>(in), {});
-  };
   const std::vector<fp::PackOverflow> overflows =
-      fp::findPackOverflows(read(log), read(constraints));
+      fp::findPackOverflows(readWholeFile(log), readWholeFile(constraints));
   for (const fp::PackOverflow& overflow : overflows) {
     ErrorMessage("Floor plan: " + fp::packOverflowMessage(overflow));
   }
   if (!overflows.empty()) {
+    Message(fp::packOverflowNote());
+  }
+}
+
+// [aurora2#1725] Names the partition of each block VPR found no free tile for: packing
+// passed, but the regions leave no room to place what it made.
+void CompilerOpenFPGA_ql::reportUnplacedBlocks() {
+  const fs::path dir = ProjManager()->projectPath();
+  const fs::path log = dir / "vpr_stdout.log";
+  const fs::path net = dir / (ProjManager()->projectName() + "_post_synth.net");
+  const fs::path constraints = dir / (ProjManager()->projectName() + "_constraints.xml");
+  if (!fs::exists(log) || !fs::exists(net) || !fs::exists(constraints)) return;
+  const std::vector<fp::UnplacedBlock> blocks = fp::findUnplacedBlocks(
+      readWholeFile(log), readWholeFile(net), readWholeFile(constraints));
+  bool constrained = false;
+  for (const fp::UnplacedBlock& block : blocks) {
+    ErrorMessage("Floor plan: " + fp::unplacedBlockMessage(block));
+    constrained = constrained || !block.partitions.empty();
+  }
+  if (constrained) {
     Message(fp::packOverflowNote());
   }
 }
@@ -6416,6 +6439,7 @@ bool CompilerOpenFPGA_ql::Placement() {
                                                           IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
+    reportUnplacedBlocks();
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " placement failed");
     return false;
