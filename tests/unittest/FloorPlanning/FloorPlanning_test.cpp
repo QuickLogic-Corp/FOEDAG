@@ -2210,6 +2210,74 @@ TEST(SelectedResources, AParentAndItsChildAreNotCountedTwice)
     EXPECT_EQ(tableValue(table, 0), clb);
 }
 
+TEST(SelectedResources, CountingBramAndDspRowByRowMatchesTheRootSelection)
+{
+    // picosoc: the cpu's register file is an array, not a module, so its two BRAMs belong to
+    // soc.cpu itself, beside its pcpi_mul child. Counting the rows whose Type lists a bram or
+    // dsp, each for its own atoms, has to reach what selecting the root reports.
+    fp::Partition::setAtomsPerTile(14);
+    fp::Partition::setAtomTypes({});
+    fp::Partition::setDspTiles({});
+    const std::vector<std::string> cpuOwn{"soc.cpu.cpuregs.0.0_TDP_ECC36K",
+                                          "soc.cpu.cpuregs.1.0_TDP_ECC36K", "soc.cpu.n_$lut"};
+    const std::vector<std::string> mul{"soc.cpu.pcpi_mul.m_QL_DSP2_MULT", "soc.cpu.pcpi_mul.n_$lut"};
+    const std::vector<std::string> memory{"soc.memory.mem_TDP_ECC36K", "soc.memory.n_$lut"};
+    const std::vector<std::string> progmem{"soc.progmem.mem0_TDP_ECC36K",
+                                           "soc.progmem.mem1_TDP_ECC36K"};
+    const auto join = [](std::initializer_list<std::vector<std::string>> parts) {
+        std::vector<std::string> all;
+        for (const auto& part : parts) all.insert(all.end(), part.begin(), part.end());
+        return all;
+    };
+    const std::map<std::string, std::vector<std::string>, fp::NaturalLess> atoms{
+        {"top", join({cpuOwn, mul, memory, progmem})},
+        {"soc", join({cpuOwn, mul, memory, progmem})},
+        {"soc.cpu", join({cpuOwn, mul})},
+        {"soc.cpu.pcpi_mul", mul},
+        {"soc.memory", memory},
+        {"soc.progmem", progmem},
+    };
+
+    fp::SynthResourceHierarchyWidget tree(
+        fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
+    tree.setTopInstance("top");
+    tree.setAtomNames(atoms);
+    tree.build(fp::NaturalStringSet{"top", "soc", "soc.cpu", "soc.cpu.pcpi_mul", "soc.memory",
+                                    "soc.progmem"});
+    auto* model = tree.findChild<QStandardItemModel*>();
+    auto* view = tree.findChild<QTreeView*>();
+    auto* table = tree.findChild<fp::SelectedResourcesWidget*>();
+    ASSERT_NE(table, nullptr);
+
+    std::map<QString, int> byRows;
+    std::function<void(QStandardItem*)> count = [&](QStandardItem* parent) {
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            QStandardItem* item = parent->child(row, 0);
+            if (item->data(kAtomRowRoleForTest).toBool()) continue;
+            const std::string path = item->data(kRtlPathRoleForTest).toString().toStdString();
+            std::set<std::string> own(atoms.at(path).begin(), atoms.at(path).end());
+            for (int c = 0; c < item->rowCount(); ++c) {
+                const QString child = item->child(c, 0)->data(kRtlPathRoleForTest).toString();
+                if (child.isEmpty()) continue;
+                for (const auto& atom : atoms.at(child.toStdString())) own.erase(atom);
+            }
+            const QString types = parent->child(row, 2)->text();
+            for (const QString type : {QString("bram"), QString("dsp")}) {
+                if (!types.contains(type)) continue;
+                for (const auto& atom : own) byRows[type] += fp::classifyAtomType(atom) == type;
+            }
+            count(item);
+        }
+    };
+    count(model->invisibleRootItem());
+
+    view->selectionModel()->select(rowNamed(view, "top"),
+                                   QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    EXPECT_EQ(tableValue(table, 2), 5);
+    EXPECT_EQ(byRows["bram"], tableValue(table, 2));
+    EXPECT_EQ(byRows["dsp"], tableValue(table, 1));
+}
+
 TEST(SelectedResources, AtomResourcesAreSummedOverTheOutermostEntriesOnly)
 {
     // The entries nest, so summing every covered one charges an inner instance twice. Only

@@ -1337,6 +1337,14 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         return primitive;
     };
 
+    // A row's Type cell: the distinct tile types of `atoms`.
+    auto setTypes = [&atomTile](QStandardItem* typeItem, const std::vector<std::string>& atoms) {
+        if (!typeItem) return;
+        std::set<QString> tiles;
+        for (const auto& n : atoms) tiles.insert(atomTile(n));
+        typeItem->setText(QStringList(tiles.begin(), tiles.end()).join(", "));
+    };
+
     // One child row per atom, so each can be selected and copied. Its RTL Names cell names
     // the owner: a parent's own atoms follow its children, and would otherwise read as the
     // last child's.
@@ -1364,7 +1372,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     };
 
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this, &atomTile, &atomPrimitive, &appendAtomRows](QStandardItem* item,
+        [&populateRecursive, this, &atomTile, &atomPrimitive, &appendAtomRows, &setTypes](QStandardItem* item,
                                                                                const std::string& prefix)
     {
         if (!item) return;
@@ -1416,16 +1424,14 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                     } else {
                         // The leaf row names its distinct element types, so they show
                         // while the per-atom rows below are hidden.
-                        std::set<QString> tiles;
-                        for (const auto& n : names) tiles.insert(atomTile(n));
-                        if (QStandardItem* typeItem = item->child(row, Column::AtomType))
-                            typeItem->setText(QStringList(tiles.begin(), tiles.end()).join(", "));
+                        setTypes(item->child(row, Column::AtomType), names);
                         appendAtomRows(child, path, names, resourceTypes);
                     }
                 } else {
-                    // Non-leaf: its own Atom List/Type cells stay empty, but the atoms no
-                    // child instance holds (aurora2#2376: a LUT beside FIFO_INST) get rows,
-                    // or the resources table counts atoms the tree never shows.
+                    // Non-leaf: the atoms no child instance holds (aurora2#2376: a LUT beside
+                    // FIFO_INST) get rows, or the resources table counts atoms the tree never
+                    // shows. Its Type names theirs: picosoc's cpu holds the register file's
+                    // BRAMs itself, beside its child instances.
                     std::set<std::string> heldByChildren;
                     for (int r = 0; r < child->rowCount(); ++r) {
                         QStandardItem* grandchild = child->child(r, Column::Netlist);
@@ -1437,6 +1443,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                     for (const auto& n : names) {
                         if (heldByChildren.count(n) == 0) own.push_back(n);
                     }
+                    setTypes(item->child(row, Column::AtomType), own);
                     populateRecursive(child, path);
                     appendAtomRows(child, path, own, resourceTypes);
                     continue;
