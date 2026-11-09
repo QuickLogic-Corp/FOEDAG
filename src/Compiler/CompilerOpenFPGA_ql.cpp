@@ -90,6 +90,7 @@
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
 #include "FloorPlanning/FloorplanChecker.h"
+#include "FloorPlanning/PackOverflow.h"
 #include "FloorPlanning/FloorplanningPaths.h"
 #include "FloorPlanning/RtlInstanceModel.h"
 
@@ -5088,6 +5089,27 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
 }
 
 
+// [aurora2#1725] Names the partitions VPR could not pack into their regions, so the user
+// knows which one to extend.
+void CompilerOpenFPGA_ql::reportPackOverflows() {
+  const fs::path dir = ProjManager()->projectPath();
+  const fs::path log = dir / "vpr_stdout.log";
+  const fs::path constraints = dir / (ProjManager()->projectName() + "_constraints.xml");
+  if (!fs::exists(log) || !fs::exists(constraints)) return;
+  const auto read = [](const fs::path& path) {
+    std::ifstream in(path);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+  };
+  const std::vector<fp::PackOverflow> overflows =
+      fp::findPackOverflows(read(log), read(constraints));
+  for (const fp::PackOverflow& overflow : overflows) {
+    ErrorMessage("Floor plan: " + fp::packOverflowMessage(overflow));
+  }
+  if (!overflows.empty()) {
+    Message(fp::packOverflowNote());
+  }
+}
+
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
@@ -6011,6 +6033,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   CleanTempFiles();
   if (status) {
+    reportPackOverflows();
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {

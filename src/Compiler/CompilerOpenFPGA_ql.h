@@ -262,6 +262,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool Analyze();
   virtual bool Synthesize();
   virtual bool Packing();
+  void reportPackOverflows();
   virtual bool GlobalPlacement();
   virtual bool Placement();
   virtual bool ConvertSdcPinConstrainToPcf(std::vector<std::string>&);

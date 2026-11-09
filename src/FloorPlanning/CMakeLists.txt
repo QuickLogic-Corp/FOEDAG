@@ -34,6 +34,7 @@ set (FLOORPLANNING_SRC_LIST
   DeviceGridDescriptor.cpp
   AtomSets.cpp
   FloorplanChecker.cpp
+  PackOverflow.cpp
   QdcSerializer.cpp
   RtlInstanceModel.cpp
   DeviceGrid.cpp
@@ -46,6 +47,7 @@ set (FLOORPLANNING_HDR_LIST
   DeviceGridDescriptor.h
   AtomSets.h
   FloorplanChecker.h
+  PackOverflow.h
   FloorplanningPaths.h
   TileDescriptor.h
   QdcSerializer.h

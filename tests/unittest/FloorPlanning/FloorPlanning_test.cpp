@@ -4,6 +4,7 @@
 #include <FloorPlanning/QdcSerializer.h>
 #include <FloorPlanning/RtlInstanceModel.h>
 #include <FloorPlanning/Partition.h>
+#include <FloorPlanning/PackOverflow.h>
 #include <FloorPlanning/FloorPlanningWidget.h>
 #include <FloorPlanning/PartitionsListWidget.h>
 #include <FloorPlanning/SelectedResourcesWidget.h>
@@ -2514,4 +2515,88 @@ TEST(PartitionsListWidget, EveryResourceColumnHeaderExplainsItself)
     // The measured column must not be mistaken for another estimate.
     EXPECT_TRUE(table->horizontalHeaderItem(4)->toolTip().contains("ACTUALLY"));
     EXPECT_TRUE(table->horizontalHeaderItem(4)->text() == "Placed");
+}
+
+// Lines from picosoc_regions' failed pack on 2026-11-09: VPR retries, and only its last
+// attempt says how many blocks the partition really needs.
+namespace {
+
+const char* kOverfullPackLog = R"(Begin packing 'picosoc_regions_post_synth.blif'.
+A partition including the following regions has been assigned 7 blocks of type clb, but only has 4 tiles of that type
+	Region (10, 20, 0) to (10, 37, 0) st -1 
+	Region (11, 34, 0) to (11, 37, 0) st -1 
+A partition including the following regions has been assigned 3 blocks of type clb, but only has 2 tiles of that type
+	Region (2, 2, 0) to (3, 2, 0) st -1 
+Floorplan regions are overfull: trying to pack again using cluster attraction groups. 
+A partition including the following regions has been assigned 5 blocks of type clb, but only has 4 tiles of that type
+	Region (10, 20, 0) to (10, 37, 0) st -1 
+	Region (11, 34, 0) to (11, 37, 0) st -1 
+Floorplan regions are overfull: trying to pack again with more attraction groups exploration and higher pull. 
+Error 1: 
+Type: Other
+Message: Failed to find pack clusters densely enough to fit in the designated floorplan regions.
+A partition including the following regions has been assigned 5 blocks of type clb, but only has 4 tiles of that type
+	Region (10, 20, 0) to (10, 37, 0) st -1 
+	Region (11, 34, 0) to (11, 37, 0) st -1 
+)";
+
+const char* kOverfullConstraints = R"(<vpr_constraints tool_name="vpr">
+    <partition_list>
+        <partition name="p_mul">
+            <add_atom name_pattern="^soc\.cpu(\..*)?$" is_regex="true"/>
+            <add_region x_low="2" x_high="3" y_low="2" y_high="2" subtile="-1"/>
+        </partition>
+        <partition name="p_brams">
+            <add_atom name_pattern="^soc\.memory(\..*)?$" is_regex="true"/>
+            <add_region x_low="10" x_high="10" y_low="20" y_high="37" subtile="-1"/>
+            <add_region x_low="11" x_high="11" y_low="34" y_high="37" subtile="-1"/>
+        </partition>
+    </partition_list>
+</vpr_constraints>
+)";
+
+}  // namespace
+
+TEST(PackOverflow, NamesThePartitionVprCouldNotFit)
+{
+    const std::vector<fp::PackOverflow> found =
+        fp::findPackOverflows(kOverfullPackLog, kOverfullConstraints);
+    ASSERT_EQ(found.size(), 1u) << "p_mul was overfull only in an earlier attempt";
+    EXPECT_EQ(found[0].partition, "p_brams");
+    EXPECT_EQ(found[0].tileType, "clb");
+    EXPECT_EQ(found[0].assigned, 5) << "the last attempt's count, not the first one's 7";
+    EXPECT_EQ(found[0].available, 4);
+}
+
+TEST(PackOverflow, TheMessageSaysWhichPartitionToExtend)
+{
+    const fp::PackOverflow overflow{"p_brams", "clb", 5, 4, {}};
+    EXPECT_EQ(fp::packOverflowMessage(overflow),
+              "Partition 'p_brams' needs 5 clb tiles after packing but only 4 available. "
+              "Extend its regions.");
+}
+
+TEST(PackOverflow, RegionsInNoPartitionAreListedInstead)
+{
+    const std::vector<fp::PackOverflow> found =
+        fp::findPackOverflows(kOverfullPackLog, "<vpr_constraints/>");
+    ASSERT_EQ(found.size(), 1u);
+    EXPECT_EQ(found[0].partition, "");
+    EXPECT_EQ(fp::packOverflowMessage(found[0]),
+              "Partition with regions (10,20):(10,37) (11,34):(11,37) needs 5 clb tiles after "
+              "packing but only 4 available. Extend its regions.");
+}
+
+TEST(PackOverflow, ALogWithoutOverfullRegionsFindsNothing)
+{
+    EXPECT_TRUE(fp::findPackOverflows("Begin packing.\nVPR succeeded\n", kOverfullConstraints)
+                    .empty());
+}
+
+TEST(PackOverflow, TheNoteExplainsWhyTheCheckCouldNotTell)
+{
+    const std::string note = fp::packOverflowNote();
+    EXPECT_NE(note.find("Note:"), std::string::npos);
+    EXPECT_NE(note.find("atoms"), std::string::npos);
+    EXPECT_NE(note.find("pins"), std::string::npos);
 }
