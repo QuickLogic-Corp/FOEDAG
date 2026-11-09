@@ -747,6 +747,8 @@ namespace {
 // below: if the constant there moves, the path checks fail rather than silently pass on an
 // unset role.
 constexpr int kRtlPathRoleForTest = Qt::UserRole + 104;
+// Mirrors kVprDisplayRowRole there: marks a row that lists one atom, not an instance.
+constexpr int kAtomRowRoleForTest = Qt::UserRole + 100;
 
 QStandardItem* childNamed(QStandardItem* parent, const QString& text)
 {
@@ -809,12 +811,49 @@ TEST(SynthResourceHierarchyTree, AParentListsTheAtomsNoChildHolds)
 
     QStringList atomRows;
     for (int row = 0; row < blockItem->rowCount(); ++row) {
-        if (blockItem->child(row, 0)->text().isEmpty()) {
+        if (blockItem->child(row, 0)->data(kAtomRowRoleForTest).toBool()) {
             atomRows << blockItem->child(row, 1)->text();
         }
     }
     EXPECT_EQ(atomRows, QStringList{"block_inst.Async_Flush_$lut_Y"});
     EXPECT_NE(childNamed(blockItem, "FIFO_INST"), nullptr);
+}
+
+TEST(SynthResourceHierarchyTree, AnAtomRowNamesTheInstanceItBelongsTo)
+{
+    // A parent's own atoms come after its children, so with the last child expanded they
+    // read as that child's. Each atom row names its owner, greyed, with the full path.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setAtomNames({
+        {"core", {"core.sel", "core.prod0[0]", "core.prod0[1]"}},
+        {"core.u_mul0", {"core.prod0[0]", "core.prod0[1]"}},
+    });
+    widget.build(fp::NaturalStringSet{"top", "core", "core.u_mul0"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    QStandardItem* coreItem = childNamed(model->invisibleRootItem()->child(0, 0), "core");
+    ASSERT_NE(coreItem, nullptr);
+    QStandardItem* mulItem = childNamed(coreItem, "u_mul0");
+    ASSERT_NE(mulItem, nullptr);
+
+    const auto expectOwner = [](QStandardItem* parent, const QString& name,
+                                const QString& path) {
+        int atomRows = 0;
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            QStandardItem* cell = parent->child(row, 0);
+            if (!cell->data(kAtomRowRoleForTest).toBool()) continue;
+            ++atomRows;
+            EXPECT_EQ(cell->text(), name);
+            EXPECT_EQ(cell->toolTip(), path);
+            EXPECT_TRUE(cell->font().italic());
+            EXPECT_NE(cell->foreground().style(), Qt::NoBrush);
+        }
+        EXPECT_GT(atomRows, 0) << path.toStdString();
+    };
+    expectOwner(coreItem, "core", "core");
+    expectOwner(mulItem, "u_mul0", "core.u_mul0");
 }
 
 TEST(SynthResourceHierarchyTree, RtlNamesCannotBeEdited)

@@ -1260,14 +1260,22 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         return primitive;
     };
 
-    // One child row per atom, so each can be selected and copied.
+    // One child row per atom, so each can be selected and copied. Its RTL Names cell names
+    // the owner: a parent's own atoms follow its children, and would otherwise read as the
+    // last child's.
     auto appendAtomRows = [&atomTile, &atomPrimitive](QStandardItem* parent,
+                                                      const std::string& ownerPath,
                                                       const std::vector<std::string>& atoms,
                                                       const std::map<std::string, int>& resourceTypes) {
+        QFont ownerFont = parent->font();
+        ownerFont.setItalic(true);
         for (const auto& n : atoms) {
-            auto* col0 = new QStandardItem();
+            auto* col0 = new QStandardItem(parent->text());
             col0->setFlags(Qt::ItemIsEnabled);
             col0->setData(true, kVprDisplayRowRole);
+            col0->setFont(ownerFont);
+            col0->setForeground(QBrush(Qt::gray));
+            col0->setToolTip(QString::fromStdString(ownerPath));
             auto* col1 = new QStandardItem(QString::fromStdString(n));
             col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             auto* col2 = new QStandardItem(atomTile(n));
@@ -1335,7 +1343,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                         for (const auto& n : names) tiles.insert(atomTile(n));
                         if (QStandardItem* typeItem = item->child(row, Column::AtomType))
                             typeItem->setText(QStringList(tiles.begin(), tiles.end()).join(", "));
-                        appendAtomRows(child, names, resourceTypes);
+                        appendAtomRows(child, path, names, resourceTypes);
                     }
                 } else {
                     // Non-leaf: its own Atom List/Type cells stay empty, but the atoms no
@@ -1353,7 +1361,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                         if (heldByChildren.count(n) == 0) own.push_back(n);
                     }
                     populateRecursive(child, path);
-                    appendAtomRows(child, own, resourceTypes);
+                    appendAtomRows(child, path, own, resourceTypes);
                     continue;
                 }
             }
