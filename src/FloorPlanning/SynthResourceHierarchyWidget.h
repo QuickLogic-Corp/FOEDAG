@@ -128,9 +128,18 @@ public:
      void partitionElementsChanged(PartitionPtr);
 
 private:
+    // Selects the instance holding the next atom whose name contains `text`.
+    void findAtom(const QString& text);
+    // Shows only the instances holding an atom whose name contains `text`, and those atoms.
+    void showItemsWithAtom(const QString& text);
+
     int m_flags = Flag::None;
     CheckableButton* m_bnExpandCollapse{nullptr};
     QLineEdit* m_leFilter{nullptr};
+    // Debug: shown with the Atom List column. See findAtom().
+    QLineEdit* m_leFindAtom{nullptr};
+    QString m_findAtomText;
+    int m_findAtomHit = -1;
     QString m_viewLabelTemplate;
     QLabel* m_lbView{nullptr};
     QTreeView* m_view{nullptr};

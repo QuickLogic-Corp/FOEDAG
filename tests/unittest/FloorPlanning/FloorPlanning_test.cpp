@@ -12,6 +12,7 @@
 #include <QPoint>
 #include <QApplication>
 #include <QItemSelectionModel>
+#include <QLineEdit>
 #include <QSplitter>
 #include <QToolBar>
 #include <QTabWidget>
@@ -904,6 +905,153 @@ struct PatternTree {
 };
 
 }  // namespace
+
+namespace {
+
+struct FindAtomTree {
+    fp::SynthResourceHierarchyWidget widget;
+    QLineEdit* find = nullptr;
+    QTreeView* view = nullptr;
+
+    FindAtomTree() {
+        widget.setTopInstance("top");
+        widget.setAtomNames({
+            {"core", {"core.sel", "core.prod0[0]", "core.prod0[1]", "core.mem_dout[0]"}},
+            {"core.u_mul0", {"core.prod0[0]", "core.prod0[1]"}},
+            {"core.u_mem", {"core.mem_dout[0]"}},
+        });
+        widget.build(fp::NaturalStringSet{"top", "core", "core.u_mul0", "core.u_mem"});
+        widget.setAtomListVisible(true);
+        find = widget.findChild<QLineEdit*>("findAtom");
+        view = widget.findChild<QTreeView*>();
+    }
+
+    void search(const QString& text) {
+        find->setText(text);
+        emit find->returnPressed();
+    }
+
+    QString currentPath() const {
+        return view->currentIndex().siblingAtColumn(0).data(kRtlPathRoleForTest).toString();
+    }
+
+    QStandardItem* item(const QString& path) const {
+        auto* model = widget.findChild<QStandardItemModel*>();
+        return itemWithPath(model->invisibleRootItem(), path);
+    }
+
+    bool hidden(QStandardItem* row) const {
+        const QModelIndex parent = row->parent() ? row->parent()->index() : QModelIndex();
+        return view->isRowHidden(row->row(), parent);
+    }
+
+    QStringList visibleAtomRows(const QString& path) const {
+        QStringList atoms;
+        QStandardItem* parent = item(path);
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            if (parent->child(row, 0)->data(kAtomRowRoleForTest).toBool() &&
+                !view->isRowHidden(row, parent->index())) {
+                atoms << parent->child(row, 1)->text();
+            }
+        }
+        return atoms;
+    }
+
+    QStringList selectedAtoms() const {
+        QStringList atoms;
+        for (const QModelIndex& row : view->selectionModel()->selectedRows(1)) {
+            atoms << row.data().toString();
+        }
+        return atoms;
+    }
+};
+
+}  // namespace
+
+TEST(SynthResourceHierarchyTree, FindAtomSelectsTheInstanceThatHoldsIt)
+{
+    FindAtomTree tree;
+    ASSERT_NE(tree.find, nullptr);
+
+    tree.search("prod0[1]");
+    EXPECT_EQ(tree.currentPath(), QString("core.u_mul0"));
+    EXPECT_TRUE(tree.selectedAtoms().contains("core.prod0[1]"));
+    EXPECT_TRUE(tree.view->isExpanded(tree.view->currentIndex()));
+}
+
+TEST(SynthResourceHierarchyTree, FindAtomMatchesALeafWithOneAtom)
+{
+    FindAtomTree tree;
+    tree.search("MEM_DOUT");
+    EXPECT_EQ(tree.currentPath(), QString("core.u_mem"));
+}
+
+TEST(SynthResourceHierarchyTree, FindAtomAgainMovesToTheNextMatch)
+{
+    FindAtomTree tree;
+    tree.search("prod0");
+    EXPECT_TRUE(tree.selectedAtoms().contains("core.prod0[0]"));
+    tree.search("prod0");
+    EXPECT_TRUE(tree.selectedAtoms().contains("core.prod0[1]"));
+    tree.search("prod0");
+    EXPECT_TRUE(tree.selectedAtoms().contains("core.prod0[0]"));
+}
+
+TEST(SynthResourceHierarchyTree, FindAtomFiltersToTheInstancesHoldingAMatch)
+{
+    FindAtomTree tree;
+    tree.find->setText("prod0");
+
+    EXPECT_FALSE(tree.hidden(tree.item("core")));
+    EXPECT_FALSE(tree.hidden(tree.item("core.u_mul0")));
+    EXPECT_TRUE(tree.hidden(tree.item("core.u_mem")));
+    EXPECT_TRUE(tree.view->isExpanded(tree.item("core.u_mul0")->index()));
+    EXPECT_EQ(tree.visibleAtomRows("core.u_mul0"),
+              (QStringList{"core.prod0[0]", "core.prod0[1]"}));
+    EXPECT_EQ(tree.visibleAtomRows("core"), QStringList{});
+
+    tree.find->setText("prod0[1]");
+    EXPECT_EQ(tree.visibleAtomRows("core.u_mul0"), QStringList{"core.prod0[1]"});
+}
+
+TEST(SynthResourceHierarchyTree, ClearingFindAtomShowsEveryInstanceAgain)
+{
+    FindAtomTree tree;
+    tree.find->setText("prod0");
+    tree.find->clear();
+
+    EXPECT_FALSE(tree.hidden(tree.item("core.u_mem")));
+    EXPECT_EQ(tree.visibleAtomRows("core"), QStringList{"core.sel"});
+}
+
+TEST(SynthResourceHierarchyTree, FindAtomFilterSurvivesTheAtomListBeingReapplied)
+{
+    // build() re-applies setAtomListVisible(true), which would show every atom row again.
+    FindAtomTree tree;
+    tree.find->setText("prod0[1]");
+    tree.widget.setAtomListVisible(true);
+
+    EXPECT_TRUE(tree.hidden(tree.item("core.u_mem")));
+    EXPECT_EQ(tree.visibleAtomRows("core.u_mul0"), QStringList{"core.prod0[1]"});
+}
+
+TEST(SynthResourceHierarchyTree, HidingTheAtomListClearsFindAtom)
+{
+    FindAtomTree tree;
+    tree.find->setText("prod0");
+    tree.widget.setAtomListVisible(false);
+
+    EXPECT_TRUE(tree.find->text().isEmpty());
+    EXPECT_FALSE(tree.hidden(tree.item("core.u_mem")));
+}
+
+TEST(SynthResourceHierarchyTree, FindAtomShowsOnlyWithTheAtomList)
+{
+    FindAtomTree tree;
+    EXPECT_FALSE(tree.find->isHidden());
+    tree.widget.setAtomListVisible(false);
+    EXPECT_TRUE(tree.find->isHidden());
+}
 
 TEST(SynthResourceHierarchyTree, APatternPartitionTicksTheRowsItMatches)
 {

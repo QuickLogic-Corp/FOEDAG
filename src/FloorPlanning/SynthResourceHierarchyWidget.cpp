@@ -337,6 +337,19 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
       toolbarLayout->addStretch();
     }
 
+    m_leFindAtom = new QLineEdit;
+    m_leFindAtom->setObjectName("findAtom");
+    m_leFindAtom->setPlaceholderText(tr("Find atom"));
+    m_leFindAtom->setClearButtonEnabled(true);
+    m_leFindAtom->setToolTip(tr("Shows only the RTL instances holding an atom whose name "
+                                "contains this text. Enter selects the next match."));
+    m_leFindAtom->setHidden(true);
+    toolbarLayout->addWidget(m_leFindAtom);
+    QObject::connect(m_leFindAtom, &QLineEdit::returnPressed, this,
+                     [this]() { findAtom(m_leFindAtom->text()); });
+    QObject::connect(m_leFindAtom, &QLineEdit::textChanged, this,
+                     [this](const QString& text) { showItemsWithAtom(text); });
+
     layout->addWidget(m_lbView);
     m_lbView->setVisible(false); // optionally activated by method
 
@@ -1101,18 +1114,79 @@ void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, Ins
     m_verdicts = std::move(verdicts);
 }
 
+void SynthResourceHierarchyWidget::findAtom(const QString& text)
+{
+    if (text.isEmpty()) return;
+
+    // (instance row, row showing the atom): the same row for a leaf with a single atom.
+    std::vector<std::pair<QModelIndex, QModelIndex>> hits;
+    std::function<void(const QModelIndex&)> walk = [&](const QModelIndex& parent) {
+        for (int row = 0; row < m_model->rowCount(parent); ++row) {
+            if (m_view->isRowHidden(row, parent)) continue;
+            const QModelIndex idx = m_model->index(row, Column::Netlist, parent);
+            const QString atom = m_model->index(row, Column::AtomList, parent).data().toString();
+            if (atom.contains(text, Qt::CaseInsensitive)) {
+                const bool atomRow = isVprDisplayRow(m_model->itemFromIndex(idx));
+                hits.emplace_back(atomRow ? parent : idx, idx);
+            }
+            walk(idx);
+        }
+    };
+    walk(QModelIndex());
+    if (hits.empty()) {
+        m_findAtomHit = -1;
+        return;
+    }
+
+    m_findAtomHit = (text == m_findAtomText) ? (m_findAtomHit + 1) % int(hits.size()) : 0;
+    m_findAtomText = text;
+    const auto& [instance, atom] = hits[m_findAtomHit];
+    for (QModelIndex p = atom.parent(); p.isValid(); p = p.parent()) {
+        m_view->expand(p);
+    }
+    m_view->selectionModel()->setCurrentIndex(
+        instance, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    m_view->selectionModel()->select(atom, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    m_view->scrollTo(atom);
+}
+
+void SynthResourceHierarchyWidget::showItemsWithAtom(const QString& text)
+{
+    if (text.isEmpty()) {
+        showAllItems();
+        return;
+    }
+    // Returns whether anything under `parent` matched.
+    std::function<bool(const QModelIndex&)> filter = [&](const QModelIndex& parent) {
+        bool any = false;
+        for (int row = 0; row < m_model->rowCount(parent); ++row) {
+            const QModelIndex idx = m_model->index(row, Column::Netlist, parent);
+            const QString atom = m_model->index(row, Column::AtomList, parent).data().toString();
+            const bool self = atom.contains(text, Qt::CaseInsensitive);
+            const bool below = filter(idx);
+            m_view->setRowHidden(row, parent, !(self || below));
+            if (below) m_view->expand(idx);
+            any = any || self || below;
+        }
+        return any;
+    };
+    filter(QModelIndex());
+}
+
 void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
 {
     m_atomListVisible = visible;
+    m_leFindAtom->setHidden(!visible);
+    if (!visible) m_leFindAtom->clear();
     // Kept as a member and re-applied from build() too: the model is cleared there, which
     // rebuilds the header sections and loses their hidden flags.
     m_view->setColumnHidden(Column::AtomList, !visible);
     m_view->setColumnHidden(Column::Primitive, !visible);
 
     // A multi-atom leaf gets one child row per atom, and those rows carry nothing but the
-    // atom name, type and primitive -- their first column is deliberately blank. Hiding only the
-    // columns therefore left a run of empty placeholder rows under such a leaf. Hide the
-    // rows as well, so the tree shows RTL instances and nothing else.
+    // atom name, type and primitive -- their first column only repeats the owner. Hiding only
+    // the columns therefore left a run of repeated rows under such a leaf. Hide the rows as
+    // well, so the tree shows RTL instances and nothing else.
     std::function<void(QStandardItem*)> applyRecursive =
         [&applyRecursive, this, visible](QStandardItem* item)
     {
@@ -1132,6 +1206,9 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
         }
     };
     applyRecursive(m_model->invisibleRootItem());
+    if (visible && !m_leFindAtom->text().isEmpty()) {
+        showItemsWithAtom(m_leFindAtom->text());
+    }
     fitColumns();
 }
 
