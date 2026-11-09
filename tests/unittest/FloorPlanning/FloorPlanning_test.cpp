@@ -2678,3 +2678,95 @@ TEST(PackOverflow, APlacedDesignHasNoUnplacedBlocks)
                                        kUnplacedConstraints)
                     .empty());
 }
+
+TEST(AtomSets, ConflictsNameTheAtomAndBothInstances)
+{
+    const auto path = writeQdc("fp_atomsets_conflicts", R"({
+      "atomsets": {},
+      "conflicts": [
+        {"atom": "system_cpu._zz_143_sdffre_Q", "assigned_to": "system_cpu",
+         "scopename_claims": "systemDebugger_1"}
+      ]
+    })");
+
+    std::vector<fp::AtomConflict> conflicts;
+    ASSERT_TRUE(fp::loadAtomConflicts(path, conflicts));
+    ASSERT_EQ(conflicts.size(), 1u);
+    EXPECT_EQ(conflicts[0].atom, "system_cpu._zz_143_sdffre_Q");
+    EXPECT_EQ(conflicts[0].assignedTo, "system_cpu");
+    EXPECT_EQ(conflicts[0].scopeClaims, "systemDebugger_1");
+}
+
+TEST(AtomSets, AFileWithNoConflictsHasNone)
+{
+    const auto path = writeQdc("fp_atomsets_no_conflicts", R"({"atomsets": {}})");
+    std::vector<fp::AtomConflict> conflicts;
+    EXPECT_TRUE(fp::loadAtomConflicts(path, conflicts));
+    EXPECT_TRUE(conflicts.empty());
+}
+
+namespace {
+
+constexpr int kExplanationRoleForTest = Qt::UserRole + 102;
+// Mirrors the widget's private Column::Why.
+constexpr int kWhyColumnForTest = 4;
+
+QStandardItem* whyCellOf(QStandardItemModel* model, const QString& name)
+{
+    QStandardItem* top = model->invisibleRootItem()->child(0, 0);
+    for (int row = 0; row < top->rowCount(); ++row) {
+        if (top->child(row, 0) && top->child(row, 0)->text() == name)
+            return top->child(row, kWhyColumnForTest);
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+TEST(SynthResourceHierarchyTree, APartialRowExplainsItsDisputedAtoms)
+{
+    // murax: one flop is counted in system_cpu by its name, but Yosys's scope puts it in
+    // systemDebugger_1. Both rows are partial; the "?" has to name the atom and both sides.
+    const fp::AtomConflict conflict{"system_cpu._zz_143_sdffre_Q", "system_cpu",
+                                    "systemDebugger_1"};
+    const std::string warning = "check 2b: 1 atom(s) where prefix and scopename disagree";
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("Murax");
+    widget.setInstanceVerdicts({
+        {"system_cpu", fp::InstanceVerdict{"partial", warning, {conflict}}},
+        {"systemDebugger_1", fp::InstanceVerdict{"partial", warning, {conflict}}},
+    });
+    widget.build(fp::NaturalStringSet{"Murax", "system_cpu", "systemDebugger_1"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    for (const QString name : {QString("system_cpu"), QString("systemDebugger_1")}) {
+        QStandardItem* why = whyCellOf(model, name);
+        ASSERT_NE(why, nullptr) << name.toStdString();
+        EXPECT_EQ(why->text(), "?") << name.toStdString();
+        const QString body = why->data(kExplanationRoleForTest).toString();
+        EXPECT_TRUE(body.contains("system_cpu._zz_143_sdffre_Q")) << body.toStdString();
+        EXPECT_TRUE(body.contains("counted in system_cpu")) << body.toStdString();
+        EXPECT_TRUE(body.contains("scope says systemDebugger_1")) << body.toStdString();
+    }
+}
+
+TEST(SynthResourceHierarchyTree, APartialRowsTooltipNamesTheFailedCheck)
+{
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setInstanceVerdicts(
+        {{"core", fp::InstanceVerdict{"partial", "check 2: hdlname disagrees", {}}}});
+    widget.build(fp::NaturalStringSet{"top", "core"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    QStandardItem* core = childNamed(model->invisibleRootItem()->child(0, 0), "core");
+    ASSERT_NE(core, nullptr);
+    EXPECT_TRUE(core->toolTip().contains("check 2: hdlname disagrees"))
+        << core->toolTip().toStdString();
+    QStandardItem* why = whyCellOf(model, "core");
+    ASSERT_NE(why, nullptr);
+    EXPECT_EQ(why->text(), "?");
+    EXPECT_TRUE(why->data(kExplanationRoleForTest).toString().contains("check 2: hdlname"));
+}

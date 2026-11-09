@@ -38,6 +38,17 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
                   AtomResourceMap& atomResources, int& atomsPerTile);
 
+// An atom whose name puts it in one instance while Yosys's scopename puts it in another:
+// synthesis moved or merged it across that boundary. It is counted in assignedTo.
+struct AtomConflict {
+    std::string atom;
+    std::string assignedTo;
+    std::string scopeClaims;
+};
+
+// Reads atomsets.json's "conflicts". A file without that list has none.
+bool loadAtomConflicts(const std::filesystem::path& path, std::vector<AtomConflict>& conflicts);
+
 // [aurora2#2377] Atom name -> its real Yosys cell type ("sdffre", "$lut",
 // "TDP_ECC36K_FIFO_ASYNC_...", ...), read from <top>_post_synth_debug.json -- the full
 // write_json netlist dump floorplanning_post_synth.tcl produces alongside atomsets.json.

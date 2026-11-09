@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AtomSets.h"
+
 #include <string>
 #include <vector>
 #include <set>
@@ -82,6 +84,7 @@ struct DesignResources {
 struct InstanceVerdict {
     std::string verdict;   // "complete" | "partial" | "deleted" | "unknown"
     std::string reason;    // why it was deleted, or which check failed
+    std::vector<AtomConflict> conflicts;  // atoms this instance disputes with another
 };
 
 // [aurora2#1725 stage P7] Where one constrained instance's atoms actually ended up, from

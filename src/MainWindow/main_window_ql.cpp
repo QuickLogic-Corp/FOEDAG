@@ -2450,7 +2450,16 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // what builds them: build() grades each row as it goes.
   std::map<std::string, fp::InstanceVerdict> verdicts;
   for (const fp::RtlInstance& instance : rtlModel.instances()) {
-    verdicts[instance.path] = fp::InstanceVerdict{instance.status, instance.statusReason};
+    verdicts[instance.path] = fp::InstanceVerdict{instance.status, instance.statusReason, {}};
+  }
+  std::vector<fp::AtomConflict> conflicts;
+  fp::loadAtomConflicts(atomsetsJsonPath, conflicts);
+  for (const fp::AtomConflict& conflict : conflicts) {
+    for (const std::string& side : {conflict.assignedTo, conflict.scopeClaims}) {
+      if (const auto it = verdicts.find(side); it != verdicts.end()) {
+        it->second.conflicts.push_back(conflict);
+      }
+    }
   }
   m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
 

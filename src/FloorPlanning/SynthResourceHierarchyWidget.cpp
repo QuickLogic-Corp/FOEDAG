@@ -1289,9 +1289,36 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
                     }
                 } else if (graded.verdict == "partial") {
                     child->setForeground(QBrush(QColor(0xB8, 0x86, 0x0B)));  // dark goldenrod
-                    child->setToolTip(
-                        tr("This instance can be constrained, but its atom set may be\n"
-                           "incomplete, so its resource figures are a lower bound."));
+                    QString tip = tr("This instance can be constrained, but its atom set may be\n"
+                                     "incomplete, so its resource figures are a lower bound.");
+                    if (!reason.isEmpty()) tip += QStringLiteral("\n\n") + reason;
+                    child->setToolTip(tip + tr("\nClick ? for details."));
+
+                    QStringList lines;
+                    lines << tr("Instance: %1").arg(QString::fromStdString(path));
+                    lines << QString();
+                    lines << tr("Its atom set may be incomplete.");
+                    if (!reason.isEmpty()) lines << tr("Failed check: %1").arg(reason);
+                    if (!graded.conflicts.empty()) {
+                        lines << QString();
+                        lines << tr("%n atom(s) where the name and the Yosys scope disagree:",
+                                    nullptr, static_cast<int>(graded.conflicts.size()));
+                        for (const AtomConflict& conflict : graded.conflicts) {
+                            lines << QStringLiteral("  ") + QString::fromStdString(conflict.atom);
+                            lines << tr("    counted in %1 (by name)")
+                                         .arg(QString::fromStdString(conflict.assignedTo));
+                            lines << tr("    scope says %1")
+                                         .arg(QString::fromStdString(conflict.scopeClaims));
+                        }
+                        lines << QString();
+                        lines << tr("Synthesis moved or merged these cells across the boundary.");
+                        lines << tr("Each one is pinned with the instance that counts it.");
+                        lines << tr("Usually harmless. To keep one with the other instance, "
+                                    "add the atom to that partition by name.");
+                    }
+                    setExplanation(item->child(row, Column::Why),
+                                   tr("Why partial: %1").arg(QString::fromStdString(path)),
+                                   lines.join(QStringLiteral("\n")));
                 }
             }
 
