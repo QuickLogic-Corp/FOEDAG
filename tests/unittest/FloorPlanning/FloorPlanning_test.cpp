@@ -2158,6 +2158,18 @@ TEST(SelectedResources, TallyCountsAtomsByTypeAndRoundsClbUp)
     EXPECT_EQ(fp::tallyResources({"i.n0_$lut"}, 0).clbTiles, 1);
 }
 
+TEST(SelectedResources, ASimpleDualPortBramCountsAsBram)
+{
+    // deep_hierarchy's memSys maps to SDP_ECC36K (simple dual port), not TDP_ECC36K.
+    const fp::AtomTypeMap types{
+        {"dut.memSys.ram0", "SDP_ECC36K_BRAM_A1_X18_B1_X18_A2_X18_B2_X18_split"},
+        {"dut.memSys.ram1", "TDP_ECC36K_BRAM_A_X36_B_X36_nonsplit"}};
+    const fp::ResourceTally tally =
+        fp::tallyResources({"dut.memSys.ram0", "dut.memSys.ram1"}, 14, types, {});
+    EXPECT_EQ(tally.bram, 2);
+    EXPECT_EQ(tally.clbAtoms, 0);
+}
+
 TEST(SelectedResources, SelectingInstancesTalliesWhatTheyCost)
 {
     fp::Partition::setAtomsPerTile(14);
