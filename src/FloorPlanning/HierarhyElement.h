@@ -13,8 +13,8 @@ namespace fp {
 // Classifies an atom by the hard-block primitive embedded in its name (see
 // dspv2_sim.v / QL_DSP4_leaves.v / brams_final_map.v in the device data): every DSP
 // primitive is named "QL_DSP*" (QL_DSPV2, and the QL_DSP4_* leaves), and every BRAM macro
-// techmaps down to "TDP_ECC36K" or, simple dual port, "SDP_ECC36K". Anything else (luts, adder_carry, sdffre, ...) packs
-// into ordinary CLB fabric.
+// techmaps down to a type isBramCellType() accepts. Anything else (luts, adder_carry,
+// sdffre, ...) packs into ordinary CLB fabric.
 //
 // [aurora2#2377] realType, when known, is checked instead of atomName: a hard macro
 // instance (a BRAM, say) keeps its original RTL instance name through synthesis rather
@@ -26,10 +26,22 @@ namespace fp {
 //
 // Shared between the Atom List column (SynthResourceHierarchyWidget) and Partition's
 // running clb/dsp/bram counts, so the two can never disagree on what an atom is.
+// The BRAM cell types the ql-qlf yosys plugin emits: TDP36K, SDP36K, TDP_ECC36K or
+// SDP_ECC36K, alone or followed by "_BRAM_..." or "_FIFO_..." (ql_*bram*_types.cc).
+inline bool isBramCellType(const std::string& type) {
+    if ((type.rfind("TDP", 0) != 0) && (type.rfind("SDP", 0) != 0)) return false;
+    std::size_t at = 3;
+    if (type.compare(at, 4, "_ECC") == 0) at += 4;
+    if (type.compare(at, 3, "36K") != 0) return false;
+    at += 3;
+    return (at == type.size()) || (type[at] == '_');
+}
+
 inline QString classifyAtomType(const std::string& atomName, const std::string& realType = "") {
     const std::string& probe = !realType.empty() ? realType : atomName;
     if (probe.find("QL_DSP") != std::string::npos) return "dsp";
-    if (probe.find("DP_ECC36K") != std::string::npos) return "bram";
+    if (!realType.empty()) return isBramCellType(realType) ? "bram" : "clb";
+    if (atomName.find("DP_ECC36K") != std::string::npos) return "bram";
     return "clb";
 }
 

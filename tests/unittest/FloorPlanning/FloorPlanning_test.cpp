@@ -2170,6 +2170,31 @@ TEST(SelectedResources, ASimpleDualPortBramCountsAsBram)
     EXPECT_EQ(tally.clbAtoms, 0);
 }
 
+TEST(SelectedResources, EveryBramCellTypeTheQlfPluginEmitsCountsAsBram)
+{
+    // The type names ql_bram_types, ql_sdp_bram_types, ql_bramecc_types and
+    // ql_sdp_bramecc_types build: a base, BRAM or FIFO mode, then widths and split mode.
+    // A FIFO takes a BRAM tile too. The bare base is a cell without MODE_BITS.
+    const std::vector<std::string> brams{
+        "TDP_ECC36K_BRAM_A1_X18_B1_X18_A2_X18_B2_X18_split",
+        "TDP_ECC36K_FIFO_ASYNC_A_X36_B_X36_nonsplit",
+        "SDP_ECC36K_BRAM_A_X36_B_X36_nonsplit",
+        "SDP_ECC36K_FIFO_SYNC_A1_X9_B1_X9_A2_X9_B2_X9_split",
+        "TDP36K_BRAM_A_X18_B_X36_nonsplit",
+        "TDP36K_FIFO_SYNC_A1_X18_B1_X18_A2_X18_B2_X18_split",
+        "SDP36K_BRAM_A1_X9_B1_X18_A2_X9_B2_X18_split",
+        "SDP36K_FIFO_ASYNC_A_X36_B_X36_nonsplit",
+        "TDP_ECC36K", "SDP_ECC36K", "TDP36K", "SDP36K"};
+    for (const std::string& type : brams) {
+        EXPECT_EQ(fp::classifyAtomType("u.mem", type), "bram") << type;
+    }
+
+    EXPECT_EQ(fp::classifyAtomType("u.mul", "QL_DSPV2_MULT"), "dsp");
+    for (const std::string type : {"$lut", "sdffre", "adder_carry", "TDP36KX", "MY_TDP36K"}) {
+        EXPECT_EQ(fp::classifyAtomType("u.x", type), "clb") << type;
+    }
+}
+
 TEST(SelectedResources, SelectingInstancesTalliesWhatTheyCost)
 {
     fp::Partition::setAtomsPerTile(14);
