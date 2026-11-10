@@ -2451,7 +2451,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   std::map<std::string, fp::InstanceVerdict> verdicts;
   for (const fp::RtlInstance& instance : rtlModel.instances()) {
     verdicts[instance.path] =
-        fp::InstanceVerdict{instance.status, instance.statusReason, instance.conflicts};
+        fp::InstanceVerdict{instance.status, instance.statusReason, instance.notes};
   }
   m_floorPlanningWidget->setInstanceVerdicts(std::move(verdicts));
 

@@ -79,19 +79,10 @@ struct DesignResources {
 // trees render it: greyed out when synthesis deleted it, flagged when its atom set is only
 // partially trustworthy. Lives here rather than on a widget because both the netlist tree and
 // the partition tree take it, and FloorPlanningWidget only forward-declares those.
-// An atom whose name puts it in one instance while Yosys's scopename puts it in another:
-// synthesis moved or merged it across that boundary. It is counted in assignedTo.
-struct AtomConflict {
-    std::string atom;
-    std::string assignedTo;
-    std::string scopeClaims;
-    std::string vprName;  // what a .qdc must name; empty when validation.json lacks it
-};
-
 struct InstanceVerdict {
     std::string verdict;   // "complete" | "partial" | "deleted" | "unknown"
     std::string reason;    // why it was deleted, or which check failed
-    std::vector<AtomConflict> conflicts;  // atoms this instance disputes with another
+    std::vector<std::string> notes;  // e.g. cells placed by their scopename, not their name
 };
 
 // [aurora2#1725 stage P7] Where one constrained instance's atoms actually ended up, from

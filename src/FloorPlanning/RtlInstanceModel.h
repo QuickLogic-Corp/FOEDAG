@@ -40,7 +40,7 @@ struct RtlInstance {
     // status must never be presented as usable -- absence of a verdict is not a pass.
     std::string status = "unknown";
     std::string statusReason;  // why it was deleted, or what check failed
-    std::vector<AtomConflict> conflicts;
+    std::vector<std::string> notes;
     int atomCount = -1;        // -1 = not known yet
 
     std::vector<std::string> children;  // direct children, by full path

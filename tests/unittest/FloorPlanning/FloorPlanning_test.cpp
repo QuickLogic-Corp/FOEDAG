@@ -615,16 +615,13 @@ const char* kInstancesJson = R"JSON({
 const char* kValidationJson = R"JSON({
   "netlist_sha256": "abc123",
   "instances": {
-    "i_mul_24":     { "verdict": "complete", "atom_count": 536, "checks": {} },
+    "i_mul_24":     { "verdict": "complete", "atom_count": 536, "checks": {},
+                      "notes": ["1 cell named under i_other is placed here, as Yosys's scope record (scopename) says"] },
     "i_serial_mul": { "verdict": "deleted", "atom_count": 0,
                       "reason": "no atoms in the netlist; synthesis reported 'Deleting now unused module serial_mul_default'" },
     "i_mul_24.i_inner": { "verdict": "partial", "atom_count": 12,
-                          "warnings": ["check 3 not run: [6] unavailable",
-                                       "check 2b: 1 atom(s) where prefix and scopename disagree"],
-                          "conflicts": [{ "atom": "i_mul_24.i_inner.q_sdffre_Q",
-                                          "assigned_to": "i_mul_24.i_inner",
-                                          "scopename_claims": "i_mul_24",
-                                          "vpr_name": "i_mul_24.i_inner.q" }] }
+                          "warnings": ["Unnamed-cell check not run: no instance list to compare against",
+                                       "1 net(s) whose hierarchy name (hdlname) says another instance"] }
   }
 })JSON";
 
@@ -1227,18 +1224,16 @@ TEST(RtlInstanceModel, MergedVerdictsDriveWhatThePanelCanShow)
     EXPECT_NE(deleted->statusReason.find("Deleting now unused module"), std::string::npos);
 
     // A partial instance is still constrainable, but the reason shown must be the real check
-    // failure, not the "check 3 not run" bookkeeping note.
+    // failure, not the "not run" bookkeeping note.
     const fp::RtlInstance* partial = model.find("i_mul_24.i_inner");
     ASSERT_NE(partial, nullptr);
     EXPECT_TRUE(partial->partial());
     EXPECT_TRUE(partial->constrainable());
-    EXPECT_NE(partial->statusReason.find("scopename"), std::string::npos);
+    EXPECT_NE(partial->statusReason.find("hdlname"), std::string::npos);
     EXPECT_EQ(partial->statusReason.find("not run"), std::string::npos);
-    ASSERT_EQ(partial->conflicts.size(), 1u);
-    EXPECT_EQ(partial->conflicts[0].atom, "i_mul_24.i_inner.q_sdffre_Q");
-    EXPECT_EQ(partial->conflicts[0].assignedTo, "i_mul_24.i_inner");
-    EXPECT_EQ(partial->conflicts[0].scopeClaims, "i_mul_24");
-    EXPECT_EQ(partial->conflicts[0].vprName, "i_mul_24.i_inner.q");
+
+    // A cell P3 moved by scopename is a note on a complete row, not a failed check.
+    EXPECT_EQ(complete->notes, (std::vector<std::string>{"1 cell named under i_other is placed here, as Yosys's scope record (scopename) says"}));
 }
 
 TEST(RtlInstanceModel, DeletedInstancesAreNotOfferedAsConstraintTargets)
@@ -2710,59 +2705,25 @@ QStandardItem* whyCellOf(QStandardItemModel* model, const QString& name)
 
 }  // namespace
 
-TEST(SynthResourceHierarchyTree, APartialRowExplainsItsDisputedAtoms)
+TEST(SynthResourceHierarchyTree, ACompleteRowShowsItsNoteAsTheTooltip)
 {
-    // murax: one flop is counted in system_cpu by its name, but Yosys's scope puts it in
-    // systemDebugger_1. Both rows are partial; the "?" has to name the atom and both sides.
-    const fp::AtomConflict conflict{"system_cpu._zz_143_sdffre_Q", "system_cpu",
-                                    "systemDebugger_1", "system_cpu._zz_143"};
-    const std::string warning = "check 2b: 1 atom(s) where prefix and scopename disagree";
+    // murax: flop system_cpu._zz_143 goes with systemDebugger_1, as its scopename says.
+    const std::string note = "1 cell named under system_cpu is placed with systemDebugger_1, "
+                             "as Yosys's scope record (scopename) says";
     fp::SynthResourceHierarchyWidget widget;
     widget.setTopInstance("Murax");
-    widget.setInstanceVerdicts({
-        {"system_cpu", fp::InstanceVerdict{"partial", warning, {conflict}}},
-        {"systemDebugger_1", fp::InstanceVerdict{"partial", warning, {conflict}}},
-    });
-    widget.build(fp::NaturalStringSet{"Murax", "system_cpu", "systemDebugger_1"});
-
-    auto* model = widget.findChild<QStandardItemModel*>();
-    ASSERT_NE(model, nullptr);
-    for (const QString name : {QString("system_cpu"), QString("systemDebugger_1")}) {
-        QStandardItem* why = whyCellOf(model, name);
-        ASSERT_NE(why, nullptr) << name.toStdString();
-        EXPECT_EQ(why->text(), "?") << name.toStdString();
-        const QString body = why->data(kExplanationRoleForTest).toString();
-        EXPECT_TRUE(body.contains("system_cpu._zz_143_sdffre_Q")) << body.toStdString();
-        EXPECT_TRUE(body.contains("counted in system_cpu")) << body.toStdString();
-        EXPECT_TRUE(body.contains("scope says systemDebugger_1")) << body.toStdString();
-        // The advice names the file and the name VPR matches, not the Yosys cell.
-        EXPECT_TRUE(body.contains(".qdc")) << body.toStdString();
-        EXPECT_TRUE(body.contains("set_region system_cpu._zz_143 ")) << body.toStdString();
-        EXPECT_FALSE(body.contains("set_region system_cpu._zz_143_sdffre_Q"));
-        // Both partitions then claim the atom; VPR keeps the last one in the XML.
-        EXPECT_TRUE(body.contains("_constraints.xml")) << body.toStdString();
-    }
-}
-
-TEST(SynthResourceHierarchyTree, WithoutVprNamesThePopupOffersNoQdcLine)
-{
-    // An older validation.json has no VPR names; a set_region with the cell name matches
-    // nothing, so the popup must not suggest one.
-    const fp::AtomConflict conflict{"system_cpu._zz_143_sdffre_Q", "system_cpu",
-                                    "systemDebugger_1", ""};
-    fp::SynthResourceHierarchyWidget widget;
-    widget.setTopInstance("Murax");
-    widget.setInstanceVerdicts(
-        {{"system_cpu", fp::InstanceVerdict{"partial", "check 2b", {conflict}}}});
+    widget.setInstanceVerdicts({{"system_cpu", fp::InstanceVerdict{"complete", "", {note}}}});
     widget.build(fp::NaturalStringSet{"Murax", "system_cpu"});
 
     auto* model = widget.findChild<QStandardItemModel*>();
     ASSERT_NE(model, nullptr);
+    QStandardItem* cpu = childNamed(model->invisibleRootItem()->child(0, 0), "system_cpu");
+    ASSERT_NE(cpu, nullptr);
+    EXPECT_TRUE(cpu->toolTip().contains(QString::fromStdString(note)))
+        << cpu->toolTip().toStdString();
     QStandardItem* why = whyCellOf(model, "system_cpu");
     ASSERT_NE(why, nullptr);
-    const QString body = why->data(kExplanationRoleForTest).toString();
-    EXPECT_TRUE(body.contains("system_cpu._zz_143_sdffre_Q")) << body.toStdString();
-    EXPECT_FALSE(body.contains("set_region")) << body.toStdString();
+    EXPECT_TRUE(why->text().isEmpty());
 }
 
 TEST(SynthResourceHierarchyTree, APartialRowsTooltipNamesTheFailedCheck)
@@ -2770,19 +2731,19 @@ TEST(SynthResourceHierarchyTree, APartialRowsTooltipNamesTheFailedCheck)
     fp::SynthResourceHierarchyWidget widget;
     widget.setTopInstance("top");
     widget.setInstanceVerdicts(
-        {{"core", fp::InstanceVerdict{"partial", "check 2: hdlname disagrees", {}}}});
+        {{"core", fp::InstanceVerdict{"partial", "1 net(s) whose hierarchy name (hdlname) says another instance", {}}}});
     widget.build(fp::NaturalStringSet{"top", "core"});
 
     auto* model = widget.findChild<QStandardItemModel*>();
     ASSERT_NE(model, nullptr);
     QStandardItem* core = childNamed(model->invisibleRootItem()->child(0, 0), "core");
     ASSERT_NE(core, nullptr);
-    EXPECT_TRUE(core->toolTip().contains("check 2: hdlname disagrees"))
+    EXPECT_TRUE(core->toolTip().contains("hierarchy name (hdlname)"))
         << core->toolTip().toStdString();
     QStandardItem* why = whyCellOf(model, "core");
     ASSERT_NE(why, nullptr);
     EXPECT_EQ(why->text(), "?");
-    EXPECT_TRUE(why->data(kExplanationRoleForTest).toString().contains("check 2: hdlname"));
+    EXPECT_TRUE(why->data(kExplanationRoleForTest).toString().contains("hierarchy name (hdlname)"));
 }
 
 // [aurora2#1725] Mouse modes of the device grid, matching the VPR viewer: the left button pans

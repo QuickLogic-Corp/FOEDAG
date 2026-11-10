@@ -173,21 +173,17 @@ bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
         const auto& verdict = it.value();
         instance.status = verdict.value("verdict", std::string{"unknown"});
         instance.atomCount = verdict.value("atom_count", -1);
-        instance.conflicts.clear();
-        if (verdict.contains("conflicts") && verdict["conflicts"].is_array()) {
-            for (const auto& entry : verdict["conflicts"]) {
-                if (!entry.is_object()) continue;
-                instance.conflicts.push_back({entry.value("atom", std::string{}),
-                                              entry.value("assigned_to", std::string{}),
-                                              entry.value("scopename_claims", std::string{}),
-                                              entry.value("vpr_name", std::string{})});
+        instance.notes.clear();
+        if (verdict.contains("notes") && verdict["notes"].is_array()) {
+            for (const auto& note : verdict["notes"]) {
+                if (note.is_string()) instance.notes.push_back(note.get<std::string>());
             }
         }
         if (verdict.contains("reason") && verdict["reason"].is_string()) {
             instance.statusReason = verdict["reason"].get<std::string>();
         } else if (verdict.contains("warnings") && verdict["warnings"].is_array()
                    && !verdict["warnings"].empty()) {
-            // Surface the first real warning; the "check 3 not run" note is bookkeeping
+            // Surface the first real warning; a "... not run" note is bookkeeping
             // rather than something the user needs in a tooltip.
             for (const auto& warning : verdict["warnings"]) {
                 const std::string text = warning.get<std::string>();
