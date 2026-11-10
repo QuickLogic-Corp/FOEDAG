@@ -182,20 +182,20 @@ void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
     update();
 }
 
-void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
+bool DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
 {
     if (!m_selectedPartition) {
-        return;
+        return false;
     }
 
     if (!m_newRegion) {
-        return;
+        return false;
     }
 
     std::unordered_map<Tile::Index, TilePtr> tiles = m_device.findTiles(m_newRegion->rect());
     if (tiles.empty()) {
         cancelRegionCreation();
-        return;
+        return false;
     }
 
     m_newRegion->accept(worldCoord, tiles);
@@ -206,7 +206,10 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
         reportPartitionChanges();
         m_newRegion.reset();
         update();
+        return true;
     }
+    cancelRegionCreation();
+    return false;
 }
 
 void DeviceGridWidget::selectRegion(const RegionPtr& region)
@@ -353,8 +356,7 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
           if (isClick(mousePos)) {
             cancelRegionCreation();  // a stray click keeps "+" armed
           } else {
-            stopRegionSelection(worldCoord);
-            if (!m_newRegion) {
+            if (stopRegionSelection(worldCoord)) {
               setDrawRegionMode(false);
               emit regionDrawn();
             }

@@ -2868,6 +2868,20 @@ TEST(DeviceGridMouse, AStrayClickInAddRegionModeKeepsTheMode)
     EXPECT_TRUE(f.grid.isDrawRegionModeActive());
 }
 
+TEST(DeviceGridMouse, ADiscardedRegionKeepsAddRegionOn)
+{
+    // A drag too small to cover a tile draws nothing, so "+" must stay armed for a retry.
+    GridFixture f;
+    f.grid.createNewPartition("p1");
+    QSignalSpy drawn(&f.grid, &fp::DeviceGridWidget::regionDrawn);
+    f.grid.setDrawRegionMode(true);
+    const QPointF at = f.tileCenter(2, 2);
+    leftDrag(&f.grid, at, at + QPointF(8, 8));
+    EXPECT_EQ(f.regionCount(), 0u);
+    EXPECT_EQ(drawn.count(), 0);
+    EXPECT_TRUE(f.grid.isDrawRegionModeActive());
+}
+
 TEST(DeviceGridMouse, AddRegionWithNoPartitionCreatesOneAndDraws)
 {
     GridFixture f;

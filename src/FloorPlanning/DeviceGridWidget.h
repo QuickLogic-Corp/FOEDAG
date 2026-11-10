@@ -188,7 +188,8 @@ private:
         const QPointF& worldCoord) const;
 
     void startNewRegionSelection(const QPointF& worldCoord);
-    void stopRegionSelection(const QPointF& worldCoord);
+    // True when the region was added; a drag covering no whole tile is discarded.
+    bool stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");
     void selectPartition(PartitionPtr partition);
     void selectRegion(const RegionPtr& region);
