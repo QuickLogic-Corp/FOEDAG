@@ -952,6 +952,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto ipgenerate = [](void* clientData, Tcl_Interp* interp, int argc,
                          const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
+      // As configure_ip does: a target device changed since then swaps the
+      // device catalog before anything is generated.
+      if (IPGenerator* generator = compiler->GetIPGenerator()) {
+        generator->LoadDefaultCatalogs();
+      }
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "clean") {
@@ -1263,6 +1268,11 @@ bool Compiler::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     auto ipgenerate = [](void* clientData, Tcl_Interp* interp, int argc,
                          const char* argv[]) -> int {
       Compiler* compiler = (Compiler*)clientData;
+      // As configure_ip does: a target device changed since then swaps the
+      // device catalog before anything is generated.
+      if (IPGenerator* generator = compiler->GetIPGenerator()) {
+        generator->LoadDefaultCatalogs();
+      }
       for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "clean") {
@@ -2296,7 +2306,40 @@ void Compiler::finish() {
   if (m_tclInterpreterHandler) m_tclInterpreterHandler->notifyFinish();
 }
 
+bool Compiler::hasOpenProject() const {
+  return m_projManager && !m_projManager->projectPath().empty();
+}
+
 bool Compiler::RunCompileTask(Action action) {
+  bool held = false;
+  if (!BeginRun(held)) return false;
+  auto endRun = sg::make_scope_guard([this, held] {
+    if (held) EndRun();
+  });
+  // Until a project is open there is nothing to clear, so the flag waits.
+  if (m_forceFullRun && hasOpenProject()) {
+    Message("--no-incremental: clearing the compilation cache; every stage runs");
+    if (!forceClearCompilationCache()) {
+      // The user asked for a full run; an incremental one would not be that.
+      ErrorMessage("--no-incremental: the compilation cache could not be cleared, so " +
+                   std::string("the task does not run"));
+      return false;
+    }
+    m_forceFullRun = false;
+  }
+  BeforeCompileTask(action);
+  bool ok = false;
+  try {
+    ok = RunCompileTaskGuarded(action);
+  } catch (...) {
+    AfterCompileTask(action, false);
+    throw;
+  }
+  AfterCompileTask(action, ok);
+  return ok;
+}
+
+bool Compiler::RunCompileTaskGuarded(Action action) {
   auto currentTask = m_taskManager->currentTask();
   // Use Scope Guard to add headers to new logs whenever this function exits
   auto guard = sg::make_scope_guard([this, action, currentTask] {
@@ -2358,6 +2401,10 @@ bool Compiler::RunCompileTask(Action action) {
 void Compiler::setTaskManager(TaskManager* newTaskManager) {
   m_taskManager = newTaskManager;
   if (m_taskManager) {
+    QObject::connect(m_taskManager, &TaskManager::started, m_taskManager,
+                     [this]() { TaskSequenceStarted(); });
+    QObject::connect(m_taskManager, &TaskManager::done, m_taskManager,
+                     [this]() { TaskSequenceDone(); });
     m_taskManager->bindTaskCommand(IP_GENERATE, []() {
       GlobalSession->CmdStack()->push_and_exec(new Command("ipgenerate"));
     });
@@ -2684,6 +2731,40 @@ void Compiler::SetConstraints(Constraints* c) {
 void Compiler::SetEnvironmentVariable(const std::string variable,
                                       const std::string value) {
   m_environmentVariableMap.emplace(variable, value);
+}
+
+std::string Compiler::getQtPlatformPluginFor(bool gui) {
+  if (!gui) return "offscreen";
+#ifdef __linux__
+  // Avoid Wayland: the GUI needs X11 on Ubuntu 22.04+ Wayland sessions.
+  return "xcb";
+#else
+  return {};
+#endif
+}
+
+bool Compiler::IsVprGuiCommand(const std::string& command) {
+  std::istringstream tokens(command);
+  std::string token;
+  while (tokens >> token) {
+    if (token == "--disp" && tokens >> token) return token == "on";
+  }
+  return false;
+}
+
+// With --disp off, VPR switches Qt to offscreen only if QT_QPA_PLATFORM is
+// unset. The bin/aurora wrapper exports xcb whenever DISPLAY is set, which
+// blocks that, so VPR aborts when no X server is reachable. Set the platform
+// explicitly instead (aurora2#2641).
+int Compiler::ExecuteAndMonitorQtApplication(const std::string& command,
+                                             bool gui,
+                                             const std::string logFile,
+                                             bool appendLog) {
+  const std::string platform = getQtPlatformPluginFor(gui);
+  if (!platform.empty()) m_environmentVariableMap["QT_QPA_PLATFORM"] = platform;
+  const int status = ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
+  m_environmentVariableMap.erase("QT_QPA_PLATFORM");
+  return status;
 }
 
 int Compiler::ExecuteAndMonitorSystemCommand(const std::string& command,

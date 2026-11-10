@@ -60,6 +60,9 @@ set (SRC_CPP_LIST
   Task.cpp
   TaskCompilationStateManager.cpp
   CommandWrapper.cpp
+  FlowEngineClient.cpp
+  EngineBackend.cpp
+  EngineRunLock.cpp
   TilesCfgParser.cpp
   #TaskManager.cpp
   TaskManager_ql.cpp
@@ -83,11 +86,15 @@ set (SRC_CPP_LIST
   QLDeviceManager.cpp
   QLDeviceLayoutInfo.cpp
   QLDevicePath.cpp
+  PrivateTempDir.cpp
+  DumpOptions.cpp
   QLSettingsManager.cpp
   QLMetricsManager.cpp
   BlifParser.cpp
   WildcardFileFinder.cpp
   DialogUtils.cpp
+  PackLayout.cpp
+  EngineStatusRefresh.cpp
 )
 
 set (SRC_H_INSTALL_LIST
@@ -101,6 +108,9 @@ set (SRC_H_INSTALL_LIST
   Task.h
   TaskCompilationStateManager.h
   CommandWrapper.h
+  FlowEngineClient.h
+  EngineBackend.h
+  EngineRunLock.h
   TilesCfgParser.h
   TaskManager.h
   CompilerDefines.h
@@ -122,12 +132,16 @@ set (SRC_H_INSTALL_LIST
   TaskGlobal.h
   QLDeviceManager.h
   QLDeviceLayoutInfo.h
+  PrivateTempDir.h
+  DumpOptions.h
   QLDevicePath.h
   QLSettingsManager.h
   QLMetricsManager.h
   BlifParser.h
   WildcardFileFinder.h
   DialogUtils.h
+  PackLayout.h
+  EngineStatusRefresh.h
 )
 
 set (SRC_H_LIST

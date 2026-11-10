@@ -1111,6 +1111,10 @@ void MainWindow::createActions() {
   connect(clearCompilationStatesAction, &QAction::triggered, this, &MainWindow::clearCompilationStates);
 
   aboutAction = new QAction(tr("About"), this);
+#ifdef __APPLE__
+  // Keep About in Help: Qt moves it to the app menu, leaving Help empty and hidden.
+  aboutAction->setMenuRole(QAction::NoRole);
+#endif
   connect(aboutAction, &QAction::triggered, this, [this]() {
     AboutWidget w(m_projectInfo, GlobalSession->Context()->BinaryPath(), this);
     w.exec();
@@ -2355,6 +2359,11 @@ void MainWindow::floorPlanningActionTriggered()
         args.append("--show_arch_resources");
 
         QProcess* process = new QProcess;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("QT_QPA_PLATFORM",
+                   QString::fromStdString(Compiler::getQtPlatformPluginFor(
+                       Compiler::IsVprGuiCommand(args.join(" ").toStdString()))));
+        process->setProcessEnvironment(env);
         const std::filesystem::path projectPath = compiler->ProjManager()->projectPath();
         std::filesystem::current_path(projectPath);
         process->start(vpr_program, args);

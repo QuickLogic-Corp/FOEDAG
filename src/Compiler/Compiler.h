@@ -185,6 +185,11 @@ class Compiler {
   const std::set<std::string>& LoadedIpCatalogRoots() const {
     return m_loadedIpCatalogRoots;
   }
+  // Drops a root from that record, so the next lazy load scans it again
+  // (IPGenerator::SyncDeviceCatalog, after unloading the root's IPs).
+  void ForgetIpCatalogRoot(const std::filesystem::path& root) {
+    m_loadedIpCatalogRoots.erase(std::filesystem::weakly_canonical(root).string());
+  }
 
   // VPR, Yosys generic opt
   void ChannelWidth(uint32_t width) { m_channel_width = width; }
@@ -282,7 +287,24 @@ class Compiler {
 
   virtual bool hasCompilationCache() const { return false; }
   virtual void clearCompilationCache() {}
+  // --no-incremental (REQ-126): the first compile task of this process clears
+  // the compilation cache first, as clear_compilation_cache does, so every
+  // stage runs. The project is not open at startup, hence the first task.
+  void ForceFullRun(bool on) { m_forceFullRun = on; }
+  // The clear --no-incremental asks for; false when records may remain.
+  virtual bool forceClearCompilationCache() {
+    clearCompilationCache();
+    return true;
+  }
+  // A project is open, so there is a cache to clear.
+  virtual bool hasOpenProject() const;
+  bool ForceFullRunPending() const { return m_forceFullRun; }
   virtual void invalidateTaskStatuses() {}
+
+  /// QT_QPA_PLATFORM for a child Qt application; empty keeps Qt's default.
+  static std::string getQtPlatformPluginFor(bool gui);
+  /// VPR shows its GUI only with --disp on.
+  static bool IsVprGuiCommand(const std::string& command);
 
  protected:
   /* Methods that can be customized for each new compiler flow */
@@ -313,12 +335,29 @@ class Compiler {
   /* Compiler class utilities */
   bool RunBatch();
   bool RunCompileTask(Action action);
+  bool RunCompileTaskGuarded(Action action);
+  // Around each compile task; AfterCompileTask runs after RunCompileTask's guard.
+  virtual void BeforeCompileTask(Action /*action*/) {}
+  virtual void AfterCompileTask(Action /*action*/, bool /*ok*/) {}
+  // Around all of RunCompileTask: the run-wide lock (aurora2 REQ-015). False
+  // refuses the task; `held` says whether EndRun must follow.
+  virtual bool BeginRun(bool& held) {
+    held = false;
+    return true;
+  }
+  virtual void EndRun() {}
+  // A GUI task sequence (TaskManager started() .. done()).
+  virtual void TaskSequenceStarted() {}
+  virtual void TaskSequenceDone() {}
 
   void SetEnvironmentVariable(const std::string variable,
                               const std::string value);
   virtual int ExecuteAndMonitorSystemCommand(
       const std::string& command, const std::string logFile = std::string{},
       bool appendLog = false);
+  int ExecuteAndMonitorQtApplication(const std::string& command, bool gui,
+                                     const std::string logFile = std::string{},
+                                     bool appendLog = false);
   std::string ReplaceAll(std::string_view str, std::string_view from,
                          std::string_view to);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
@@ -349,6 +388,7 @@ class Compiler {
   std::string m_result;
   TclInterpreterHandler* m_tclInterpreterHandler{nullptr};
   TaskManager* m_taskManager{nullptr};
+  bool m_forceFullRun = false;
   TclCommandIntegration* m_tclCmdIntegration{nullptr};
   Constraints* m_constraints = nullptr;
   std::string m_output;

@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 #include <QString>
@@ -33,6 +34,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
+#include "Compiler/EngineBackend.h"
+#include "Compiler/PackLayout.h"
+#include "Compiler/EngineStatusRefresh.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -229,7 +233,27 @@ class CompilerOpenFPGA_ql : public Compiler {
   /// GUI open_project in particular never passes through CreateDesign.
   void PruneRelIpBlifs();
 
+  /// Records an explicit `verific_parser on|off` from the Tcl script. For the
+  /// rest of the session that request takes priority over
+  /// `general > options > verific` in the settings JSON; see ResolveUseVerific().
+  void SetUseVerificFromTcl(bool on);
+
  protected:
+  /// Refuses, without starting it, a command that would have VPR write data built
+  /// from the decrypted architecture of an encrypted device (REQ-131 of aurora2's
+  /// docs/specs/aurora-flow-engine); see RefuseDumpingCommand().
+  int ExecuteAndMonitorSystemCommand(const std::string& command,
+                                     const std::string logFile = std::string{},
+                                     bool appendLog = false) override;
+  /// True, after reporting the options, when `command` would dump on an
+  /// encrypted device; see findRefusedDumpOptions().
+  bool RefuseDumpingCommand(const std::string& command);
+  /// True when VPR reads an encrypted architecture: the device's installed one,
+  /// or the one pack generates in AUTO/CUSTOM layout mode, always saved as .en.
+  virtual bool DeviceIsEncrypted();
+  /// The current device's VPR architecture as QLDeviceManager finds it; empty when
+  /// there is none.
+  virtual std::filesystem::path InstalledVPRArchitectureFile();
   virtual bool IPGenerate();
   virtual bool Analyze();
   virtual bool Synthesize();
@@ -388,6 +412,9 @@ class CompilerOpenFPGA_ql : public Compiler {
                                     std::string netlistFileName,
                                     std::string sdfFileName,
                                     std::string sdcFileName);
+  /// Decides whether Verific parses the design: never for a Synplify project,
+  /// else the explicit Tcl request if there was one, else the settings JSON.
+  bool ResolveUseVerific();
   bool m_keepAllSignals = false;
 
 private:
@@ -395,11 +422,123 @@ private:
   std::filesystem::path m_cryptdbPath;
 
   BlifParser m_blifParser;
-  TaskCompilationStateManager m_taskCompilationStateManager;
+  /// Set only by the verific_parser Tcl command; unset means "not mentioned".
+  std::optional<bool> m_useVerificFromTcl;
+  std::unique_ptr<IncrementalBackend> m_incrementalBackend;
+  IncrementalBackend& backend() const { return *m_incrementalBackend; }
+
+  // AURORA_INCREMENTAL=engine selected the flow engine for this project.
+  bool m_engineSelected = false;
+  // Builders run in their describe form: no decryption, no floorplanning, no
+  // script files written (aurora2 docs/specs/aurora-flow-engine §1.2.6).
+  // Per thread: a GUI status query must not change a task running on the worker.
+  static thread_local bool s_describeOnly;
+  bool m_incrementalModeWarned = false;
+  void selectIncrementalBackend();
+  std::unique_ptr<IncrementalBackend> makeCppBackend();
+  std::filesystem::path engineInstallRoot() const;
+  EngineStageContext engineContext(const std::string& stage, const std::string& profile = {});
+  std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
+  void invalidateEngineRecords(int taskId);
+  // IO floorplanning as its own engine stage (row 1.11): the builder, the run,
+  // and the decision, made once per task.
+  struct FloorplanJob {
+    std::string python;
+    std::vector<std::string> args;
+    CommandWrapperPtr command;  // describe form; built only under the engine
+    bool deferred = false;  // AUTO/RESOURCES device not yet packed: nothing to do
+    std::vector<std::filesystem::path> removeBeforeRun;
+  };
+  static constexpr const char* REPACK_TEMPLATE_MASK = "repack_template_mask";
+  std::optional<bool> m_floorplanOutcome;
+  bool buildFloorplan(FloorplanJob& job);
+  int runFloorplan(const FloorplanJob& job);
+  bool engineFloorplan();
+  // getPackingCommand() is building pack's command (BaseVprCommand's caller).
+  bool m_buildingPack = false;
+  // False, after saying why, when bitstream must not run before route.
+  bool engineBitstreamHasRoute();
+  // The layout an AUTO/CUSTOM pack resolved, for the stages after it (row 1.10).
+  bool layoutResolvedInPack() const;
+  void resetPackLayout();
+  // Restores the members from pack_layout.json under the engine; false when the
+  // device needs one and it cannot be read. Always true under cpp.
+  bool restorePackLayout();
+  bool writePackLayout(PackLayout layout);
+  // pack_layout.json's device_layout.json for `target`, while it still holds.
+  std::string packedDeviceLayout(const QLDeviceTarget& target);
+  static const std::vector<std::pair<std::string, std::string>>& powerMetrics();
+  // A BaseVprCommandLEGACY() string in the engine's describe form.
+  CommandWrapperPtr wrapVprCommand(const std::string& command, const QLDeviceTarget& device);
+  // Removes a stage's engine records (one profile, or all when empty).
+  void invalidateEngineStage(const std::string& stage, const std::string& profile = {});
+  void cleanRemovedStaProfiles(const std::map<std::string, QLDeviceTarget>& devices);
+  // Bitstream's describe form, gathered while FinishOpenFPGAScript() builds the
+  // script: decrypted files by mask and source digest, plain files as inputs.
+  struct EngineTemp {
+    std::filesystem::path path;
+    std::string mask;
+    std::string digest;
+  };
+  std::vector<EngineTemp> m_bitstreamTemps;
+  std::vector<std::filesystem::path> m_bitstreamInputs;
+  std::string m_bitstreamVprCommand;
+  void noteBitstreamTemp(const std::filesystem::path& temp, const std::string& mask,
+                         const std::filesystem::path& source);
+  CommandWrapperPtr describeBitstream(const std::string& command, const std::string& script);
+  // The secure encode post-process, built then run; bitstream@encode under the engine.
+  struct EncodeJob {
+    std::string python;
+    std::vector<std::string> args;
+    std::vector<std::string> keyFiles;  // --ascon_key/--ascon_nonce/--ascon_ad values
+    std::filesystem::path log;
+    std::filesystem::path out;
+    std::string banner;
+  };
+  bool buildBitstreamEncode(uint32_t stages, EncodeJob& job);
+  bool runBitstreamEncode(const EncodeJob& job);
+  CommandWrapperPtr describeBitstreamEncode(const EncodeJob& job);
+  void engineBitstreamEncode(uint32_t stages);
+  // GUI statuses under the engine: debounced, one plan off the GUI thread.
+  std::unique_ptr<EngineStatusRefresh> m_statusRefresh;
+  bool m_statusWarned = false;
+  std::function<nlohmann::json()> describeEngineStatus();
+  void applyEngineStatus(const nlohmann::json& answer);
+  // The status sequence shared by both backends; `actual` answers per task.
+  void applyTaskStatuses(const std::function<bool(int task)>& actual);
+  CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
+                                    const std::vector<std::string>& modes,
+                                    const QLDeviceTarget& device);
+  // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
+  // the engine: the caller fails the task although its tool succeeded (T-015).
+  bool faultAfterTool(const std::string& stage) const;
+  void BeforeCompileTask(Action action) override;
+  void AfterCompileTask(Action action, bool ok) override;
+  // The run-wide lock (REQ-015, row 1.15a), under the engine only (NFR-001).
+  bool BeginRun(bool& held) override;
+  void EndRun() override;
+  void TaskSequenceStarted() override;
+  void TaskSequenceDone() override;
+  // A --batch --script or --cmd run: it holds the lock from its first task to exit.
+  bool batchScriptSession() const;
+  EngineRunHolds m_runHolds{EngineRunLock::instance()};
+  std::atomic<bool> m_runLockWarned{false};
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
+  // Clock-aware placement (aurora2 docs/development/clock_aware_placement): when the
+  // device ships a clock-region file, Placement() runs clock-region-place instead of
+  // one VPR command; the driver runs `command` itself, once per placement, and copies
+  // the legal placement to the command's place file.
+  bool RunClockAwarePlacement(const CommandWrapperPtr& command,
+                              const std::filesystem::path& regionFile);
+  // The second stored command of a clock-aware placement: the installed region file
+  // (its digest changes with a device-data update) and the final place file.
+  CommandWrapperPtr getClockRegionCommand(const std::filesystem::path& regionFile,
+                                          const CommandWrapperPtr& vprCommand);
+  // The value of `--option VALUE` or `--option=VALUE` in a command's argv; empty if absent.
+  static std::string argvValue(const std::vector<std::string>& argv, const std::string& option);
   CommandWrapperPtr getRoutingCommand();      
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA       
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
@@ -415,6 +554,7 @@ private:
 #endif
 
   void clearCompilationCache() override final;
+  bool forceClearCompilationCache() override { return backend().clear(); }
   bool hasCompilationCache() const override final;
 
   const std::vector<std::string>& vprRedirectedWarnings() const;

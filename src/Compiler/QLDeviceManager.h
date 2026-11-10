@@ -412,7 +412,21 @@ class QLDeviceManager : public QObject {
   //   io   = 2 * (arrayX + arrayY) * IO_CAPACITY
   static std::vector<std::tuple<std::string, std::optional<int>>> deriveResourceCounts(
       const QLDeviceLayoutInfo& layout_info, std::string* out_error = nullptr);
-  
+
+  // Fallback for a package whose config.json cannot answer deriveResourceCounts():
+  // clb/bram/dsp/io read verbatim from an already-parsed resources.json, the
+  // vpr-generated file deviceResourceInformation() used to read before it
+  // became formula-only (issue #2257). Other keys the file may carry
+  // (io_top, io_right, ...) are ignored - no caller consumes them. A key the
+  // entry omits is reported as 0: the file is generated and lists every
+  // resource type the fabric carries, so its absence means the device has
+  // none. Empty, with a reason, when the entry is missing, unusable, or
+  // carries none of the four. Pure and public for the same reason
+  // deriveResourceCounts() is: every edge case (missing layout entry, wrong
+  // value type) is exercised here, not through a real device_data package.
+  static std::vector<std::tuple<std::string, std::optional<int>>> resourceCountsFromResourcesJson(
+      const json& resources_json, const std::string& layout_name, std::string* out_error = nullptr);
+
   std::filesystem::path deviceTypeDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceVariantDirPath(QLDeviceTarget device_target = QLDeviceTarget());
   
@@ -441,6 +455,19 @@ class QLDeviceManager : public QObject {
   std::filesystem::path deviceOpenFPGARepackDesignConstraintFile(QLDeviceTarget device_target = QLDeviceTarget(),
                                                                 bool device_only = false,
                                                                 bool report_missing = true);
+  // The device's clock-region file (config.json CLOCK_REGIONS), as installed: the
+  // plaintext file, or the same path plus ".en". Empty when the device declares none.
+  // When the key names a file that is not there, the result is empty and `error`,
+  // if given, names the device and the key; placement then fails rather than
+  // running unchecked.
+  std::filesystem::path deviceClockRegionFile(QLDeviceTarget device_target = QLDeviceTarget(),
+                                              std::string* error = nullptr);
+  // The lookup behind deviceClockRegionFile(), on a device directory and its parsed
+  // config.json; `device` names the device in `error`.
+  static std::filesystem::path clockRegionFileIn(const std::filesystem::path& device_dir,
+                                                 const json& config,
+                                                 const std::string& device,
+                                                 std::string* error);
   std::filesystem::path deviceOpenFPGAFixedSimFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGAFabricKeyFile(QLDeviceTarget device_target = QLDeviceTarget());
   std::filesystem::path deviceOpenFPGABitstreamRemappingFile(QLDeviceTarget device_target = QLDeviceTarget());

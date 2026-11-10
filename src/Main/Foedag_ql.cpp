@@ -54,6 +54,7 @@ extern "C" {
 #include "CommandLine.h"
 #include "Console/StreamBuffer.h"
 #include "Console/TclWorker.h"
+#include "EventLoopProbe.h"
 #include "FoedagStyle.h"
 #include "Main/Foedag.h"
 #include "Main/ToolContext.h"
@@ -96,7 +97,7 @@ FOEDAG::GUI_TYPE Foedag::getGuiType(const bool& withQt, const bool& withQml) {
     return FOEDAG::GUI_TYPE::GT_WIDGET;
 }
 
-void loadTclInitFile(CommandStack* commandStack,
+void loadTclInitFile(CommandStack* commandStack, TclInterpreter* interpreter,
                      const std::string& initFilePrefix) {
   if (!commandStack) return;
 
@@ -110,7 +111,24 @@ void loadTclInitFile(CommandStack* commandStack,
 
   // Search for and load/source each file match in searchPaths
   std::string fileName = initFilePrefix + "_init.tcl";
+
+  // Sourced first and unrecorded, so home/cwd init files can override it
+  std::filesystem::path installInit =
+      PathUtils::instance().installDir() / "share" / "aurora" / fileName;
+  std::error_code ec;
+  const bool hasInstallInit =
+      interpreter && std::filesystem::is_regular_file(installInit, ec);
+  std::filesystem::path installCanon;
+  if (hasInstallInit) {
+    installCanon = std::filesystem::weakly_canonical(installInit, ec);
+    interpreter->evalCmd("source {" + installInit.string() + "}");
+  }
+
   for (auto path : FileUtils::FindFileInDirs(fileName, searchPaths, true)) {
+    // Already sourced above when home or cwd is the install share dir
+    if (hasInstallInit &&
+        std::filesystem::weakly_canonical(path, ec) == installCanon)
+      continue;
     std::string cmd = "source " + path.string();
     commandStack->push_and_exec(new Command(cmd));
   }
@@ -192,13 +210,14 @@ bool Foedag::initGui() {
   QApplication app(argc, m_cmdLine->Argv());
 #endif
   QApplication::setStyle(new FoedagStyle(QApplication::style()));
+  FOEDAG::EventLoopProbe::fromEnvironment(qApp);
   FOEDAG::TclInterpreter* interpreter =
       new FOEDAG::TclInterpreter(m_cmdLine->Argv()[0]);
   Config::Instance()->dataPath(m_context->DataPath());
   FOEDAG::CommandStack* commands =
       new FOEDAG::CommandStack(interpreter, m_context->ExecutableName());
 
-  loadTclInitFile(commands, m_context->ExecutableName());
+  loadTclInitFile(commands, interpreter, m_context->ExecutableName());
 
   QWidget* mainWin = nullptr;
 
@@ -429,7 +448,7 @@ bool Foedag::initBatch() {
       new FOEDAG::Session(m_mainWin, interpreter, commands, m_cmdLine,
                           m_context, m_compiler, m_settings);
 
-  loadTclInitFile(commands, m_context->ExecutableName());
+  loadTclInitFile(commands, interpreter, m_context->ExecutableName());
 
   GlobalSession->setGuiType(GUI_TYPE::GT_NONE);
   m_compiler->setGuiTclSync(

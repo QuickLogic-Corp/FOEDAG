@@ -25,6 +25,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Compiler/QLDeviceLayoutInfo.h"
 #include "gtest/gtest.h"
+
+#include <unistd.h>
+
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 using namespace FOEDAG;
 
 TEST(QLDeviceManager, NormalizeVersionStringSpellings) {
@@ -286,6 +292,139 @@ TEST(QLDeviceManager, DeriveResourceCountsMatchesShippedResourcesJSON) {
   }
 }
 
+// ---- resources.json fallback -----------------------------------------------
+//
+// deviceResourceInformation() falls back to a device's resources.json when
+// deriveResourceCounts() cannot answer (issue #2370). resourceCountsFromResourcesJson()
+// is the pure lookup/validation piece of that: given an already-parsed
+// resources.json document and a layout name, return its clb/bram/dsp/io.
+//
+// The values below are TURNKEY-FPGA126126's "FPGA126126" entry, the same
+// package and the same clb/bram/dsp/io numbers already verified above in
+// DeriveResourceCountsMatchesShippedResourcesJSON - reusing an already-established
+// ground truth rather than introducing a new one.
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonUsesShippedValues) {
+  const json resources_json = json::parse(R"({
+    "FPGA126126": {
+      "io_top": 2120, "io_right": 2520, "io_bottom": 2120, "io_left": 2520,
+      "io_bram_top": 200, "io_bram_bottom": 200, "io_dsp_top": 200, "io_dsp_bottom": 200,
+      "corner_left_top": 20, "corner_left_bottom": 20,
+      "corner_right_top": 20, "corner_right_bottom": 20,
+      "clb": 13356, "bram": 210, "dsp": 420, "io": 10080
+    }
+  })");
+
+  std::string error;
+  const auto resources =
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error);
+
+  ASSERT_FALSE(resources.empty()) << error;
+  EXPECT_EQ(resources.size(), 4u);
+  EXPECT_EQ(countOf(resources, "clb"), 13356);
+  EXPECT_EQ(countOf(resources, "bram"), 210);
+  EXPECT_EQ(countOf(resources, "dsp"), 420);
+  EXPECT_EQ(countOf(resources, "io"), 10080);
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsMissingLayout) {
+  const json resources_json = json::parse(R"({"FPGA126126": {"clb": 1, "bram": 1, "dsp": 1, "io": 1}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA_AUTO", &error).empty());
+  EXPECT_NE(error.find("FPGA_AUTO"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonTreatsAnAbsentKeyAsZero) {
+  // EPSON-2024Q2-1209 ships no "bram" key - that fabric has none. The file is
+  // generated and lists every resource type present, so the omission means
+  // zero BRAM, not an unknown count. Refusing the whole entry over it would
+  // leave exactly the device this fallback exists for reporting nothing.
+  const json resources_json = json::parse(R"({
+    "FPGA1209": {
+      "io_top": 220, "io_right": 180, "io_bottom": 220, "io_left": 180,
+      "empty_dsp_top": 20, "empty_dsp_bottom": 20,
+      "clb": 99, "dsp": 3, "io": 800
+    }
+  })");
+
+  std::string error;
+  const auto resources =
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA1209", &error);
+
+  ASSERT_EQ(resources.size(), 4u) << error;
+  EXPECT_EQ(countOf(resources, "clb"), 99);
+  EXPECT_EQ(countOf(resources, "dsp"), 3);
+  EXPECT_EQ(countOf(resources, "io"), 800);
+  EXPECT_EQ(countOf(resources, "bram"), 0);
+  EXPECT_TRUE(error.empty()) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsEntryWithNoneOfTheFour) {
+  const json resources_json = json::parse(R"({"FPGA1209": {"io_top": 220, "corner_left_top": 20}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA1209", &error).empty());
+  EXPECT_NE(error.find("none of"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsNonIntegerValue) {
+  const json resources_json =
+      json::parse(R"({"FPGA126126": {"clb": "13356", "bram": 210, "dsp": 420, "io": 10080}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsNonObjectEntry) {
+  const json resources_json = json::parse(R"({"FPGA126126": 13356})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("not an object"), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsOutOfRangeValue) {
+  // is_number_integer() alone accepts this - get<int>() would silently
+  // narrow it to a wrong value instead of rejecting it.
+  const json resources_json = json::parse(
+      R"({"FPGA126126": {"clb": 9999999999999, "bram": 210, "dsp": 420, "io": 10080}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsValueAboveInt64Max) {
+  // json stores this as number_unsigned, where get<int64_t>() wraps to -1 and
+  // would pass a signed-only bounds check.
+  const json resources_json = json::parse(
+      R"({"FPGA126126": {"clb": 18446744073709551615, "bram": 210, "dsp": 420, "io": 10080}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA126126", &error).empty());
+  EXPECT_NE(error.find("\"clb\""), std::string::npos) << error;
+}
+
+TEST(QLDeviceManager, ResourceCountsFromResourcesJsonRejectsAnInvalidKeyAmongValidOnes) {
+  // a bad key refuses the whole entry even when earlier keys already parsed -
+  // the partly-filled vector must not reach the caller as a success.
+  const json resources_json =
+      json::parse(R"({"FPGA1209": {"clb": 99, "dsp": "three", "io": 800}})");
+
+  std::string error;
+  EXPECT_TRUE(
+      QLDeviceManager::resourceCountsFromResourcesJson(resources_json, "FPGA1209", &error).empty());
+  EXPECT_NE(error.find("\"dsp\""), std::string::npos) << error;
+}
+
 TEST(QLDeviceManager, DeriveResourceCountsRejectsUnresolvedLayout) {
   // an unresolved layout reaching deriveResourceCounts() is always a genuine
   // problem by the time it gets here - the expected "not yet known" case
@@ -352,4 +491,70 @@ TEST(QLDeviceManager, DeriveResourceCountsHonoursIOCapacity) {
           "BRAM_COLS": "3", "DSP_COLS": "6", "IO_CAPACITY": "10"})";
   EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_number)), "io"), 280);
   EXPECT_EQ(countOf(QLDeviceManager::deriveResourceCounts(resolve(as_string)), "io"), 280);
+}
+
+// ---- the device's clock-region file (config.json CLOCK_REGIONS) ------------
+
+namespace {
+struct StagedDevice {
+  std::filesystem::path dir;
+  StagedDevice() {
+    dir = std::filesystem::temp_directory_path() /
+          ("qldm_clock_regions_" + std::to_string(::getpid()) + "_" +
+           std::to_string(reinterpret_cast<std::uintptr_t>(this)));
+    std::filesystem::create_directories(dir / "aurora");
+  }
+  ~StagedDevice() {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  }
+  void touch(const std::string& relative) {
+    std::ofstream(dir / relative) << "x";
+  }
+};
+}  // namespace
+
+TEST(QLDeviceManager, ClockRegionFileAbsentWhenTheDeviceDeclaresNone) {
+  StagedDevice device;
+  std::string error;
+  const json config = json::parse(R"({"DEVICE_SIZE": "8x6"})");
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", &error).empty());
+  EXPECT_TRUE(error.empty());
+  // an empty value or a non-string value declares none as well
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, json::parse(R"({"CLOCK_REGIONS": ""})"), "d", &error).empty());
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, json::parse(R"({"CLOCK_REGIONS": 3})"), "d", &error).empty());
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(QLDeviceManager, ClockRegionFilePlaintextIsPreferredOverEncrypted) {
+  StagedDevice device;
+  device.touch("aurora/clock_regions.xml");
+  device.touch("aurora/clock_regions.xml.en");
+  std::string error;
+  const json config = json::parse(R"({"CLOCK_REGIONS": "aurora/clock_regions.xml"})");
+  EXPECT_EQ(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", &error),
+            device.dir / "aurora/clock_regions.xml");
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(QLDeviceManager, ClockRegionFileFallsBackToTheInstalledEncryptedFile) {
+  StagedDevice device;
+  device.touch("aurora/clock_regions.xml.en");
+  std::string error;
+  const json config = json::parse(R"({"CLOCK_REGIONS": "aurora/clock_regions.xml"})");
+  EXPECT_EQ(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", &error),
+            device.dir / "aurora/clock_regions.xml.en");
+  EXPECT_TRUE(error.empty());
+}
+
+TEST(QLDeviceManager, ClockRegionFileMissingIsAnErrorNamingDeviceAndKey) {
+  StagedDevice device;
+  std::string error;
+  const json config = json::parse(R"({"CLOCK_REGIONS": "aurora/clock_regions.xml"})");
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, config, "FPGA240144", &error).empty());
+  EXPECT_NE(error.find("FPGA240144"), std::string::npos);
+  EXPECT_NE(error.find("CLOCK_REGIONS"), std::string::npos);
+  EXPECT_NE(error.find("aurora/clock_regions.xml"), std::string::npos);
+  // without an error sink the lookup is still just empty
+  EXPECT_TRUE(QLDeviceManager::clockRegionFileIn(device.dir, config, "d", nullptr).empty());
 }

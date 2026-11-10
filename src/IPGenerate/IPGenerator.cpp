@@ -139,6 +139,8 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
 
     // Keep the generated file's mode: the temporary is created with
     // 0666 & ~umask, so renaming it over a read-only wrapper would widen it.
+    // The mode goes back on after the rename, not onto the temporary: Windows
+    // can neither replace nor delete a read-only file.
     std::error_code error;
     const auto mode = std::filesystem::status(wrapper, error).permissions();
     const bool haveMode = !error;
@@ -161,19 +163,37 @@ bool IPGenerator::StampWrapperComment(Compiler* compiler,
         continue;
       }
     }
-    if (haveMode) {
-      std::filesystem::permissions(temporary, mode,
-                                   std::filesystem::perm_options::replace,
-                                   error);
-      if (error) {
-        discardTemporary();
-        continue;
-      }
+    std::error_code ignored;
+#ifdef _WIN32
+    // Only Windows needs the target writable to replace it; on POSIX a link
+    // target would keep the added bit.
+    const bool readOnly =
+        haveMode && (mode & std::filesystem::perms::owner_write) ==
+                        std::filesystem::perms::none;
+    if (readOnly) {
+      std::filesystem::permissions(wrapper, std::filesystem::perms::owner_write,
+                                   std::filesystem::perm_options::add, ignored);
     }
+#else
+    const bool readOnly = false;
+#endif
     std::filesystem::rename(temporary, wrapper, error);
     if (error) {
+      if (readOnly) {
+        std::filesystem::permissions(
+            wrapper, mode, std::filesystem::perm_options::replace, ignored);
+      }
       discardTemporary();
       continue;
+    }
+    if (haveMode) {
+      std::filesystem::permissions(
+          wrapper, mode, std::filesystem::perm_options::replace, error);
+      if (error && compiler) {
+        compiler->WarningMessage(
+            "IP Generate, could not restore the mode of " + wrapper.string() +
+            " after stamping it: " + error.message());
+      }
     }
     stamped = true;
   }
@@ -365,7 +385,28 @@ std::filesystem::path IPGenerator::DeviceCatalogPath() const {
   return devices->deviceTypeDirPath(target) / "aurora" / "IP_Catalog";
 }
 
+void IPGenerator::SyncDeviceCatalog() {
+  const std::filesystem::path deviceRoot = DeviceCatalogPath();
+  const std::filesystem::path current =
+      deviceRoot.empty() ? std::filesystem::path{}
+                         : std::filesystem::weakly_canonical(deviceRoot);
+  if (current == m_deviceCatalogRoot) return;
+  if (!m_deviceCatalogRoot.empty()) {
+    const size_t removed = m_catalog->removeDefinitionsUnder(m_deviceCatalogRoot);
+    m_compiler->ForgetIpCatalogRoot(m_deviceCatalogRoot);
+    if (removed > 0) {
+      m_compiler->Message("IP Catalog, target device changed: unloaded " +
+                          std::to_string(removed) + " IP(s) of " +
+                          m_deviceCatalogRoot.string());
+    }
+  }
+  m_deviceCatalogRoot = current;
+}
+
 void IPGenerator::LoadDefaultCatalogs() {
+  // Before the device root is looked up below: a previous device's IPs must
+  // be out of the catalog before the current device's catalog is scanned.
+  SyncDeviceCatalog();
   const std::filesystem::path defaultRoot = DefaultIPCatalogPath();
   const std::filesystem::path deviceRoot = DeviceCatalogPath();
   const std::filesystem::path userRoot = ProjectUserCatalogPath();
@@ -1154,6 +1195,20 @@ bool IPGenerator::Generate() {
     }
 
     const IPDefinition* def = inst->Definition();
+    // An instance configured before the target device changed points at the
+    // previous device's definition, which SyncDeviceCatalog unloaded. Do not
+    // generate from it (or from a same-named IP of the new device: the
+    // instance keeps the output location it was configured with, which may
+    // belong to another project); configuring it again binds it to the
+    // current device's IP.
+    if (m_catalog->isRetired(def)) {
+      compiler->ErrorMessage(
+          "IP Generate, " + inst->ModuleName() + ": IP '" + def->Name() +
+          "' was configured from the IP catalog of a previous target device; "
+          "configure it again with configure_ip for the current device");
+      status = false;
+      continue;
+    }
     switch (def->Type()) {
       case IPDefinition::IPType::Other: {
         break;

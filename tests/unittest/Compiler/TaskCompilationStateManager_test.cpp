@@ -390,3 +390,63 @@ TEST_F(TaskCompilationStateManagerTest, directory_input_detects_new_file) {
   recheck->appendPath("--srcdir", srcDir);
   EXPECT_TRUE(mgr.isCompilationRequired(1, recheck));
 }
+
+// Call sites reach the C++ cache through IncrementalBackend; a task without a
+// profile and one with an empty profile share one entry, as before the interface.
+TEST_F(TaskCompilationStateManagerTest, backend_interface_keeps_profile_keys) {
+  ScopedFile src{inProject("a.v"), "module a; endmodule"};
+
+  std::unique_ptr<IncrementalBackend> owned =
+      std::make_unique<CppBackend>(&m_compiler);
+  IncrementalBackend& backend = *owned;
+  backend.setProjectPath(m_projectDir);
+
+  auto command = std::make_shared<CommandWrapper>("vpr");
+  command->appendPath("--net", src.filePath());
+  EXPECT_TRUE(backend.isEmpty());
+  backend.storeTaskCommand(2, command);
+  EXPECT_FALSE(backend.isEmpty());
+  EXPECT_FALSE(backend.isCompilationRequired(2, command));
+  EXPECT_FALSE(backend.isCompilationRequired(2, "", command));
+  EXPECT_TRUE(backend.isCompilationRequired(2, "fast", command));
+
+  backend.storeTaskCommand(3, "fast", command);
+  EXPECT_FALSE(backend.isCompilationRequired(3, "fast", command));
+  EXPECT_TRUE(backend.isCompilationRequired(3, command));
+
+  backend.clear();
+  EXPECT_TRUE(backend.isEmpty());
+  EXPECT_TRUE(backend.isCompilationRequired(2, command));
+  EXPECT_FALSE(
+      std::filesystem::exists(m_projectDir / COMPILATION_CACHE_FILENAME));
+}
+
+// Each C++ record is reported, so the compiler can clear the engine's records of
+// that task and every later one (REQ-125).
+TEST_F(TaskCompilationStateManagerTest, record_hook_sees_every_record) {
+  ScopedFile src{inProject("a.v"), "module a; endmodule"};
+  CppBackend backend(&m_compiler);
+  backend.setProjectPath(m_projectDir);
+  std::vector<int> recorded;
+  backend.setRecordHook([&recorded](int taskId) { recorded.push_back(taskId); });
+
+  auto command = std::make_shared<CommandWrapper>("vpr");
+  command->appendPath("--net", src.filePath());
+  backend.storeTaskCommand(4, command);
+  backend.storeTaskCommand(8, "fast", command);
+  EXPECT_EQ(recorded, (std::vector<int>{4, 8}));
+}
+
+// An engine record drops the C++ entries of its task and every later task.
+TEST_F(TaskCompilationStateManagerTest, forget_tasks_keeps_earlier_entries) {
+  const std::filesystem::path cache = inProject(COMPILATION_CACHE_FILENAME);
+  FileUtils::WriteToFile(cache, R"({"3_0": 1, "4": 1, "6": 1, "8_fast": 1, "12": 1})");
+  CppBackend::forgetTasks(m_projectDir, 4, 10);
+  EXPECT_EQ(nlohmann::json::parse(FileUtils::GetFileContent(cache)),
+            nlohmann::json::parse(R"({"3_0": 1, "12": 1})"));
+
+  FileUtils::WriteToFile(cache, "not json", /*newLine*/ false);
+  CppBackend::forgetTasks(m_projectDir, 4, 10);
+  EXPECT_EQ(FileUtils::GetFileContent(cache), "not json");
+  CppBackend::forgetTasks(m_projectDir / "missing", 4, 10);
+}
