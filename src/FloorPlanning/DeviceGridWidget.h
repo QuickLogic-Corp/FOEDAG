@@ -99,8 +99,13 @@ public:
     void zoomOut();
     void zoomFit();
 
-    void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
+    void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; setDrawRegionMode(false); }
     void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
+
+    // [aurora2#1725] "+": the left button draws one region, then the mode switches off.
+    // Otherwise the left button pans, as in the VPR viewer, unless it starts on a handle.
+    void setDrawRegionMode(bool on);
+    bool isDrawRegionModeActive() const { return m_isDrawRegionModeActive; }
 
     bool hasSelectedPartition() const { return m_selectedPartition != nullptr; }
     bool hasSelectedRegion() const { return m_selectedRegion != nullptr; }
@@ -118,6 +123,7 @@ signals:
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
     void selectionChanged();
+    void regionDrawn();
 
 protected:
     QSize sizeHint() const override final;
@@ -151,6 +157,12 @@ private:
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
     bool m_isZoomInRegionModeActive = false;
+    bool m_isDrawRegionModeActive = false;
+
+    // Where a left press started, to tell a click (select) from a drag (pan or draw).
+    std::optional<QPointF> m_leftPressPos;
+    bool isClick(const QPointF& releasePos) const;
+    void updateCursor(const QPointF& worldCoord);
 
     // panning
     PointAnimation m_moveAnimation;
@@ -172,6 +184,8 @@ private:
     RegionPtr m_selectedRegion;
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
+    std::pair<RegionPtr, std::optional<Region::HandlerRole>> regionAt(
+        const QPointF& worldCoord) const;
 
     void startNewRegionSelection(const QPointF& worldCoord);
     void stopRegionSelection(const QPointF& worldCoord);

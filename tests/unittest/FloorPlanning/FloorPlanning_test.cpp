@@ -6,6 +6,7 @@
 #include <FloorPlanning/Partition.h>
 #include <FloorPlanning/PackOverflow.h>
 #include <FloorPlanning/FloorPlanningWidget.h>
+#include <FloorPlanning/DeviceGridWidget.h>
 #include <FloorPlanning/PartitionsListWidget.h>
 #include <FloorPlanning/SelectedResourcesWidget.h>
 #include <FloorPlanning/SynthResourceHierarchyWidget.h>
@@ -21,6 +22,9 @@
 #include <QWidgetAction>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QMouseEvent>
+#include <QKeyEvent>
+#include <QSignalSpy>
 
 #include <filesystem>
 #include <fstream>
@@ -2780,3 +2784,154 @@ TEST(SynthResourceHierarchyTree, APartialRowsTooltipNamesTheFailedCheck)
     EXPECT_EQ(why->text(), "?");
     EXPECT_TRUE(why->data(kExplanationRoleForTest).toString().contains("check 2: hdlname"));
 }
+
+// [aurora2#1725] Mouse modes of the device grid, matching the VPR viewer: the left button pans
+// unless "+" (Add region) is checked or it starts on a region handle; one "+" draws one region.
+namespace {
+
+void sendMouse(QWidget* widget, QEvent::Type type, const QPointF& pos, Qt::MouseButton button,
+               Qt::MouseButtons buttons)
+{
+    QMouseEvent event(type, pos, widget->mapToGlobal(pos.toPoint()), button, buttons,
+                      Qt::NoModifier);
+    QCoreApplication::sendEvent(widget, &event);
+}
+
+void leftDrag(QWidget* widget, const QPointF& from, const QPointF& to)
+{
+    sendMouse(widget, QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(widget, QEvent::MouseMove, (from + to) / 2, Qt::NoButton, Qt::LeftButton);
+    sendMouse(widget, QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton);
+    sendMouse(widget, QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
+}
+
+// Never shown, so the view stays at scale 1 with no pan: screen and world coordinates agree.
+struct GridFixture {
+    fp::DeviceGridWidget grid;
+    fp::DeviceGrid geometry{genTestDescriptor()};
+    std::map<int, fp::PartitionPtr> partitions;
+
+    GridFixture()
+    {
+        grid.resize(2000, 2000);
+        grid.constructTiles(genTestDescriptor());
+        QObject::connect(&grid, &fp::DeviceGridWidget::partitionsChanged,
+                         [this](const std::map<int, fp::PartitionPtr>& p) { partitions = p; });
+    }
+    QPointF tileCenter(int col, int row) const
+    {
+        return geometry.tiles().at(fp::Tile::Index{col, row})->rect().center();
+    }
+    std::size_t regionCount() const
+    {
+        std::size_t count = 0;
+        for (const auto& [id, partition] : partitions) count += partition->regions().size();
+        return count;
+    }
+};
+
+}  // namespace
+
+TEST(DeviceGridMouse, ALeftDragPansAndDrawsNothing)
+{
+    GridFixture f;
+    f.grid.createNewPartition("p1");
+    leftDrag(&f.grid, f.tileCenter(2, 2), f.tileCenter(5, 5));
+    EXPECT_EQ(f.regionCount(), 0u);
+}
+
+TEST(DeviceGridMouse, AddRegionDrawsOneRegionThenSwitchesOff)
+{
+    GridFixture f;
+    f.grid.createNewPartition("p1");
+    QSignalSpy drawn(&f.grid, &fp::DeviceGridWidget::regionDrawn);
+
+    f.grid.setDrawRegionMode(true);
+    leftDrag(&f.grid, f.tileCenter(2, 2), f.tileCenter(5, 5));
+    EXPECT_EQ(f.regionCount(), 1u);
+    EXPECT_EQ(drawn.count(), 1);
+    EXPECT_FALSE(f.grid.isDrawRegionModeActive());
+
+    leftDrag(&f.grid, f.tileCenter(2, 8), f.tileCenter(5, 10));
+    EXPECT_EQ(f.regionCount(), 1u) << "a second region needs a second press of +";
+}
+
+TEST(DeviceGridMouse, AStrayClickInAddRegionModeKeepsTheMode)
+{
+    GridFixture f;
+    f.grid.createNewPartition("p1");
+    f.grid.setDrawRegionMode(true);
+    const QPointF at = f.tileCenter(2, 2);
+    sendMouse(&f.grid, QEvent::MouseButtonPress, at, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(&f.grid, QEvent::MouseButtonRelease, at, Qt::LeftButton, Qt::NoButton);
+    EXPECT_EQ(f.regionCount(), 0u);
+    EXPECT_TRUE(f.grid.isDrawRegionModeActive());
+}
+
+TEST(DeviceGridMouse, AddRegionWithNoPartitionCreatesOneAndDraws)
+{
+    GridFixture f;
+    QObject::connect(&f.grid, &fp::DeviceGridWidget::createFirstPartitionRequested, &f.grid,
+                     [&f] { f.grid.createNewPartition(); });
+    f.grid.setDrawRegionMode(true);
+    leftDrag(&f.grid, f.tileCenter(2, 2), f.tileCenter(5, 5));
+    EXPECT_EQ(f.partitions.size(), 1u);
+    EXPECT_EQ(f.regionCount(), 1u);
+}
+
+TEST(DeviceGridMouse, ACornerHandleResizesWithoutAddRegion)
+{
+    GridFixture f;
+    f.grid.createNewPartition("p1");
+    f.grid.setDrawRegionMode(true);
+    leftDrag(&f.grid, f.tileCenter(2, 2), f.tileCenter(5, 5));
+    ASSERT_EQ(f.regionCount(), 1u);
+    const fp::RegionPtr region = f.partitions.begin()->second->regions().begin()->second;
+    const QRectF before = region->rect().normalized();
+
+    // A click on the body selects the region; its handles then take the drag from panning.
+    const QPointF body = before.center() + QPointF(before.width() / 4, before.height() / 4);
+    sendMouse(&f.grid, QEvent::MouseButtonPress, body, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(&f.grid, QEvent::MouseButtonRelease, body, Qt::LeftButton, Qt::NoButton);
+    EXPECT_TRUE(f.grid.hasSelectedRegion());
+
+    const QPointF corner = before.bottomRight() - QPointF(1, 1);
+    leftDrag(&f.grid, corner, corner + QPointF(2 * before.width(), 0));
+    EXPECT_GT(region->rect().normalized().width(), before.width());
+}
+
+TEST(FloorPlanningLayout, AddRegionSitsBeforeRemoveRegionAndStartsOff)
+{
+    fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
+    prepare(panel, 1366);
+    auto* toolBar = panel.findChild<QToolBar*>();
+    ASSERT_NE(toolBar, nullptr);
+
+    QAction* add = nullptr;
+    QAction* next = nullptr;
+    const QList<QAction*> actions = toolBar->actions();
+    for (int i = 0; i + 1 < actions.size(); ++i) {
+        if (actions[i]->text() == "Add region") {
+            add = actions[i];
+            next = actions[i + 1];
+        }
+    }
+    ASSERT_NE(add, nullptr);
+    EXPECT_EQ(next->text(), "Remove selected region");
+    EXPECT_TRUE(add->isCheckable());
+    EXPECT_FALSE(add->isChecked());
+
+    auto* grid = panel.findChild<fp::DeviceGridWidget*>();
+    ASSERT_NE(grid, nullptr);
+    add->setChecked(true);
+    EXPECT_TRUE(grid->isDrawRegionModeActive());
+    emit grid->regionDrawn();
+    EXPECT_FALSE(add->isChecked()) << "one press of + draws one region";
+
+    add->setChecked(true);
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(&panel, &escape);
+    EXPECT_FALSE(add->isChecked());
+    EXPECT_FALSE(grid->isDrawRegionModeActive());
+}
+

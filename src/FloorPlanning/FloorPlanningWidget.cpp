@@ -213,38 +213,38 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     auto* actZoomOut = new QAction(QIcon(":/zoom-out.svg"), tr("Zoom out"), this);
     auto* actZoomFit = new QAction(QIcon(":/expand.png"), tr("Zoom to fit"), this);
     m_actZoomInRegion = new QAction(QIcon(":/zoom-in-area.png"), tr("Zoom to area"), this);
-    m_actDrawRegion = new QAction(QIcon(":/selection.png"), tr("Draw region"), this);
+    m_actDrawRegion = new QAction(QIcon(":/add.png"), tr("Add region"), this);
     m_actZoomInRegion->setCheckable(true);
     m_actDrawRegion->setCheckable(true);
-    m_actDrawRegion->setChecked(true);
 
     connect(actZoomIn, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::zoomIn);
     connect(actZoomOut, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::zoomOut);
     connect(actZoomFit, &QAction::triggered, m_deviceWidget, &DeviceGridWidget::zoomFit);
 
     // exclusive toggle -- a QActionGroup where this was a QButtonGroup, for the same reason
-    // the buttons became actions.
+    // the buttons became actions. Optional: with neither checked, the left button pans.
     auto* group = new QActionGroup(this);
-    group->setExclusive(true);
+    group->setExclusionPolicy(QActionGroup::ExclusionPolicy::ExclusiveOptional);
     group->addAction(m_actZoomInRegion);
     group->addAction(m_actDrawRegion);
 
     connect(m_actZoomInRegion, &QAction::toggled, this, [this](bool checked){
       if (checked) {
         m_deviceWidget->activateZoomInRegionMode();
-      }
-    });
-    connect(m_actDrawRegion, &QAction::toggled, this, [this](bool checked){
-      if (checked) {
+      } else {
         m_deviceWidget->deactivateZoomInRegionMode();
       }
     });
+    connect(m_actDrawRegion, &QAction::toggled, m_deviceWidget,
+            &DeviceGridWidget::setDrawRegionMode);
+    connect(m_deviceWidget, &DeviceGridWidget::regionDrawn, this,
+            [this] { m_actDrawRegion->setChecked(false); });
 
     actZoomIn->setToolTip(tr("Zoom in"));
     actZoomOut->setToolTip(tr("Zoom out"));
     actZoomFit->setToolTip(tr("Fit view to device grid"));
     m_actZoomInRegion->setToolTip(tr("Zoom to selected area"));
-    m_actDrawRegion->setToolTip(tr("Draw new region"));
+    m_actDrawRegion->setToolTip(tr("Add region: drag on the grid to draw one"));
 
     connect(m_deviceWidget, &DeviceGridWidget::selectionChanged, this, [this](){
       // [aurora2#1725] Region selection only, not hasSelection(): the button is labelled
@@ -314,11 +314,11 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
     toolBar->addAction(actZoomFit);
     toolBar->addSeparator();
     toolBar->addAction(m_actZoomInRegion);
-    toolBar->addAction(m_actDrawRegion);
     toolBar->addSeparator();
     toolBar->addAction(m_actPartitionColor);
     addStretch();
     toolBar->addSeparator();
+    toolBar->addAction(m_actDrawRegion);
     toolBar->addAction(m_actRemoveSelectedRegion);
     toolBar->addSeparator();
     toolBar->addAction(actOptions);
@@ -706,6 +706,7 @@ void FloorPlanningWidget::keyPressEvent(QKeyEvent* event)
     break;
   }
   case Qt::Key_Escape: {
+    m_actDrawRegion->setChecked(false);
     m_deviceWidget->unselect();
     event->accept();
     break;
