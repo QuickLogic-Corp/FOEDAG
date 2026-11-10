@@ -18,11 +18,18 @@ gui_assert {[gui_get newProjectTabs -text] eq "Add Design Files"}
 gui_set_text lineEditTopModule counter_16bit
 # The Location column shows the file's directory, so it must be the same on
 # every run; the run directory is not.
+# Rewrite only on a change: another user's copy in /tmp is read-only to us.
 set design_dir /tmp/gui_new_project_wizard
-file mkdir $design_dir
-set f [open $design_dir/counter_16bit.v w]
-puts $f "module counter_16bit (input clk, output reg \[15:0\] count);\nendmodule"
-close $f
+set design "module counter_16bit (input clk, output reg \[15:0\] count);\nendmodule\n"
+set design_file $design_dir/counter_16bit.v
+set old ""
+if {[file exists $design_file]} {
+    set f [open $design_file]; set old [read $f]; close $f
+}
+if {$old ne $design} {
+    file mkdir $design_dir
+    set f [open $design_file w]; puts -nonewline $f $design; close $f
+}
 gui_click sourceGridAddFile
 gui_wait_event dialog.shown
 gui_set_text fileNameEdit /tmp/gui_new_project_wizard/counter_16bit.v
