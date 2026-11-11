@@ -51,42 +51,52 @@ QStringList SynthesisReportManager::getAvailableReportIds() const {
   return {QString(REPORT_NAME)};
 }
 
+// Reads the first module table after "Printing statistics." in either Yosys
+// layout and returns rows {"Number of <item>", value}; cell types under an item
+// become {"Number of <item>:<type>", value}.
+//   <= 0.66:  "   Number of cells:   62356"  then  "     $lut   26652"
+//   >= 0.67:  "    26684 cells"               then  "    26661   $lut"
 IDataReport::TableData SynthesisReportManager::getStatistics(
     const QString &statsStr) const {
+  static const QRegularExpression oldItem{
+      R"(^\s*Number of ([^:]+):\s*(\S+)\s*$)"};
+  static const QRegularExpression oldChild{R"(^\s{5,}(\S+)\s+(\d+)\s*$)"};
+  static const QRegularExpression newItem{R"(^\s*(\d+|-) (\S.*?)\s*$)"};
+  static const QRegularExpression newChild{R"(^\s*(\d+)\s{2,}(\S.*?)\s*$)"};
+
   auto res = IDataReport::TableData{};
+  auto parentItem = QString{};
+  bool inTable = false, inRows = false;
 
-  auto line = QString{};        // Unmodified line from the log file
-  auto dataLine = QString{};    // Simplified line
-  auto parentItem = QString{};  // Parent item for lines starting with tab
-
-  QRegularExpression statTable{
-      "Number.*"};  // Drop the beginning and start with stats
-  auto statTableMatch = statTable.match(statsStr);
-  if (!statTableMatch.hasMatch()) return res;
-
-  QTextStream in(statTableMatch.captured(0).toLatin1());
-
+  QString text = statsStr;
+  QTextStream in(&text);
+  auto line = QString{};
   while (in.readLineInto(&line)) {
-    if (line.startsWith("     ") && parentItem.isEmpty())
-      parentItem = dataLine.left(dataLine.indexOf(':'));
-
-    dataLine = line.simplified();
-    if (dataLine.isEmpty()) break;
-
-    auto reportLine = QStringList{};
-    auto lineStrs = dataLine.contains(":") ? dataLine.split(":")
-                                           : dataLine.split(QChar::Space);
-
-    for (auto i = 0; i < lineStrs.size(); ++i) {
-      auto lineStr = lineStrs[i];
-      // The first string represents statistic name. Parent item should only be
-      // added there.
-      if (!i && !parentItem.isEmpty())
-        lineStr = QString("%1:%2").arg(parentItem, lineStr);
-      reportLine << lineStr;
+    auto trimmed = line.trimmed();
+    if (!inTable) {
+      inTable = trimmed.startsWith("===") && trimmed.endsWith("===");
+      continue;
     }
+    if (trimmed.isEmpty()) {
+      if (inRows) break;
+      continue;
+    }
+    if (trimmed.startsWith('+') || trimmed.startsWith('|')) continue;
+    inRows = true;
 
-    res.push_back(std::move(reportLine));
+    QRegularExpressionMatch m;
+    if ((m = oldItem.match(line)).hasMatch()) {
+      parentItem = "Number of " + m.captured(1).trimmed();
+      res.push_back({parentItem, m.captured(2)});
+    } else if ((m = oldChild.match(line)).hasMatch() && !parentItem.isEmpty()) {
+      res.push_back({parentItem + ":" + m.captured(1), m.captured(2)});
+    } else if ((m = newChild.match(line)).hasMatch() && !parentItem.isEmpty()) {
+      res.push_back({parentItem + ":" + m.captured(2), m.captured(1)});
+    } else if ((m = newItem.match(line)).hasMatch()) {
+      parentItem = "Number of " + m.captured(2);
+      auto value = m.captured(1) == "-" ? QString{"0"} : m.captured(1);
+      res.push_back({parentItem, value});
+    }
   }
 
   return res;
@@ -131,10 +141,8 @@ void SynthesisReportManager::parseLogFile() {
   auto fileStr = QTextStream(logFile.get()).readAll();
   logFile->close();
 
-  QRegularExpression findStats{"Printing statistics.*\n\n===.*===\n\n.*[^\n{2}]+"};
-
-  if (auto m = lastMatch(findStats, fileStr); m.hasMatch())
-    setResourceData(getStatistics(m.captured(0)));
+  if (auto i = fileStr.lastIndexOf("Printing statistics."); i >= 0)
+    setResourceData(getStatistics(fileStr.mid(i)));
 
   QRegularExpression findLvls{"DE:([^\n]+)"};
   if (auto m = lastMatch(findLvls, fileStr); m.hasMatch())
