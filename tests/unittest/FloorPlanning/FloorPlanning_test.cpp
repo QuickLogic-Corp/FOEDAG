@@ -3025,3 +3025,22 @@ TEST(SynthResourceHierarchyTree, VprNameColumnShowsOnlyNamesThatDiffer)
     widget.setAtomListVisible(true);
     EXPECT_FALSE(view->isColumnHidden(kVprNameColumn));
 }
+
+TEST(SynthResourceHierarchyTree, CopyTakesTheTextOfTheCellUnderTheMouse)
+{
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setAtomNames({{"core", {"core.bram"}}});
+    widget.setVprAtomNames({{"core.bram", "core.mem_dout[0]"}});
+    widget.build(fp::NaturalStringSet{"top", "core"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    QStandardItem* coreItem = childNamed(model->invisibleRootItem()->child(0, 0), "core");
+    ASSERT_NE(coreItem, nullptr);
+    const QModelIndex name = coreItem->index();
+    EXPECT_EQ(widget.copyText(name), QString("core"));
+    EXPECT_EQ(widget.copyText(name.siblingAtColumn(1)), QString("core.bram"));
+    EXPECT_EQ(widget.copyText(name.siblingAtColumn(2)), QString("core.mem_dout[0]"));
+    EXPECT_EQ(widget.copyText(QModelIndex()), QString());
+}

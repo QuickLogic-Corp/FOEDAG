@@ -126,6 +126,9 @@ public:
     // region it could be inside or outside of.
     void setPlacementVerdicts(std::map<std::string, InstancePlacement> placements);
 
+    // The text the context menu's "Copy" and Ctrl+C put on the clipboard for a cell.
+    QString copyText(const QModelIndex& index) const;
+
     void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
     void selectPartition(const PartitionPtr&);
     void unselectPartition();

@@ -424,14 +424,6 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         onItemChanged(item, /*reportChanges*/true);
     });
 
-    // Returns the atom name text for a given tree index (leaf items only).
-    auto atomCopyText = [this](const QModelIndex& idx) -> QString {
-        if (!idx.isValid()) return {};
-        const QModelIndex atomIdx = m_model->index(idx.row(), Column::AtomList, idx.parent());
-        return atomIdx.data(Qt::DisplayRole).toString();
-    };
-
-    // Right-click context menu: copy atom name(s) of the hovered row
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     // [aurora2#1725 stage P7] The "?" cell behaves as a button: one click, one popup. Kept as
     // a cell rather than a real QPushButton per row so a tree of thousands of instances does
@@ -450,25 +442,29 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
         showExplanationDialog(this, index.data(kExplanationTitleRole).toString(), body);
     });
 
-    connect(m_view, &QTreeView::customContextMenuRequested, this, [this, atomCopyText](const QPoint& pos) {
-        const QModelIndex idx = m_view->indexAt(pos);
-        const QString text = atomCopyText(idx);
+    connect(m_view, &QTreeView::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QString text = copyText(m_view->indexAt(pos));
         if (text.isEmpty()) return;
         QMenu menu;
-        QAction* act = menu.addAction(tr("Copy Atom Name"));
+        const QString shown = menu.fontMetrics().elidedText(text, Qt::ElideMiddle, 400);
+        QAction* act = menu.addAction(tr("Copy \"%1\"").arg(shown));
         if (menu.exec(m_view->viewport()->mapToGlobal(pos)) == act)
             QApplication::clipboard()->setText(text);
     });
 
-    // Ctrl+C: copy atom name(s) of the current row
     auto* copyShortcut = new QShortcut(QKeySequence::Copy, m_view);
-    connect(copyShortcut, &QShortcut::activated, this, [this, atomCopyText]() {
-        const QString text = atomCopyText(m_view->currentIndex());
+    connect(copyShortcut, &QShortcut::activated, this, [this]() {
+        const QString text = copyText(m_view->currentIndex());
         if (!text.isEmpty())
             QApplication::clipboard()->setText(text);
     });
 
     setEnabled(false);
+}
+
+QString SynthResourceHierarchyWidget::copyText(const QModelIndex& index) const
+{
+    return index.data(Qt::DisplayRole).toString();
 }
 
 void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
