@@ -341,8 +341,8 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     m_leFindAtom->setObjectName("findAtom");
     m_leFindAtom->setPlaceholderText(tr("Find atom"));
     m_leFindAtom->setClearButtonEnabled(true);
-    m_leFindAtom->setToolTip(tr("Shows only the RTL instances holding an atom whose name "
-                                "contains this text. Enter selects the next match."));
+    m_leFindAtom->setToolTip(tr("Shows only the RTL instances holding an atom whose Yosys or "
+                                "VPR name contains this text. Enter selects the next match."));
     m_leFindAtom->setHidden(true);
     toolbarLayout->addWidget(m_leFindAtom);
     QObject::connect(m_leFindAtom, &QLineEdit::returnPressed, this,
@@ -1122,6 +1122,16 @@ void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, Ins
     m_verdicts = std::move(verdicts);
 }
 
+bool SynthResourceHierarchyWidget::rowNamesAtom(int row, const QModelIndex& parent,
+                                                const QString& text) const
+{
+    for (const int column : {Column::AtomList, Column::VprName}) {
+        if (m_model->index(row, column, parent).data().toString().contains(text, Qt::CaseInsensitive))
+            return true;
+    }
+    return false;
+}
+
 void SynthResourceHierarchyWidget::findAtom(const QString& text)
 {
     if (text.isEmpty()) return;
@@ -1132,8 +1142,7 @@ void SynthResourceHierarchyWidget::findAtom(const QString& text)
         for (int row = 0; row < m_model->rowCount(parent); ++row) {
             if (m_view->isRowHidden(row, parent)) continue;
             const QModelIndex idx = m_model->index(row, Column::Netlist, parent);
-            const QString atom = m_model->index(row, Column::AtomList, parent).data().toString();
-            if (atom.contains(text, Qt::CaseInsensitive)) {
+            if (rowNamesAtom(row, parent, text)) {
                 const bool atomRow = isVprDisplayRow(m_model->itemFromIndex(idx));
                 hits.emplace_back(atomRow ? parent : idx, idx);
             }
@@ -1169,8 +1178,7 @@ void SynthResourceHierarchyWidget::showItemsWithAtom(const QString& text)
         bool any = false;
         for (int row = 0; row < m_model->rowCount(parent); ++row) {
             const QModelIndex idx = m_model->index(row, Column::Netlist, parent);
-            const QString atom = m_model->index(row, Column::AtomList, parent).data().toString();
-            const bool self = atom.contains(text, Qt::CaseInsensitive);
+            const bool self = rowNamesAtom(row, parent, text);
             const bool below = filter(idx);
             m_view->setRowHidden(row, parent, !(self || below));
             if (below) m_view->expand(idx);

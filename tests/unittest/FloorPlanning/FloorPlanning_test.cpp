@@ -3044,3 +3044,35 @@ TEST(SynthResourceHierarchyTree, CopyTakesTheTextOfTheCellUnderTheMouse)
     EXPECT_EQ(widget.copyText(name.siblingAtColumn(2)), QString("core.mem_dout[0]"));
     EXPECT_EQ(widget.copyText(QModelIndex()), QString());
 }
+
+TEST(SynthResourceHierarchyTree, FindAtomMatchesAVprName)
+{
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setAtomNames({
+        {"top", {"din_QL_DSP4_MULT_I0", "core.sel"}},
+        {"core", {"core.sel"}},
+    });
+    widget.setVprAtomNames({{"din_QL_DSP4_MULT_I0", "din_QL_DSP4_MULT_I0_U[50]"}});
+    widget.build(fp::NaturalStringSet{"top", "core"});
+    widget.setAtomListVisible(true);
+    auto* find = widget.findChild<QLineEdit*>("findAtom");
+    auto* view = widget.findChild<QTreeView*>();
+    ASSERT_NE(find, nullptr);
+    ASSERT_NE(view, nullptr);
+
+    find->setText("_U[50]");
+    emit find->returnPressed();
+    EXPECT_EQ(view->currentIndex().siblingAtColumn(0).data(kRtlPathRoleForTest).toString(),
+              QString("top"));
+    QStringList selected;
+    for (const QModelIndex& row : view->selectionModel()->selectedRows(1)) {
+        selected << row.data().toString();
+    }
+    EXPECT_TRUE(selected.contains("din_QL_DSP4_MULT_I0"));
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    QStandardItem* core = itemWithPath(model->invisibleRootItem(), "core");
+    ASSERT_NE(core, nullptr);
+    EXPECT_TRUE(view->isRowHidden(core->row(), core->parent()->index()));
+}

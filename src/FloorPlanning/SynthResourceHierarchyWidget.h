@@ -141,6 +141,8 @@ private:
     void findAtom(const QString& text);
     // Shows only the instances holding an atom whose name contains `text`, and those atoms.
     void showItemsWithAtom(const QString& text);
+    // Whether the row's Yosys or VPR atom name contains `text`.
+    bool rowNamesAtom(int row, const QModelIndex& parent, const QString& text) const;
 
     int m_flags = Flag::None;
     CheckableButton* m_bnExpandCollapse{nullptr};
