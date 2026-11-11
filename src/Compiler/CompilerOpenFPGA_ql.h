@@ -533,6 +533,13 @@ private:
   // the legal placement to the command's place file.
   bool RunClockAwarePlacement(const CommandWrapperPtr& command,
                               const std::filesystem::path& regionFile);
+  // The per-region clock binding of a device with an encrypted region file lives in this
+  // process's private directory. storeClockBinding() keeps a copy in the project's
+  // clock-regions directory, encrypted with the device's key database, and
+  // restoreClockBinding() brings it back when the private files are not there: true
+  // when they are in place afterwards.
+  bool storeClockBinding();
+  bool restoreClockBinding();
   // The second stored command of a clock-aware placement: the installed region file
   // (its digest changes with a device-data update) and the final place file.
   CommandWrapperPtr getClockRegionCommand(const std::filesystem::path& regionFile,
