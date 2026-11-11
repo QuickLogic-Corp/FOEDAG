@@ -2,16 +2,15 @@
 
 #include "DeviceGridDescriptor.h"
 #include "FloorPlanningWidget.h"
-
-#include "SynthResourceExtractor.h"
+#include "NaturalSort.h"
 
 #include <filesystem>
 #include <fstream>
 #include <random>
 
-std::set<std::string> genTestElements()
+fp::NaturalStringSet genTestElements()
 {
-  std::set<std::string> elements = {"dut.prism.el00.sub001",
+  fp::NaturalStringSet elements = {"dut.prism.el00.sub001",
                                     "dut.prism.el00.sub002",
                                     "dut.prism.el01",
                                     "dut.prism.el02",
@@ -71,13 +70,7 @@ int main(int argc, char** argv) {
 
     fp::FloorPlanningWidget w("Demo");
 
-    std::set<std::string> elements = genTestElements();
-    // debug
-    // fp::SynthResourceExtractor extractor;
-    // extractor.parseAtomNamesFromBlifFile("/home/work/aurora_projects/counter_16bit/atom_netlist.cleaned.echo.blif");
-    // const std::set<std::string>& elements = extractor.elements();
-    // debug
-
+    fp::NaturalStringSet elements = genTestElements();
     w.loadNetList(elements);
 
     fp::DeviceGridDescriptorPtr descriptor = genTestDeviceDescriptor();

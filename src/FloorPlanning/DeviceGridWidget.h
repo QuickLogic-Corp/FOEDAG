@@ -54,9 +54,35 @@ public:
 
     void setScrollToPartitionWhenSelected(bool flag) { m_isScrollToPartitionWhenSelected = flag; }
 
+    // [aurora2#1725] Per-instance count of directly-owned atoms, for DeviceGrid's
+    // unconstrained-own-logic warning. See FloorPlanningWidget::setAtomNames().
+    void setOwnAtomCounts(std::map<std::string, int> ownAtomCounts) {
+        m_device.setOwnAtomCounts(std::move(ownAtomCounts));
+    }
+
+    // [aurora2#1725 stage P4] Instances graded "deleted", for DeviceGrid's report on a .qdc
+    // that still constrains one. See FloorPlanningWidget::setInstanceVerdicts().
+    void setDeletedInstances(std::unordered_set<std::string> deletedInstances) {
+        m_device.setDeletedInstances(std::move(deletedInstances));
+    }
+
+    void setRtlInstances(std::set<std::string> rtlInstances) {
+        m_device.setRtlInstances(std::move(rtlInstances));
+    }
+
+    // [aurora2#1725] Options menu. Re-checks straight away, so the issues list and the Save
+    // QDC button reflect the new severity without waiting for the next edit.
+    void setTreatWarningsAsErrors(bool treatWarningsAsErrors) {
+        m_device.setTreatWarningsAsErrors(treatWarningsAsErrors);
+        checkIssues();
+    }
+
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelected();
+    // [aurora2#1725] Remove one partition by id, whatever is selected. The partitions list
+    // deletes a row directly, which is not necessarily the row the grid has selected.
+    void removePartitionById(int id);
     void unselect();
     std::unordered_set<std::string> existedPartitionNames() const;
 
@@ -73,10 +99,16 @@ public:
     void zoomOut();
     void zoomFit();
 
-    void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; }
+    void activateZoomInRegionMode() { m_isZoomInRegionModeActive = true; setDrawRegionMode(false); }
     void deactivateZoomInRegionMode() { m_isZoomInRegionModeActive = false; }
 
+    // [aurora2#1725] "+": the left button draws one region, then the mode switches off.
+    // Otherwise the left button pans, as in the VPR viewer, unless it starts on a handle.
+    void setDrawRegionMode(bool on);
+    bool isDrawRegionModeActive() const { return m_isDrawRegionModeActive; }
+
     bool hasSelectedPartition() const { return m_selectedPartition != nullptr; }
+    bool hasSelectedRegion() const { return m_selectedRegion != nullptr; }
     void changeSelectedPartitionColor(const QColor& color) {
       if (m_selectedPartition) {
         m_selectedPartition->setColor(color);
@@ -91,6 +123,7 @@ signals:
     void partitionsChanged(const std::map<int, PartitionPtr>&);
     void notify(QString, QString);
     void selectionChanged();
+    void regionDrawn();
 
 protected:
     QSize sizeHint() const override final;
@@ -124,6 +157,12 @@ private:
     void highLightTilesInRegion(QPainter& p, const Region& region) const;
 
     bool m_isZoomInRegionModeActive = false;
+    bool m_isDrawRegionModeActive = false;
+
+    // Where a left press started, to tell a click (select) from a drag (pan or draw).
+    std::optional<QPointF> m_leftPressPos;
+    bool isClick(const QPointF& releasePos) const;
+    void updateCursor(const QPointF& worldCoord);
 
     // panning
     PointAnimation m_moveAnimation;
@@ -145,9 +184,12 @@ private:
     RegionPtr m_selectedRegion;
     std::optional<Region::HandlerRole> m_regionEditRoleOpt;
     bool trySelect(const QPointF& worldCoord);
+    std::pair<RegionPtr, std::optional<Region::HandlerRole>> regionAt(
+        const QPointF& worldCoord) const;
 
     void startNewRegionSelection(const QPointF& worldCoord);
-    void stopRegionSelection(const QPointF& worldCoord);
+    // True when the region was added; a drag covering no whole tile is discarded.
+    bool stopRegionSelection(const QPointF& worldCoord);
     void cancelRegionCreation(const QString& msg = "");
     void selectPartition(PartitionPtr partition);
     void selectRegion(const RegionPtr& region);

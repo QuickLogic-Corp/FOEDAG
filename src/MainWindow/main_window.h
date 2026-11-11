@@ -86,6 +86,19 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void pinAssignmentChanged();
   void ipConfiguratorActionTriggered();
   void floorPlanningActionTriggered();
+
+  // [aurora2#1725 stage P7] Populate an ALREADY-CREATED FloorPlanning panel from the files
+  // on disk: instances.json, validation.json, atomsets.json, design_resources.json and the
+  // .qdc. Shared by the open path and the post-compile refresh so the two cannot drift.
+  // Returns false and fills `error` when the panel cannot be populated at all.
+  bool loadFloorPlanningData(QString& error);
+
+  // [aurora2#1725 stage P7] Re-read those files after a compile, so an open panel stops
+  // showing pre-compile figures -- a tier-1 estimate does not become the measured tier-2
+  // one by itself. Deliberately never CREATES the panel: if it is closed this is a no-op.
+  // Prompts first when the floorplan has unsaved edits, since the reload repopulates the
+  // partitions from the .qdc on disk.
+  void refreshFloorPlanningData();
   void newDialogAccepted();
   void recentProjectOpen();
   void openProjectSettings();

@@ -66,8 +66,14 @@ QSize DeviceGridWidget::sizeHint() const {
   return QSize(800, 600);
 }
 
+// [aurora2#1725] No floor of its own. The grid is drawn scaled to whatever room it gets, so
+// there is no width below which it stops working -- and inside FloorPlanningWidget's splitter
+// a floor here is width the other two panes cannot borrow, which on a low-resolution screen
+// is the difference between a hierarchy pane the user can widen and one they cannot. The
+// splitter keeps the pane from vanishing entirely (setChildrenCollapsible(false)) and the
+// toolbar above the grid supplies what little minimum the pane has left.
 QSize DeviceGridWidget::minimumSizeHint() const {
-  return QSize(200, 200);
+  return QSize(0, 0);
 }
 
 void DeviceGridWidget::constructTiles(const DeviceGridDescriptorPtr& descriptor)
@@ -86,30 +92,31 @@ void DeviceGridWidget::onPartitionSelectedElementsChanged(PartitionPtr partition
     }
 }
 
+std::pair<RegionPtr, std::optional<Region::HandlerRole>> DeviceGridWidget::regionAt(
+    const QPointF& worldCoord) const
+{
+    RegionPtr candidate;
+    for (const auto& [partitionId, partition]: m_device.partitions()) {
+        for (const auto& [regionId, region]: partition->regions()) {
+            if (region->rect().contains(worldCoord)) {
+              if (std::optional<Region::HandlerRole> roleOpt = region->checkHandlerClick(worldCoord)) {
+                // if user click on area which contains several regions,
+                // the one who has intersection with handler will have more priority
+                return std::make_pair(region, roleOpt);
+              } else {
+                candidate = region;
+              }
+            }
+        }
+    }
+    return std::make_pair(candidate, std::nullopt);
+}
+
 bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
 {
     m_selectedRegion.reset();
 
-    auto trySelectHelper = [this](const QPointF& worldCoord)->std::pair<RegionPtr, std::optional<Region::HandlerRole>> {
-        RegionPtr candidate;
-        for (const auto& [partitionId, partition]: m_device.partitions()) {
-            for (const auto& [regionId, region]: partition->regions()) {
-                if (region->rect().contains(worldCoord)) {
-                  if (std::optional<Region::HandlerRole> roleOpt = region->checkHandlerClick(worldCoord)) {
-                    // if user click on area which contains several regions,
-                    // the one who has intersection with handler will have more priority
-                    return std::make_pair(region, roleOpt);
-                  } else {
-                    candidate = region;
-                  }
-                }
-            }
-        }
-        return std::make_pair(candidate, std::nullopt);
-    };
-
-    // check focused region handlers
-    auto [region, roleOpt] = trySelectHelper(worldCoord);
+    auto [region, roleOpt] = regionAt(worldCoord);
     if (region) {
       selectRegion(region);
       if (roleOpt) {
@@ -124,30 +131,71 @@ bool DeviceGridWidget::trySelect(const QPointF& worldCoord)
     return (region != nullptr);
 }
 
+void DeviceGridWidget::setDrawRegionMode(bool on)
+{
+    m_isDrawRegionModeActive = on;
+    if (on) {
+        m_isZoomInRegionModeActive = false;
+    } else {
+        cancelRegionCreation();
+    }
+    setCursor(on ? Qt::CrossCursor : Qt::ArrowCursor);
+}
+
+bool DeviceGridWidget::isClick(const QPointF& releasePos) const
+{
+    const int kClickSlopPx = 4;
+    return m_leftPressPos &&
+           (releasePos - m_leftPressPos.value()).manhattanLength() <= kClickSlopPx;
+}
+
+void DeviceGridWidget::updateCursor(const QPointF& worldCoord)
+{
+    if (m_isDrawRegionModeActive || m_isZoomInRegionModeActive) {
+        setCursor(Qt::CrossCursor);
+        return;
+    }
+    const std::optional<Region::HandlerRole> role = regionAt(worldCoord).second;
+    if (!role) {
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
+    switch (role.value()) {
+    case Region::HandlerRole::TL:
+    case Region::HandlerRole::BR: setCursor(Qt::SizeFDiagCursor); break;
+    case Region::HandlerRole::TR:
+    case Region::HandlerRole::BL: setCursor(Qt::SizeBDiagCursor); break;
+    case Region::HandlerRole::MOVE: setCursor(Qt::SizeAllCursor); break;
+    case Region::HandlerRole::REMOVE: setCursor(Qt::PointingHandCursor); break;
+    }
+}
+
 void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
 {
     if (!m_selectedPartition) {
         emit createFirstPartitionRequested();
-        return;
+        if (!m_selectedPartition) {
+            return;
+        }
     }
     m_newRegion = std::make_shared<Region>(worldCoord);
     update();
 }
 
-void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
+bool DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
 {
     if (!m_selectedPartition) {
-        return;
+        return false;
     }
 
     if (!m_newRegion) {
-        return;
+        return false;
     }
 
     std::unordered_map<Tile::Index, TilePtr> tiles = m_device.findTiles(m_newRegion->rect());
     if (tiles.empty()) {
         cancelRegionCreation();
-        return;
+        return false;
     }
 
     m_newRegion->accept(worldCoord, tiles);
@@ -158,7 +206,10 @@ void DeviceGridWidget::stopRegionSelection(const QPointF& worldCoord)
         reportPartitionChanges();
         m_newRegion.reset();
         update();
+        return true;
     }
+    cancelRegionCreation();
+    return false;
 }
 
 void DeviceGridWidget::selectRegion(const RegionPtr& region)
@@ -259,12 +310,15 @@ void DeviceGridWidget::mousePressEvent(QMouseEvent* event)
     const QPointF worldCoord{screenToWorldCoord(mousePos)};
     switch(event->button()) {
     case Qt::LeftButton: {
+        m_leftPressPos = mousePos;
         if (m_isZoomInRegionModeActive) {
           m_selectionBottomLeftOpt = worldCoord;
+        } else if (m_isDrawRegionModeActive) {
+          startNewRegionSelection(worldCoord);
+        } else if (regionAt(worldCoord).second) {
+          trySelect(worldCoord);
         } else {
-          if (!trySelect(worldCoord)) {
-              startNewRegionSelection(worldCoord);
-          }
+          startPanning(mousePos);
         }
         break;
     }
@@ -298,13 +352,31 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
           m_selectionTopRightOpt.reset();
 
           update();
-        } else {
-          if (m_newRegion) {
-            stopRegionSelection(worldCoord);
+        } else if (m_newRegion) {
+          if (isClick(mousePos)) {
+            cancelRegionCreation();  // a stray click keeps "+" armed
+          } else {
+            if (stopRegionSelection(worldCoord)) {
+              setDrawRegionMode(false);
+              emit regionDrawn();
+            }
           }
-          // even if there is no m_newRegion, we still could move existed regions, so we need refresh
+        } else if (m_isPanning) {
+          stopPanning();
+          if (isClick(mousePos)) {
+            const bool hadSelection = hasSelectedRegion();
+            if (!trySelect(worldCoord) && hadSelection) {
+              emit selectionChanged();
+              update();
+            }
+          }
+        } else {
           m_device.alignRegions();
-          checkIssues();
+          // [aurora2#1725] was checkIssues() alone -- a resize/move drag never
+          // called reportPartitionChanges(), so PartitionsListWidget's CLB/DSP/BRAM
+          // columns (and anything else listening to partitionsChanged) never heard
+          // about it. reportPartitionChanges() already calls checkIssues() too.
+          reportPartitionChanges();
           update();
 
         }
@@ -318,6 +390,9 @@ void DeviceGridWidget::mouseReleaseEvent(QMouseEvent* event) {
     default: break;
     }
     m_isMousePressed = false;
+    m_leftPressPos.reset();
+    m_regionEditRoleOpt.reset();
+    updateCursor(worldCoord);
 }
 
 void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
@@ -348,7 +423,11 @@ void DeviceGridWidget::mouseMoveEvent(QMouseEvent* event)
         update();
         return;
     }
-    if (m_isMousePressed && m_selectedRegion && m_regionEditRoleOpt) {
+    if (!m_isMousePressed) {
+        updateCursor(worldCoord);
+        return;
+    }
+    if (m_selectedRegion && m_regionEditRoleOpt) {
         switch (m_regionEditRoleOpt.value()) {
         case Region::HandlerRole::BL: m_selectedRegion->setBottomLeft(worldCoord); break;
         case Region::HandlerRole::BR: m_selectedRegion->setBottomRight(worldCoord); break;
@@ -450,7 +529,6 @@ void DeviceGridWidget::startPanning(const QPointF& pos)
 void DeviceGridWidget::stopPanning()
 {
     m_isPanning = false;
-    unsetCursor();
 }
 
 std::unordered_set<std::string> DeviceGridWidget::existedPartitionNames() const
@@ -478,6 +556,9 @@ void DeviceGridWidget::loadQdc()
     m_qdcSerializer.load(m_device);
     emit unselectPartitionRequested();
     reportPartitionChanges();
+    // A .qdc has no atom names, so the check inside reportPartitionChanges() saw zero
+    // required tiles; the partitionsChanged listeners have filled them in by now.
+    checkIssues();
     update();
 }
 
@@ -794,6 +875,22 @@ void DeviceGridWidget::removeSelected()
   }
 }
 
+void DeviceGridWidget::removePartitionById(int id)
+{
+    const auto& partitions = m_device.partitions();
+    const auto found = partitions.find(id);
+    if (found == partitions.end()) return;
+
+    // Clear the selection when it is the partition being removed, so the grid does not keep
+    // a dangling pointer to it; a selection on some other partition is left alone.
+    if (m_selectedPartition && (m_selectedPartition->id() == id)) {
+        unselect();
+    }
+    m_device.removePartition(found->second);
+    reportPartitionChanges();
+    update();
+}
+
 void DeviceGridWidget::removeSelectedPartition()
 {
     if (m_selectedPartition) {
@@ -860,6 +957,15 @@ void DeviceGridWidget::checkIssues()
 
 void DeviceGridWidget::reportPartitionChanges()
 {
+  // [aurora2#1725] Refresh every region's tile set before anything downstream reads
+  // it: a region's tiles are computed lazily (findTiles() against its current rect,
+  // see refreshPartition()), not kept live as the rect changes, so a caller that
+  // moved/resized a region or loaded one from a .qdc (QdcSerializer only restores
+  // geometry, never tiles) would otherwise report clb/dsp/bram *AvailableCount() as
+  // 0 -- correct for the rect it forgot to look at, wrong for the one it's actually
+  // sitting on. Doing it here, once, means every reportPartitionChanges() call site
+  // gets this for free instead of each one having to remember to.
+  m_device.refreshPartitions();
   checkIssues();
   emit partitionsChanged(m_device.partitions());
 }
