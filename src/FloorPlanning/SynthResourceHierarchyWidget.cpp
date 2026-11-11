@@ -474,14 +474,19 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
 void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
 {
     m_model->clear();
-    // Both variants carry all six columns so Column::Why means the same index in each;
+    // Both variants carry all seven columns so Column::Why means the same index in each;
     // the partition tree hides Partitions instead of omitting it.
     if (!isPartitionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "Type" << "Partitions" << "" << "Primitive");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "VPR Name" << "Type" << "Partitions" << "" << "Primitive");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "Type" << "" << "" << "Primitive");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "VPR Name" << "Type" << "" << "" << "Primitive");
         m_view->header()->setVisible(false);
     }
+    m_model->horizontalHeaderItem(Column::AtomList)->setToolTip(
+        tr("Yosys cell names from the synthesized netlist (atomsets.json)"));
+    m_model->horizontalHeaderItem(Column::VprName)->setToolTip(
+        tr("The name VPR gives the atom, shown only where it differs from the Yosys name.\n"
+           "Known once the floorplanning constraints have been generated."));
 
     QHeaderView* header = m_view->header();
     // Interactive so the user can drag the borders; fitColumns() gives the first widths.
@@ -845,8 +850,10 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
         whyItem->setTextAlignment(Qt::AlignCenter);
         QStandardItem* primitiveItem = new QStandardItem("");
         primitiveItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-        parent->appendRow({item, atomListItem, atomTypeItem, partitionItem, whyItem,
-                           primitiveItem});
+        QStandardItem* vprNameItem = new QStandardItem("");
+        vprNameItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+        parent->appendRow({item, atomListItem, vprNameItem, atomTypeItem, partitionItem,
+                           whyItem, primitiveItem});
         return item;
     };
 
@@ -927,6 +934,11 @@ void SynthResourceHierarchyWidget::setAtomResources(AtomResourceMap atomResource
 void SynthResourceHierarchyWidget::setAtomTypes(AtomTypeMap atomTypes)
 {
     m_atomTypes = std::move(atomTypes);
+}
+
+void SynthResourceHierarchyWidget::setVprAtomNames(VprAtomNameMap vprNames)
+{
+    m_vprAtomNames = std::move(vprNames);
 }
 
 // [aurora2#1725] Tally the selected rows into the "Selected RTL Resources" table.
@@ -1182,6 +1194,7 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
     // rebuilds the header sections and loses their hidden flags.
     m_view->setColumnHidden(Column::AtomList, !visible);
     m_view->setColumnHidden(Column::Primitive, !visible);
+    m_view->setColumnHidden(Column::VprName, !visible);
 
     // A multi-atom leaf gets one child row per atom, and those rows carry nothing but the
     // atom name, type and primitive -- their first column only repeats the owner. Hiding only
@@ -1215,7 +1228,7 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
 void SynthResourceHierarchyWidget::fitColumns()
 {
     QScopedValueRollback<bool> guard(m_fittingColumns, true);
-    for (const int column : {Column::Netlist, Column::AtomType, Column::Primitive}) {
+    for (const int column : {Column::Netlist, Column::AtomType, Column::Primitive, Column::VprName}) {
         if (!m_view->isColumnHidden(column)) {
             m_view->resizeColumnToContents(column);
         }
@@ -1354,6 +1367,11 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         return primitive;
     };
 
+    const auto vprName = [this](const std::string& name) {
+        const auto it = m_vprAtomNames.find(name);
+        return (it != m_vprAtomNames.end()) ? QString::fromStdString(it->second) : QString();
+    };
+
     // A row's Type cell: the distinct tile types of `atoms`.
     auto setTypes = [&atomTile](QStandardItem* typeItem, const std::vector<std::string>& atoms) {
         if (!typeItem) return;
@@ -1365,7 +1383,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     // One child row per atom, so each can be selected and copied. Its RTL Names cell names
     // the owner: a parent's own atoms follow its children, and would otherwise read as the
     // last child's.
-    auto appendAtomRows = [&atomTile, &atomPrimitive](QStandardItem* parent,
+    auto appendAtomRows = [&atomTile, &atomPrimitive, &vprName](QStandardItem* parent,
                                                       const std::string& ownerPath,
                                                       const std::vector<std::string>& atoms,
                                                       const std::map<std::string, int>& resourceTypes) {
@@ -1380,16 +1398,18 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
             col0->setToolTip(QString::fromStdString(ownerPath));
             auto* col1 = new QStandardItem(QString::fromStdString(n));
             col1->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-            auto* col2 = new QStandardItem(atomTile(n));
-            col2->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-            auto* col5 = new QStandardItem(atomPrimitive(n, resourceTypes));
-            col5->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-            parent->appendRow({col0, col1, col2, new QStandardItem(), new QStandardItem(), col5});
+            auto* typeCell = new QStandardItem(atomTile(n));
+            typeCell->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            auto* primitiveCell = new QStandardItem(atomPrimitive(n, resourceTypes));
+            primitiveCell->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            auto* vprCell = new QStandardItem(vprName(n));
+            vprCell->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+            parent->appendRow({col0, col1, vprCell, typeCell, new QStandardItem(), new QStandardItem(), primitiveCell});
         }
     };
 
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this, &atomTile, &atomPrimitive, &appendAtomRows, &setTypes](QStandardItem* item,
+        [&populateRecursive, this, &atomTile, &atomPrimitive, &vprName, &appendAtomRows, &setTypes](QStandardItem* item,
                                                                                const std::string& prefix)
     {
         if (!item) return;
@@ -1438,6 +1458,8 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                             typeItem->setText(atomTile(name));
                         if (QStandardItem* primItem = item->child(row, Column::Primitive))
                             primItem->setText(atomPrimitive(name, resourceTypes));
+                        if (QStandardItem* vprItem = item->child(row, Column::VprName))
+                            vprItem->setText(vprName(name));
                     } else {
                         // The leaf row names its distinct element types, so they show
                         // while the per-atom rows below are hidden.

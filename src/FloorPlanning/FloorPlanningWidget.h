@@ -50,6 +50,9 @@ public:
     // are told, same as setAtomNames().
     void setAtomTypes(AtomTypeMap atomTypes);
 
+    // [aurora2#1725] The "VPR Name" column of both trees, from the constraints manifest.
+    void setVprAtomNames(VprAtomNameMap vprNames);
+
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
     // one tile, so a partition's required clb can be reported in the same unit as what its
     // regions have available.

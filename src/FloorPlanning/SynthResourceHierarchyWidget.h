@@ -31,15 +31,17 @@ class SynthResourceHierarchyWidget : public QWidget {
     enum Column {
       Netlist = 0,
       AtomList = 1,
-      AtomType = 2,
-      Partitions = 3,
+      // The atom's VPR name where it differs from the Yosys name in Atom List.
+      VprName = 2,
+      AtomType = 3,
+      Partitions = 4,
       // [aurora2#1725 stage P7] Clickable "?" for rows that have something to explain --
-      // a partial placement or an instance synthesis optimised out. Last logically so the
-      // existing column indices are untouched; moved next to the name visually in build().
-      Why = 4,
+      // a partial placement or an instance synthesis optimised out. Moved next to the name
+      // visually in build().
+      Why = 5,
       // An atom's Yosys cell type ("TDP_ECC36K_...", "QL_DSP4_MULT"), shown with the atom
       // list; moved next to Type visually in build().
-      Primitive = 5
+      Primitive = 6
     };
 public:
     enum Flag {
@@ -82,6 +84,10 @@ public:
     // debug json falls back to classifyAtomType()'s name-substring guess, same as before
     // this existed.
     void setAtomTypes(AtomTypeMap atomTypes);
+
+    // [aurora2#1725] Yosys cell name -> VPR atom name, for the "VPR Name" column. Only
+    // the names that differ; an atom with no entry keeps its Yosys name in VPR.
+    void setVprAtomNames(VprAtomNameMap vprNames);
 
     // [aurora2#1725] "Show Atom List and Primitive columns" from the Options menu. Off by
     // default: the atom names are long and mostly of interest when debugging a mapping.
@@ -158,6 +164,7 @@ private:
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
     AtomResourceMap m_atomResources;
     AtomTypeMap m_atomTypes;
+    VprAtomNameMap m_vprAtomNames;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
     std::map<std::string, InstancePlacement> m_placements;

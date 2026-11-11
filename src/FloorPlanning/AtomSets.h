@@ -126,4 +126,10 @@ ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPe
 std::map<std::string, int> tallyAtomResources(const AtomResourceMap& atomResources,
                                               const std::set<std::string>& paths);
 
+// [aurora2#1725] Yosys cell name -> VPR atom name, for the cells whose names differ. Read
+// from the constraints manifest's "vpr_atom_names", which generate_floorplanning.py writes.
+// Returns false, with the map cleared, when the file or the map is missing.
+using VprAtomNameMap = std::map<std::string, std::string>;
+bool loadVprAtomNames(const std::filesystem::path& manifestPath, VprAtomNameMap& outNames);
+
 }  // namespace fp

@@ -366,4 +366,28 @@ bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outT
     return true;
 }
 
+bool loadVprAtomNames(const std::filesystem::path& manifestPath, VprAtomNameMap& outNames)
+{
+    outNames.clear();
+    std::ifstream stream(manifestPath);
+    if (!stream) {
+        return false;
+    }
+    nlohmann::json doc;
+    try {
+        stream >> doc;
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (!doc.contains("vpr_atom_names") || !doc["vpr_atom_names"].is_object()) {
+        return false;
+    }
+    for (auto it = doc["vpr_atom_names"].begin(); it != doc["vpr_atom_names"].end(); ++it) {
+        if (it.value().is_string()) {
+            outNames[it.key()] = it.value().get<std::string>();
+        }
+    }
+    return true;
+}
+
 }  // namespace fp

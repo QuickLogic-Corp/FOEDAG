@@ -2381,6 +2381,19 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     m_floorPlanningWidget->setAtomTypes(std::move(atomTypes));
   }
 
+  // [aurora2#1725] VPR atom names that differ from the Yosys ones, written by
+  // generate_floorplanning.py into the constraints manifest. Set even when absent, so a
+  // previous project's names do not linger.
+  {
+    fp::VprAtomNameMap vprNames;
+    fp::loadVprAtomNames(
+        fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
+                                  compiler->ProjManager()->projectName(),
+                                  "constraints.manifest.json"),
+        vprNames);
+    m_floorPlanningWidget->setVprAtomNames(std::move(vprNames));
+  }
+
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
   // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
   // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be

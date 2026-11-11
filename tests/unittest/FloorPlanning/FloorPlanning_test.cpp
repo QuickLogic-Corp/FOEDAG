@@ -2307,7 +2307,7 @@ TEST(SelectedResources, CountingBramAndDspRowByRowMatchesTheRootSelection)
                 if (child.isEmpty()) continue;
                 for (const auto& atom : atoms.at(child.toStdString())) own.erase(atom);
             }
-            const QString types = parent->child(row, 2)->text();
+            const QString types = parent->child(row, 3)->text();
             for (const QString type : {QString("bram"), QString("dsp")}) {
                 if (!types.contains(type)) continue;
                 for (const auto& atom : own) byRows[type] += fp::classifyAtomType(atom) == type;
@@ -2728,7 +2728,7 @@ namespace {
 
 constexpr int kExplanationRoleForTest = Qt::UserRole + 102;
 // Mirrors the widget's private Column::Why.
-constexpr int kWhyColumnForTest = 4;
+constexpr int kWhyColumnForTest = 5;
 
 QStandardItem* whyCellOf(QStandardItemModel* model, const QString& name)
 {
@@ -2947,3 +2947,81 @@ TEST(FloorPlanningLayout, AddRegionSitsBeforeRemoveRegionAndStartsOff)
     EXPECT_FALSE(grid->isDrawRegionModeActive());
 }
 
+
+TEST(VprAtomNames, ReadFromTheConstraintsManifest)
+{
+    QTemporaryDir dir;
+    const std::filesystem::path path =
+        std::filesystem::path(dir.path().toStdString()) / "manifest.json";
+    std::ofstream(path) << R"({"version": 1, "partitions": [],
+        "vpr_atom_names": {"core.u_mem.bram": "core.mem_dout[0]"}})";
+    fp::VprAtomNameMap names;
+    ASSERT_TRUE(fp::loadVprAtomNames(path, names));
+    EXPECT_EQ(names, (fp::VprAtomNameMap{{"core.u_mem.bram", "core.mem_dout[0]"}}));
+}
+
+TEST(VprAtomNames, NoneWithoutAManifestOrItsMap)
+{
+    QTemporaryDir dir;
+    const std::filesystem::path path =
+        std::filesystem::path(dir.path().toStdString()) / "manifest.json";
+    fp::VprAtomNameMap names{{"stale", "entry"}};
+    EXPECT_FALSE(fp::loadVprAtomNames(path, names));
+    EXPECT_TRUE(names.empty());
+
+    std::ofstream(path) << R"({"version": 1, "partitions": []})";
+    names = {{"stale", "entry"}};
+    EXPECT_FALSE(fp::loadVprAtomNames(path, names));
+    EXPECT_TRUE(names.empty());
+}
+
+TEST(SynthResourceHierarchyTree, VprNameColumnShowsOnlyNamesThatDiffer)
+{
+    constexpr int kAtomListColumn = 1;
+    constexpr int kVprNameColumn = 2;
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setAtomNames({
+        {"core", {"core.u_mem.bram", "core.u_mem.ff", "core.u_reg.q"}},
+        {"core.u_mem", {"core.u_mem.bram", "core.u_mem.ff"}},
+        {"core.u_reg", {"core.u_reg.q"}},
+    });
+    widget.setVprAtomNames({{"core.u_mem.bram", "core.mem_dout[0]"},
+                            {"core.u_reg.q", "core.q_out"}});
+    widget.build(fp::NaturalStringSet{"top", "core", "core.u_mem", "core.u_reg"});
+
+    auto* model = widget.findChild<QStandardItemModel*>();
+    ASSERT_NE(model, nullptr);
+    ASSERT_GT(model->columnCount(), kVprNameColumn);
+    EXPECT_EQ(model->horizontalHeaderItem(kVprNameColumn)->text(), QString("VPR Name"));
+    EXPECT_TRUE(model->horizontalHeaderItem(kAtomListColumn)->toolTip().contains("Yosys"));
+    EXPECT_TRUE(model->horizontalHeaderItem(kVprNameColumn)->toolTip().contains("VPR"));
+
+    QStandardItem* coreItem = childNamed(model->invisibleRootItem()->child(0, 0), "core");
+    ASSERT_NE(coreItem, nullptr);
+
+    // A multi-atom leaf: one row per atom.
+    QStandardItem* memItem = childNamed(coreItem, "u_mem");
+    ASSERT_NE(memItem, nullptr);
+    std::map<QString, QString> vprByAtom;
+    for (int row = 0; row < memItem->rowCount(); ++row) {
+        QStandardItem* vpr = memItem->child(row, kVprNameColumn);
+        vprByAtom[memItem->child(row, kAtomListColumn)->text()] = vpr ? vpr->text() : "<none>";
+    }
+    EXPECT_EQ(vprByAtom, (std::map<QString, QString>{{"core.u_mem.bram", "core.mem_dout[0]"},
+                                                      {"core.u_mem.ff", ""}}));
+
+    // A single-atom leaf shows its atom in its own row.
+    QStandardItem* regItem = childNamed(coreItem, "u_reg");
+    ASSERT_NE(regItem, nullptr);
+    QStandardItem* regVpr = coreItem->child(regItem->row(), kVprNameColumn);
+    ASSERT_NE(regVpr, nullptr);
+    EXPECT_EQ(regVpr->text(), QString("core.q_out"));
+
+    // Shown with the Atom List, hidden by default.
+    auto* view = widget.findChild<QTreeView*>();
+    ASSERT_NE(view, nullptr);
+    EXPECT_TRUE(view->isColumnHidden(kVprNameColumn));
+    widget.setAtomListVisible(true);
+    EXPECT_FALSE(view->isColumnHidden(kVprNameColumn));
+}
