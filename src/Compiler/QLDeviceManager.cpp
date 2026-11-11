@@ -3903,8 +3903,8 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
     append_root_dir_path(registered_root_dir_path, "registered by install_device", true);
   }
 
-  // [4] $AURORA2_DEVICE_DATA_PATH - additive, a list in the platform's form like PATH: ';' on
-  //     Windows (MSYS2 hands native programs C:\a;C:\b), ':' elsewhere (aurora2#2837).
+  // [4] $AURORA2_DEVICE_DATA_PATH - additive, split like PATH: ';' on Windows
+  //     (MSYS2 hands native programs C:\a;C:\b), ':' elsewhere (aurora2#2837).
   const char* const path_device_data_search_env_str = std::getenv("AURORA2_DEVICE_DATA_PATH");
 
   if(path_device_data_search_env_str != nullptr) {
@@ -3915,7 +3915,8 @@ std::vector<std::filesystem::path> QLDeviceManager::deviceDataRootDirPathList() 
 
     while(entry_begin <= path_device_data_search_str.size()) {
 
-      std::string::size_type entry_end = path_device_data_search_str.find(list_separator, entry_begin);
+      std::string::size_type entry_end =
+          path_device_data_search_str.find(list_separator, entry_begin);
       if(entry_end == std::string::npos) {
         entry_end = path_device_data_search_str.size();
       }
