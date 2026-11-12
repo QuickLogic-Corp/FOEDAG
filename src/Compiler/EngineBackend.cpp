@@ -121,8 +121,10 @@ std::vector<std::string> EngineBackend::ownedOutputs(const std::string& stage,
             name + "_post_synth.vhd",  name + ".clocks"};
   }
   if (stage == "floorplan") {
-    return {name + "_repack_design_constraint.xml", name + "_constraints.xml",
-            name + "_rpm_constraints.xml"};
+    // From an encrypted template the repack constraints stay private; the project
+    // keeps their encrypted copy (.en), which later processes restore.
+    return {name + "_repack_design_constraint.xml", name + "_repack_design_constraint.xml.en",
+            name + "_constraints.xml", name + "_rpm_constraints.xml"};
   }
   if (stage == "pack") {
     std::vector<std::string> outputs{name + "_post_synth.net"};
@@ -218,7 +220,8 @@ bool EngineBackend::packReadsCustomLayout(bool deviceTypePresent, const std::str
 }
 
 std::vector<std::string> EngineBackend::floorplanStaleOutputs(const std::string& projectName) {
-  return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml"};
+  return {projectName + "_constraints.xml", projectName + "_repack_design_constraint.xml",
+          projectName + "_repack_design_constraint.xml.en"};
 }
 
 bool EngineBackend::onPath(const std::string& program) {
@@ -279,11 +282,6 @@ nlohmann::json EngineBackend::request(const std::string& op, const std::string& 
     if (digest != ctx.outputHostDigests.end() && fs::exists(path, ec)) {
       hostDigests[utf8(path)] = digest->second;
     }
-  }
-  for (const fs::path& output : command.declaredOutputs()) {
-    const fs::path path = absolute(output, ctx.project);
-    outputs.push_back(utf8(path));
-    owned.insert(path);
   }
 
   std::vector<fs::path> declared = command.declaredPaths();

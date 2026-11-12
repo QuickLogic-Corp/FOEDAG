@@ -218,6 +218,7 @@ TEST_F(EngineBackendTest, owned_outputs_follow_the_ownership_table) {
   EXPECT_FALSE(owns("vpr_generated.xml"));  // deleted once encrypted
   EXPECT_EQ(EngineBackend::ownedOutputs("floorplan", "", m_ctx),
             (std::vector<std::string>{"counter_repack_design_constraint.xml",
+                                      "counter_repack_design_constraint.xml.en",
                                       "counter_constraints.xml", "counter_rpm_constraints.xml"}));
   EXPECT_EQ(EngineBackend::ownedOutputs("bitstream", "", m_ctx),
             std::vector<std::string>{"fabric_bitstream.bit"});
@@ -246,8 +247,8 @@ TEST_F(EngineBackendTest, metrics_go_with_their_catalogue) {
 }
 
 // REQ-121: an encrypted owned output is known by its plaintext digest, but only
-// while it exists; outputs outside the project are keyed by their mask.
-TEST_F(EngineBackendTest, output_host_digests_and_private_outputs) {
+// while it exists; a per-process private path is only masked, never an output (F1).
+TEST_F(EngineBackendTest, output_host_digests_and_masked_private_paths) {
   m_ctx.layoutResolvedInPack = true;
   const std::string plain = "sha256:" + std::string(64, 'b');
   m_ctx.outputHostDigests["vpr_generated.xml.en"] = plain;
@@ -255,14 +256,14 @@ TEST_F(EngineBackendTest, output_host_digests_and_private_outputs) {
   write(m_project / "vpr_generated.xml.en", "cipher");
   const fs::path privateOut = m_root / "private" / "counter_repack.xml";
   auto command = vprCommand();
-  command->declareOutput(privateOut, "repack_constraints_private");
+  command->maskTemp(privateOut, "repack_constraints_private");
   command->declarePath(m_root / "data.csv");
 
   const nlohmann::json req = backend({})->request("check", "pack", "", *command, m_ctx);
   EXPECT_EQ(req["host_digests"][(m_project / "vpr_generated.xml.en").string()], plain);
   EXPECT_FALSE(req["host_digests"].contains((m_project / "sb_maps_generated.yml.en").string()));
   const auto& outputs = req["outputs"];
-  EXPECT_NE(std::find(outputs.begin(), outputs.end(), privateOut.string()), outputs.end());
+  EXPECT_EQ(std::find(outputs.begin(), outputs.end(), privateOut.string()), outputs.end());
   EXPECT_EQ(req["temps"][privateOut.string()], "repack_constraints_private");
   const auto& inputs = req["inputs"];
   EXPECT_NE(std::find(inputs.begin(), inputs.end(), (m_root / "data.csv").string()), inputs.end());
@@ -558,6 +559,8 @@ TEST_F(EngineBackendTest, floorplan_removes_its_outputs_first_and_records_0_or_2
   const auto stale = EngineBackend::floorplanStaleOutputs("counter");
   EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_constraints.xml"), stale.end());
   EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_repack_design_constraint.xml"),
+            stale.end());
+  EXPECT_NE(std::find(stale.begin(), stale.end(), "counter_repack_design_constraint.xml.en"),
             stale.end());
   EXPECT_TRUE(EngineBackend::floorplanRecords(0));
   EXPECT_TRUE(EngineBackend::floorplanRecords(2));

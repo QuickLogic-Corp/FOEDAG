@@ -172,6 +172,19 @@ class CompilerOpenFPGA_ql : public Compiler {
                           const std::filesystem::path& deviceTypeDir,
                           const std::string& deviceTypeString);
 
+  /// Encrypt `src_plain` to `dst_en` with an existing key database, so a private
+  /// file outlives this process. Removes `dst_en` on failure.
+  static bool storeEncryptedCopy(const std::filesystem::path& src_plain,
+                                 const std::filesystem::path& dst_en,
+                                 const std::filesystem::path& cryptdb);
+  /// Decrypt a storeEncryptedCopy() file to the private `dst_plain` (owner-only).
+  /// Removes `dst_plain` on failure.
+  static bool restoreEncryptedCopy(const std::filesystem::path& src_en,
+                                   const std::filesystem::path& dst_plain,
+                                   const std::filesystem::path& cryptdb);
+  /// The current device's `<family>_Supp.db`.
+  std::filesystem::path deviceKeyDb();
+
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
@@ -448,6 +461,8 @@ private:
     CommandWrapperPtr command;  // describe form; built only under the engine
     bool deferred = false;  // AUTO/RESOURCES device not yet packed: nothing to do
     std::vector<std::filesystem::path> removeBeforeRun;
+    // Repack constraints the script writes privately; their encrypted copy is kept.
+    std::filesystem::path privateRepackOut;
   };
   static constexpr const char* REPACK_TEMPLATE_MASK = "repack_template_mask";
   std::optional<bool> m_floorplanOutcome;
