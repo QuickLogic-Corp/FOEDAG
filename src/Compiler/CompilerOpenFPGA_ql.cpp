@@ -9051,7 +9051,9 @@ int CompilerOpenFPGA_ql::runFloorplan(const FloorplanJob& job) {
 
   int status = FileUtils::ExecuteSystemCommand(job.python, job.args, m_out, /*timeout_ms*/-1).realCode;
 
-  if (status == 0 && !job.privateRepackOut.empty() &&
+  // Exit 2 skips only the IO constraints (no PCF or QDC); the repack constraints
+  // may still have been written.
+  if ((status == 0 || status == 2) && !job.privateRepackOut.empty() &&
       FileUtils::FileExists(job.privateRepackOut)) {
     const std::filesystem::path stored = storedRepackConstraintsPath(
         ProjManager()->projectPath(), ProjManager()->projectName());
