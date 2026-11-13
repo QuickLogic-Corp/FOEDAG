@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -189,6 +190,7 @@ class CompilerOpenFPGA_ql : public Compiler {
   bool privateRepackMissing();
   /// The project whose floorplanning this process last ran with private repack output.
   std::string m_privateRepackGeneratedIn;
+  std::mutex m_privateRepackMutex;
 
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);

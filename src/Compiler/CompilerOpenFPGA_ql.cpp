@@ -7662,10 +7662,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   if (bindingPrivate) {
     restoreClockBinding();
   }
-  // Otherwise floorplanning writes them, privately from an encrypted template. If that
-  // was an earlier process, make floorplanning current before choosing a file, or this
-  // bitstream would silently fall back and lose the design's 'set_clock' bindings.
-  if (privateRepackMissing()) {
+  // Otherwise floorplanning writes them, privately from an encrypted template. Make it
+  // current before choosing a file, or this bitstream could use another process's
+  // constraints or silently fall back and lose the design's 'set_clock' bindings. The
+  // engine decides floorplan once per task, so asking first costs nothing; cpp only
+  // needs it when this process has not generated them yet.
+  if (m_engineSelected || privateRepackMissing()) {
     GenerateIOFloorPlanConstraints();
   }
   std::filesystem::path repack_constraints_file;
@@ -9176,8 +9178,9 @@ int CompilerOpenFPGA_ql::runFloorplan(const FloorplanJob& job) {
   }
 
   int status = FileUtils::ExecuteSystemCommand(job.python, job.args, m_out, /*timeout_ms*/-1).realCode;
-  if (!job.privateRepackOut.empty()) {
+  if (!job.privateRepackOut.empty() && (status == 0 || status == 2)) {
     // This process has generated them, or found there are none to generate.
+    std::lock_guard<std::mutex> lock(m_privateRepackMutex);
     m_privateRepackGeneratedIn = ProjManager()->projectPath();
   }
 
@@ -10384,9 +10387,15 @@ bool CompilerOpenFPGA_ql::restoreEncryptedCopy(const std::filesystem::path& src_
 bool CompilerOpenFPGA_ql::privateRepackMissing() {
   const std::filesystem::path privateFile =
       privateRepackConstraintsPath(ProjManager()->projectName());
-  if (privateFile.empty() || FileUtils::FileExists(privateFile) ||
-      m_privateRepackGeneratedIn == ProjManager()->projectPath()) {
+  if (privateFile.empty() || FileUtils::FileExists(privateFile)) {
     return false;
+  }
+  {
+    // Status queries read this on the GUI thread while a task may set it.
+    std::lock_guard<std::mutex> lock(m_privateRepackMutex);
+    if (m_privateRepackGeneratedIn == ProjManager()->projectPath()) {
+      return false;
+    }
   }
   QLDeviceManager* devices = QLDeviceManager::getInstance();
   // With clock regions, clock-aware placement writes them (restoreClockBinding).
