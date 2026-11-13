@@ -273,7 +273,7 @@ class QLDeviceManager : public QObject {
   //       and the device-data validation gate rely on.
   //   [2] the installation's device_data dir (built-in devices, authoritative)
   //   [3] roots registered by install_device (per-user registry)
-  //   [4] $AURORA2_DEVICE_DATA_PATH - additive, ':'-separated
+  //   [4] $AURORA2_DEVICE_DATA_PATH - additive, split like PATH (';' on Windows, ':' elsewhere)
   // roots that do not exist are dropped here (with a warning), so callers never have to
   // guard against a stale registry entry or a mistyped env var.
   std::vector<std::filesystem::path> deviceDataRootDirPathList();
