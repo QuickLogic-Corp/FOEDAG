@@ -47,6 +47,7 @@ public:
   const QVector<QVector<QString>>& errors() const { return m_errors; }
   bool hasErrors() const { return !m_errors.isEmpty(); }
   void forceNextCheck();
+  void checkNow();
 
 signals:
   void contentChecked(bool status);

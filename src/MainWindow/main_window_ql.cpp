@@ -881,12 +881,12 @@ bool MainWindow::saveConstraintFile() {
 #else
 bool MainWindow::saveConstraintFile() {
   if (!m_pinAssignmentCreator) return false;
-  auto [pcf, refreshUI] = m_pinAssignmentCreator->generatePcf();
+  const QString pcf = m_pinAssignmentCreator->generatePcf();
   FileUtils::WriteToFile(m_projectManager->getPcfFilePath().toStdString(), pcf.toStdString());
+  // Reload now, so the timer does not take this write for an outside edit and
+  // drop pins set after Save.
+  m_pinAssignmentCreator->checkPcfFileNow();
   updateSourceTree();
-  if (refreshUI) {
-    m_pinAssignmentCreator->refresh();
-  }
   return true;
 }
 #endif

@@ -24,6 +24,9 @@ PcfObserver::PcfObserver(QObject* parent, const QString& filePath, PortsModel* p
   connect(&m_checkTimer, &QTimer::timeout, this, &PcfObserver::check);
 
   m_checkTimer.start();
+  // Check once the caller is wired up, not on the first tick: that late check
+  // reloads the rows and drops pins the user set meanwhile.
+  QTimer::singleShot(0, this, &PcfObserver::check);
 }
 
 const QList<PcfLineFrame>& PcfObserver::lineFrames(bool update)
@@ -39,6 +42,12 @@ void PcfObserver::forceNextCheck()
   m_checkTimer.stop();
   m_checkTimer.start();
   m_forceNextCheck = true;
+}
+
+void PcfObserver::checkNow()
+{
+  m_forceNextCheck = true;
+  check();
 }
 
 void PcfObserver::check()
