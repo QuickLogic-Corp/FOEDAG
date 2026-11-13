@@ -9133,19 +9133,25 @@ bool CompilerOpenFPGA_ql::engineFloorplan() {
     return ok = true;
   }
   if (!backend().isCompilationRequired(EngineBackend::FLOORPLAN_TASK, job.command)) {
-    // Cached means the project's encrypted copy is this run's output: restore it if
-    // this process has not got the plaintext. A copy that will not restore runs again.
+    // Cached means the project's encrypted copy is the recorded output, possibly from
+    // another process: the private plaintext must match it, whatever this process holds.
+    // A copy that will not restore runs floorplanning again.
     const std::filesystem::path stored = storedRepackConstraintsPath(
         ProjManager()->projectPath(), ProjManager()->projectName());
-    const bool restore = !job.privateRepackOut.empty() &&
-                         !FileUtils::FileExists(job.privateRepackOut) &&
-                         FileUtils::FileExists(stored);
-    if (!restore || restoreEncryptedCopy(stored, job.privateRepackOut, deviceKeyDb())) {
-      if (restore) Message("Repack design constraints restored from " + stored.string());
+    bool current = true;
+    if (!job.privateRepackOut.empty()) {
+      if (FileUtils::FileExists(stored)) {
+        current = restoreEncryptedCopy(stored, job.privateRepackOut, deviceKeyDb());
+      } else {
+        std::error_code ec;
+        fs::remove(job.privateRepackOut, ec);  // the recorded run wrote none
+      }
+    }
+    if (current) {
       Message("IO floorplanning skipped, not required");
       return ok = true;
     }
-    Message("Cannot restore the repack design constraints from " + stored.string() +
+    Message("Warning: cannot restore the repack design constraints from " + stored.string() +
             "; running IO floorplanning again.");
   }
   const int status = runFloorplan(job);
@@ -9170,6 +9176,10 @@ int CompilerOpenFPGA_ql::runFloorplan(const FloorplanJob& job) {
   }
 
   int status = FileUtils::ExecuteSystemCommand(job.python, job.args, m_out, /*timeout_ms*/-1).realCode;
+  if (!job.privateRepackOut.empty()) {
+    // This process has generated them, or found there are none to generate.
+    m_privateRepackGeneratedIn = ProjManager()->projectPath();
+  }
 
   // The engine keeps the private repack constraints as an encrypted copy, its record of
   // floorplan's output. Exit 2 skips only the IO constraints; the repack ones may exist.
@@ -10374,7 +10384,8 @@ bool CompilerOpenFPGA_ql::restoreEncryptedCopy(const std::filesystem::path& src_
 bool CompilerOpenFPGA_ql::privateRepackMissing() {
   const std::filesystem::path privateFile =
       privateRepackConstraintsPath(ProjManager()->projectName());
-  if (privateFile.empty() || FileUtils::FileExists(privateFile)) {
+  if (privateFile.empty() || FileUtils::FileExists(privateFile) ||
+      m_privateRepackGeneratedIn == ProjManager()->projectPath()) {
     return false;
   }
   QLDeviceManager* devices = QLDeviceManager::getInstance();
