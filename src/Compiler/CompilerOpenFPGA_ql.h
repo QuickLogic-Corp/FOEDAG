@@ -184,6 +184,9 @@ class CompilerOpenFPGA_ql : public Compiler {
                                    const std::filesystem::path& cryptdb);
   /// The current device's `<family>_Supp.db`.
   std::filesystem::path deviceKeyDb();
+  /// True when floorplanning writes this device's repack constraints privately (an
+  /// encrypted template, no clock regions) and this process does not have them yet.
+  bool privateRepackMissing();
 
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
