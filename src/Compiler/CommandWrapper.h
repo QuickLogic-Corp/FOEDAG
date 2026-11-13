@@ -536,7 +536,6 @@ public:
   // the host computes for decrypted or key-protected files. Never serialized.
   const std::vector<std::string>& argv() const { return m_argv; }
   const std::vector<std::filesystem::path>& declaredPaths() const { return m_declaredPaths; }
-  const std::vector<std::filesystem::path>& declaredOutputs() const { return m_declaredOutputs; }
   // Inputs used if they exist: which candidate exists, and its content, are keyed.
   using Probe = std::pair<std::string, std::vector<std::filesystem::path>>;
   const std::vector<Probe>& probes() const { return m_probes; }
@@ -562,10 +561,9 @@ public:
       m_temps[file.string()] = mask;
     }
   }
-  // An output outside the project, keyed by its mask so its location does not
-  // matter; the engine sees it missing in a process that did not write it.
-  void declareOutput(const std::filesystem::path& file, const std::string& mask) {
-    m_declaredOutputs.push_back(file);
+  // A per-process path an argument names that is neither an input nor an output:
+  // the engine sees only its mask, so the key does not change between processes.
+  void maskTemp(const std::filesystem::path& file, const std::string& mask) {
     m_temps[file.string()] = mask;
   }
 
@@ -609,7 +607,6 @@ private:
 
   std::vector<std::string> m_argv;
   std::vector<std::filesystem::path> m_declaredPaths;
-  std::vector<std::filesystem::path> m_declaredOutputs;
   std::vector<Probe> m_probes;
   std::map<std::string, std::string> m_temps;  // path -> role (its mask)
   std::map<std::string, std::string> m_hostDigests;

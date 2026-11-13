@@ -124,6 +124,13 @@ static std::filesystem::path privateRepackConstraintsPath(const std::string& pro
   return dir.empty() ? dir : dir / (projectName + "_repack_design_constraint.xml");
 }
 
+// The engine's encrypted copy of those private repack constraints, floorplan's recorded
+// output, which a later process restores when floorplan is cached.
+static std::filesystem::path storedRepackConstraintsPath(const std::filesystem::path& projectPath,
+                                                         const std::string& projectName) {
+  return projectPath / (projectName + "_repack_design_constraint.xml.en");
+}
+
 // The file clock-aware placement writes the clock selectors' bits to, in the
 // clock-regions directory, and its private counterpart when the device's region
 // file is encrypted: the bits locate the selectors, so they stay private, beside
@@ -7655,14 +7662,20 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   if (bindingPrivate) {
     restoreClockBinding();
   }
+  // Otherwise floorplanning writes them, privately from an encrypted template. Make it
+  // current before choosing a file, or this bitstream could use another process's
+  // constraints or silently fall back and lose the design's 'set_clock' bindings. The
+  // engine decides floorplan once per task, so asking first costs nothing; cpp only
+  // needs it when this process has not generated them yet.
+  if (m_engineSelected || privateRepackMissing()) {
+    GenerateIOFloorPlanConstraints();
+  }
   std::filesystem::path repack_constraints_file;
+  bool repack_private_used = false;
   if (!private_repack_constraints.empty() &&
       FileUtils::FileExists(private_repack_constraints)) {
     repack_constraints_file = private_repack_constraints;
-    if (m_engineSelected) {
-      m_bitstreamTemps.push_back({private_repack_constraints, "repack_constraints_private",
-                                  FlowEngineClient::sha256File(private_repack_constraints)});
-    }
+    repack_private_used = true;
   }
   else if (FileUtils::FileExists(generated_repack_constraints)) {
     repack_constraints_file = generated_repack_constraints;
@@ -7775,6 +7788,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::string vpr_analysis_command = base_vpr_command;
   if (m_engineSelected) {
     m_bitstreamVprCommand = base_vpr_command;
+    // Keyed only now: floorplanning may have re-run inside BaseVprCommandLEGACY() and
+    // rewritten the file. Its plaintext is the same in every process.
+    if (repack_private_used) {
+      m_bitstreamTemps.push_back({private_repack_constraints, "repack_constraints_private",
+                                  FlowEngineClient::sha256File(private_repack_constraints)});
+    }
   }
   if(vpr_analysis_command.empty()) {
     ErrorMessage("Base VPR Command is empty!");
@@ -9077,13 +9096,21 @@ bool CompilerOpenFPGA_ql::GenerateIOFloorPlanConstraints(bool forceOverwrite) {
         }
       }
     }
-    if (newerSource.empty()) {
+    // From an encrypted template the repack constraints live only in the process that
+    // generated them; a later one generates them again rather than reuse a stale copy.
+    const bool repackMissing = privateRepackMissing();
+    if (newerSource.empty() && !repackMissing) {
       Message(ProjManager()->projectName() + "_constraints.xml" +
               " Already Exists. Using the Existing Constraint File.");
       return true;
     }
-    Message(ProjManager()->projectName() + "_constraints.xml is older than " +
-            newerSource + "; regenerating it.");
+    if (!newerSource.empty()) {
+      Message(ProjManager()->projectName() + "_constraints.xml is older than " +
+              newerSource + "; regenerating it.");
+    } else {
+      Message("The repack design constraints are not in this process; regenerating " +
+              ProjManager()->projectName() + "_constraints.xml with them.");
+    }
   }
 
   FloorplanJob job;
@@ -9108,8 +9135,26 @@ bool CompilerOpenFPGA_ql::engineFloorplan() {
     return ok = true;
   }
   if (!backend().isCompilationRequired(EngineBackend::FLOORPLAN_TASK, job.command)) {
-    Message("IO floorplanning skipped, not required");
-    return ok = true;
+    // Cached means the project's encrypted copy is the recorded output, possibly from
+    // another process: the private plaintext must match it, whatever this process holds.
+    // A copy that will not restore runs floorplanning again.
+    const std::filesystem::path stored = storedRepackConstraintsPath(
+        ProjManager()->projectPath(), ProjManager()->projectName());
+    bool current = true;
+    if (!job.privateRepackOut.empty()) {
+      if (FileUtils::FileExists(stored)) {
+        current = restoreEncryptedCopy(stored, job.privateRepackOut, deviceKeyDb());
+      } else {
+        std::error_code ec;
+        fs::remove(job.privateRepackOut, ec);  // the recorded run wrote none
+      }
+    }
+    if (current) {
+      Message("IO floorplanning skipped, not required");
+      return ok = true;
+    }
+    Message("Warning: cannot restore the repack design constraints from " + stored.string() +
+            "; running IO floorplanning again.");
   }
   const int status = runFloorplan(job);
   if (status == 1 || faultAfterTool("floorplan")) {
@@ -9133,6 +9178,24 @@ int CompilerOpenFPGA_ql::runFloorplan(const FloorplanJob& job) {
   }
 
   int status = FileUtils::ExecuteSystemCommand(job.python, job.args, m_out, /*timeout_ms*/-1).realCode;
+  if (!job.privateRepackOut.empty() && (status == 0 || status == 2)) {
+    // This process has generated them, or found there are none to generate.
+    std::lock_guard<std::mutex> lock(m_privateRepackMutex);
+    m_privateRepackGeneratedIn = ProjManager()->projectPath();
+  }
+
+  // The engine keeps the private repack constraints as an encrypted copy, its record of
+  // floorplan's output. Exit 2 skips only the IO constraints; the repack ones may exist.
+  if (m_engineSelected && (status == 0 || status == 2) && !job.privateRepackOut.empty() &&
+      FileUtils::FileExists(job.privateRepackOut)) {
+    const std::filesystem::path stored = storedRepackConstraintsPath(
+        ProjManager()->projectPath(), ProjManager()->projectName());
+    if (!storeEncryptedCopy(job.privateRepackOut, stored, deviceKeyDb())) {
+      ErrorMessage("Cannot keep an encrypted copy of the repack design constraints in " +
+                   stored.string());
+      status = 1;
+    }
+  }
 
   if (status == 1) { //Failure
     ErrorMessage("Design " + ProjManager()->projectName() +
@@ -9453,6 +9516,8 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     }
   } else if (!clockRegions) {
     job.removeBeforeRun.push_back(repack_constraints_out);
+    job.removeBeforeRun.push_back(storedRepackConstraintsPath(ProjManager()->projectPath(),
+                                                              ProjManager()->projectName()));
   }
   if (!clockRegions) {
     // A binding left in this process by a device with clock regions goes too.
@@ -9479,6 +9544,7 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       // The output then carries the decrypted template, so it stays private
       // (REQ-130); a plaintext device keeps it in the project as before.
       repack_constraints_out = repack_constraints_private;
+      job.privateRepackOut = repack_constraints_private;
       std::filesystem::path repack_constraints_en_path = repack_constraints_in;
       if (m_engineSelected) {
         repack_template_digest = FlowEngineClient::sha256File(repack_constraints_en_path);
@@ -9596,8 +9662,9 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     } else if (option == "--repack_constraints_in") {
       job.command->appendPath(option, value);
     } else if (option == "--repack_constraints_out" && value == repack_constraints_private) {
+      // The project's encrypted copy is the output (EngineBackend::ownedOutputs).
       job.command->append(option, args[i + 1]);
-      job.command->declareOutput(value, "repack_constraints_private");
+      job.command->maskTemp(value, "repack_constraints_private");
     } else {
       job.command->append(option, args[i + 1]);
     }
@@ -10282,6 +10349,68 @@ bool CompilerOpenFPGA_ql::encryptDeviceFiles(
     }
   }
   return true;
+}
+
+
+bool CompilerOpenFPGA_ql::storeEncryptedCopy(const std::filesystem::path& src_plain,
+                                             const std::filesystem::path& dst_en,
+                                             const std::filesystem::path& cryptdb) {
+  qlcrypt::KeyDB keys;
+  const bool stored = FileUtils::FileExists(cryptdb) &&
+                      qlcrypt::ok(qlcrypt::KeyDB::load(cryptdb.string(), keys)) &&
+                      qlcrypt::ok(qlcrypt::FileCrypt(keys).encryptFile(src_plain.string(),
+                                                                        dst_en.string()));
+  if (!stored) {
+    std::error_code ec;
+    std::filesystem::remove(dst_en, ec);  // never half a copy
+  }
+  return stored;
+}
+
+bool CompilerOpenFPGA_ql::restoreEncryptedCopy(const std::filesystem::path& src_en,
+                                               const std::filesystem::path& dst_plain,
+                                               const std::filesystem::path& cryptdb) {
+  qlcrypt::KeyDB keys;
+  std::string plaintext;
+  const bool restored = FileUtils::FileExists(cryptdb) &&
+                        qlcrypt::ok(qlcrypt::KeyDB::load(cryptdb.string(), keys)) &&
+                        qlcrypt::ok(qlcrypt::FileCrypt(keys).decryptFile(src_en.string(),
+                                                                          plaintext)) &&
+                        PrivateTempDir::writePrivate(dst_plain, plaintext);
+  if (!restored) {
+    std::error_code ec;
+    std::filesystem::remove(dst_plain, ec);
+  }
+  return restored;
+}
+
+bool CompilerOpenFPGA_ql::privateRepackMissing() {
+  const std::filesystem::path privateFile =
+      privateRepackConstraintsPath(ProjManager()->projectName());
+  if (privateFile.empty() || FileUtils::FileExists(privateFile)) {
+    return false;
+  }
+  {
+    // Status queries read this on the GUI thread while a task may set it.
+    std::lock_guard<std::mutex> lock(m_privateRepackMutex);
+    if (m_privateRepackGeneratedIn == ProjManager()->projectPath()) {
+      return false;
+    }
+  }
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  // With clock regions, clock-aware placement writes them (restoreClockBinding).
+  std::string regionError;
+  if (!devices->deviceClockRegionFile(QLDeviceTarget(), &regionError).empty()) {
+    return false;
+  }
+  const std::filesystem::path repackTemplate = devices->deviceOpenFPGARepackDesignConstraintFile(
+      QLDeviceTarget(), /*device_only*/ true, /*report_missing*/ false);
+  return !repackTemplate.empty() && devices->deviceFileIsEncrypted(repackTemplate);
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::deviceKeyDb() {
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  return devices->deviceTypeDirPath() / (devices->convertToDeviceTypeString() + "_Supp.db");
 }
 
 
