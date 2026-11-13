@@ -12798,7 +12798,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                             ".." /
                             "tabby" /
                             "bin" /
+#ifdef _WIN32
+                            "yosys_verific.exe";
+#else
                             "yosys_verific";
+#endif
     if (!FileUtils::FileExists(yosys_executable_path)) {
       ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
                    "found: " + yosys_executable_path.string());
