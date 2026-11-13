@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDir>
 #include <filesystem>
 
+#include "GuiTestFramework/GuiMilestone.h"
 #include "Main/ToolContext.h"
 #ifdef UPSTREAM_PINPLANNER
 #include "PackagePinsLoader.h"
@@ -83,6 +84,7 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
     refresh(status);
     emit allowSaving(status);
   });
+  GUI_TEST_BRIDGE(m_pcfObserver);
 #endif
   loader->load(fileName);
   QLPackagePinsLoader* qlLoader = static_cast<QLPackagePinsLoader*>(loader);
@@ -91,6 +93,7 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
   m_baseModel->setCollisionDetector(collisionDetector);
 
   auto portsView = new PortsView(m_baseModel);
+  portsView->setObjectName("pinPlannerPortsView");
   connect(portsView, &PortsView::selectionHasChanged, this,
           &PinAssignmentCreator::changed);
   m_portsView = CreateLayoutedWidget(portsView);
@@ -197,6 +200,8 @@ QWidget *PinAssignmentCreator::CreateLayoutedWidget(QWidget *main) {
 
   ErrorsModel* errorsModel = new ErrorsModel(m_baseModel);
   ErrorsView* errorsView = new ErrorsView(errorsModel);
+  if (qobject_cast<PortsView*>(main))
+    errorsView->setObjectName("pinPlannerErrorsView");
   connect(errorsView, &ErrorsView::openFileRequested, this, [this](){
     emit openPcfFileRequested(m_data.pinFile);
   });

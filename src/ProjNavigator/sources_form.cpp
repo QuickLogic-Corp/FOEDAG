@@ -30,6 +30,7 @@ SourcesForm::SourcesForm(QWidget *parent)
   ui->setupUi(this);
 
   m_treeSrcHierachy = new QTreeWidget(ui->m_tabHierarchy);
+  m_treeSrcHierachy->setObjectName("sourcesTree");
   m_treeSrcHierachy->setSelectionMode(
       QAbstractItemView::SelectionMode::ExtendedSelection);
 

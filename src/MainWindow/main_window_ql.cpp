@@ -472,7 +472,7 @@ void MainWindow::addPinPlannerRefreshButton(QDockWidget* dock) {
   layout->addWidget(new QLabel{dock->windowTitle()});
 
   auto saveButton = new QPushButton;
-  saveButton->setObjectName("saveButton");
+  saveButton->setObjectName("savePcfButton");
   connect(saveButton, &QPushButton::clicked, this,
           &MainWindow::saveActionTriggered);
   saveButton->setSizePolicy(
@@ -501,7 +501,7 @@ QWidget* MainWindow::createPinPlannerToolBar(PinAssignmentCreator* creator) cons
   auto saveButton = new QPushButton;
   connect(creator, &PinAssignmentCreator::allowSaving, saveButton, &QPushButton::setEnabled);
 
-  saveButton->setObjectName("saveButton");
+  saveButton->setObjectName("savePcfButton");
   connect(saveButton, &QPushButton::clicked, this,
           &MainWindow::saveActionTriggered);
   saveButton->setSizePolicy(
@@ -1055,6 +1055,7 @@ void MainWindow::createActions() {
   connect(newAction, SIGNAL(triggered()), this, SLOT(newFile()));
 
   openProjectAction = new QAction(tr("Open &Project..."), this);
+  openProjectAction->setObjectName("actionOpenProject");
   openProjectAction->setToolTip(tr("Open a new project"));
   connect(openProjectAction, SIGNAL(triggered()), this,
           SLOT(openProjectDialog()));
@@ -1138,6 +1139,7 @@ void MainWindow::createActions() {
   });
 
   pinAssignmentAction = new QAction(tr("Pin Planner"), this);
+  pinAssignmentAction->setObjectName("actionPinPlanner");
   pinAssignmentAction->setCheckable(true);
   pinAssignmentAction->setEnabled(false);
   connect(pinAssignmentAction, &QAction::triggered, this,

@@ -27,12 +27,16 @@ enum FileType {
 
 class Editor : public QWidget {
   Q_OBJECT
+  // Lets GUI scenarios read and type the text with gui_get / gui_set_text.
+  Q_PROPERTY(QString text READ text WRITE setText)
  public:
   explicit Editor(QString strFileName, int iFileType,
                   QWidget* parent = nullptr);
 
   QString getFileName() const;
   bool isModified() const;
+  QString text() const;
+  void setText(const QString& text);
   void SetFileWatcher(QFileSystemWatcher* watcher);
 
   void FindFirst(const QString& strWord);

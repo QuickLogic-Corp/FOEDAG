@@ -48,6 +48,7 @@ struct BridgeEntry {
 constexpr BridgeEntry kBridges[] = {
     {"FOEDAG::TaskManager", "started()", "task.started"},
     {"FOEDAG::TaskManager", "done()", "task.done"},
+    {"FOEDAG::PcfObserver", "contentChecked(bool)", "pinplanner.checked"},
 };
 
 constexpr int kRecentSize = 10;

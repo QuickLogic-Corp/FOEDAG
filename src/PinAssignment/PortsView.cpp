@@ -228,6 +228,7 @@ void PortsView::insertTableItem(QTreeWidgetItem *parent, const IOPort &port) {
   }
 #endif
 
+  combo->setObjectName("pin_" + port.name);
   combo->setAutoFillBackground(true);
   combo->setEditable(true);
 #ifdef UPSTREAM_PINPLANNER
