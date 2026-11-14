@@ -24,6 +24,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <optional>
@@ -185,6 +186,80 @@ class CompilerOpenFPGA_ql : public Compiler {
                                    const std::filesystem::path& cryptdb);
   /// The current device's `<family>_Supp.db`.
   std::filesystem::path deviceKeyDb();
+
+  /// The per-region clock binding of a device with clock regions (aurora2
+  /// docs/specs/per-region-clock-binding): the repack design constraints and the clock
+  /// selectors' mode bits of one placement. The bitstream stage computes them with the
+  /// clock-region driver's binding step (`clock-region-place bind`) from the packed
+  /// netlist, the place file, the clock pads, the region file and the record
+  /// clock-aware placement left of that placement; nothing of the binding is kept
+  /// between stages.
+  struct ClockBindingJob {
+    std::filesystem::path workdir;     ///< the project's clock-regions directory
+    std::filesystem::path netFile;
+    std::filesystem::path placeFile;
+    std::filesystem::path clockPads;
+    std::filesystem::path regionFile;  ///< as installed, plaintext or `.en`
+    bool regionEncrypted = false;
+    /// The two files to write: in `workdir`, or private to this process when the
+    /// region file is encrypted.
+    std::filesystem::path repack;
+    std::filesystem::path selectorBits;
+  };
+  struct ClockBindingPlan {
+    std::optional<ClockBindingJob> job;  ///< none on a device without clock regions
+    std::string error;                   ///< why the stage cannot run; empty otherwise
+  };
+  /// The binding the bitstream stage computes, from the lookup of the device's region
+  /// file (`regionFile`, `regionError`: QLDeviceManager::deviceClockRegionFile). A
+  /// device that names a region file the lookup cannot resolve is an error, never a
+  /// device without regions: its bitstream would not carry the placement's binding.
+  /// The job's two files go to the project's clock-regions directory, or, with an
+  /// encrypted region file, to two names `privateFile` gives (empty when it cannot).
+  /// The netlist and the place file are the caller's, from its VPR command.
+  static ClockBindingPlan clockBindingPlan(const std::filesystem::path& projectPath,
+                                           const std::string& projectName,
+                                           const std::filesystem::path& regionFile,
+                                           const std::string& regionError, bool regionEncrypted,
+                                           const std::function<std::filesystem::path()>& privateFile);
+  /// True when the record clock-aware placement left in `job.workdir` is one the binding
+  /// step accepts for the files of `job`: complete, and made from these very files (their
+  /// SHA-256; the region file as installed). Placement is skipped only then, so it never
+  /// stays skipped while Bitstream says to run it again.
+  static bool clockBindingRecordMatches(const ClockBindingJob& job);
+  /// The binding step's command line; `regionPlain` is the region file as the driver
+  /// reads it, the decrypted copy of an encrypted one; `--regions-installed` names the
+  /// file as installed, by which the record knows it.
+  static std::vector<std::string> clockBindingCommand(const std::filesystem::path& driver,
+                                                      const ClockBindingJob& job,
+                                                      const std::filesystem::path& regionPlain);
+  struct ClockBindingOutcome {
+    bool bound = false;
+    std::string reason;  ///< why not, when not bound
+  };
+  /// What `<driver> bind --help` tells of the installed clock-region driver: it has
+  /// the binding step (exit 0); it is older than the step (exit 2, argparse's
+  /// "invalid choice: 'bind'"); or it cannot be run at all (anything else).
+  struct ClockDriverProbe {
+    enum Verdict { Binds, NoBindStep, CannotRun };
+    Verdict verdict = CannotRun;
+    int status = -1;        ///< the probe's exit status; negative when it did not end
+    std::string firstLine;  ///< the first line it wrote to stderr, or why it did not start
+  };
+  static ClockDriverProbe probeClockRegionDriver(const std::filesystem::path& driver);
+  /// The reason to give when `driver` ended with `exitStatus` and left no verdict:
+  /// `plain` when it was stopped or crashed (a negative status) or has the binding step;
+  /// otherwise what `probe` found, a driver older than the step or one that cannot run.
+  static std::string clockDriverNoVerdict(const std::string& driver, int exitStatus,
+                                          const std::string& plain,
+                                          const std::function<ClockDriverProbe()>& probe);
+  /// The verdict of a binding step, from its exit status and its result file; without a
+  /// verdict in the file, clockDriverNoVerdict() with `probe`.
+  static ClockBindingOutcome clockBindingOutcome(const std::filesystem::path& resultFile,
+                                                 int exitStatus, const std::string& driver,
+                                                 const std::function<ClockDriverProbe()>& probe);
+  /// What to tell the user when the installed driver is older than the binding step.
+  static std::string clockBindingStepMissing(const std::string& driver);
   /// True when floorplanning writes this device's repack constraints privately (an
   /// encrypted template, no clock regions) and this process has not run it yet.
   bool privateRepackMissing();
@@ -503,7 +578,13 @@ private:
     std::string digest;
   };
   std::vector<EngineTemp> m_bitstreamTemps;
+  // Per-process paths the script names that are neither inputs nor outputs, by mask.
+  std::vector<std::pair<std::filesystem::path, std::string>> m_bitstreamMasks;
   std::vector<std::filesystem::path> m_bitstreamInputs;
+  // The clock binding the stage has to compute before OpenFPGA runs; set by
+  // FinishOpenFPGAScript() on a device with clock regions.
+  std::optional<ClockBindingJob> m_clockBinding;
+  bool RunClockBinding(const ClockBindingJob& job);
   std::string m_bitstreamVprCommand;
   void noteBitstreamTemp(const std::filesystem::path& temp, const std::string& mask,
                          const std::filesystem::path& source);
@@ -555,15 +636,9 @@ private:
   // the legal placement to the command's place file.
   bool RunClockAwarePlacement(const CommandWrapperPtr& command,
                               const std::filesystem::path& regionFile);
-  // The per-region clock binding of a device with an encrypted region file lives in this
-  // process's private directory. storeClockBinding() keeps a copy in the project's
-  // clock-regions directory, encrypted with the device's key database, and
-  // restoreClockBinding() brings it back when the private files are not there: true
-  // when they are in place afterwards.
-  bool storeClockBinding();
-  bool restoreClockBinding();
   // The second stored command of a clock-aware placement: the installed region file
-  // (its digest changes with a device-data update) and the final place file.
+  // (its digest changes with a device-data update), the final place file and the
+  // clock pads.
   CommandWrapperPtr getClockRegionCommand(const std::filesystem::path& regionFile,
                                           const CommandWrapperPtr& vprCommand);
   // The value of `--option VALUE` or `--option=VALUE` in a command's argv; empty if absent.
