@@ -394,8 +394,8 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                                        "drops them."});
         }
 
-        // A name the RTL hierarchy does not have reaches VPR as a literal atom name. Only the
-        // constant drivers synthesis adds are such atoms; anything else matches nothing.
+        // set_region takes RTL instance names. The constant drivers synthesis adds are the only
+        // other names allowed.
         if (!m_rtlInstances.empty()) {
             for (const HierarhyElement& element: partition->elements()) {
                 const std::string& path = element.path;
@@ -411,9 +411,10 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 } else {
                     m_issues->errors.insert({"Partition '" + partition->name() + "' names '" +
                                              path + "', which is not in the RTL hierarchy",
-                                             "No RTL instance has this name, so the constraint "
-                                             "matches nothing and VPR skips it. Check the "
-                                             "spelling, or remove it from the partition."});
+                                             "set_region accepts RTL instance names only; net "
+                                             "and atom names are no longer accepted. Use the "
+                                             "name of the RTL instance that holds this logic, "
+                                             "or check the spelling."});
                 }
             }
         }

@@ -3499,6 +3499,12 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 }
 
+// .cname, which keeps RTL instance names on VPR atoms, is valid only in extended BLIF.
+// "auto" reads the netlist as plain BLIF too: VPR picks the format from the .blif name.
+static bool vprReadsExtendedBlif() {
+  return QLSettingsManager::getStringValue("vpr", "filename", "circuit_format") == "eblif";
+}
+
 // [aurora2#1725] Device templates synced from silicon drop the floorplanning hooks, and
 // without them synthesis writes no atom-set file. Insert each missing hook around the
 // synthesis line; a template with no such line is returned unchanged.
@@ -10004,10 +10010,9 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
 
   // [aurora2#1725 stage P5] instances.json (P0b) is the only trustworthy answer to
-  // "is this .qdc token a whole RTL instance, or an exact atom/net name?" -- e.g.
-  // "out[0]"/"$false"/"$undef" in mult_16_signed_floorplanning_dsp.qdc are real leaf
-  // atom names and must stay literal, while "i_mul_24" without a "." + "*" suffix is a
+  // "is this .qdc token an RTL instance?" -- "i_mul_24" without a "." + "*" suffix is a
   // whole instance and must not reach VPR as a literal (see the set_region loop below).
+  // Net names are not accepted; the floorplan checker rejects them.
   // NOT best-effort where set_region is concerned. instances.json is what tells an
   // instance path apart from an exact atom name, and without it every instance silently
   // stays literal -- a name_pattern that matches nothing, because a bare instance path is
@@ -10182,6 +10187,13 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     if (!s_describeOnly && leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
       Message("Warning: QDC file either does not contain a valid side/region or the side/region is empty.");
     }
+    // Regions match RTL instance names, which reach VPR only through .cname.
+    if (!s_describeOnly && !partitionStr.empty() && !vprReadsExtendedBlif()) {
+      ErrorMessage("set_region needs vpr circuit_format 'eblif'. With plain BLIF the "
+                   "netlist has no RTL instance names for regions to match. Set "
+                   "circuit_format to eblif, or remove set_region from the .qdc.");
+      return false;
+    }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
   // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
@@ -10193,7 +10205,7 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   // Errors stop the compile here, matching the panel's own refusal to save such a .qdc:
   // failing at the point it is read names the offending partition far more usefully than
   // whatever the packer does with it later. Warnings are advisory and let it proceed.
-  if (fs::exists(floor_planning_constraint_filepath)) {
+  if (!s_describeOnly && fs::exists(floor_planning_constraint_filepath)) {
     fp::DeviceGrid::Issues issues;
     std::string checkError;
     const bool checked = fp::FloorplanChecker::check(
@@ -13767,6 +13779,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   for (const auto& rel_ip_blif : m_relIpBlifs) {
     yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
     yosysScript->addFile(rel_ip_blif);
+  }
+
+  if (!vprReadsExtendedBlif()) {
+    yosys_options += " -no_cname";
   }
 
   // TODO: trim yosys_options at the front
