@@ -10112,8 +10112,8 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
           // are always "<path>.<signal>" -- so without the "." + "*" suffix this would
           // reach VPR as a literal name_pattern and silently match nothing (see
           // generate_floorplanning.py's add_atom_pattern). But not every token here is
-          // an instance: e.g. "out[0]"/"$false"/"$undef" are exact leaf atom/net names
-          // and must stay literal. instances.json is what tells the two apart.
+          // an instance: the constant drivers synthesis adds ("$false"/"$undef") must stay
+          // literal. instances.json is what tells the two apart.
           //
           // isInstanceOrAncestor(), not find(): a SystemVerilog generate-block label
           // like "cluster[0]" is never itself a recorded instance -- only
