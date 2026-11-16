@@ -154,7 +154,10 @@ void Editor::QscintillaModificationChanged(bool m) {
   emit EditorModificationChanged(m);
 }
 
-void Editor::QScintillaTextChanged() { UpdateToolBarStates(); }
+void Editor::QScintillaTextChanged() {
+  UpdateToolBarStates();
+  if (!m_loading) emit textEdited();
+}
 
 void Editor::InitToolBar() {
   m_actSearch = new QAction(m_toolBar);
@@ -290,7 +293,9 @@ void Editor::SetScintillaText(QString strFileName) {
 
   QTextStream in(&file);
   QApplication::setOverrideCursor(Qt::WaitCursor);
+  m_loading = true;
   m_scintilla->setText(in.readAll());
+  m_loading = false;
   QApplication::restoreOverrideCursor();
 
   m_scintilla->setModified(false);

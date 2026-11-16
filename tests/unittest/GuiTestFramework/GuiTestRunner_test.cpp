@@ -20,10 +20,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "GuiTestFramework/GuiTestRunner.h"
 
+#include <tcl.h>
+
+#include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QPushButton>
 #include <QTest>
+#include <QTimer>
 
+#include "GuiTestFramework/GuiTestCommands.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;
@@ -94,4 +99,29 @@ TEST(GuiTestSpaceGate, OpensAfterTimeoutWithoutSpace) {
   GuiTestSpaceGate immediate{0};
   immediate.arm();
   EXPECT_TRUE(immediate.isOpen());
+}
+
+// An action waits for its widget when it exists but is not shown yet, as a
+// dock opened by the previous action is; an unknown name fails at once.
+TEST(GuiTestCommands, ActionWaitsForHiddenWidget) {
+  QWidget window;
+  auto button = new QPushButton("Late", &window);
+  button->setObjectName("lateButton");
+  button->hide();
+  window.show();
+  int clicks = 0;
+  QObject::connect(button, &QPushButton::clicked, [&]() { ++clicks; });
+  QTimer::singleShot(100, button, &QWidget::show);
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_click lateButton"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(clicks, 1);
+
+  QElapsedTimer elapsed;
+  elapsed.start();
+  EXPECT_EQ(Tcl_Eval(interp, "gui_click noSuchButton"), TCL_ERROR);
+  EXPECT_LT(elapsed.elapsed(), 1000);
+  Tcl_DeleteInterp(interp);
 }

@@ -4,6 +4,7 @@
 #include "PinsBaseModel.h"
 #include "IODirection.h"
 
+#include "GuiTestFramework/GuiMilestone.h"
 #include "Utils/QtUtils.h"
 
 #include <QCryptographicHash>
@@ -24,6 +25,7 @@ PcfObserver::PcfObserver(QObject* parent, const QString& filePath, PortsModel* p
   connect(&m_checkTimer, &QTimer::timeout, this, &PcfObserver::check);
 
   m_checkTimer.start();
+  GUI_TEST_BRIDGE(this);
   // Check once the caller is wired up, not on the first tick: that late check
   // reloads the rows and drops pins the user set meanwhile.
   QTimer::singleShot(0, this, &PcfObserver::check);

@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/TaskManager.h"
 #include "GuiTestFramework/GuiMilestone.h"
 #include "GuiTestFramework/GuiTestCommands.h"
+#include "PinAssignment/PcfObserver.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;
@@ -133,6 +134,13 @@ TEST_F(GuiTestHubTest, TaskManagerBridge) {
   emit taskManager.done();
   EXPECT_TRUE(wait("task.started"));
   EXPECT_TRUE(wait("task.done"));
+}
+
+TEST_F(GuiTestHubTest, PcfObserverBridge) {
+  PcfObserver observer{nullptr, "/no/such/file.pcf", nullptr, nullptr};
+  GuiTestHub::instance()->takeSnapshot();
+  emit observer.contentChecked(true);
+  EXPECT_TRUE(wait("pcf.checked"));
 }
 
 TEST_F(GuiTestHubTest, DisabledHubCountsNothing) {

@@ -35,6 +35,7 @@ extern "C" {
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QGroupBox>
@@ -258,6 +259,18 @@ bool waitUntil(const std::function<bool()> &condition, int timeoutMs,
   return satisfied;
 }
 
+// The widget an action works on. A widget that exists but is hidden is waited
+// for: a dock opened by the previous action is shown a few event-loop turns
+// after that action returns, and no milestone marks it.
+QWidget *findWidgetToAct(const QString &name, QString *error) {
+  if (QWidget *w = findWidget(name, {}, error)) return w;
+  if (!error->endsWith(" hidden)")) return nullptr;
+  QString ignored;
+  waitUntil([&]() { return findWidget(name, {}, &ignored) != nullptr; },
+            kDefaultTimeoutMs, "waiting for '" + name + "' to be shown", true);
+  return findWidget(name, {}, error);
+}
+
 // A dialog left open is the usual reason a wait never ends.
 QString openDialogNote() {
   QWidget *modal = QApplication::activeModalWidget();
@@ -415,7 +428,7 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (button != "left" && button != "right")
     return fail(interp, QString("gui_click %1: -button must be left or right")
                             .arg(name));
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_click %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp, QString("gui_click %1: widget is disabled").arg(name));
@@ -469,7 +482,7 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const QString name = QString::fromUtf8(argv[1]);
   const QString text = QString::fromUtf8(argv[2]);
   QString error;
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_set_text %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp,
@@ -536,7 +549,7 @@ int guiSelect(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const QString name = o.positional.at(0);
   const QString item = o.positional.at(1);
   const int column = o.values.value("-column", "0").toInt();
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_select %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp, QString("gui_select %1: widget is disabled").arg(name));
@@ -681,7 +694,7 @@ int guiDrag(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
                               .arg(name));
   }
   QString error;
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_drag %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp, QString("gui_drag %1: widget is disabled").arg(name));
@@ -961,7 +974,23 @@ bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,
   return false;
 }
 
+// GUI_TEST_FRAMEWORK_TRACE=<file> gets each user action as it ran, before it
+// runs, since an action that opens a modal dialog returns after the next one.
+static int traced(ClientData proc, Tcl_Interp *interp, int argc,
+                  const char *argv[]) {
+  static const QString path = qEnvironmentVariable("GUI_TEST_FRAMEWORK_TRACE");
+  if (!path.isEmpty()) {
+    QFile file{path};
+    if (file.open(QIODevice::Append | QIODevice::Text))
+      file.write((traceLine(argc, argv) + "\n").toUtf8());
+  }
+  return reinterpret_cast<Tcl_CmdProc *>(proc)(nullptr, interp, argc, argv);
+}
+
 void registerGuiTestCommands(Tcl_Interp *interp) {
+  static const QSet<QString> actions{"gui_click",  "gui_set_text",
+                                     "gui_select", "gui_trigger_action",
+                                     "gui_drag",   "gui_dialog"};
   const std::pair<const char *, Tcl_CmdProc *> commands[] = {
       {"gui_find", guiFind},
       {"gui_click", guiClick},
@@ -978,8 +1007,13 @@ void registerGuiTestCommands(Tcl_Interp *interp) {
       {"gui_test_run", guiTestRun},
       {"gui_test_checkpoint", guiTestCheckpoint},
   };
-  for (const auto &[name, proc] : commands)
-    Tcl_CreateCommand(interp, name, proc, nullptr, nullptr);
+  for (const auto &[name, proc] : commands) {
+    if (actions.contains(name))
+      Tcl_CreateCommand(interp, name, traced,
+                        reinterpret_cast<ClientData>(proc), nullptr);
+    else
+      Tcl_CreateCommand(interp, name, proc, nullptr, nullptr);
+  }
 }
 
 }  // namespace FOEDAG
