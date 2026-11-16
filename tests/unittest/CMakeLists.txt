@@ -59,6 +59,7 @@ set (CPP_LIST
     Compiler/DumpOptions_test.cpp
     Compiler/DumpOptionsGuard_test.cpp
     Compiler/EncryptedCopy_test.cpp
+    Compiler/ClockBinding_test.cpp
     Main/EventLoopProbe_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp

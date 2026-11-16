@@ -135,46 +135,19 @@ static std::filesystem::path storedRepackConstraintsPath(const std::filesystem::
   return projectPath / (projectName + "_repack_design_constraint.xml.en");
 }
 
-// The file clock-aware placement writes the clock selectors' bits to, in the
-// clock-regions directory, and its private counterpart when the device's region
-// file is encrypted: the bits locate the selectors, so they stay private, beside
-// the private repack constraints. Empty if that directory cannot be created.
+// The per-region clock binding of a device with clock regions (RunClockBinding): the
+// record clock-aware placement leaves for the binding step, the step's verdict, and
+// the two files it writes for the bitstream stage, all in the clock-regions directory.
+static constexpr const char* CLOCK_BINDING_RECORD_FILE = "clock_binding_state.json";
+static constexpr const char* CLOCK_BINDING_RESULT_FILE = "binding_result.json";
+static constexpr const char* CLOCK_REPACK_CONSTRAINTS_FILE = "repack_design_constraint.xml";
 static constexpr const char* CLOCK_SELECTOR_BITS_FILE = "clock_selector_bits.xml";
-static std::filesystem::path privateSelectorBitsPath(const std::string& projectName) {
-  const std::filesystem::path dir = PrivateTempDir::path();
-  return dir.empty() ? dir : dir / (projectName + "_clock_selector_bits.xml");
-}
 
 // The clock pads Packing assigns to the design clocks on a device with clock
-// regions, read by clock-aware placement to bind the clocks per region.
+// regions, read by clock-aware placement and by the binding step.
 static std::filesystem::path clockPadsPath(const std::string& projectPath,
                                            const std::string& projectName) {
   return std::filesystem::path(projectPath) / (projectName + "_clock_pads.json");
-}
-
-// The two files of a per-region clock binding: in the project, or in this process's
-// private directory when the device's region file is encrypted. The device decides
-// which pair is read, never which one happens to exist. Empty paths if the private
-// directory cannot be created.
-struct ClockBindingFiles {
-  std::filesystem::path repack;
-  std::filesystem::path selectorBits;
-};
-static ClockBindingFiles clockBindingFiles(const std::filesystem::path& projectPath,
-                                           const std::string& projectName, bool isPrivate) {
-  if (isPrivate) {
-    return {privateRepackConstraintsPath(projectName), privateSelectorBitsPath(projectName)};
-  }
-  return {projectPath / (projectName + "_repack_design_constraint.xml"),
-          projectPath / CLOCK_REGIONS_DIR / CLOCK_SELECTOR_BITS_FILE};
-}
-
-// The encrypted copy of a private binding, kept in the project so a later session
-// has the binding of its placement (storeClockBinding, restoreClockBinding).
-static ClockBindingFiles storedClockBindingFiles(const std::filesystem::path& projectPath) {
-  const std::filesystem::path dir = projectPath / CLOCK_REGIONS_DIR;
-  return {dir / "repack_design_constraint.xml.en",
-          dir / (std::string(CLOCK_SELECTOR_BITS_FILE) + ".en")};
 }
 
 thread_local bool CompilerOpenFPGA_ql::s_describeOnly = false;
@@ -2249,6 +2222,7 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
           "clock_regions/clock_regions.json",
           "clock_regions/clock_regions.rpt",
           "clock_regions/clock_region_state.json",
+          "clock_regions/clock_binding_state.json",
           "clock_regions/place_macros.echo",
           "clock_regions/device_grid.echo",
       };
@@ -2313,7 +2287,11 @@ std::vector<std::string> CompilerOpenFPGA_ql::GetCleanFiles(
                // secure post-process artefacts (REQUIREMENTS.md §4.3, FR-9)
                std::string{projectName + "_fabric_bitstream.bch"},
                std::string{projectName + "_fabric_bitstream.ascon"},
-               std::string{projectName + "_bitstream_encode.log"}};
+               std::string{projectName + "_bitstream_encode.log"},
+               // the per-region clock binding the stage computed (RunClockBinding)
+               "clock_regions/binding_result.json",
+               "clock_regions/repack_design_constraint.xml",
+               "clock_regions/clock_selector_bits.xml"};
       break;
     default:
       break;
@@ -6444,26 +6422,33 @@ bool CompilerOpenFPGA_ql::Placement() {
       (clockRegionCommand &&
        backend().isCompilationRequired(static_cast<int>(Action::Detailed),
                                        CLOCK_REGIONS_PROFILE, clockRegionCommand));
-  // The binding of an encrypted region file lives in this process's private directory,
-  // so a later session has the placement without it: it comes back from its encrypted
-  // copy in the project, and only when that fails does placement run to write it again.
-  bool bindingMissing = false;
+  // The bitstream stage binds the clocks of this placement from what the driver
+  // recorded of it (RunClockBinding), and refuses a record that is not this placement's.
+  // A placement without such a record could never be bound, so it is placed again: one
+  // made by an Aurora whose placement wrote the binding itself (which leaves no record,
+  // or leaves the record of an earlier placement beside its own place file), or one
+  // whose clock-regions directory was removed. Whatever the step would refuse, this
+  // check refuses too, by the same files.
+  bool recordMissing = false;
   if (clockRegionCommand && !commandChanged) {
-    const bool bindingPrivate = QLDeviceManager::getInstance()->deviceFileIsEncrypted(regionFile);
-    if (bindingPrivate) {
-      restoreClockBinding();
-    }
-    const ClockBindingFiles binding =
-        clockBindingFiles(std::filesystem::path(ProjManager()->projectPath()),
-                          ProjManager()->projectName(), bindingPrivate);
-    bindingMissing =
-        !FileUtils::FileExists(binding.repack) || !FileUtils::FileExists(binding.selectorBits);
-    if (bindingMissing) {
-      Message("Clock-aware placement: the clock binding of this placement is not available; "
+    const std::filesystem::path projectPath{ProjManager()->projectPath()};
+    auto commandFile = [&](const char* option) {
+      const std::filesystem::path file{argvValue(command->argv(), option)};
+      return file.is_relative() ? projectPath / file : file;
+    };
+    ClockBindingJob placed;
+    placed.workdir = projectPath / CLOCK_REGIONS_DIR;
+    placed.netFile = commandFile("--net_file");
+    placed.placeFile = commandFile("--place_file");
+    placed.clockPads = clockPadsPath(ProjManager()->projectPath(), ProjManager()->projectName());
+    placed.regionFile = regionFile;
+    recordMissing = !clockBindingRecordMatches(placed);
+    if (recordMissing) {
+      Message("Clock-aware placement: this placement has no record for the clock binding; "
               "placing again");
     }
   }
-  const bool placementRequired = commandChanged || bindingMissing;
+  const bool placementRequired = commandChanged || recordMissing;
   if (!placementRequired) {
     Message("##################################################");
     Message("Placement skipped, not required");
@@ -8337,8 +8322,10 @@ std::string CompilerOpenFPGA_ql::InitOpenFPGAScript() {
 
 std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script) {
   m_bitstreamTemps.clear();
+  m_bitstreamMasks.clear();
   m_bitstreamInputs.clear();
   m_bitstreamVprCommand.clear();
+  m_clockBinding.reset();
 
   std::string result = script;
 
@@ -8468,19 +8455,27 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
       (ProjManager()->projectName() + "_repack_design_constraint.xml");
   const std::filesystem::path private_repack_constraints =
       privateRepackConstraintsPath(ProjManager()->projectName());
-  // On a device with clock regions the repack constraints are the placement's (see 2.
-  // below). A region file that cannot be resolved reads as no regions here; Placement
-  // fails on that error first. A private binding written by an earlier session comes
-  // back from its encrypted copy before the lookup.
+  // On a device with clock regions the repack constraints are the placement's: the
+  // binding step computes them, with the clock selectors' bits, when the stage runs
+  // (RunClockBinding; see 2. below), so only their paths are chosen here. Both files
+  // locate the device's clock selectors: with an encrypted region file they get names
+  // in this process's private directory, which CleanTempFiles() removes, and otherwise
+  // they go to the project's clock-regions directory. A device whose region file cannot
+  // be resolved fails here: a bitstream without the binding would leave every selector
+  // at its default under a chip-wide template.
   std::string regionError;
   const std::filesystem::path clockRegionFile =
       QLDeviceManager::getInstance()->deviceClockRegionFile(QLDeviceTarget(), &regionError);
-  const bool bindingPrivate =
+  const ClockBindingPlan binding = clockBindingPlan(
+      ProjManager()->projectPath(), ProjManager()->projectName(), clockRegionFile, regionError,
       !clockRegionFile.empty() &&
-      QLDeviceManager::getInstance()->deviceFileIsEncrypted(clockRegionFile);
-  if (bindingPrivate) {
-    restoreClockBinding();
+          QLDeviceManager::getInstance()->deviceFileIsEncrypted(clockRegionFile),
+      [this] { return GenerateTempFilePath(); });
+  if (!binding.error.empty()) {
+    ErrorMessage("Clock binding: " + binding.error);
+    return std::string("");
   }
+  m_clockBinding = binding.job;
   // Otherwise floorplanning writes them, privately from an encrypted template. Make it
   // current before choosing a file, or this bitstream could use another process's
   // constraints or silently fall back and lose the design's 'set_clock' bindings. The
@@ -8491,7 +8486,12 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   }
   std::filesystem::path repack_constraints_file;
   bool repack_private_used = false;
-  if (!private_repack_constraints.empty() &&
+  if (m_clockBinding) {
+    // never a file found by lookup: a chip-wide template or a user's file would not
+    // match the placement
+    repack_constraints_file = m_clockBinding->repack;
+  }
+  else if (!private_repack_constraints.empty() &&
       FileUtils::FileExists(private_repack_constraints)) {
     repack_constraints_file = private_repack_constraints;
     repack_private_used = true;
@@ -8810,42 +8810,39 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   result = ReplaceAll(result, "${OPENFPGA_REPACK_CONSTRAINTS_COMMAND}",
                       openfpga_repack_constraints_command);
 
-  // 2. the clock selectors of a clock-aware placement (RunClockAwarePlacement): the
-  //    driver wrote their bits beside the repack constraints it generated, and
-  //    build_architecture_bitstream applies them per instance. The device decides
-  //    which pair is read: the private one when its region file is encrypted, else
-  //    the project's. Both files must be there: without them repack would fall back
-  //    to the device's chip-wide template and the selectors to their defaults, a
-  //    bitstream whose clocks do not match the placement.
-  //    A device without clock regions takes neither: a binding left by another
-  //    device must not reach its bitstream.
-  if (!clockRegionFile.empty()) {
-    const ClockBindingFiles binding =
-        clockBindingFiles(std::filesystem::path(ProjManager()->projectPath()),
-                          ProjManager()->projectName(), bindingPrivate);
-    if (!FileUtils::FileExists(binding.selectorBits)) {
-      ErrorMessage("Clock-aware placement: this device binds its clocks per clock region, but "
-                   "no clock binding was found for this placement; run Placement before "
-                   "Bitstream");
-      return std::string("");
-    }
-    if (repack_constraints_file != binding.repack) {
-      ErrorMessage("Clock-aware placement: the repack constraints of this placement were not "
-                   "found; run Placement before Bitstream");
-      return std::string("");
-    }
+  // 2. the clock selectors of a device with clock regions: build_architecture_bitstream
+  //    applies their bits per instance, from the file the binding step writes beside
+  //    the repack constraints of 1. (RunClockBinding, before OpenFPGA runs). The step
+  //    reads the packed netlist and the place file of the command above, the clock
+  //    pads and the region file, and what Placement recorded of the placement.
+  //    A device without clock regions takes no such option.
+  if (m_clockBinding) {
+    const std::vector<std::string> vprArgv = StringUtils::tokenize(base_vpr_command, " ");
+    const std::filesystem::path projectPath{ProjManager()->projectPath()};
+    auto vprFile = [&](const std::string& option, const std::string& suffix) {
+      std::filesystem::path file{argvValue(vprArgv, option)};
+      if (file.empty()) {
+        file = ProjManager()->projectName() + "_post_synth" + suffix;
+      }
+      return file.is_relative() ? projectPath / file : file;
+    };
+    m_clockBinding->netFile = vprFile("--net_file", ".net");
+    m_clockBinding->placeFile = vprFile("--place_file", ".place");
     result = ReplaceAll(result, "build_architecture_bitstream",
                         "build_architecture_bitstream --mode_bits_overrides " +
-                            binding.selectorBits.string());
-    Message("Clock-aware placement: the clock selectors are programmed from " +
-            binding.selectorBits.string());
+                            m_clockBinding->selectorBits.string());
     if (m_engineSelected) {
-      // The private copy has a new path in every process: the engine knows it by its mask.
-      if (bindingPrivate) {
-        m_bitstreamTemps.push_back({binding.selectorBits, "clock_selector_bits_private",
-                                    FlowEngineClient::sha256File(binding.selectorBits)});
-      } else {
-        m_bitstreamInputs.push_back(binding.selectorBits);
+      // The stage's inputs are the files the binding is computed from, not the binding:
+      // the netlist and the place file are the VPR command's, these are the others.
+      for (const std::filesystem::path& file :
+           {m_clockBinding->clockPads, m_clockBinding->regionFile,
+            m_clockBinding->workdir / CLOCK_BINDING_RECORD_FILE}) {
+        m_bitstreamInputs.push_back(file);
+      }
+      // The private pair has new names in every process: the engine knows them by mask.
+      if (m_clockBinding->regionEncrypted) {
+        m_bitstreamMasks.emplace_back(m_clockBinding->repack, "clock_repack_constraints_private");
+        m_bitstreamMasks.emplace_back(m_clockBinding->selectorBits, "clock_selector_bits_private");
       }
     }
   }
@@ -8904,7 +8901,9 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
           repack_constraints_file, m_OpenFpgaFabricKeyFile, m_OpenFpgaBitstreamRemappingFile}) {
       const bool temp = std::any_of(m_bitstreamTemps.begin(), m_bitstreamTemps.end(),
                                     [&file](const EngineTemp& t) { return t.path == file; });
-      if (!file.empty() && !temp) {
+      // the binding's repack constraints are made in the stage, from its inputs
+      const bool made = m_clockBinding && file == m_clockBinding->repack;
+      if (!file.empty() && !temp && !made) {
         m_bitstreamInputs.push_back(file);
       }
     }
@@ -8967,6 +8966,9 @@ CommandWrapperPtr CompilerOpenFPGA_ql::describeBitstream(const std::string& comm
   for (const EngineTemp& temp : m_bitstreamTemps) {
     described->declarePath(temp.path, temp.mask);
     described->setHostDigest(temp.path, temp.digest);
+  }
+  for (const auto& [path, mask] : m_bitstreamMasks) {
+    described->maskTemp(path, mask);
   }
   if (!m_bitstreamTemps.empty()) {
     described->addKeyPath(QLDeviceManager::getInstance()->deviceTypeDirPath(device) /
@@ -9226,6 +9228,16 @@ bool CompilerOpenFPGA_ql::GenerateBitstream() {
                           std::string("fabric_bitstream.bit"));
   std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) /
                           std::string("fabric_independent_bitstream.xml"));
+  // On a device with clock regions: the clock binding of this placement, computed now
+  // for the repack and build_architecture_bitstream commands of the script. Nothing of
+  // it is kept for a later stage: its private files go with the stage's other
+  // temporary files, below.
+  if (m_clockBinding && !RunClockBinding(*m_clockBinding)) {
+    CleanTempFiles();
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " bitstream generation failed");
+    return false;
+  }
   // Create OpenFpga command and execute
   script_path =
       (std::filesystem::path(ProjManager()->projectPath()) / script_path)
@@ -10429,10 +10441,10 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
 
   // On a device with clock regions, a block clock pin does not carry one net
   // chip-wide: each region selects its own clocks. The design clocks are then
-  // bound per region after clock-aware placement (RunClockAwarePlacement), which
-  // writes the repack constraints and owns them: this step, which runs before
-  // every stage, must neither write nor remove them. Here every design clock
-  // only gets a global clock pad, as many as the pin table has.
+  // bound per region from the clock-aware placement, by the bitstream stage
+  // (RunClockBinding), under names of its own: this step writes no repack
+  // constraints. Here every design clock only gets a global clock pad, as many
+  // as the pin table has.
   // A region file that cannot be resolved reads as no regions; Placement fails on it.
   std::string clockRegionError;
   const std::filesystem::path clockRegionFile =
@@ -10451,25 +10463,15 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   const bool clockRegions = !clockRegionFile.empty();
   if (m_engineSelected) {
     for (const std::string& stale : EngineBackend::floorplanStaleOutputs(ProjManager()->projectName())) {
-      const std::filesystem::path stalePath =
-          std::filesystem::path(ProjManager()->projectPath()) / stale;
-      if (!clockRegions || stalePath != repack_constraints_out) {
-        job.removeBeforeRun.push_back(stalePath);
-      }
+      job.removeBeforeRun.push_back(std::filesystem::path(ProjManager()->projectPath()) / stale);
     }
-  } else if (!clockRegions) {
+  } else {
     job.removeBeforeRun.push_back(repack_constraints_out);
     job.removeBeforeRun.push_back(storedRepackConstraintsPath(ProjManager()->projectPath(),
                                                               ProjManager()->projectName()));
   }
-  if (!clockRegions) {
-    // A binding left in this process by a device with clock regions goes too.
-    for (const std::filesystem::path& stale :
-         {repack_constraints_private, privateSelectorBitsPath(ProjManager()->projectName())}) {
-      if (!stale.empty()) {
-        job.removeBeforeRun.push_back(stale);
-      }
-    }
+  if (!repack_constraints_private.empty()) {
+    job.removeBeforeRun.push_back(repack_constraints_private);
   }
 
   // The engine knows a decrypted template by its encrypted file (REQ-012).
@@ -10545,8 +10547,8 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   if (clockRegions) {
     if (!user_repack_constraints.empty() && !s_describeOnly) {
       Message("<warning> " + user_repack_constraints.string() + " is ignored: this device binds"
-              " its clocks per clock region, and clock-aware placement writes the repack"
-              " design constraints.");
+              " its clocks per clock region, and the repack design constraints are computed"
+              " from the clock-aware placement.");
     }
   }
   else if (!repack_constraints_in.empty()) {
@@ -11341,7 +11343,8 @@ bool CompilerOpenFPGA_ql::privateRepackMissing() {
     }
   }
   QLDeviceManager* devices = QLDeviceManager::getInstance();
-  // With clock regions, clock-aware placement writes them (restoreClockBinding).
+  // With clock regions, floorplanning writes none: the bitstream stage computes them
+  // from the placement (RunClockBinding).
   std::string regionError;
   if (!devices->deviceClockRegionFile(QLDeviceTarget(), &regionError).empty()) {
     return false;
@@ -14151,78 +14154,243 @@ std::string CompilerOpenFPGA_ql::argvValue(const std::vector<std::string>& argv,
   return {};
 }
 
-// Both report nothing through ErrorMessage: a binding that cannot be kept or brought
-// back is not a failed stage, Placement writes it again.
-bool CompilerOpenFPGA_ql::storeClockBinding() {
-  const std::filesystem::path projectPath{ProjManager()->projectPath()};
-  const ClockBindingFiles plain =
-      clockBindingFiles(projectPath, ProjManager()->projectName(), /*isPrivate*/ true);
-  const ClockBindingFiles stored = storedClockBindingFiles(projectPath);
-  QLDeviceManager* devices = QLDeviceManager::getInstance();
-  const std::filesystem::path cryptdb =
-      devices->deviceTypeDirPath() / (devices->convertToDeviceTypeString() + "_Supp.db");
-  qlcrypt::KeyDB keys;
-  bool stored_ok = FileUtils::FileExists(cryptdb);
-  if (stored_ok) {
-    const auto loaded = qlcrypt::KeyDB::load(cryptdb.string(), keys);
-    stored_ok = qlcrypt::ok(loaded);
+// The clock-region driver, installed in Aurora's bin directory.
+#ifdef _WIN32
+static constexpr const char* CLOCK_REGION_DRIVER = "clock-region-place.exe";
+#else
+static constexpr const char* CLOCK_REGION_DRIVER = "clock-region-place";
+#endif
+
+CompilerOpenFPGA_ql::ClockBindingPlan CompilerOpenFPGA_ql::clockBindingPlan(
+    const std::filesystem::path& projectPath, const std::string& projectName,
+    const std::filesystem::path& regionFile, const std::string& regionError,
+    bool regionEncrypted, const std::function<std::filesystem::path()>& privateFile) {
+  ClockBindingPlan plan;
+  if (!regionError.empty()) {
+    plan.error = regionError + "; the clocks of the placement cannot be bound without it";
+    return plan;
   }
-  if (stored_ok) {
-    const qlcrypt::FileCrypt crypt(keys);
-    for (const auto& [from, to] : {std::pair{plain.repack, stored.repack},
-                                   std::pair{plain.selectorBits, stored.selectorBits}}) {
-      const auto encrypted = crypt.encryptFile(from.string(), to.string());
-      stored_ok = stored_ok && qlcrypt::ok(encrypted);
-    }
+  if (regionFile.empty()) {
+    return plan;  // a device without clock regions
   }
-  if (!stored_ok) {
-    // never half a copy
-    std::error_code ec;
-    std::filesystem::remove(stored.repack, ec);
-    std::filesystem::remove(stored.selectorBits, ec);
+  ClockBindingJob job;
+  job.workdir = projectPath / CLOCK_REGIONS_DIR;
+  job.clockPads = clockPadsPath(projectPath.string(), projectName);
+  job.regionFile = regionFile;
+  job.regionEncrypted = regionEncrypted;
+  job.repack = regionEncrypted ? privateFile() : job.workdir / CLOCK_REPACK_CONSTRAINTS_FILE;
+  job.selectorBits = regionEncrypted ? privateFile() : job.workdir / CLOCK_SELECTOR_BITS_FILE;
+  if (job.repack.empty() || job.selectorBits.empty()) {
+    plan.error = "no private file for the binding of an encrypted clock-region file";
+    return plan;
   }
-  return stored_ok;
+  plan.job = job;
+  return plan;
 }
 
-bool CompilerOpenFPGA_ql::restoreClockBinding() {
-  const std::filesystem::path projectPath{ProjManager()->projectPath()};
-  const ClockBindingFiles plain =
-      clockBindingFiles(projectPath, ProjManager()->projectName(), /*isPrivate*/ true);
-  if (plain.repack.empty() || plain.selectorBits.empty()) {
+bool CompilerOpenFPGA_ql::clockBindingRecordMatches(const ClockBindingJob& job) {
+  const std::filesystem::path recordFile = job.workdir / CLOCK_BINDING_RECORD_FILE;
+  if (!FileUtils::FileExists(recordFile)) {
     return false;
   }
-  if (FileUtils::FileExists(plain.repack) && FileUtils::FileExists(plain.selectorBits)) {
-    return true;  // this process's own
-  }
-  const ClockBindingFiles stored = storedClockBindingFiles(projectPath);
-  QLDeviceManager* devices = QLDeviceManager::getInstance();
-  const std::filesystem::path cryptdb =
-      devices->deviceTypeDirPath() / (devices->convertToDeviceTypeString() + "_Supp.db");
-  if (!FileUtils::FileExists(stored.repack) || !FileUtils::FileExists(stored.selectorBits) ||
-      !FileUtils::FileExists(cryptdb)) {
+  const json record = json::parse(FileUtils::GetFileContent(recordFile), nullptr, false);
+  // What the binding step requires of a record (aurora2 scripts/clock_region/
+  // binding_step.py, PlacementRecord.read and .check).
+  auto field = [&record](const char* key) -> const json* {
+    const auto it = record.find(key);
+    return it == record.end() ? nullptr : &*it;
+  };
+  if (!record.is_object()) {
     return false;
   }
-  qlcrypt::KeyDB keys;
-  const auto loaded = qlcrypt::KeyDB::load(cryptdb.string(), keys);
-  bool restored = qlcrypt::ok(loaded);
-  if (restored) {
-    const qlcrypt::FileCrypt crypt(keys);
-    for (const auto& [from, to] : {std::pair{stored.repack, plain.repack},
-                                   std::pair{stored.selectorBits, plain.selectorBits}}) {
-      std::string plaintext;
-      const auto decrypted = crypt.decryptFile(from.string(), plaintext);
-      restored = restored && qlcrypt::ok(decrypted) && PrivateTempDir::writePrivate(to, plaintext);
+  const json* schema = field("schema");
+  const json* origin = field("fabric_origin");
+  const json* inputs = field("inputs");
+  if (!schema || !schema->is_number_integer() || schema->get<long long>() != 1 || !origin ||
+      !origin->is_number_integer() || origin->get<long long>() < 0 || !inputs ||
+      !inputs->is_object()) {
+    return false;
+  }
+  for (const char* name : {"clock_port", "clock_config_pb_type"}) {
+    const json* value = field(name);
+    if (!value || !value->is_string() || value->get<std::string>().empty()) {
+      return false;
     }
   }
-  if (!restored) {
-    // never half a binding
-    std::error_code ec;
-    std::filesystem::remove(plain.repack, ec);
-    std::filesystem::remove(plain.selectorBits, ec);
+  for (const auto& [name, file] :
+       {std::pair<const char*, std::filesystem::path>{"place_file", job.placeFile},
+        {"net_file", job.netFile},
+        {"clock_pads_file", job.clockPads},
+        {"region_file", job.regionFile}}) {
+    const auto recorded = inputs->find(name);
+    if (recorded == inputs->end() || !recorded->is_string()) {
+      return false;
+    }
+    // the driver writes "SHA256:<hex>", sha256File() "sha256:<hex>", empty when unreadable
+    const std::string actual = FlowEngineClient::sha256File(file);
+    if (actual.empty() || StringUtils::toLower(recorded->get<std::string>()) != actual) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::vector<std::string> CompilerOpenFPGA_ql::clockBindingCommand(
+    const std::filesystem::path& driver, const ClockBindingJob& job,
+    const std::filesystem::path& regionPlain) {
+  std::vector<std::string> argv{driver.string(),
+                                "bind",
+                                "--workdir",
+                                job.workdir.string(),
+                                "--net",
+                                job.netFile.string(),
+                                "--place",
+                                job.placeFile.string(),
+                                "--clock-pads",
+                                job.clockPads.string(),
+                                "--regions",
+                                regionPlain.string(),
+                                "--regions-installed",
+                                job.regionFile.string(),
+                                "--repack-constraints-out",
+                                job.repack.string(),
+                                "--selector-bits-out",
+                                job.selectorBits.string()};
+  if (job.regionEncrypted) {
+    argv.push_back("--regions-encrypted");
+  }
+  return argv;
+}
+
+std::string CompilerOpenFPGA_ql::clockBindingStepMissing(const std::string& driver) {
+  return driver + " has no clock binding step ('bind'): it is older than this Aurora, which "
+                  "computes the per-region clock binding in the bitstream stage. Install the "
+                  "clock-region-place that belongs to this Aurora";
+}
+
+CompilerOpenFPGA_ql::ClockDriverProbe CompilerOpenFPGA_ql::probeClockRegionDriver(
+    const std::filesystem::path& driver) {
+  std::ostringstream out;
+  std::ostringstream err;
+  const Return ran = FileUtils::ExecuteSystemCommand(driver.string(), {"bind", "--help"}, &out,
+                                                     /*timeout_ms*/ 120000, /*workingDir*/ {},
+                                                     &err);
+  ClockDriverProbe probe;
+  probe.status = ran.code;
+  std::istringstream lines(err.str());
+  for (std::string line; std::getline(lines, line);) {
+    line = StringUtils::trim(line);
+    if (!line.empty()) {
+      probe.firstLine = line;
+      break;
+    }
+  }
+  if (ran.code == 0) {
+    probe.verdict = ClockDriverProbe::Binds;
+  } else if (ran.code == 2 && err.str().find("invalid choice: 'bind'") != std::string::npos) {
+    probe.verdict = ClockDriverProbe::NoBindStep;  // argparse on an unknown command
+  }
+  return probe;
+}
+
+std::string CompilerOpenFPGA_ql::clockDriverNoVerdict(
+    const std::string& driver, int exitStatus, const std::string& plain,
+    const std::function<ClockDriverProbe()>& probe) {
+  if (exitStatus < 0) {
+    return plain;  // stopped or crashed: no sign of another driver, and not asked
+  }
+  const ClockDriverProbe found = probe();
+  if (found.verdict == ClockDriverProbe::Binds) {
+    return plain;
+  }
+  if (found.verdict == ClockDriverProbe::NoBindStep) {
+    return clockBindingStepMissing(driver);
+  }
+  std::string reason = driver + " cannot be run (status " + std::to_string(found.status) + ")";
+  if (!found.firstLine.empty()) {
+    reason += ": " + found.firstLine;
+  }
+  return reason;
+}
+
+CompilerOpenFPGA_ql::ClockBindingOutcome CompilerOpenFPGA_ql::clockBindingOutcome(
+    const std::filesystem::path& resultFile, int exitStatus, const std::string& driver,
+    const std::function<ClockDriverProbe()>& probe) {
+  ClockBindingOutcome outcome;
+  if (FileUtils::FileExists(resultFile)) {
+    const json result = json::parse(FileUtils::GetFileContent(resultFile), nullptr, false);
+    if (result.is_object()) {
+      const bool bound = result.contains("bound") && result["bound"].is_boolean() &&
+                         result["bound"].get<bool>();
+      if (result.contains("reason") && result["reason"].is_string()) {
+        outcome.reason = result["reason"].get<std::string>();
+      }
+      outcome.bound = bound && exitStatus == 0;
+      if (outcome.bound) {
+        outcome.reason.clear();
+        return outcome;
+      }
+      if (!bound && !outcome.reason.empty()) {
+        return outcome;
+      }
+    }
+  }
+  // No verdict: the step ended before it wrote one, the driver has no such step (it
+  // exits on its unknown command), or it cannot be run at all.
+  outcome.reason = clockDriverNoVerdict(
+      driver, exitStatus,
+      driver + " bind ended with status " + std::to_string(exitStatus) + " and gave no reason",
+      probe);
+  return outcome;
+}
+
+bool CompilerOpenFPGA_ql::RunClockBinding(const ClockBindingJob& job) {
+  const std::filesystem::path driver = FileUtils::LocateExecFile(CLOCK_REGION_DRIVER);
+  if (driver.empty()) {
+    ErrorMessage(std::string("Clock binding: ") + CLOCK_REGION_DRIVER +
+                 " is not installed (expected in Aurora's bin directory)");
     return false;
   }
-  Message("Clock-aware placement: the clock binding of this placement is read from its "
-          "encrypted copy in " + (projectPath / CLOCK_REGIONS_DIR).string());
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  // The region file as the driver reads it: the device's plaintext file, or a private
+  // decrypted copy, removed as soon as the step has ended (CleanTempFiles() otherwise).
+  std::filesystem::path regionPlain = job.regionFile;
+  if (job.regionEncrypted) {
+    regionPlain = GenerateTempFilePath();
+    if (regionPlain.empty() ||
+        !decryptDeviceFile(job.regionFile, regionPlain, devices->deviceTypeDirPath(),
+                           devices->convertToDeviceTypeString())) {
+      return false;
+    }
+  }
+  // Never an earlier run's verdict or files: the driver removes them too, but not when
+  // it ends before it reads its arguments.
+  const std::filesystem::path resultFile = job.workdir / CLOCK_BINDING_RESULT_FILE;
+  std::error_code ec;
+  for (const std::filesystem::path& stale : {resultFile, job.repack, job.selectorBits}) {
+    std::filesystem::remove(stale, ec);
+  }
+  std::string command;
+  for (const std::string& arg : clockBindingCommand(driver, job, regionPlain)) {
+    command += (command.empty() ? "" : " ") + arg;
+  }
+  Message("Clock binding: binding the clocks of this placement per clock region");
+  const int status = ExecuteAndMonitorSystemCommand(command);
+  if (job.regionEncrypted) {
+    // not for the rest of the stage: only the step reads it
+    std::filesystem::remove(regionPlain, ec);
+  }
+  const ClockBindingOutcome outcome =
+      clockBindingOutcome(resultFile, status, CLOCK_REGION_DRIVER,
+                          [&driver] { return probeClockRegionDriver(driver); });
+  if (!outcome.bound) {
+    for (const std::filesystem::path& file : {job.repack, job.selectorBits}) {
+      std::filesystem::remove(file, ec);
+    }
+    ErrorMessage("Clock binding: " + outcome.reason);
+    return false;
+  }
+  Message("Clock binding: the clock selectors are programmed from " + job.selectorBits.string());
   return true;
 }
 
@@ -14257,11 +14425,7 @@ bool CompilerOpenFPGA_ql::RunClockAwarePlacement(const CommandWrapperPtr& comman
     ErrorMessage(prefix + "; an RPM authoring project cannot be placed on it");
     return false;
   }
-#ifdef _WIN32
-  const std::filesystem::path driverName{"clock-region-place.exe"};
-#else
-  const std::filesystem::path driverName{"clock-region-place"};
-#endif
+  const std::filesystem::path driverName{CLOCK_REGION_DRIVER};
   const std::filesystem::path driver = FileUtils::LocateExecFile(driverName);
   if (driver.empty()) {
     ErrorMessage(prefix + ", but " + driverName.string() +
@@ -14351,37 +14515,15 @@ bool CompilerOpenFPGA_ql::RunClockAwarePlacement(const CommandWrapperPtr& comman
     spec["private_workdir"] = privateWorkdir.string();
   }
 
-  // The per-region clock binding the driver writes after a legal placement: it reads
-  // the global clock pads Packing assigned, and writes the repack constraints where
-  // FinishOpenFPGAScript looks for Packing's, with the clock selectors' bits beside
-  // them. Both outputs place the design's clocks on the fabric, so when the region
-  // file is encrypted they go to the private directory, as its decrypted copy does.
+  // The per-region clock binding: with the global clock pads Packing assigned, the
+  // driver publishes a placement only when its clocks can be bound, reports the
+  // binding, and records what the binding step needs of the placement. The two files
+  // of the binding are written in the bitstream stage (RunClockBinding), not here. The
+  // record names the region file as installed, the `.en` file of an encrypted one, as
+  // the skip check above and the bitstream stage know it: never by its decrypted copy.
   spec["clock_pads_file"] =
       clockPadsPath(ProjManager()->projectPath(), ProjManager()->projectName()).string();
-  const ClockBindingFiles binding =
-      clockBindingFiles(projectPath, ProjManager()->projectName(), regionEncrypted);
-  if (binding.repack.empty() || binding.selectorBits.empty()) {
-    ErrorMessage("Clock-aware placement: cannot create a private temporary directory under " +
-                 std::filesystem::temp_directory_path().string());
-    return false;
-  }
-  spec["repack_constraints_out"] = binding.repack.string();
-  spec["selector_bits_out"] = binding.selectorBits.string();
-  // A binding of an earlier placement must not outlive this run's verdict. The
-  // floor-plan step leaves both files alone on a device with clock regions, so
-  // this is where a stale binding is removed: the project's, the private one and
-  // its encrypted copy, whichever this run writes, so one left by another device
-  // cannot be read later.
-  for (const ClockBindingFiles& stale :
-       {clockBindingFiles(projectPath, ProjManager()->projectName(), /*isPrivate*/ false),
-        clockBindingFiles(projectPath, ProjManager()->projectName(), /*isPrivate*/ true),
-        storedClockBindingFiles(projectPath)}) {
-    for (const std::filesystem::path& file : {stale.repack, stale.selectorBits}) {
-      if (!file.empty()) {
-        std::filesystem::remove(file, ec);
-      }
-    }
-  }
+  spec["region_file_installed"] = regionFile.string();
   const std::filesystem::path specPath = workdir / "spec.json";
   FileUtils::WriteToFile(specPath, spec.dump(1));
   if (!FileUtils::FileExists(specPath)) {
@@ -14389,9 +14531,11 @@ bool CompilerOpenFPGA_ql::RunClockAwarePlacement(const CommandWrapperPtr& comman
     return false;
   }
 
-  // The verdict files of an earlier run must not pass for this run's: the driver writes
-  // new ones, but not when it stops before reading spec.json.
-  for (const char* name : {"result.json", "clock_regions.json", "clock_regions.rpt"}) {
+  // The verdict files of an earlier run, and the record of an earlier placement, must
+  // not pass for this run's: the driver writes new ones, but not when it stops before
+  // reading spec.json.
+  for (const char* name :
+       {"result.json", "clock_regions.json", "clock_regions.rpt", CLOCK_BINDING_RECORD_FILE}) {
     std::filesystem::remove(workdir / name, ec);
   }
   Message(prefix + "; running " + driver.string());
@@ -14417,16 +14561,24 @@ bool CompilerOpenFPGA_ql::RunClockAwarePlacement(const CommandWrapperPtr& comman
       }
     }
   }
+  // Without a verdict, or with a legal one but no record, the driver is asked what it
+  // is: one without the binding step refuses a spec that names the pads alone (and
+  // would leave no record if it did not), and one that cannot start leaves nothing.
+  const auto probe = [&driver] { return probeClockRegionDriver(driver); };
   if (status == 0 && legal) {
-    if (regionEncrypted && !storeClockBinding()) {
-      Message("<warning> Clock-aware placement: cannot keep an encrypted copy of the clock "
-              "binding in " + workdir.string() + "; a later session will place again.");
+    if (FileUtils::FileExists(workdir / CLOCK_BINDING_RECORD_FILE)) {
+      return true;
     }
-    return true;
+    reason = clockDriverNoVerdict(
+        driverName.string(), status,
+        driverName.string() + " published a placement but no record of it for the clock binding",
+        probe);
   }
   if (reason.empty()) {
-    reason = driverName.string() + " exited with status " + std::to_string(status) +
-             " without a result";
+    reason = clockDriverNoVerdict(
+        driverName.string(), status,
+        driverName.string() + " exited with status " + std::to_string(status) + " without a result",
+        probe);
   }
   ErrorMessage("Clock-aware placement: " + reason);
   return false;
