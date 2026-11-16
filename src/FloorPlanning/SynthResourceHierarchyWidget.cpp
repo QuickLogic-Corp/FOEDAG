@@ -1473,8 +1473,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                 } else {
                     // Non-leaf: the atoms no child instance holds (aurora2#2376: a LUT beside
                     // FIFO_INST) get rows, or the resources table counts atoms the tree never
-                    // shows. Its Type names theirs: picosoc's cpu holds the register file's
-                    // BRAMs itself, beside its child instances.
+                    // shows. Its Type names the whole subtree's, as the leaf rows do.
                     std::set<std::string> heldByChildren;
                     for (int r = 0; r < child->rowCount(); ++r) {
                         QStandardItem* grandchild = child->child(r, Column::Netlist);
@@ -1486,7 +1485,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                     for (const auto& n : names) {
                         if (heldByChildren.count(n) == 0) own.push_back(n);
                     }
-                    setTypes(item->child(row, Column::AtomType), own);
+                    setTypes(item->child(row, Column::AtomType), names);
                     populateRecursive(child, path);
                     appendAtomRows(child, path, own, resourceTypes);
                     continue;

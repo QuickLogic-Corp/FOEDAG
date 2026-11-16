@@ -2324,6 +2324,41 @@ TEST(SelectedResources, CountingBramAndDspRowByRowMatchesTheRootSelection)
     EXPECT_EQ(byRows["dsp"], tableValue(table, 1));
 }
 
+TEST(SynthResourceHierarchy, ParentTypeListsTheWholeSubtree)
+{
+    // fft256's memSys holds only logic itself and its BRAMs in nested instances: its Type
+    // must still say bram.
+    fp::Partition::setAtomTypes({});
+    const std::vector<std::string> own{"top.mem.n_$lut"};
+    const std::vector<std::string> bank{"top.mem.bank.ram_TDP_ECC36K", "top.mem.bank.n_$lut"};
+    std::vector<std::string> mem = own;
+    mem.insert(mem.end(), bank.begin(), bank.end());
+    const std::map<std::string, std::vector<std::string>, fp::NaturalLess> atoms{
+        {"top", mem}, {"top.mem", mem}, {"top.mem.bank", bank}};
+
+    fp::SynthResourceHierarchyWidget tree;
+    tree.setTopInstance("top");
+    tree.setAtomNames(atoms);
+    tree.build(fp::NaturalStringSet{"top", "top.mem", "top.mem.bank"});
+    auto* model = tree.findChild<QStandardItemModel*>();
+
+    std::map<std::string, QString> typeOf;
+    std::function<void(QStandardItem*)> collect = [&](QStandardItem* parent) {
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            QStandardItem* item = parent->child(row, 0);
+            if (item->data(kAtomRowRoleForTest).toBool()) continue;
+            typeOf[item->data(kRtlPathRoleForTest).toString().toStdString()] =
+                parent->child(row, 3)->text();  // Type
+            collect(item);
+        }
+    };
+    collect(model->invisibleRootItem());
+
+    EXPECT_EQ(typeOf["top.mem"], "bram, clb");
+    EXPECT_EQ(typeOf["top"], "bram, clb");
+    EXPECT_EQ(typeOf["top.mem.bank"], "bram, clb");
+}
+
 TEST(SelectedResources, AtomResourcesAreSummedOverTheOutermostEntriesOnly)
 {
     // The entries nest, so summing every covered one charges an inner instance twice. Only
