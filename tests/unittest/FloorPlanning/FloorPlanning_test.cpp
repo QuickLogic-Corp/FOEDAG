@@ -2428,6 +2428,23 @@ TEST(SelectedResources, ALoadedAtomsetsFileCarriesBothHalves)
     EXPECT_EQ(names.count("dut.b"), 1u);
 }
 
+TEST(SelectedResources, TypedAtomsAreLoadedByName)
+{
+    // REQ-001 "Typed": each atom maps to its cell type.
+    const auto path = writeQdc("fp_atomsets_typed", R"({
+      "atomsets": {
+        "dut.a": {"atoms": {"dut.a.n0_$lut_Y": "$lut", "dut.a.n2_sdffre_Q": "sdffre"}}
+      }
+    })");
+
+    fp::AtomNameMap names;
+    int atomsPerTile = 1;
+    ASSERT_TRUE(fp::loadAtomSets(path, names, atomsPerTile));
+
+    EXPECT_EQ(names["dut.a"],
+              (std::vector<std::string>{"dut.a.n0_$lut_Y", "dut.a.n2_sdffre_Q"}));
+}
+
 TEST(SelectedResources, ThePartitionTreeDoesNotGetTheTable)
 {
     // The right-hand tree shows what one partition already holds, and the partitions table

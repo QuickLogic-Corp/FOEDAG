@@ -44,10 +44,18 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
     }
     for (auto it = doc["atomsets"].begin(); it != doc["atomsets"].end(); ++it) {
         std::vector<std::string> atoms;
-        if (it.value().contains("atoms") && it.value()["atoms"].is_array()) {
-            for (const auto& atom : it.value()["atoms"]) {
-                if (atom.is_string()) {
-                    atoms.push_back(atom.get<std::string>());
+        if (it.value().contains("atoms")) {
+            // An object maps each atom to its cell type; older files list bare names.
+            const auto& list = it.value()["atoms"];
+            if (list.is_object()) {
+                for (auto atom = list.begin(); atom != list.end(); ++atom) {
+                    atoms.push_back(atom.key());
+                }
+            } else if (list.is_array()) {
+                for (const auto& atom : list) {
+                    if (atom.is_string()) {
+                        atoms.push_back(atom.get<std::string>());
+                    }
                 }
             }
         }

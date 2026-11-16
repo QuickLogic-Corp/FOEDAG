@@ -3130,6 +3130,8 @@ void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
 bool CompilerOpenFPGA_ql::RunValidateInstances() {
   const std::string topModule = ProjManager()->DesignTopModule();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
+  // Every early return below leaves no verdicts, which P5 must see as "not validated".
+  std::filesystem::remove(FloorplanningArtifact("validation.json"));
 
   // floorplanning_atomsets.tcl (invoked from the device template) writes this relative to the
   // yosys process's cwd, which is the project directory. Not every device template has
@@ -3469,6 +3471,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::filesystem::remove(
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
+  // [aurora2#1725] A script without the floorplanning hooks writes no atom set, so the
+  // previous run's would otherwise describe a netlist that no longer exists.
+  std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) / "atomsets.json");
+  std::filesystem::remove(FloorplanningArtifact("atomsets.json"));
 
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
@@ -10037,6 +10043,8 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     };
 
     std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
+    // .qdc order, so the emitted partitions do not depend on hash order.
+    std::vector<std::string> partitionOrder;
     // Counts every set_region line, as the Floor Planning panel numbers its partitions.
     int setRegionIndex = 0;
 
@@ -10140,6 +10148,7 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
           const std::string partitionKey = partitionName + "|" + partition;
           if (partitionMap.find(partitionKey) == partitionMap.end()) {
             partitionMap[partitionKey] = {};
+            partitionOrder.push_back(partitionKey);
           }
           for (const std::string& element: elements) {
             partitionMap[partitionKey].insert(element);
@@ -10156,8 +10165,8 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     std::string bottomStr = StringUtils::toString(bottomSet);
 
     std::string partitionStr;
-    for (const auto& [partition, patternsSet]: partitionMap) {
-      partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
+    for (const std::string& partition: partitionOrder) {
+      partitionStr += "partition:" + partition + "|" + StringUtils::toString(partitionMap[partition]) + ";";
     }
 
     // Output results
