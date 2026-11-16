@@ -169,7 +169,8 @@ TEST_F(FlowEngineClientTest, sha256_is_cached_only_for_settled_files) {
   QThread::msleep(50);
   write("arch.xml.en", "cipher two");
   fs::last_write_time(file, mtime);
-  EXPECT_EQ(fs::last_write_time(file), mtime);
+  EXPECT_EQ(fs::last_write_time(file).time_since_epoch().count(),
+            mtime.time_since_epoch().count());
   EXPECT_GT(FlowEngineClient::changeTimeMs(file), changedBefore);
   EXPECT_NE(FlowEngineClient::sha256File(file), first);
   EXPECT_EQ(FlowEngineClient::changeTimeMs(m_dir / "none"), -1);

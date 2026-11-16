@@ -331,6 +331,7 @@ void NCriticalPathToolsWidget::tryRunPnRView() {
     fullCmd += " --server";
     fullCmd += QString(" --port %1").arg(portNum);
     fullCmd += " --disp on";
+    fullCmd += " --graphics_pause final_stage";
 
     const std::string platform = Compiler::getQtPlatformPluginFor(
         Compiler::IsVprGuiCommand(fullCmd.toStdString()));
