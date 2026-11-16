@@ -523,7 +523,20 @@ void QLDeviceLayoutInfo::setPackedLayoutSource(PackedLayoutSource source) {
   s_packedLayoutSource = std::move(source);
 }
 
+namespace {
+thread_local bool s_noRefresh = false;
+}
+
+QLDeviceLayoutInfo::ScopedNoRefresh::ScopedNoRefresh() : m_previous(s_noRefresh) {
+  s_noRefresh = true;
+}
+
+QLDeviceLayoutInfo::ScopedNoRefresh::~ScopedNoRefresh() { s_noRefresh = m_previous; }
+
 void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
+  if (s_noRefresh) {
+    return;
+  }
   if (projectPath().empty()) {
     // No project: device selection in the new-project wizard has nowhere to write
     // and nothing to invalidate.

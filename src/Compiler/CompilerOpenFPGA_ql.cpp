@@ -351,6 +351,9 @@ std::vector<UpstreamCommand> CompilerOpenFPGA_ql::engineUpstream(const std::stri
   const std::filesystem::path sbMapsFile = m_SBMapsFile;
   const std::filesystem::path sbTemplatesDir = m_SBTemplatesDir;
   s_describeOnly = true;
+  // Describing pack resets the layout it resolved; a settings read during that must
+  // not rewrite device_layout.json with the device's own layout (aurora2 REQ-121).
+  const QLDeviceLayoutInfo::ScopedNoRefresh noLayoutRefresh;
   auto restore = sg::make_scope_guard([&] {
     s_describeOnly = describeOnly;
     m_architectureFile = architectureFile;

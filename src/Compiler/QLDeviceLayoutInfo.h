@@ -87,6 +87,20 @@ class QLDeviceLayoutInfo {
   using PackedLayoutSource = std::function<std::string(const QLDeviceTarget& device_target)>;
   static void setPackedLayoutSource(PackedLayoutSource source);
 
+  // While one is alive on this thread, refresh() leaves device_layout.json alone. A
+  // describe builds commands with the pack layout reset, and must not write the
+  // project (REQ-011): the file would name the device's layout, not the packed one.
+  class ScopedNoRefresh {
+   public:
+    ScopedNoRefresh();
+    ~ScopedNoRefresh();
+    ScopedNoRefresh(const ScopedNoRefresh&) = delete;
+    ScopedNoRefresh& operator=(const ScopedNoRefresh&) = delete;
+
+   private:
+    bool m_previous;
+  };
+
   // auto_device.log names no device - it is just whatever Packing() last ran
   // add_layout.py for. Call before switching the current device: if the
   // switch is a real change (not just re-reading the same device's settings),
