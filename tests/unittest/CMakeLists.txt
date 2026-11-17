@@ -47,7 +47,6 @@ set (CPP_LIST
     Compiler/QLDeviceManager_test.cpp
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp
-    Compiler/BlifParser_test.cpp
     Compiler/PackLayout_test.cpp
     Compiler/QLMetricsManager_test.cpp
     Compiler/EngineStatusRefresh_test.cpp
@@ -94,7 +93,7 @@ target_link_libraries(unittest PRIVATE
   gmock
   gtest_main
   pinassignment
-  floorplanning
+  floorplanningui
   newproject
   foedag
   foedagcore
