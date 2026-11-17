@@ -32,10 +32,12 @@ namespace FOEDAG {
 
 class GuiTestScriptView;
 
-// Interactive mode's pause: once armed, it opens on the next Space pressed in
+// Display mode's pause: once armed, it opens on the next Space pressed in
 // any window and swallows that Space, so it never reaches the focused widget.
 // With a timeout (ms; -1 waits for Space only) it also opens once that time
-// has passed.
+// has passed. While stepping (interactive mode, or after a breakpoint) every
+// line is held; otherwise only a line with a breakpoint, which starts
+// stepping, until run().
 class GuiTestSpaceGate : public QObject {
   Q_OBJECT
 
@@ -43,6 +45,12 @@ class GuiTestSpaceGate : public QObject {
   explicit GuiTestSpaceGate(int timeoutMs = -1, QObject *parent = nullptr);
   void arm();
   bool isOpen() const;
+  void setStepping(bool on) { m_stepping = on; }
+  bool isStepping() const { return m_stepping; }
+  // A new line is next. Returns whether it is held, and arms the gate if so.
+  bool arrive(bool breakpoint);
+  // Stops stepping and lets a held line run.
+  void run();
 
  protected:
   bool eventFilter(QObject *watched, QEvent *event) override;
@@ -53,6 +61,7 @@ class GuiTestSpaceGate : public QObject {
   bool m_armed{false};
   bool m_open{false};
   bool m_swallowRelease{false};
+  bool m_stepping{true};
 };
 
 // Runs a "# gui-test: sync" replay script one Tcl command at a time. It is
@@ -118,9 +127,10 @@ class GuiTestRunner : public QObject {
   QVector<Command> m_commands;
   int m_next{0};
   QVector<Frame> m_running;  // innermost last
-  GuiTestSpaceGate *m_gate{nullptr};  // set in interactive mode
-  int m_announced{-1};               // last index printed as NEXT
-  QPointer<GuiTestScriptView> m_view;  // display mode only
+  GuiTestSpaceGate *m_gate{nullptr};  // interactive or debug mode
+  int m_announced{-1};               // last index the gate was told of
+  QPointer<GuiTestScriptView> m_view;  // debug mode only
+  bool m_finished{false};
 };
 
 }  // namespace FOEDAG

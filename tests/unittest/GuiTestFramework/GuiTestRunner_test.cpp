@@ -22,12 +22,20 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <tcl.h>
 
+#include <QApplication>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QFileDialog>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QPushButton>
+#include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QTextBlock>
 #include <QTimer>
+#include <QToolButton>
+#include <QTreeWidget>
 
 #include "GuiTestFramework/GuiTestCommands.h"
 #include "GuiTestFramework/GuiTestHub.h"
@@ -129,20 +137,46 @@ TEST(GuiTestCommands, ActionWaitsForHiddenWidget) {
   Tcl_DeleteInterp(interp);
 }
 
+// A file dialog rewrites a typed path to the bare file name unless its field
+// has focus. gui_set_text types with focus, as a user does, even when another
+// window is active, such as the replay window after Run.
+TEST(GuiTestCommands, SetTextInFileDialogKeepsPath) {
+  QTemporaryDir dir;
+  const QString file = dir.filePath("demo.ospr");
+  QFile{file}.open(QIODevice::WriteOnly);
+  QWidget other;
+  other.show();
+  QFileDialog dialog{nullptr, "Open", dir.path()};
+  dialog.setOption(QFileDialog::DontUseNativeDialog);
+  dialog.show();
+  QTest::qWait(500);  // the dialog lists the directory in the background
+  QApplication::setActiveWindow(&other);
+  ASSERT_EQ(QApplication::activeWindow(), &other);
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  const QByteArray command = "gui_set_text fileNameEdit " + file.toUtf8();
+  EXPECT_EQ(Tcl_Eval(interp, command.constData()), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  Tcl_DeleteInterp(interp);
+}
+
 // The script view grays finished commands, highlights running ones (all lines
 // of a command that spans several), marks the next one, lists each line's
 // screenshots, and is no test target.
 TEST(GuiTestScriptView, ShowsProgressByCommand) {
-  GuiTestScriptView view{"/x/demo.tcl",
-                         "# gui-test: sync\na\n# note\nb {\n  c}\nd\ne"};
-  EXPECT_EQ(view.windowTitle().toStdString(), "Replay demo.tcl");
-  EXPECT_TRUE(GuiTestHub::isInternal(&view));
-  EXPECT_EQ(view.topLevelItem(1)->text(0).toStdString(), "2  a");
-
   const QVector<GuiTestScriptView::Span> commands{
       {2, 1}, {4, 2}, {6, 1}, {7, 1}};
-  auto state = [&view](int line) -> std::string {
-    const QTreeWidgetItem *item = view.topLevelItem(line - 1);
+  GuiTestScriptView view{"/x/demo.tcl",
+                         "# gui-test: sync\na\n# note\nb {\n  c}\nd\ne",
+                         commands};
+  QTreeWidget *tree = view.tree();
+  EXPECT_EQ(view.windowTitle().toStdString(), "Replay demo.tcl");
+  EXPECT_TRUE(GuiTestHub::isInternal(tree));
+  EXPECT_EQ(tree->topLevelItem(1)->text(0).toStdString(), "2  a");
+
+  auto state = [tree](int line) -> std::string {
+    const QTreeWidgetItem *item = tree->topLevelItem(line - 1);
     const QVariant fill = item->data(0, Qt::BackgroundRole);
     if (fill.isValid())
       return fill.value<QBrush>().color().name().toStdString();
@@ -150,21 +184,83 @@ TEST(GuiTestScriptView, ShowsProgressByCommand) {
   };
   const std::string running = QColor{255, 236, 140}.name().toStdString();
   const std::string next = QColor{205, 225, 255}.name().toStdString();
-  view.showProgress(commands, {1}, 2);
+  view.showProgress({1}, 2);
   EXPECT_EQ(std::vector<std::string>({state(1), state(2), state(3), state(4),
                                       state(5), state(6), state(7)}),
             std::vector<std::string>(
                 {"", "done", "", running, running, next, ""}));
 
-  view.showProgress(commands, {}, 4);
+  view.showProgress({}, 4);
   EXPECT_EQ(std::vector<std::string>({state(2), state(4), state(5), state(6),
                                       state(7)}),
             std::vector<std::string>({"done", "done", "done", "done", "done"}));
 
   view.addScreenshot(6, "/out/shots/demo/01_a.png");
   view.addScreenshot(6, "/out/shots/demo/02_b.png");
-  EXPECT_EQ(view.topLevelItem(5)->text(1).toStdString(), "01_a, 02_b");
+  EXPECT_EQ(tree->topLevelItem(5)->text(1).toStdString(), "01_a, 02_b");
   EXPECT_EQ(view.screenshots(6), QStringList({"/out/shots/demo/01_a.png",
                                               "/out/shots/demo/02_b.png"}));
   EXPECT_TRUE(view.screenshots(2).isEmpty());
+}
+
+// A double click sets a breakpoint on the command of that line, or clears
+// it; comment lines take none. Run is a button on top.
+TEST(GuiTestScriptView, BreakpointsAndRun) {
+  GuiTestScriptView view{"/x/demo.tcl",
+                         "# gui-test: sync\na\n# note\nb {\n  c}",
+                         {{2, 1}, {4, 2}}};
+  QTreeWidget *tree = view.tree();
+  emit tree->itemDoubleClicked(tree->topLevelItem(4), 0);  // line 5, in "b {"
+  EXPECT_FALSE(view.hasBreakpoint(0));
+  EXPECT_TRUE(view.hasBreakpoint(1));
+  emit tree->itemDoubleClicked(tree->topLevelItem(2), 0);  // the comment
+  EXPECT_FALSE(view.hasBreakpoint(0));
+  EXPECT_TRUE(view.hasBreakpoint(1));
+  emit tree->itemDoubleClicked(tree->topLevelItem(3), 0);
+  EXPECT_FALSE(view.hasBreakpoint(1));
+
+  QSignalSpy run{&view, &GuiTestScriptView::runRequested};
+  view.runButton()->click();
+  EXPECT_EQ(run.count(), 1);
+}
+
+// At the end of a debug run the view marks the failing command red, shows
+// the message, disables Run, and says when it is closed.
+TEST(GuiTestScriptView, ShowsResult) {
+  GuiTestScriptView view{"/x/demo.tcl", "# gui-test: sync\na\nb {\n  c}",
+                         {{2, 1}, {3, 2}}};
+  QTreeWidget *tree = view.tree();
+  view.showResult(1, "boom");
+  const QColor red{255, 170, 170};
+  EXPECT_EQ(tree->topLevelItem(2)->background(0).color(), red);
+  EXPECT_EQ(tree->topLevelItem(3)->background(0).color(), red);
+  EXPECT_NE(tree->topLevelItem(1)->background(0).color(), red);
+  EXPECT_FALSE(view.runButton()->isEnabled());
+  bool shown = false;
+  for (QLabel *label : view.findChildren<QLabel *>())
+    shown = shown || label->text().startsWith("Failed at line 3: boom");
+  EXPECT_TRUE(shown);
+
+  QSignalSpy closed{&view, &GuiTestScriptView::closed};
+  view.show();
+  view.close();
+  EXPECT_EQ(closed.count(), 1);
+}
+
+// Stepping holds every line; Run stops it, and a breakpoint starts it again.
+TEST(GuiTestSpaceGate, RunsToBreakpoint) {
+  GuiTestSpaceGate gate;
+  gate.setStepping(false);
+  EXPECT_FALSE(gate.arrive(false));
+  EXPECT_TRUE(gate.isOpen());
+  EXPECT_TRUE(gate.arrive(true));
+  EXPECT_FALSE(gate.isOpen());
+  EXPECT_TRUE(gate.isStepping());
+  EXPECT_TRUE(gate.arrive(false));
+  EXPECT_FALSE(gate.isOpen());
+
+  gate.run();
+  EXPECT_TRUE(gate.isOpen());
+  EXPECT_FALSE(gate.arrive(false));
+  EXPECT_TRUE(gate.isOpen());
 }

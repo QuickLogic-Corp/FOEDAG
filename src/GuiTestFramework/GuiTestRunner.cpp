@@ -37,7 +37,6 @@ extern "C" {
 #include <iostream>
 
 #include "GuiRecorder.h"
-#include "GuiTestHub.h"
 #include "GuiTestMode.h"
 #include "GuiTestScriptView.h"
 
@@ -57,6 +56,23 @@ void GuiTestSpaceGate::arm() {
 bool GuiTestSpaceGate::isOpen() const {
   return m_open ||
          (m_armed && m_timeoutMs >= 0 && m_armedFor.elapsed() >= m_timeoutMs);
+}
+
+bool GuiTestSpaceGate::arrive(bool breakpoint) {
+  if (breakpoint) m_stepping = true;
+  if (m_stepping) {
+    arm();
+  } else {
+    m_armed = false;
+    m_open = true;
+  }
+  return m_stepping;
+}
+
+void GuiTestSpaceGate::run() {
+  m_stepping = false;
+  m_armed = false;
+  m_open = true;
 }
 
 bool GuiTestSpaceGate::eventFilter(QObject *watched, QEvent *event) {
@@ -152,21 +168,30 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
              GuiRecorder::installDir().toUtf8().constData(), TCL_GLOBAL_ONLY);
 
   qApp->installEventFilter(this);
-  if (qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_INTERACTIVE") == 1) {
+  const bool interactive =
+      qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_INTERACTIVE") == 1;
+  if (interactive || GuiTestMode::isDebugMode()) {
     bool ok{false};
     int timeoutMs = qEnvironmentVariableIntValue(
         "GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT", &ok);
-    if (!ok || timeoutMs < 0) timeoutMs = -1;
+    if (!interactive || !ok || timeoutMs < 0) timeoutMs = -1;
     m_gate = new GuiTestSpaceGate(timeoutMs, this);
-    std::cout << "Interactive mode: press Space in an application window to "
-                 "run each line"
-              << (timeoutMs >= 0 ? ", or wait " + std::to_string(timeoutMs) +
-                                      " ms"
-                                : std::string{})
-              << "." << std::endl;
+    m_gate->setStepping(interactive);
+    if (interactive)
+      std::cout << "Interactive mode: press Space in an application window to "
+                   "run each line"
+                << (timeoutMs >= 0 ? ", or wait " +
+                                         std::to_string(timeoutMs) + " ms"
+                                   : std::string{})
+                << "." << std::endl;
   }
-  if (GuiTestMode::isDisplayMode()) {
-    m_view = new GuiTestScriptView(file, text);
+  if (GuiTestMode::isDebugMode()) {
+    QVector<GuiTestScriptView::Span> spans;
+    for (const Command &c : m_commands)
+      spans.append({c.line, int(c.text.count('\n')) + 1});
+    m_view = new GuiTestScriptView(file, text, spans);
+    connect(m_view, &GuiTestScriptView::runRequested, m_gate,
+            &GuiTestSpaceGate::run);
     m_view->show();
     showProgress();
   }
@@ -192,16 +217,18 @@ bool GuiTestRunner::holdForSpace() {
   if (m_announced != m_next) {
     m_announced = m_next;
     const Command &command = m_commands.at(m_next);
-    std::cout << "NEXT " << command.line << ": " << command.text.toStdString()
-              << std::endl;
-    m_gate->arm();
+    const bool breakpoint = m_view && m_view->hasBreakpoint(m_next);
+    if (m_gate->arrive(breakpoint))
+      std::cout << (breakpoint ? "BREAK " : "NEXT ") << command.line << ": "
+                << command.text.toStdString() << std::endl;
   }
   bool windowShown = false;
   for (QWidget *w : QApplication::topLevelWidgets())
     windowShown = windowShown || (w->isVisible() && w->windowType() != Qt::Popup &&
-                                  w->windowType() != Qt::ToolTip &&
-                                  !GuiTestHub::isInternal(w));
-  return windowShown && !m_gate->isOpen();
+                                  w->windowType() != Qt::ToolTip);
+  const bool held = windowShown && !m_gate->isOpen();
+  if (m_view) m_view->setPaused(held);
+  return held;
 }
 
 void GuiTestRunner::scheduleStep(int delayMs) {
@@ -211,6 +238,7 @@ void GuiTestRunner::scheduleStep(int delayMs) {
 }
 
 void GuiTestRunner::step() {
+  if (m_finished) return;  // the result is on screen in debug mode
   if (!canRunNext()) {
     scheduleStep(kBlockedPollMs);
     return;
@@ -244,12 +272,9 @@ void GuiTestRunner::screenshotTaken(const QString &path) {
 
 void GuiTestRunner::showProgress() {
   if (!m_view) return;
-  QVector<GuiTestScriptView::Span> spans;
-  for (const Command &c : m_commands)
-    spans.append({c.line, int(c.text.count('\n')) + 1});
   QVector<int> running;
   for (const Frame &f : m_running) running.append(f.index);
-  m_view->showProgress(spans, running, m_next);
+  m_view->showProgress(running, m_next);
 }
 
 bool GuiTestRunner::eventFilter(QObject *watched, QEvent *event) {
@@ -268,6 +293,9 @@ void GuiTestRunner::fail(const QString &message) {
     std::cout << "  at " << m_file.toStdString() << ":" << command.line
               << ": " << command.text.toStdString() << std::endl;
   }
+  if (m_view)
+    m_view->showResult(m_running.isEmpty() ? -1 : m_running.last().index,
+                       message);
   finish(1);
 }
 
@@ -279,6 +307,15 @@ void GuiTestRunner::finish(int code) {
   std::cout.flush();
   std::cerr.flush();
   std::fflush(nullptr);
+  // Debug mode keeps the application and the result on screen until the
+  // replay window is closed; no further line runs meanwhile.
+  m_finished = true;
+  if (m_view && m_view->isVisible()) {
+    if (code == 0) m_view->showResult(-1, {});
+    QEventLoop wait;
+    connect(m_view, &GuiTestScriptView::closed, &wait, &QEventLoop::quit);
+    wait.exec();
+  }
   // Exit-time teardown crashes in ~MainWindow (Qt accessibility), which would
   // turn every result into a signal; the run's result is all that matters.
   std::_Exit(code);

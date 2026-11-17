@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "<binary> --replay", one run dir each.
-# usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
+# usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--debug] [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
 #   GUI_TEST_FRAMEWORK_TARGET_BIN: the GUI application to test, a path or a name on PATH; no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
 #   --interactive: as --show, and run each line only after Space is pressed
 #     --timeout ms: or once a line has waited that long (default -1: wait for Space)
+#   --debug: as --show (or with --interactive), plus a window with the script's
+#     progress, breakpoints and Run; at the end it shows the result and the
+#     application stays open until that window is closed
 #   --roundtrip: replay each scenario with --record, replay the recording
 #     unchanged after the scenario's setup lines (G-015), and compare the
 #     actions both runs performed, with variables substituted (G-013)
@@ -20,6 +23,16 @@ set -u
 platform=(env QT_QPA_PLATFORM=offscreen)
 interactive=0
 roundtrip=0
+debug=0
+if [ "${1:-}" = --debug ]; then
+  debug=1
+  shift
+  case "${1:-}" in
+    --show | --interactive) ;;
+    --roundtrip) echo "[error] --debug does not go with --roundtrip" >&2; exit 1 ;;
+    *) set -- --show "$@" ;;
+  esac
+fi
 case "${1:-}" in
   --show | --interactive)
     [ "$1" = --interactive ] && interactive=1
@@ -38,7 +51,7 @@ case "${1:-}" in
       shift 2
     fi
     platform=(env -u QT_QPA_PLATFORM GUI_TEST_FRAMEWORK_SHOW=1 GUI_TEST_FRAMEWORK_INTERACTIVE=$interactive
-      GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT=$hold_timeout)
+      GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT=$hold_timeout GUI_TEST_FRAMEWORK_DEBUG=$debug)
     ;;
   --roundtrip)
     roundtrip=1
@@ -72,9 +85,9 @@ out=$(cd "$out" && pwd)
 
 # The limit only ends a hung run. A busy build node can run a scenario many
 # times slower than an idle one, so it is set far above any normal run. A
-# paused interactive session must not be killed by it.
+# paused interactive or debug session must not be killed by it.
 limit=""
-if [ $interactive -eq 0 ] && command -v timeout >/dev/null 2>&1; then
+if [ $interactive -eq 0 ] && [ $debug -eq 0 ] && command -v timeout >/dev/null 2>&1; then
   limit="timeout ${GUI_TEST_FRAMEWORK_RUN_TIMEOUT:-3600}"
 fi
 
@@ -97,7 +110,7 @@ run() {
       GUI_TEST_FRAMEWORK_GOLDEN_DIR="$golden" \
       GUI_TEST_FRAMEWORK_TRACE=$([ $roundtrip -eq 1 ] && echo "$dir/actions.trace") \
       "${platform[@]}" $limit "$binary" "$@" 2>&1 |
-      if [ $interactive -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
+      if [ $interactive -eq 1 ] || [ $debug -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
     exit "${PIPESTATUS[0]}")
 }
 

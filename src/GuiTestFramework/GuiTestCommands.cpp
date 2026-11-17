@@ -477,6 +477,24 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return succeed(interp);
 }
 
+// A user clicks into a field before typing, and some widgets depend on it: a
+// file dialog rewrites a typed path to the bare file name unless its field has
+// focus. A window that is not active (it has just opened, or another window
+// was clicked) is activated first: activateWindow() asks the window manager,
+// which takes effect later, if at all (not on offscreen), so Qt is also told
+// at once.
+void focusForTyping(QWidget *w) {
+  QWidget *window = w->window();
+  if (!window->isActiveWindow()) {
+    window->activateWindow();
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    QApplication::setActiveWindow(window);
+    QT_WARNING_POP
+  }
+  w->setFocus(Qt::OtherFocusReason);
+}
+
 int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (argc != 3) return fail(interp, "usage: gui_set_text <objName> <text>");
   const QString name = QString::fromUtf8(argv[1]);
@@ -493,6 +511,7 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     if (edit->isReadOnly())
       return fail(interp,
                   QString("gui_set_text %1: widget is read-only").arg(name));
+    focusForTyping(edit);
     // insert() goes through the validator and emits textEdited like typing.
     edit->selectAll();
     edit->insert(text);
