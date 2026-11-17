@@ -20,6 +20,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "nlohmann_json/json.hpp"
 
+#include <QtGlobal>
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -58,7 +60,17 @@ public:
   // empty when missing. There is no system-Python fallback.
   static std::filesystem::path bundledInterpreter(const std::filesystem::path& installRoot);
   // "sha256:<hex>" of a file's bytes, the form of a host digest; empty if unreadable.
+  // Cached per process by (path, size, mtime, ctime), and only for a file whose
+  // mtime and ctime were more than 2 s old when it was hashed, as the engine's
+  // own digest cache (aurora2 design-install §1.2.3): a status query on the
+  // GUI thread then hashes a 13 MB encrypted architecture once, not per query.
   static std::string sha256File(const std::filesystem::path& path);
+  // When the file's content or metadata last changed, ms since the epoch; -1
+  // when unknown (then sha256File does not cache it). A true change time on
+  // every platform: a write that restores size and mtime still moves it.
+  static qint64 changeTimeMs(const std::filesystem::path& path);
+  // Hashes actually computed by sha256File; for tests.
+  static std::size_t sha256FilesHashed();
 
   FlowEngineClient() = default;
   explicit FlowEngineClient(const std::filesystem::path& installRoot,
@@ -69,6 +81,12 @@ public:
                    const std::filesystem::path& osLibs, int timeoutMs);
 
   bool usable() const { return !m_interpreter.empty() && !m_script.empty(); }
+  // The same client with another timeout.
+  FlowEngineClient withTimeout(int timeoutMs) const {
+    FlowEngineClient client(*this);
+    client.m_timeoutMs = timeoutMs;
+    return client;
+  }
   const std::filesystem::path& interpreter() const { return m_interpreter; }
 
   // `<python> -I -X utf8 aurora_engine.py <args...> --json`, request on stdin.

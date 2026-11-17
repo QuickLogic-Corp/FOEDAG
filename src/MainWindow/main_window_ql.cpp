@@ -1116,6 +1116,10 @@ void MainWindow::createActions() {
 
   aboutAction = new QAction(tr("About"), this);
   aboutAction->setObjectName("actionAbout");
+#ifdef __APPLE__
+  // Keep About in Help: Qt moves it to the app menu, leaving Help empty and hidden.
+  aboutAction->setMenuRole(QAction::NoRole);
+#endif
   connect(aboutAction, &QAction::triggered, this, [this]() {
     AboutWidget w(m_projectInfo, GlobalSession->Context()->BinaryPath(), this);
     w.exec();

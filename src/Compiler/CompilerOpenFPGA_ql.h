@@ -24,7 +24,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -35,6 +37,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
 #include "Compiler/EngineBackend.h"
+#include "Compiler/PackLayout.h"
+#include "Compiler/EngineStatusRefresh.h"
 #include "QLDeviceManager.h"
 #include "QLMetricsManager.h"
 
@@ -170,6 +174,99 @@ class CompilerOpenFPGA_ql : public Compiler {
                           const std::filesystem::path& deviceTypeDir,
                           const std::string& deviceTypeString);
 
+  /// Encrypt `src_plain` to `dst_en` with an existing key database, so a private
+  /// file outlives this process. Removes `dst_en` on failure.
+  static bool storeEncryptedCopy(const std::filesystem::path& src_plain,
+                                 const std::filesystem::path& dst_en,
+                                 const std::filesystem::path& cryptdb);
+  /// Decrypt a storeEncryptedCopy() file to the private `dst_plain` (owner-only).
+  /// Removes `dst_plain` on failure.
+  static bool restoreEncryptedCopy(const std::filesystem::path& src_en,
+                                   const std::filesystem::path& dst_plain,
+                                   const std::filesystem::path& cryptdb);
+  /// The current device's `<family>_Supp.db`.
+  std::filesystem::path deviceKeyDb();
+
+  /// The per-region clock binding of a device with clock regions (aurora2
+  /// docs/specs/per-region-clock-binding): the repack design constraints and the clock
+  /// selectors' mode bits of one placement. The bitstream stage computes them with the
+  /// clock-region driver's binding step (`clock-region-place bind`) from the packed
+  /// netlist, the place file, the clock pads, the region file and the record
+  /// clock-aware placement left of that placement; nothing of the binding is kept
+  /// between stages.
+  struct ClockBindingJob {
+    std::filesystem::path workdir;     ///< the project's clock-regions directory
+    std::filesystem::path netFile;
+    std::filesystem::path placeFile;
+    std::filesystem::path clockPads;
+    std::filesystem::path regionFile;  ///< as installed, plaintext or `.en`
+    bool regionEncrypted = false;
+    /// The two files to write: in `workdir`, or private to this process when the
+    /// region file is encrypted.
+    std::filesystem::path repack;
+    std::filesystem::path selectorBits;
+  };
+  struct ClockBindingPlan {
+    std::optional<ClockBindingJob> job;  ///< none on a device without clock regions
+    std::string error;                   ///< why the stage cannot run; empty otherwise
+  };
+  /// The binding the bitstream stage computes, from the lookup of the device's region
+  /// file (`regionFile`, `regionError`: QLDeviceManager::deviceClockRegionFile). A
+  /// device that names a region file the lookup cannot resolve is an error, never a
+  /// device without regions: its bitstream would not carry the placement's binding.
+  /// The job's two files go to the project's clock-regions directory, or, with an
+  /// encrypted region file, to two names `privateFile` gives (empty when it cannot).
+  /// The netlist and the place file are the caller's, from its VPR command.
+  static ClockBindingPlan clockBindingPlan(const std::filesystem::path& projectPath,
+                                           const std::string& projectName,
+                                           const std::filesystem::path& regionFile,
+                                           const std::string& regionError, bool regionEncrypted,
+                                           const std::function<std::filesystem::path()>& privateFile);
+  /// True when the record clock-aware placement left in `job.workdir` is one the binding
+  /// step accepts for the files of `job`: complete, and made from these very files (their
+  /// SHA-256; the region file as installed). Placement is skipped only then, so it never
+  /// stays skipped while Bitstream says to run it again.
+  static bool clockBindingRecordMatches(const ClockBindingJob& job);
+  /// The binding step's command line; `regionPlain` is the region file as the driver
+  /// reads it, the decrypted copy of an encrypted one; `--regions-installed` names the
+  /// file as installed, by which the record knows it.
+  static std::vector<std::string> clockBindingCommand(const std::filesystem::path& driver,
+                                                      const ClockBindingJob& job,
+                                                      const std::filesystem::path& regionPlain);
+  struct ClockBindingOutcome {
+    bool bound = false;
+    std::string reason;  ///< why not, when not bound
+  };
+  /// What `<driver> bind --help` tells of the installed clock-region driver: it has
+  /// the binding step (exit 0); it is older than the step (exit 2, argparse's
+  /// "invalid choice: 'bind'"); or it cannot be run at all (anything else).
+  struct ClockDriverProbe {
+    enum Verdict { Binds, NoBindStep, CannotRun };
+    Verdict verdict = CannotRun;
+    int status = -1;        ///< the probe's exit status; negative when it did not end
+    std::string firstLine;  ///< the first line it wrote to stderr, or why it did not start
+  };
+  static ClockDriverProbe probeClockRegionDriver(const std::filesystem::path& driver);
+  /// The reason to give when `driver` ended with `exitStatus` and left no verdict:
+  /// `plain` when it was stopped or crashed (a negative status) or has the binding step;
+  /// otherwise what `probe` found, a driver older than the step or one that cannot run.
+  static std::string clockDriverNoVerdict(const std::string& driver, int exitStatus,
+                                          const std::string& plain,
+                                          const std::function<ClockDriverProbe()>& probe);
+  /// The verdict of a binding step, from its exit status and its result file; without a
+  /// verdict in the file, clockDriverNoVerdict() with `probe`.
+  static ClockBindingOutcome clockBindingOutcome(const std::filesystem::path& resultFile,
+                                                 int exitStatus, const std::string& driver,
+                                                 const std::function<ClockDriverProbe()>& probe);
+  /// What to tell the user when the installed driver is older than the binding step.
+  static std::string clockBindingStepMissing(const std::string& driver);
+  /// True when floorplanning writes this device's repack constraints privately (an
+  /// encrypted template, no clock regions) and this process has not run it yet.
+  bool privateRepackMissing();
+  /// The project whose floorplanning this process last ran with private repack output.
+  std::string m_privateRepackGeneratedIn;
+  std::mutex m_privateRepackMutex;
+
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   
@@ -237,6 +334,21 @@ class CompilerOpenFPGA_ql : public Compiler {
   void SetUseVerificFromTcl(bool on);
 
  protected:
+  /// Refuses, without starting it, a command that would have VPR write data built
+  /// from the decrypted architecture of an encrypted device (REQ-131 of aurora2's
+  /// docs/specs/aurora-flow-engine); see RefuseDumpingCommand().
+  int ExecuteAndMonitorSystemCommand(const std::string& command,
+                                     const std::string logFile = std::string{},
+                                     bool appendLog = false) override;
+  /// True, after reporting the options, when `command` would dump on an
+  /// encrypted device; see findRefusedDumpOptions().
+  bool RefuseDumpingCommand(const std::string& command);
+  /// True when VPR reads an encrypted architecture: the device's installed one,
+  /// or the one pack generates in AUTO/CUSTOM layout mode, always saved as .en.
+  virtual bool DeviceIsEncrypted();
+  /// The current device's VPR architecture as QLDeviceManager finds it; empty when
+  /// there is none.
+  virtual std::filesystem::path InstalledVPRArchitectureFile();
   virtual bool IPGenerate();
   virtual bool Analyze();
   virtual bool Synthesize();
@@ -420,15 +532,117 @@ private:
   void selectIncrementalBackend();
   std::unique_ptr<IncrementalBackend> makeCppBackend();
   std::filesystem::path engineInstallRoot() const;
-  EngineStageContext engineContext(const std::string& stage);
+  EngineStageContext engineContext(const std::string& stage, const std::string& profile = {});
   std::vector<UpstreamCommand> engineUpstream(const std::string& stage);
   void invalidateEngineRecords(int taskId);
+  // IO floorplanning as its own engine stage (row 1.11): the builder, the run,
+  // and the decision, made once per task.
+  struct FloorplanJob {
+    std::string python;
+    std::vector<std::string> args;
+    CommandWrapperPtr command;  // describe form; built only under the engine
+    bool deferred = false;  // AUTO/RESOURCES device not yet packed: nothing to do
+    std::vector<std::filesystem::path> removeBeforeRun;
+    // Repack constraints the script writes privately; their encrypted copy is kept.
+    std::filesystem::path privateRepackOut;
+  };
+  static constexpr const char* REPACK_TEMPLATE_MASK = "repack_template_mask";
+  std::optional<bool> m_floorplanOutcome;
+  bool buildFloorplan(FloorplanJob& job);
+  int runFloorplan(const FloorplanJob& job);
+  bool engineFloorplan();
+  // getPackingCommand() is building pack's command (BaseVprCommand's caller).
+  bool m_buildingPack = false;
+  // False, after saying why, when bitstream must not run before route.
+  bool engineBitstreamHasRoute();
+  // The layout an AUTO/CUSTOM pack resolved, for the stages after it (row 1.10).
+  bool layoutResolvedInPack() const;
+  void resetPackLayout();
+  // Restores the members from pack_layout.json under the engine; false when the
+  // device needs one and it cannot be read. Always true under cpp.
+  bool restorePackLayout();
+  bool writePackLayout(PackLayout layout);
+  // pack_layout.json's device_layout.json for `target`, while it still holds.
+  std::string packedDeviceLayout(const QLDeviceTarget& target);
+  static const std::vector<std::pair<std::string, std::string>>& powerMetrics();
+  // A BaseVprCommandLEGACY() string in the engine's describe form.
+  CommandWrapperPtr wrapVprCommand(const std::string& command, const QLDeviceTarget& device);
+  // Removes a stage's engine records (one profile, or all when empty).
+  void invalidateEngineStage(const std::string& stage, const std::string& profile = {});
+  void cleanRemovedStaProfiles(const std::map<std::string, QLDeviceTarget>& devices);
+  // Bitstream's describe form, gathered while FinishOpenFPGAScript() builds the
+  // script: decrypted files by mask and source digest, plain files as inputs.
+  struct EngineTemp {
+    std::filesystem::path path;
+    std::string mask;
+    std::string digest;
+  };
+  std::vector<EngineTemp> m_bitstreamTemps;
+  // Per-process paths the script names that are neither inputs nor outputs, by mask.
+  std::vector<std::pair<std::filesystem::path, std::string>> m_bitstreamMasks;
+  std::vector<std::filesystem::path> m_bitstreamInputs;
+  // The clock binding the stage has to compute before OpenFPGA runs; set by
+  // FinishOpenFPGAScript() on a device with clock regions.
+  std::optional<ClockBindingJob> m_clockBinding;
+  bool RunClockBinding(const ClockBindingJob& job);
+  std::string m_bitstreamVprCommand;
+  void noteBitstreamTemp(const std::filesystem::path& temp, const std::string& mask,
+                         const std::filesystem::path& source);
+  CommandWrapperPtr describeBitstream(const std::string& command, const std::string& script);
+  // The secure encode post-process, built then run; bitstream@encode under the engine.
+  struct EncodeJob {
+    std::string python;
+    std::vector<std::string> args;
+    std::vector<std::string> keyFiles;  // --ascon_key/--ascon_nonce/--ascon_ad values
+    std::filesystem::path log;
+    std::filesystem::path out;
+    std::string banner;
+  };
+  bool buildBitstreamEncode(uint32_t stages, EncodeJob& job);
+  bool runBitstreamEncode(const EncodeJob& job);
+  CommandWrapperPtr describeBitstreamEncode(const EncodeJob& job);
+  void engineBitstreamEncode(uint32_t stages);
+  // GUI statuses under the engine: debounced, one plan off the GUI thread.
+  std::unique_ptr<EngineStatusRefresh> m_statusRefresh;
+  bool m_statusWarned = false;
+  std::function<nlohmann::json()> describeEngineStatus();
+  void applyEngineStatus(const nlohmann::json& answer);
+  // The status sequence shared by both backends; `actual` answers per task.
+  void applyTaskStatuses(const std::function<bool(int task)>& actual);
+  CommandWrapperPtr getPowerCommand(const std::filesystem::path& exec,
+                                    const std::vector<std::string>& modes,
+                                    const QLDeviceTarget& device);
+  // True, after printing why, when AURORA_FAULT_AFTER_TOOL names this stage under
+  // the engine: the caller fails the task although its tool succeeded (T-015).
+  bool faultAfterTool(const std::string& stage) const;
   void BeforeCompileTask(Action action) override;
   void AfterCompileTask(Action action, bool ok) override;
+  // The run-wide lock (REQ-015, row 1.15a), under the engine only (NFR-001).
+  bool BeginRun(bool& held) override;
+  void EndRun() override;
+  void TaskSequenceStarted() override;
+  void TaskSequenceDone() override;
+  // A --batch --script or --cmd run: it holds the lock from its first task to exit.
+  bool batchScriptSession() const;
+  EngineRunHolds m_runHolds{EngineRunLock::instance()};
+  std::atomic<bool> m_runLockWarned{false};
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();
   CommandWrapperPtr getPlacementCommand();
+  // Clock-aware placement (aurora2 docs/development/clock_aware_placement): when the
+  // device ships a clock-region file, Placement() runs clock-region-place instead of
+  // one VPR command; the driver runs `command` itself, once per placement, and copies
+  // the legal placement to the command's place file.
+  bool RunClockAwarePlacement(const CommandWrapperPtr& command,
+                              const std::filesystem::path& regionFile);
+  // The second stored command of a clock-aware placement: the installed region file
+  // (its digest changes with a device-data update), the final place file and the
+  // clock pads.
+  CommandWrapperPtr getClockRegionCommand(const std::filesystem::path& regionFile,
+                                          const CommandWrapperPtr& vprCommand);
+  // The value of `--option VALUE` or `--option=VALUE` in a command's argv; empty if absent.
+  static std::string argvValue(const std::vector<std::string>& argv, const std::string& option);
   CommandWrapperPtr getRoutingCommand();      
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA       
   CommandWrapperPtr getTimingAnalysisCommand(const QLDeviceTarget& current_device_sta, const std::string& profile);
@@ -444,6 +658,7 @@ private:
 #endif
 
   void clearCompilationCache() override final;
+  bool forceClearCompilationCache() override { return backend().clear(); }
   bool hasCompilationCache() const override final;
 
   const std::vector<std::string>& vprRedirectedWarnings() const;
