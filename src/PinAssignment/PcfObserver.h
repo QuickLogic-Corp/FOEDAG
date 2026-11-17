@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QString>
+#include <QStringList>
 #include <QSet>
 #include <QHash>
 #include <QVector>
@@ -62,6 +63,7 @@ private:
   PackagePinsModel* m_pinsModel{nullptr};
   QTimer m_checkTimer;
   QDateTime m_lastModified;
+  QStringList m_checkedPorts;
 
   QList<PcfLineFrame> m_lineFrames;
   QVector<QVector<QString>> m_errors;

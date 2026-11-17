@@ -60,7 +60,9 @@ void PcfObserver::check()
   }
 
   QDateTime lastModified = fi.lastModified();
-  if ((lastModified != m_lastModified) || m_forceNextCheck) {
+  // A synthesis run can rename ports while the pcf file stays the same.
+  const QStringList ports = m_portsModel->listModel()->stringList();
+  if ((lastModified != m_lastModified) || (ports != m_checkedPorts) || m_forceNextCheck) {
     m_errors.clear();
 
     parsePcfFile();
@@ -72,6 +74,7 @@ void PcfObserver::check()
     checkPinsShareSamePhysicalLocation();
 
     m_lastModified = lastModified;
+    m_checkedPorts = ports;
     if (m_forceNextCheck) {
       m_forceNextCheck = false;
     }
