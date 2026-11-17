@@ -37,6 +37,8 @@ class QWidget;
 
 namespace FOEDAG {
 
+class RecordingPreview;
+
 // Writes the user's GUI actions as a "# gui-test: sync" replay script
 // (aurora --record). The rules are in aurora2
 // docs/specs/gui-test-automation/design-install.md, §2 stage 2.
@@ -124,6 +126,7 @@ class GuiRecorder : public QObject {
   void begin();
   int openFrame(QObject *target, bool input, const QEvent *event);
   void closeFrame(int id);
+  static const Offer *pickOffer(const OpenFrame &frame);
   void closeInputFrames(int level);
   void offer(QObject *source, const QStringList &lines, bool action,
              const QString &unrecordedText = {}, const QString &key = {});
@@ -135,11 +138,13 @@ class GuiRecorder : public QObject {
   void onAction(QAction *action);
   QString pathWord(const QString &text, QStringList *notes) const;
   void writeReady(bool force = false);
+  void showPending();
   void writeLine(const QString &line);
   qint64 now() const;
 
   QIODevice *m_out{nullptr};
   std::unique_ptr<QFile> m_file;
+  QPointer<RecordingPreview> m_preview;
   QList<OpenFrame> m_frames;  // innermost last
   QList<Entry> m_entries;
   int m_nextToWrite{0};

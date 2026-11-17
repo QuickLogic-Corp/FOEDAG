@@ -22,12 +22,16 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QAbstractScrollArea>
 #include <QAction>
+#include <QApplication>
 #include <QBuffer>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabBar>
 #include <QTabWidget>
@@ -260,6 +264,46 @@ TEST_F(GuiRecorderTest, DoubleClickIsOneLine) {
                      tree->visualItemRect(place).center());
   EXPECT_EQ(lines(), join({"gui_select taskTree synth",
                            "gui_click taskTree -item place -double"}));
+}
+
+// The preview window shows the script as it is written, raises no window
+// milestone, and input in it is not recorded.
+TEST_F(GuiRecorderTest, PreviewShowsScriptAndIsNotRecorded) {
+  auto tree = add(new QTreeWidget, "taskTree");
+  auto synth = new QTreeWidgetItem(tree, {"synth"});
+  window.show();
+  QTemporaryDir dir;
+  const QString file = dir.filePath("rec.tcl");
+  const int shown = GuiTestHub::instance()->count("window.shown", {});
+  QString error;
+  ASSERT_TRUE(GuiRecorder::instance()->start(file, &error))
+      << error.toStdString();
+  QWidget *preview = nullptr;
+  for (QWidget *w : QApplication::topLevelWidgets())
+    if (w->isVisible() && w->windowTitle() == "Recording rec.tcl")
+      preview = w;
+  ASSERT_NE(preview, nullptr);
+  EXPECT_EQ(GuiTestHub::instance()->count("window.shown", {}), shown);
+  auto script = preview->findChild<QPlainTextEdit *>();
+  auto pending = preview->findChild<QLabel *>();
+  ASSERT_TRUE(script && pending);
+
+  QTest::mouseClick(tree->viewport(), Qt::LeftButton, {},
+                    tree->visualItemRect(synth).center());
+  EXPECT_TRUE(pending->isVisible());
+  EXPECT_EQ(pending->text().toStdString(), "gui_select taskTree synth");
+  QTest::keyClick(script, Qt::Key_S, Qt::ControlModifier | Qt::ShiftModifier);
+  QTest::mouseClick(script->viewport(), Qt::LeftButton);
+  EXPECT_TRUE(pending->isVisible()) << "a click in the preview is no new input";
+
+  GuiRecorder::instance()->flush();
+  EXPECT_FALSE(pending->isVisible());
+  QFile written(file);
+  ASSERT_TRUE(written.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString text = QString::fromUtf8(written.readAll());
+  EXPECT_EQ(text.toStdString(),
+            "# gui-test: sync\ngui_start\ngui_select taskTree synth\n");
+  EXPECT_EQ((script->toPlainText() + "\n").toStdString(), text.toStdString());
 }
 
 // accept/reject name a button only when no other button has that answer.

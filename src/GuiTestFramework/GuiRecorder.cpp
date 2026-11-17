@@ -37,17 +37,21 @@ extern "C" {
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QMessageBox>
 #include <QMetaProperty>
+#include <QPlainTextEdit>
 #include <QSet>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QThread>
 #include <QToolButton>
+#include <QVBoxLayout>
 #include <QWidget>
 #include <algorithm>
 #include <iostream>
@@ -191,6 +195,40 @@ QString clickKey(const QObject *view, const QString &item) {
 
 }  // namespace
 
+// The script as it is written, in its own window, so it is in no screenshot.
+class RecordingPreview : public QWidget {
+ public:
+  explicit RecordingPreview(const QString &file) {
+    setWindowTitle("Recording " + QFileInfo(file).fileName());
+    setAttribute(Qt::WA_ShowWithoutActivating);
+    setAttribute(Qt::WA_QuitOnClose, false);
+    GuiTestHub::markInternal(this);
+    m_script = new QPlainTextEdit;
+    m_script->setReadOnly(true);
+    m_script->setLineWrapMode(QPlainTextEdit::NoWrap);
+    m_script->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    // Recorded, not written yet: the next input may still change it.
+    m_pending = new QLabel;
+    m_pending->setFont(m_script->font());
+    m_pending->setStyleSheet("color: gray;");
+    m_pending->setTextFormat(Qt::PlainText);
+    m_pending->hide();
+    auto layout = new QVBoxLayout(this);
+    layout->addWidget(m_script);
+    layout->addWidget(m_pending);
+    resize(640, 480);
+  }
+  void append(const QString &line) { m_script->appendPlainText(line); }
+  void setPending(const QStringList &lines) {
+    m_pending->setText(lines.join('\n'));
+    m_pending->setVisible(!lines.isEmpty());
+  }
+
+ private:
+  QPlainTextEdit *m_script;
+  QLabel *m_pending;
+};
+
 QString tclWord(const QString &word) {
   const QByteArray utf8 = word.toUtf8();
   const char *argv[] = {utf8.constData()};
@@ -254,6 +292,8 @@ bool GuiRecorder::start(const QString &file, QString *error) {
   }
   m_out = m_file.get();
   m_scenario = QFileInfo(file).completeBaseName();
+  m_preview = new RecordingPreview(file);
+  m_preview->show();
   begin();
   return true;
 }
@@ -300,6 +340,7 @@ void GuiRecorder::stop() {
   }
   m_out = nullptr;
   m_file.reset();
+  delete m_preview;
   m_frames.clear();
   m_entries.clear();
   m_milestones.clear();
@@ -346,15 +387,7 @@ void GuiRecorder::closeInputFrames(int level) {
     closeFrame(m_frames.last().id);
 }
 
-void GuiRecorder::closeFrame(int id) {
-  int index = -1;
-  for (int i = 0; i < m_frames.size(); ++i)
-    if (m_frames.at(i).id == id) index = i;
-  if (index < 0) return;
-  // Frames opened inside this one end with it.
-  while (m_frames.size() > index + 1) closeFrame(m_frames.last().id);
-  const OpenFrame frame = m_frames.takeLast();
-
+const GuiRecorder::Offer *GuiRecorder::pickOffer(const OpenFrame &frame) {
   const Offer *pick = nullptr;
   auto choose = [&](auto &&accept) {
     for (const Offer &o : frame.offers)
@@ -368,10 +401,22 @@ void GuiRecorder::closeFrame(int id) {
   choose([&](const Offer &o) { return named(o) && related(o); });
   choose(named);
   choose([](const Offer &) { return true; });
+  return pick;
+}
 
+void GuiRecorder::closeFrame(int id) {
+  int index = -1;
+  for (int i = 0; i < m_frames.size(); ++i)
+    if (m_frames.at(i).id == id) index = i;
+  if (index < 0) return;
+  // Frames opened inside this one end with it.
+  while (m_frames.size() > index + 1) closeFrame(m_frames.last().id);
+  const OpenFrame frame = m_frames.takeLast();
+
+  const Offer *pick = pickOffer(frame);
   Entry &entry = m_entries[frame.entry];
   entry.closed = true;
-  if (pick && named(*pick)) {
+  if (pick && !pick->lines.isEmpty()) {
     entry.lines = pick->lines;
     entry.action = true;
     entry.key = pick->key;
@@ -394,6 +439,7 @@ void GuiRecorder::offer(QObject *source, const QStringList &lines, bool action,
   o.unrecorded = unrecordedText;
   o.key = key;
   m_frames.last().offers.append(o);
+  showPending();
 }
 
 // Drops the last recorded action if it has this key and is not written yet:
@@ -446,12 +492,33 @@ void GuiRecorder::writeReady(bool force) {
     }
     for (const QString &line : entry.lines) writeLine(line);
   }
+  showPending();
+}
+
+// Lines not written yet: held back, or of an action still open, as its frame
+// would record them now.
+void GuiRecorder::showPending() {
+  if (!m_preview) return;
+  QStringList pending;
+  for (int i = m_nextToWrite; i < m_entries.size(); ++i) {
+    if (m_entries.at(i).closed) {
+      pending << m_entries.at(i).lines;
+      continue;
+    }
+    for (const OpenFrame &f : m_frames) {
+      if (f.entry != i) continue;
+      const Offer *pick = pickOffer(f);
+      if (pick && !pick->lines.isEmpty()) pending << pick->lines;
+    }
+  }
+  m_preview->setPending(pending);
 }
 
 void GuiRecorder::writeLine(const QString &line) {
   if (!m_out) return;
   m_out->write((line + "\n").toUtf8());
   if (m_file) m_file->flush();
+  if (m_preview) m_preview->append(line);
 }
 
 QString GuiRecorder::pathWord(const QString &text, QStringList *notes) const {
@@ -467,7 +534,9 @@ void GuiRecorder::watch(QAction *action) {
 }
 
 void GuiRecorder::watch(QWidget *widget) {
-  if (widget->property(kWatchedProperty).isValid()) return;
+  if (widget->property(kWatchedProperty).isValid() ||
+      GuiTestHub::isInternal(widget))
+    return;
   widget->setProperty(kWatchedProperty, true);
   for (QAction *a : widget->actions()) watch(a);
 
@@ -681,9 +750,11 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
       if (auto w = qobject_cast<QWidget *>(watched)) watch(w);
       break;
     case QEvent::ActionAdded:
-      watch(static_cast<QActionEvent *>(event)->action());
+      if (!GuiTestHub::isInternal(watched))
+        watch(static_cast<QActionEvent *>(event)->action());
       break;
     case QEvent::KeyPress: {
+      if (GuiTestHub::isInternal(watched)) break;
       auto key = static_cast<QKeyEvent *>(event);
       if (key->key() == Qt::Key_S &&
           key->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
@@ -699,6 +770,7 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
     case QEvent::ContextMenu: {
       if (!qobject_cast<QWidget *>(watched) && !qobject_cast<QAction *>(watched))
         break;
+      if (GuiTestHub::isInternal(watched)) break;
       // An event passed on to a parent widget is still the same input. Event
       // objects are reused for new input, so the address alone is not proof.
       for (const OpenFrame &f : m_frames)

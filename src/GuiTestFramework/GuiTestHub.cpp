@@ -52,6 +52,7 @@ constexpr BridgeEntry kBridges[] = {
 };
 
 constexpr int kRecentSize = 10;
+constexpr const char *kInternalProperty = "_guiTestInternal";
 const QChar kArgSeparator{0x1f};
 
 class BridgeRelay : public QObject {
@@ -67,12 +68,24 @@ class BridgeRelay : public QObject {
 };
 
 bool isTrackedWindow(QWidget *w) {
-  if (!w->isWindow()) return false;
+  if (!w->isWindow() || GuiTestHub::isInternal(w)) return false;
   const Qt::WindowType type = w->windowType();
   return type != Qt::Popup && type != Qt::ToolTip && type != Qt::SplashScreen;
 }
 
 }  // namespace
+
+void GuiTestHub::markInternal(QWidget *window) {
+  window->setProperty(kInternalProperty, true);
+}
+
+// The parent chain also covers popups, such as a context menu, opened there.
+bool GuiTestHub::isInternal(const QObject *object) {
+  for (; object; object = object->parent())
+    if (object->isWidgetType() && object->property(kInternalProperty).toBool())
+      return true;
+  return false;
+}
 
 GuiTestHub *GuiTestHub::instance() {
   static GuiTestHub *hub = new GuiTestHub;
