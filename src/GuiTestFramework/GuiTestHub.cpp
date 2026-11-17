@@ -49,6 +49,7 @@ constexpr BridgeEntry kBridges[] = {
     {"FOEDAG::TaskManager", "started()", "task.started"},
     {"FOEDAG::TaskManager", "done()", "task.done"},
     {"FOEDAG::PcfObserver", "contentChecked(bool)", "pcf.checked"},
+    {"FOEDAG::TaskStatusWatcher", "synthResultDirty()", "synth.dirty"},
 };
 
 constexpr int kRecentSize = 10;
@@ -93,7 +94,10 @@ GuiTestHub *GuiTestHub::instance() {
 }
 
 GuiTestHub::Kind GuiTestHub::kindOf(const QString &name) {
-  static const QStringList info{"task.started", "process.started", "busy.on"};
+  // synth.dirty follows a design file edited outside the GUI, which a
+  // recording cannot replay, so the recorder must not wait for it either.
+  static const QStringList info{"task.started", "process.started", "busy.on",
+                                "synth.dirty"};
   return info.contains(name) ? Kind::Info : Kind::Sync;
 }
 

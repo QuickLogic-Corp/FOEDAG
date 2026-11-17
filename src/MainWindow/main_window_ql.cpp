@@ -513,6 +513,7 @@ QWidget* MainWindow::createPinPlannerToolBar(PinAssignmentCreator* creator) cons
   layout->addWidget(saveButton);
 
   QLabel* warningIcon = new QLabel;
+  warningIcon->setObjectName("pinPlannerOutdatedIcon");
   QPixmap pixmap(":/images/error.png");
   pixmap = pixmap.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation);
   warningIcon->setPixmap(pixmap);

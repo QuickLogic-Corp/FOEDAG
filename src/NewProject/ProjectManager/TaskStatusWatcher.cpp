@@ -3,7 +3,11 @@
 
 #include <QDebug>
 
+#include "GuiTestFramework/GuiMilestone.h"
+
 namespace FOEDAG {
+
+TaskStatusWatcher::TaskStatusWatcher() { GUI_TEST_BRIDGE(this); }
 
 TaskStatusWatcher* TaskStatusWatcher::Instance() {
   static TaskStatusWatcher watcher{};
