@@ -35,7 +35,8 @@ namespace FOEDAG {
 // gray, running ones highlighted, the next one marked, and beside each line
 // the screenshots it took, opened in the system viewer on click. A double
 // click on a line sets or clears a breakpoint on its command; Run lets the
-// script go on to the next breakpoint. Not in any screenshot.
+// script go on to the next breakpoint. Selected lines copy as script text.
+// Not in any screenshot.
 class GuiTestScriptView : public QWidget {
   Q_OBJECT
 
@@ -65,6 +66,10 @@ class GuiTestScriptView : public QWidget {
 
   void toggleBreakpoint(int line);  // any 1-based line of the command
   bool hasBreakpoint(int command) const;
+
+  // The selected lines as written in the script, in script order; Ctrl+C or
+  // the context menu puts them on the clipboard.
+  QString selectedScript() const;
 
   QTreeWidget *tree() const { return m_tree; }
   QToolButton *runButton() const { return m_run; }

@@ -20,10 +20,13 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "GuiTestScriptView.h"
 
+#include <QAction>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QGuiApplication>
 #include <QHeaderView>
 #include <QLabel>
 #include <QPainter>
@@ -40,6 +43,7 @@ namespace FOEDAG {
 namespace {
 
 constexpr int kPathsRole = Qt::UserRole;
+constexpr int kLineRole = Qt::UserRole + 1;  // the line without its number
 constexpr int kMarkSize = 12;
 
 // A red circle for a breakpoint; every other line gets the same space empty,
@@ -93,7 +97,7 @@ GuiTestScriptView::GuiTestScriptView(const QString &file, const QString &text,
   m_tree->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
   m_tree->setRootIsDecorated(false);
   m_tree->setUniformRowHeights(true);
-  m_tree->setSelectionMode(QAbstractItemView::NoSelection);
+  m_tree->setSelectionMode(QAbstractItemView::ExtendedSelection);
   m_tree->setExpandsOnDoubleClick(false);
   m_tree->setHeaderLabels({"Script", "Screenshot"});
   // The script column takes the rest, so the screenshots stay in view; a long
@@ -108,8 +112,17 @@ GuiTestScriptView::GuiTestScriptView(const QString &file, const QString &text,
     auto item = new QTreeWidgetItem(
         m_tree, {QString("%1  %2").arg(i + 1, width).arg(lines.at(i))});
     item->setToolTip(kScriptColumn, lines.at(i));
+    item->setData(kScriptColumn, kLineRole, lines.at(i));
     item->setIcon(kScriptColumn, markIcon(false));
   }
+  auto copy = new QAction{"Copy", m_tree};
+  copy->setShortcut(QKeySequence::Copy);
+  copy->setShortcutContext(Qt::WidgetShortcut);
+  connect(copy, &QAction::triggered, this, [this]() {
+    QGuiApplication::clipboard()->setText(selectedScript());
+  });
+  m_tree->addAction(copy);
+  m_tree->setContextMenuPolicy(Qt::ActionsContextMenu);
   connect(m_tree, &QTreeWidget::itemClicked, this, &GuiTestScriptView::open);
   connect(m_tree, &QTreeWidget::itemDoubleClicked, this,
           [this](QTreeWidgetItem *item, int column) {
@@ -238,6 +251,16 @@ void GuiTestScriptView::toggleBreakpoint(int line) {
   if (QTreeWidgetItem *item =
           m_tree->topLevelItem(m_commands.at(command).line - 1))
     item->setIcon(kScriptColumn, markIcon(set));
+}
+
+QString GuiTestScriptView::selectedScript() const {
+  QStringList lines;
+  for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+    if (m_tree->topLevelItem(i)->isSelected())
+      lines << m_tree->topLevelItem(i)
+                   ->data(kScriptColumn, kLineRole)
+                   .toString();
+  return lines.join('\n');
 }
 
 bool GuiTestScriptView::hasBreakpoint(int command) const {

@@ -22,7 +22,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <tcl.h>
 
+#include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
@@ -222,6 +224,24 @@ TEST(GuiTestScriptView, BreakpointsAndRun) {
   QSignalSpy run{&view, &GuiTestScriptView::runRequested};
   view.runButton()->click();
   EXPECT_EQ(run.count(), 1);
+}
+
+// Selected lines copy as written, without their numbers, in script order,
+// with Ctrl+C or the context menu's Copy.
+TEST(GuiTestScriptView, CopiesSelectedLines) {
+  GuiTestScriptView view{"/x/demo.tcl", "# gui-test: sync\na\nb {\n  c}",
+                         {{2, 1}, {3, 2}}};
+  QTreeWidget *tree = view.tree();
+  tree->topLevelItem(3)->setSelected(true);
+  tree->topLevelItem(1)->setSelected(true);
+  EXPECT_EQ(view.selectedScript().toStdString(), "a\n  c}");
+
+  QGuiApplication::clipboard()->clear();
+  ASSERT_EQ(tree->actions().size(), 1);
+  QAction *copy = tree->actions().first();
+  EXPECT_EQ(copy->shortcut(), QKeySequence{QKeySequence::Copy});
+  copy->trigger();
+  EXPECT_EQ(QGuiApplication::clipboard()->text().toStdString(), "a\n  c}");
 }
 
 // At the end of a debug run the view marks the failing command red, shows
