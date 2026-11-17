@@ -3484,12 +3484,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 }
 
-// .cname, which keeps RTL instance names on VPR atoms, is valid only in extended BLIF.
-// "auto" reads the netlist as plain BLIF too: VPR picks the format from the .blif name.
-static bool vprReadsExtendedBlif() {
-  return QLSettingsManager::getStringValue("vpr", "filename", "circuit_format") == "eblif";
-}
-
 // [aurora2#1725] Device templates synced from silicon drop the floorplanning hooks, and
 // without them synthesis writes no atom-set file. Insert each missing hook around the
 // synthesis line; a template with no such line is returned unchanged.
@@ -10262,13 +10256,6 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     if (!s_describeOnly && leftStr.empty() && rightStr.empty() && topStr.empty() && bottomStr.empty() && partitionStr.empty()) {
       Message("Warning: QDC file either does not contain a valid side/region or the side/region is empty.");
     }
-    // Regions match RTL instance names, which reach VPR only through .cname.
-    if (!s_describeOnly && !partitionStr.empty() && !vprReadsExtendedBlif()) {
-      ErrorMessage("set_region needs vpr circuit_format 'eblif'. With plain BLIF the "
-                   "netlist has no RTL instance names for regions to match. Set "
-                   "circuit_format to eblif, or remove set_region from the .qdc.");
-      return false;
-    }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
   // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
@@ -13911,10 +13898,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   for (const auto& rel_ip_blif : m_relIpBlifs) {
     yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
     yosysScript->addFile(rel_ip_blif);
-  }
-
-  if (!vprReadsExtendedBlif()) {
-    yosys_options += " -no_cname";
   }
 
   // TODO: trim yosys_options at the front
