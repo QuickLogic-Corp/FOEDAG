@@ -37,7 +37,9 @@ extern "C" {
 #include <iostream>
 
 #include "GuiRecorder.h"
+#include "GuiTestHub.h"
 #include "GuiTestMode.h"
+#include "GuiTestScriptView.h"
 
 namespace FOEDAG {
 
@@ -119,7 +121,8 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
   QFile f{file};
   if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
     fail(QString("cannot open replay script %1").arg(file));
-  const QStringList lines = QTextStream{&f}.readAll().split('\n');
+  const QString text = QTextStream{&f}.readAll();
+  const QStringList lines = text.split('\n');
 
   QString pending;
   int pendingLine = 0;
@@ -162,6 +165,11 @@ void GuiTestRunner::run(Tcl_Interp *interp, const QString &file) {
                                 : std::string{})
               << "." << std::endl;
   }
+  if (GuiTestMode::isDisplayMode()) {
+    m_view = new GuiTestScriptView(file, text);
+    m_view->show();
+    showProgress();
+  }
   scheduleStep(0);
 
   QEventLoop loop;
@@ -191,7 +199,8 @@ bool GuiTestRunner::holdForSpace() {
   bool windowShown = false;
   for (QWidget *w : QApplication::topLevelWidgets())
     windowShown = windowShown || (w->isVisible() && w->windowType() != Qt::Popup &&
-                                  w->windowType() != Qt::ToolTip);
+                                  w->windowType() != Qt::ToolTip &&
+                                  !GuiTestHub::isInternal(w));
   return windowShown && !m_gate->isOpen();
 }
 
@@ -218,12 +227,24 @@ void GuiTestRunner::step() {
   }
   const int index = m_next++;
   m_running.append(Frame{index, {}});
+  showProgress();
   scheduleStep(0);
   const QByteArray script = m_commands.at(index).text.toUtf8();
   const int code =
       Tcl_EvalEx(m_interp, script.constData(), script.size(), TCL_EVAL_GLOBAL);
   if (code != TCL_OK) fail(Tcl_GetStringResult(m_interp));
   m_running.removeLast();
+  showProgress();
+}
+
+void GuiTestRunner::showProgress() {
+  if (!m_view) return;
+  QVector<GuiTestScriptView::Span> spans;
+  for (const Command &c : m_commands)
+    spans.append({c.line, int(c.text.count('\n')) + 1});
+  QVector<int> running;
+  for (const Frame &f : m_running) running.append(f.index);
+  m_view->showProgress(spans, running, m_next);
 }
 
 bool GuiTestRunner::eventFilter(QObject *watched, QEvent *event) {

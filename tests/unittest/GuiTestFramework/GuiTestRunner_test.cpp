@@ -26,9 +26,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QKeyEvent>
 #include <QPushButton>
 #include <QTest>
+#include <QTextBlock>
 #include <QTimer>
 
 #include "GuiTestFramework/GuiTestCommands.h"
+#include "GuiTestFramework/GuiTestHub.h"
+#include "GuiTestFramework/GuiTestScriptView.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;
@@ -124,4 +127,34 @@ TEST(GuiTestCommands, ActionWaitsForHiddenWidget) {
   EXPECT_EQ(Tcl_Eval(interp, "gui_click noSuchButton"), TCL_ERROR);
   EXPECT_LT(elapsed.elapsed(), 1000);
   Tcl_DeleteInterp(interp);
+}
+
+// The script view grays finished commands, highlights running ones (all lines
+// of a command that spans several), marks the next one, and is no test target.
+TEST(GuiTestScriptView, ShowsProgressByCommand) {
+  GuiTestScriptView view{"/x/demo.tcl",
+                         "# gui-test: sync\na\n# note\nb {\n  c}\nd\ne"};
+  EXPECT_EQ(view.windowTitle().toStdString(), "Replay demo.tcl");
+  EXPECT_TRUE(GuiTestHub::isInternal(&view));
+  EXPECT_EQ(view.document()->findBlockByNumber(1).text().toStdString(), "2  a");
+
+  const QVector<GuiTestScriptView::Span> commands{
+      {2, 1}, {4, 2}, {6, 1}, {7, 1}};
+  view.showProgress(commands, {1}, 2);
+  std::vector<std::pair<int, std::string>> got;
+  for (const QTextEdit::ExtraSelection &s : view.extraSelections()) {
+    const bool marked = s.format.hasProperty(QTextFormat::BackgroundBrush);
+    const std::string kind =
+        marked ? s.format.background().color().name().toStdString() : "done";
+    got.emplace_back(s.cursor.blockNumber() + 1, kind);
+  }
+  const std::string running = QColor{255, 236, 140}.name().toStdString();
+  const std::string next = QColor{205, 225, 255}.name().toStdString();
+  EXPECT_EQ(got, (std::vector<std::pair<int, std::string>>{
+                     {2, "done"}, {4, running}, {5, running}, {6, next}}));
+
+  view.showProgress(commands, {}, 4);
+  EXPECT_EQ(view.extraSelections().size(), 5);
+  for (const QTextEdit::ExtraSelection &s : view.extraSelections())
+    EXPECT_FALSE(s.format.hasProperty(QTextFormat::BackgroundBrush));
 }

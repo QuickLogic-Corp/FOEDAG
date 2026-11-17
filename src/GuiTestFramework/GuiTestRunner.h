@@ -30,6 +30,8 @@ class QWidget;
 
 namespace FOEDAG {
 
+class GuiTestScriptView;
+
 // Interactive mode's pause: once armed, it opens on the next Space pressed in
 // any window and swallows that Space, so it never reaches the focused widget.
 // With a timeout (ms; -1 waits for Space only) it also opens once that time
@@ -104,6 +106,7 @@ class GuiTestRunner : public QObject {
   bool holdForSpace();
   void scheduleStep(int delayMs);
   void step();
+  void showProgress();
   [[noreturn]] void finish(int code);
 
   Tcl_Interp *m_interp{nullptr};
@@ -113,6 +116,7 @@ class GuiTestRunner : public QObject {
   QVector<Frame> m_running;  // innermost last
   GuiTestSpaceGate *m_gate{nullptr};  // set in interactive mode
   int m_announced{-1};               // last index printed as NEXT
+  QPointer<GuiTestScriptView> m_view;  // display mode only
 };
 
 }  // namespace FOEDAG
