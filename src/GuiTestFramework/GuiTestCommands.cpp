@@ -884,6 +884,7 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const QString capture = QString("%1/%2.png").arg(artifacts, id);
   if (!writeImage(image, capture))
     return fail(interp, QString("%1: cannot write %2").arg(what, capture));
+  GuiTestRunner::instance()->screenshotTaken(capture);
 
   const bool display = GuiTestMode::isDisplayMode();
   auto report = [&](const QString &line) {

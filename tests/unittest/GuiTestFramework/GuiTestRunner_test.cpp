@@ -130,31 +130,41 @@ TEST(GuiTestCommands, ActionWaitsForHiddenWidget) {
 }
 
 // The script view grays finished commands, highlights running ones (all lines
-// of a command that spans several), marks the next one, and is no test target.
+// of a command that spans several), marks the next one, lists each line's
+// screenshots, and is no test target.
 TEST(GuiTestScriptView, ShowsProgressByCommand) {
   GuiTestScriptView view{"/x/demo.tcl",
                          "# gui-test: sync\na\n# note\nb {\n  c}\nd\ne"};
   EXPECT_EQ(view.windowTitle().toStdString(), "Replay demo.tcl");
   EXPECT_TRUE(GuiTestHub::isInternal(&view));
-  EXPECT_EQ(view.document()->findBlockByNumber(1).text().toStdString(), "2  a");
+  EXPECT_EQ(view.topLevelItem(1)->text(0).toStdString(), "2  a");
 
   const QVector<GuiTestScriptView::Span> commands{
       {2, 1}, {4, 2}, {6, 1}, {7, 1}};
-  view.showProgress(commands, {1}, 2);
-  std::vector<std::pair<int, std::string>> got;
-  for (const QTextEdit::ExtraSelection &s : view.extraSelections()) {
-    const bool marked = s.format.hasProperty(QTextFormat::BackgroundBrush);
-    const std::string kind =
-        marked ? s.format.background().color().name().toStdString() : "done";
-    got.emplace_back(s.cursor.blockNumber() + 1, kind);
-  }
+  auto state = [&view](int line) -> std::string {
+    const QTreeWidgetItem *item = view.topLevelItem(line - 1);
+    const QVariant fill = item->data(0, Qt::BackgroundRole);
+    if (fill.isValid())
+      return fill.value<QBrush>().color().name().toStdString();
+    return item->data(0, Qt::ForegroundRole).isValid() ? "done" : "";
+  };
   const std::string running = QColor{255, 236, 140}.name().toStdString();
   const std::string next = QColor{205, 225, 255}.name().toStdString();
-  EXPECT_EQ(got, (std::vector<std::pair<int, std::string>>{
-                     {2, "done"}, {4, running}, {5, running}, {6, next}}));
+  view.showProgress(commands, {1}, 2);
+  EXPECT_EQ(std::vector<std::string>({state(1), state(2), state(3), state(4),
+                                      state(5), state(6), state(7)}),
+            std::vector<std::string>(
+                {"", "done", "", running, running, next, ""}));
 
   view.showProgress(commands, {}, 4);
-  EXPECT_EQ(view.extraSelections().size(), 5);
-  for (const QTextEdit::ExtraSelection &s : view.extraSelections())
-    EXPECT_FALSE(s.format.hasProperty(QTextFormat::BackgroundBrush));
+  EXPECT_EQ(std::vector<std::string>({state(2), state(4), state(5), state(6),
+                                      state(7)}),
+            std::vector<std::string>({"done", "done", "done", "done", "done"}));
+
+  view.addScreenshot(6, "/out/shots/demo/01_a.png");
+  view.addScreenshot(6, "/out/shots/demo/02_b.png");
+  EXPECT_EQ(view.topLevelItem(5)->text(1).toStdString(), "01_a, 02_b");
+  EXPECT_EQ(view.screenshots(6), QStringList({"/out/shots/demo/01_a.png",
+                                              "/out/shots/demo/02_b.png"}));
+  EXPECT_TRUE(view.screenshots(2).isEmpty());
 }

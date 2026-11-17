@@ -237,6 +237,11 @@ void GuiTestRunner::step() {
   showProgress();
 }
 
+void GuiTestRunner::screenshotTaken(const QString &path) {
+  if (m_view && !m_running.isEmpty())
+    m_view->addScreenshot(m_commands.at(m_running.last().index).line, path);
+}
+
 void GuiTestRunner::showProgress() {
   if (!m_view) return;
   QVector<GuiTestScriptView::Span> spans;

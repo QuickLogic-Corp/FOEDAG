@@ -80,6 +80,10 @@ class GuiTestRunner : public QObject {
     ~StrictWait();
   };
 
+  // gui_screenshot saved this file; display mode shows it beside the line
+  // that runs.
+  void screenshotTaken(const QString &path);
+
   // Ends the run from anywhere, including inside a nested event loop that
   // can no longer unwind.
   [[noreturn]] void fail(const QString &message);
