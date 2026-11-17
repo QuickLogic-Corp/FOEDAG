@@ -69,6 +69,7 @@
 #include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
+#include "Utils/PathUtils.h"
 #include "Utils/StringUtils.h"
 #include "nlohmann_json/json.hpp"
 #include "scope_guard/scope_guard.hpp"
@@ -2998,21 +2999,11 @@ std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
                                          ProjManager()->projectName(), "atomsets.json");
 }
 
-// [aurora2#1725] See the header for why the depth cannot be hardcoded. The aurora
-// layout (<install>/device_data) is probed first because that is what every packaged
-// build and every 'make install' tree looks like; the share/<program> layout is the
-// fallback DataPath() itself only reaches when device_data is absent.
 std::filesystem::path CompilerOpenFPGA_ql::InstalledScript(
     const std::filesystem::path& rel_path) {
-  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
-  for (const auto& root : {data_path / "..", data_path / ".." / ".."}) {
-    std::filesystem::path candidate =
-        (root / std::filesystem::path("scripts") / rel_path).lexically_normal();
-    if (std::filesystem::exists(candidate)) {
-      return candidate;
-    }
-  }
-  return {};
+  const std::filesystem::path candidate =
+      (PathUtils::instance().installDir() / "scripts" / rel_path).lexically_normal();
+  return std::filesystem::exists(candidate) ? candidate : std::filesystem::path{};
 }
 
 // [aurora2#1725] Where the helper stages' diagnostic chatter goes instead of the console
@@ -5891,9 +5882,7 @@ bool CompilerOpenFPGA_ql::Packing() {
     // use a basic blif file for generating the rr_graph.bin and router_lookahead.bin
     // this requires us to run pack and place (router_lookahead is only generated in place)
     std::filesystem::path blif_filepath = 
-            std::filesystem::canonical(GlobalSession->Context()->DataPath() /
-            std::filesystem::path("..") /
-            std::filesystem::path("..") /
+            std::filesystem::canonical(PathUtils::instance().installDir() /
             std::filesystem::path("scripts") /
             "and2.blif");
 
@@ -6528,12 +6517,11 @@ bool CompilerOpenFPGA_ql::Placement() {
     return false;
   }
 
-   std::filesystem::path place2pcf_script_path =
-    GetSession()->Context()->DataPath() /
-    std::filesystem::path("..") /
-    std::filesystem::path("..") /
-    std::filesystem::path("scripts") /
-    std::filesystem::path("place2pcf.py");
+  const std::filesystem::path place2pcf_script_path = InstalledScript("place2pcf.py");
+  if (place2pcf_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/place2pcf.py in the installation. Place2PCF Failed!");
+    return false;
+  }
 
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
   if (pinTableFile.empty()){
@@ -6593,9 +6581,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     args.push_back(clocksFile.string());
   }
 
-  int place2pcf_status = FileUtils::ExecuteSystemCommand(place2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
+  int place2pcf_status = FileUtils::ExecuteSystemCommand(place2pcf_command, args, m_out, /*timeout_ms*/-1).code;
 
-  if (place2pcf_status == 1) { //Failure
+  if (place2pcf_status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                 " Place2PCF Failed!");
     return false;
@@ -9445,12 +9433,13 @@ bool CompilerOpenFPGA_ql::buildBitstreamEncode(uint32_t stages, EncodeJob& job) 
   const std::filesystem::path projectPath(ProjManager()->projectPath());
   const std::string projectName = ProjManager()->projectName();
 
-  // Vendored encoder, resolved via the same scripts root as other utilities.
   const std::filesystem::path script =
-      GetSession()->Context()->DataPath() / std::filesystem::path("..") /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") / std::filesystem::path("bitstream") /
-      std::filesystem::path("aurora_bitstream_encode.py");
+      InstalledScript(std::filesystem::path("bitstream") / "aurora_bitstream_encode.py");
+  if (script.empty()) {
+    ErrorMessage("Cannot locate scripts/bitstream/aurora_bitstream_encode.py in the "
+                 "installation; skipping secure bitstream post-process.");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -10619,23 +10608,8 @@ bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlist
     return false;
   }
 
-  // Locate the installed script. DataPath varies with the install layout
-  // (<install>/share/aurora in the aurora tree), so probe the plausible
-  // roots: <install>/scripts (aurora layout) and DataPath()/../scripts.
-  std::filesystem::path generate_constraints_script_path;
-  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
-  const std::filesystem::path script_rel_path =
-      std::filesystem::path("scripts") /
-      std::filesystem::path("rel_macro_placement") /
-      std::filesystem::path("blif_rel_macro_constraints.py");
-  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
-    std::filesystem::path candidate =
-        (root / script_rel_path).lexically_normal();
-    if (fs::exists(candidate)) {
-      generate_constraints_script_path = candidate;
-      break;
-    }
-  }
+  const std::filesystem::path generate_constraints_script_path = InstalledScript(
+      std::filesystem::path("rel_macro_placement") / "blif_rel_macro_constraints.py");
   if (generate_constraints_script_path.empty()) {
     ErrorMessage(
         "Cannot locate scripts/rel_macro_placement/"
@@ -10830,22 +10804,8 @@ bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {
     return false;
   }
 
-  // Locate the installed packaging driver, same probing as
-  // GenerateRelMacroConstraints above.
-  std::filesystem::path driver_script_path;
-  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
-  const std::filesystem::path script_rel_path =
-      std::filesystem::path("scripts") /
-      std::filesystem::path("rel_macro_placement") /
-      std::filesystem::path("package_rpm_ip.py");
-  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
-    std::filesystem::path candidate =
-        (root / script_rel_path).lexically_normal();
-    if (fs::exists(candidate)) {
-      driver_script_path = candidate;
-      break;
-    }
-  }
+  const std::filesystem::path driver_script_path =
+      InstalledScript(std::filesystem::path("rel_macro_placement") / "package_rpm_ip.py");
   if (driver_script_path.empty()) {
     ErrorMessage(
         "Cannot locate scripts/rel_macro_placement/package_rpm_ip.py in the "
@@ -13614,11 +13574,13 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     
     // we have a valid SDC file
     std::filesystem::path aurora_yosys_import_script_path =
-        GetSession()->Context()->DataPath() /
-        std::filesystem::path("..") /
-        std::filesystem::path("..") /
-        std::filesystem::path("scripts") /
-        std::filesystem::path("aurora_yosys_import.tcl");
+        InstalledScript("aurora_yosys_import.tcl");
+    if (aurora_yosys_import_script_path.empty()) {
+      ErrorMessage("Cannot locate scripts/aurora_yosys_import.tcl in the installation; "
+                   "reading the synthesis SDC will fail.");
+      aurora_yosys_import_script_path =
+          PathUtils::instance().installDir() / "scripts" / "aurora_yosys_import.tcl";
+    }
 
     yosysScript->apply("${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
 
@@ -13662,10 +13624,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    " will fail.");
       // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a bare
       // `tcl` would be a yosys syntax error rather than a missing-file one.
-      resolved = (GetSession()->Context()->DataPath() /
-                  std::filesystem::path("..") /
-                  std::filesystem::path("scripts") /
-                  std::filesystem::path(name)).lexically_normal();
+      resolved = PathUtils::instance().installDir() / "scripts" / name;
     }
     return resolved;
   };
