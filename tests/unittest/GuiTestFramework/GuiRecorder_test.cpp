@@ -233,6 +233,23 @@ TEST_F(GuiRecorderTest, CheckpointWritesAsserts) {
                   "gui_screenshot recording/02 -widget win"}));
 }
 
+// Ctrl+Shift+S in a window with no focused widget, such as Floor Planning,
+// takes a screenshot of that window.
+TEST_F(GuiRecorderTest, CheckpointWithoutFocusShotsActiveWindow) {
+  window.show();
+  QWidget other;
+  other.setObjectName("otherWindow");
+  other.show();
+  QApplication::setActiveWindow(&other);
+  ASSERT_EQ(QApplication::activeWindow(), &other);
+  ASSERT_EQ(QApplication::focusWidget(), nullptr);
+  record();
+
+  QTest::keyClick(&other, Qt::Key_S, Qt::ControlModifier | Qt::ShiftModifier);
+  EXPECT_EQ(lines(),
+            join({"gui_screenshot recording/01 -widget otherWindow"}));
+}
+
 // The chosen text is recorded even when a handler rebuilds the items, as the
 // Pin Planner does when a pin is taken.
 TEST_F(GuiRecorderTest, ComboRecordsChosenTextAfterRebuild) {

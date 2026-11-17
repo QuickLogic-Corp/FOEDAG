@@ -22,6 +22,7 @@ namespace fp {
 FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* parent)
     : QWidget(parent)
 {
+    setObjectName("floorPlanningWindow");
     setWindowTitle(projectName + tr(" - Floor Planning"));
     const int indicatorSize = 32;
     m_busyOverlayWidget = new FOEDAG::RoundProgressWidget(indicatorSize, this);

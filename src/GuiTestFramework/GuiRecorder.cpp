@@ -705,7 +705,9 @@ void GuiRecorder::checkpoint(QWidget *widget) {
   auto button = qobject_cast<QAbstractButton *>(named);
   bool hasText{false};
   const QString text = guiDisplayedText(named, &hasText);
-  if (name.isEmpty()) {
+  if (named->isWindow() && !name.isEmpty()) {
+    // A window has no value of its own; its checkpoint is the screenshot.
+  } else if (name.isEmpty()) {
     lines << "# UNRECORDED: checkpoint on " + unrecordedText(named, text);
     std::cerr << "WARNING: recorder: checkpoint on an unnamed "
               << named->metaObject()->className()
@@ -758,7 +760,9 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
       auto key = static_cast<QKeyEvent *>(event);
       if (key->key() == Qt::Key_S &&
           key->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
-        checkpoint(QApplication::focusWidget());
+        // A window such as Floor Planning may have no focused widget.
+        checkpoint(QApplication::focusWidget() ? QApplication::focusWidget()
+                                               : QApplication::activeWindow());
         return true;
       }
       [[fallthrough]];
