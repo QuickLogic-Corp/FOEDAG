@@ -2184,6 +2184,9 @@ void MainWindow::pinAssignmentActionTriggered() {
 #else
     m_pinAssignmentDocks = {portsDockWidget};
 #endif
+    // Docked as a tab beside the console; show it rather than leave it behind.
+    // The tab exists only once the dock layout has run, so raise it after.
+    QTimer::singleShot(0, portsDockWidget, &QWidget::raise);
 
   } else {
     if (saveAction->isEnabled()) {
