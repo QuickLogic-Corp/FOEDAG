@@ -392,3 +392,34 @@ TEST(GuiRecorderTrace, WritesCommandsAsRecorded) {
             "gui_set_text editor_x.pcf \"a\\nb \\[c\\]\" "
             "\"$::gui_test::project_dir/sub/a b.v\" {two words}");
 }
+
+// A right-click names the item a context menu is for; replay selects it the
+// same way before the menu's action runs.
+TEST_F(GuiRecorderTest, RightClickOnItemIsRecorded) {
+  auto tree = add(new QTreeWidget, "taskTree");
+  new QTreeWidgetItem(tree, {"synth"});
+  auto place = new QTreeWidgetItem(tree, {"place"});
+  window.show();
+  record();
+
+  QTest::mouseClick(tree->viewport(), Qt::RightButton, {},
+                    tree->visualItemRect(place).center());
+  EXPECT_EQ(lines(), join({"gui_click taskTree -item place -button right"}));
+}
+
+// A context-menu action is a child of its view and is added to a widget only
+// while its menu is open. Triggered without the menu, as in a replay, it is
+// still recorded.
+TEST_F(GuiRecorderTest, ContextMenuActionWithoutMenuIsRecorded) {
+  auto tree = add(new QTreeWidget, "taskTree");
+  auto action = new QAction("Remove", tree);
+  action->setObjectName("actionRemove");
+  window.show();
+  record();
+
+  {
+    GuiRecorder::Frame frame{action};  // as gui_trigger_action does it
+    action->trigger();
+  }
+  EXPECT_EQ(lines(), join({"gui_trigger_action actionRemove"}));
+}

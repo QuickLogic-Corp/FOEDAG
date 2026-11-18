@@ -28,8 +28,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
+#include <QIntValidator>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -38,6 +40,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QVBoxLayout>
+#include <functional>
 
 #include "GuiTestFramework/GuiTestCommands.h"
 #include "GuiTestFramework/GuiTestHub.h"
@@ -160,6 +164,67 @@ TEST(GuiTestCommands, SetTextInFileDialogKeepsPath) {
   const QByteArray command = "gui_set_text fileNameEdit " + file.toUtf8();
   EXPECT_EQ(Tcl_Eval(interp, command.constData()), TCL_OK)
       << Tcl_GetStringResult(interp);
+  Tcl_DeleteInterp(interp);
+}
+
+// Each edit of the first field rebuilds the form, as the IP parameters do:
+// the new fields are shown by a queued call, and the old ones deleted later.
+// The next action must type into the new field, not the old one.
+TEST(GuiTestCommands, SetTextFindsFieldOfRebuiltForm) {
+  QWidget window;
+  auto layout = new QVBoxLayout(&window);
+  QLineEdit *second{nullptr};
+  QWidget *form{nullptr};
+  std::function<void()> build = [&]() {
+    if (form) {
+      layout->removeWidget(form);
+      form->deleteLater();
+    }
+    form = new QWidget;
+    auto formLayout = new QVBoxLayout(form);
+    auto first = new QLineEdit;
+    first->setObjectName("first");
+    second = new QLineEdit;
+    second->setObjectName("second");
+    formLayout->addWidget(first);
+    formLayout->addWidget(second);
+    layout->addWidget(form);
+    QObject::connect(first, &QLineEdit::editingFinished, &window,
+                     [&]() { build(); });
+  };
+  build();
+  window.show();
+  QTest::qWait(50);
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_set_text first 12"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_set_text second 500"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(second->text(), "500");
+  Tcl_DeleteInterp(interp);
+}
+
+// Qt finishes an edit only when the validator accepts the text; a rejected
+// value leaves the field invalid without editingFinished.
+TEST(GuiTestCommands, SetTextFinishesOnlyAcceptableEdits) {
+  QWidget window;
+  auto edit = new QLineEdit(&window);
+  edit->setObjectName("depth");
+  edit->setValidator(new QIntValidator(4, 64, edit));
+  int finished = 0;
+  QObject::connect(edit, &QLineEdit::editingFinished, [&]() { ++finished; });
+  window.show();
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_set_text depth 1"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(finished, 0);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_set_text depth 16"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(finished, 1);
   Tcl_DeleteInterp(interp);
 }
 
