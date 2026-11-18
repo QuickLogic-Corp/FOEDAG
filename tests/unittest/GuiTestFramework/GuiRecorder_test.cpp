@@ -30,6 +30,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -422,4 +423,20 @@ TEST_F(GuiRecorderTest, ContextMenuActionWithoutMenuIsRecorded) {
     action->trigger();
   }
   EXPECT_EQ(lines(), join({"gui_trigger_action actionRemove"}));
+}
+
+// An unnamed item picked from a context menu, as the task table builds one
+// on each right-click, is recorded by its text.
+TEST_F(GuiRecorderTest, UnnamedContextMenuItemIsRecordedByText) {
+  auto tree = add(new QTreeWidget, "taskTree");
+  window.show();
+  record();
+
+  auto menu = new QMenu(tree);
+  auto logs = new QAction("View &Logs", tree);
+  menu->addAction(logs);
+  menu->popup(tree->mapToGlobal(QPoint{5, 5}));
+  QTest::mouseClick(menu, Qt::LeftButton, {},
+                    menu->actionGeometry(logs).center());
+  EXPECT_EQ(lines(), join({"gui_menu {View Logs}"}));
 }

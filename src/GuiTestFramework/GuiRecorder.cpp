@@ -193,6 +193,16 @@ QString clickKey(const QObject *view, const QString &item) {
   return QString("click %1 %2").arg(quintptr(view)).arg(item);
 }
 
+// The context menu an action was picked from: a menu that is not part of a
+// menu bar or of another menu. gui_menu replays it by its text.
+const QMenu *contextMenuOf(const QAction *action) {
+  for (QObject *o : action->associatedObjects()) {
+    auto menu = qobject_cast<const QMenu *>(o);
+    if (menu && menu->menuAction()->associatedObjects().isEmpty()) return menu;
+  }
+  return nullptr;
+}
+
 }  // namespace
 
 // The script as it is written, in its own window, so it is in no screenshot.
@@ -699,6 +709,10 @@ void GuiRecorder::aboutToClick(QAbstractButton *button) { onButton(button); }
 
 void GuiRecorder::onAction(QAction *action) {
   if (action->isSeparator() || action->menu()) return;
+  if (action->objectName().isEmpty() && contextMenuOf(action)) {
+    offer(action, {"gui_menu " + tclWord(plain(action->text()))}, true);
+    return;
+  }
   if (action->objectName().isEmpty()) {
     offer(action, {}, true, unrecordedText(action, plain(action->text())));
     return;
