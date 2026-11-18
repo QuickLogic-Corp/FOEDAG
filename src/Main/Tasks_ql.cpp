@@ -26,6 +26,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QStackedWidget>
+#include <QStyle>
+#include <QTabBar>
+#include <QTabWidget>
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QStandardItem>
@@ -386,7 +389,13 @@ void openInteractivePathAnalysisView(Compiler* compiler, const QString& profile)
     NCriticalPathWidget* viewWidget = new NCriticalPathWidget(compiler, profile, FOEDAG::QLSettingsManager::getInstance()->settings_json_filepath);
     viewWidget->setProperty("deleteOnCloseTab", true);
 
-    tabWidget->addTab(viewWidget, NCRITICALPATH_UI_NAME);
+    const int index = tabWidget->addTab(viewWidget, NCRITICALPATH_UI_NAME);
+    QTabBar* tabBar = tabWidget->tabBar();
+    const auto closeSide = static_cast<QTabBar::ButtonPosition>(
+        tabBar->style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition,
+                                   nullptr, tabBar));
+    if (QWidget* closeButton = tabBar->tabButton(index, closeSide))
+      closeButton->setObjectName("ipaCloseTab");
     tabWidget->setCurrentWidget(viewWidget);
   }
 }

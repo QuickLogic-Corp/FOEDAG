@@ -46,6 +46,7 @@ NCriticalPathStatusBar::NCriticalPathStatusBar(QWidget* parent)
   layout->addWidget(m_lbConnectionStatus);
 
   m_lbMessage = new QLabel;
+  m_lbMessage->setObjectName("ipaStatusMessage");
   layout->addWidget(m_lbMessage);
 
   onConnectionStatusChanged(false);

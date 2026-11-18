@@ -34,6 +34,7 @@
 class QComboBox;
 class QLineEdit;
 class QCheckBox;
+class QPushButton;
 
 namespace FOEDAG {
 
@@ -69,6 +70,9 @@ class NCriticalPathFilterWidget : public QGroupBox {
 
   QComboBox* comboBox() const { return m_comboBox; }
 
+  // Names the fields <prefix>Text, Combo, Clear, CaseSensitive and Regexp.
+  void setNamePrefix(const QString& prefix);
+
   void clear();
 
   void onAccepted();
@@ -79,6 +83,7 @@ class NCriticalPathFilterWidget : public QGroupBox {
   QLineEdit* m_lineEdit = nullptr;
   QCheckBox* m_chUseRegexp = nullptr;
   QCheckBox* m_chUseCaseSensetive = nullptr;
+  QPushButton* m_bnClear = nullptr;
 
   UiBackup m_backup;
 

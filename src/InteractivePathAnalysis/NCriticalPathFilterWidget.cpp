@@ -60,14 +60,14 @@ NCriticalPathFilterWidget::NCriticalPathFilterWidget(const QString& name,
       tr("set filter criteria here to affect on visible path items"));
 
   QLabel* lbSearch = new QLabel("Search:");
-  QPushButton* bnClear = new QPushButton();
-  bnClear->setToolTip(tr("clear filter criteria"));
-  bnClear->setIcon(QIcon(":/images/erase.png"));
-  connect(bnClear, &QPushButton::clicked, this, [this]() { resetUI(); });
+  m_bnClear = new QPushButton();
+  m_bnClear->setToolTip(tr("clear filter criteria"));
+  m_bnClear->setIcon(QIcon(":/images/erase.png"));
+  connect(m_bnClear, &QPushButton::clicked, this, [this]() { resetUI(); });
 
   layout->addRow(
       lbSearch,
-      wrapIntoRowWidget(wrapIntoRowWidget(m_lineEdit, m_comboBox), bnClear));
+      wrapIntoRowWidget(wrapIntoRowWidget(m_lineEdit, m_comboBox), m_bnClear));
   layout->addRow(new QWidget,
                  wrapIntoRowWidget(m_chUseRegexp, m_chUseCaseSensetive));
 
@@ -103,6 +103,14 @@ NCriticalPathFilterWidget::NCriticalPathFilterWidget(const QString& name,
     [this](int state) { m_chUseCaseSensetive->setEnabled(state == Qt::Unchecked); }
 #endif
   );
+}
+
+void NCriticalPathFilterWidget::setNamePrefix(const QString& prefix) {
+  m_lineEdit->setObjectName(prefix + "Text");
+  m_comboBox->setObjectName(prefix + "Combo");
+  m_bnClear->setObjectName(prefix + "Clear");
+  m_chUseCaseSensetive->setObjectName(prefix + "CaseSensitive");
+  m_chUseRegexp->setObjectName(prefix + "Regexp");
 }
 
 void NCriticalPathFilterWidget::onAccepted() { backupUI(); }

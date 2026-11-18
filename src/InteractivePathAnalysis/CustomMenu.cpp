@@ -79,6 +79,12 @@ void CustomMenu::setButtonToolTips(const QString& toolTipForDoneButton,
   m_bnCancel->setToolTip(toolTipForCancelButton);
 }
 
+void CustomMenu::setNamePrefix(const QString& prefix) {
+  setObjectName(prefix + "Menu");
+  m_bnDone->setObjectName(prefix + "Done");
+  m_bnCancel->setObjectName(prefix + "Cancel");
+}
+
 void CustomMenu::addContentLayout(QLayout* layout) {
   m_contentLayout->addLayout(layout);
 }

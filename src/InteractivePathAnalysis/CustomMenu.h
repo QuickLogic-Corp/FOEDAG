@@ -53,6 +53,8 @@ class CustomMenu final : public QWidget {
 
   void setButtonToolTips(const QString& toolTipForDoneButton,
                          const QString& toolTipForCancelButton);
+  // Names the menu <prefix>Menu and its buttons <prefix>Done, <prefix>Cancel.
+  void setNamePrefix(const QString& prefix);
 
  signals:
   void accepted();
