@@ -132,6 +132,7 @@ class GuiRecorder : public QObject {
              const QString &unrecordedText = {}, const QString &key = {});
   void supersede(const QString &key);
   void onDoubleClick(QObject *watched, const QMouseEvent *event);
+  void onRightPress(QObject *watched, const QMouseEvent *event);
   void watch(QWidget *widget);
   void watch(QAction *action);
   void onButton(QAbstractButton *button);

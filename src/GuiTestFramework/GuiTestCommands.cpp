@@ -263,6 +263,11 @@ bool waitUntil(const std::function<bool()> &condition, int timeoutMs,
 // for: a dock opened by the previous action is shown a few event-loop turns
 // after that action returns, and no milestone marks it.
 QWidget *findWidgetToAct(const QString &name, QString *error) {
+  // A form rebuilt by the previous action, such as the IP parameters, shows
+  // its new fields through queued calls and deletes the old ones later. Both
+  // happen before a user's next input, so the old fields must not be found.
+  QCoreApplication::sendPostedEvents();
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
   if (QWidget *w = findWidget(name, {}, error)) return w;
   if (!error->endsWith(" hidden)")) return nullptr;
   QString ignored;
@@ -518,7 +523,8 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     if (edit->text() != text)
       return fail(interp, QString("gui_set_text %1: expected '%2', got '%3'")
                               .arg(name, text, edit->text()));
-    emit edit->editingFinished();
+    // Qt does not finish an edit its validator rejects; the field stays red.
+    if (edit->hasAcceptableInput()) emit edit->editingFinished();
     return succeed(interp);
   };
   if (w->inherits("QConsole")) {

@@ -539,6 +539,10 @@ void GuiRecorder::watch(QWidget *widget) {
     return;
   widget->setProperty(kWatchedProperty, true);
   for (QAction *a : widget->actions()) watch(a);
+  // Context-menu actions, such as the Sources tree's, are added to a widget
+  // only while their menu is open; a replay triggers them without it.
+  for (QAction *a : widget->findChildren<QAction *>(Qt::FindDirectChildrenOnly))
+    watch(a);
 
   if (auto button = qobject_cast<QAbstractButton *>(widget)) {
     // For clicks that do not come from a mouse release, such as keyboard.
@@ -654,6 +658,25 @@ void GuiRecorder::onDoubleClick(QObject *watched, const QMouseEvent *event) {
   offer(view,
         {"gui_click " + tclWord(view->objectName()) + " -item " +
          tclWord(text) + " -double"},
+        false);
+}
+
+// The item a context menu is for. Its actions are recorded when picked.
+void GuiRecorder::onRightPress(QObject *watched, const QMouseEvent *event) {
+  auto view = qobject_cast<QAbstractItemView *>(watched->parent());
+  if (!view || view->viewport() != watched ||
+      event->button() != Qt::RightButton)
+    return;
+  const QModelIndex index = view->indexAt(event->position().toPoint());
+  if (!index.isValid()) return;
+  const QString text = index.data().toString();
+  if (view->objectName().isEmpty()) {
+    offer(view, {}, false, unrecordedText(view, text));
+    return;
+  }
+  offer(view,
+        {"gui_click " + tclWord(view->objectName()) + " -item " +
+         tclWord(text) + " -button right"},
         false);
 }
 
@@ -785,6 +808,8 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
       openFrame(watched, true, event);
       if (event->type() == QEvent::MouseButtonDblClick)
         onDoubleClick(watched, static_cast<QMouseEvent *>(event));
+      if (event->type() == QEvent::MouseButtonPress)
+        onRightPress(watched, static_cast<QMouseEvent *>(event));
       if (event->type() == QEvent::MouseButtonRelease) {
         auto button = qobject_cast<QAbstractButton *>(watched);
         auto mouse = static_cast<QMouseEvent *>(event);
