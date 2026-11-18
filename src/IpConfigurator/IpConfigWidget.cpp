@@ -73,6 +73,7 @@ IpConfigWidget::IpConfigWidget(QWidget* parent /*nullptr*/,
   topLayout->addWidget(scrollArea);
 
   // Add VLNV meta text description
+  m_metaLabel.setObjectName("ipDetailsLabel");
   containerLayout->addWidget(&m_metaLabel);
   QSpacerItem *spacer = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
   containerLayout->addItem(spacer);
