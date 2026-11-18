@@ -544,6 +544,13 @@ install (
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/${TCL_STUBB_LIB}
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag/lib)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # Tcl looks for its script library in <prefix>/lib/tcl8.6 (always "lib",
+  # never lib64); its compiled-in path points into the build tree.
+  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib/tcl8.6
+                    ${CMAKE_CURRENT_BINARY_DIR}/lib/tcl8
+          DESTINATION lib)
+endif()
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/${ZLIB_STATIC_LIB}
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag/lib)  
