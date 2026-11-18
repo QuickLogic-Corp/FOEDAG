@@ -101,6 +101,7 @@ PortsView::PortsView(PinsBaseModel *model, QWidget *parent)
   setColumnWidth(InternalPinsCol, 150);
 #endif
   resizeColumnToContents(PackagePinCol);
+  header()->setSectionResizeMode(DirCol, QHeaderView::ResizeToContents);
   hideColumn(ModeCol);
   hideColumn(InternalPinsCol);
 #endif

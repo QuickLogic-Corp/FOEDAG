@@ -34,6 +34,7 @@ set (CPP_LIST
 #    PinAssignment/PinsBaseModel_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/PortsLoader_test.cpp
     PinAssignment/PcfObserver_test.cpp
+    PinAssignment/PortsView_test.cpp
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
