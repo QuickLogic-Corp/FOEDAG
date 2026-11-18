@@ -35,14 +35,17 @@ extern "C" {
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QGroupBox>
 #include <QHash>
+#include <QHeaderView>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QMetaProperty>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -52,6 +55,7 @@ extern "C" {
 #include <QTextEdit>
 #include <QThread>
 #include <QTimer>
+#include <QTreeView>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -189,9 +193,22 @@ QAction *findAction(const QString &name, QString *error) {
   return nullptr;
 }
 
+// For reading only: a hidden widget can still be checked, for example that it
+// is hidden. Used when no visible widget has the name and one hidden one does.
+QWidget *findHiddenWidget(const QString &name) {
+  QWidget *found{nullptr};
+  for (QWidget *w : QApplication::allWidgets()) {
+    if (w->objectName() != name || w->isVisible()) continue;
+    if (found) return nullptr;
+    found = w;
+  }
+  return found;
+}
+
 QObject *findObject(const QString &name, QString *error) {
   QString widgetError;
   if (QWidget *w = findWidget(name, {}, &widgetError)) return w;
+  if (widgetError.endsWith("(1 hidden)")) return findHiddenWidget(name);
   QString actionError;
   if (QAction *a = findAction(name, &actionError)) return a;
   const bool noAction = actionError.startsWith("no action");
@@ -242,6 +259,18 @@ bool waitUntil(const std::function<bool()> &condition, int timeoutMs,
   return satisfied;
 }
 
+// The widget an action works on. A widget that exists but is hidden is waited
+// for: a dock opened by the previous action is shown a few event-loop turns
+// after that action returns, and no milestone marks it.
+QWidget *findWidgetToAct(const QString &name, QString *error) {
+  if (QWidget *w = findWidget(name, {}, error)) return w;
+  if (!error->endsWith(" hidden)")) return nullptr;
+  QString ignored;
+  waitUntil([&]() { return findWidget(name, {}, &ignored) != nullptr; },
+            kDefaultTimeoutMs, "waiting for '" + name + "' to be shown", true);
+  return findWidget(name, {}, error);
+}
+
 // A dialog left open is the usual reason a wait never ends.
 QString openDialogNote() {
   QWidget *modal = QApplication::activeModalWidget();
@@ -263,6 +292,43 @@ void sendMouse(QWidget *w, QEvent::Type type, const QPoint &pos,
   QCoreApplication::sendEvent(w, &event);
 }
 
+// The view itself, or the only item view inside a composite widget such as
+// the Pin Planner's Errors view.
+QAbstractItemView *itemViewOf(QWidget *w) {
+  if (auto view = qobject_cast<QAbstractItemView *>(w)) return view;
+  QAbstractItemView *found{nullptr};
+  for (auto view : w->findChildren<QAbstractItemView *>()) {
+    if (qobject_cast<QHeaderView *>(view)) continue;
+    if (found) return nullptr;
+    found = view;
+  }
+  return found;
+}
+
+// Every cell of `model` under `parent`, row by row. In a tree, children follow
+// their row; other views are flat, whatever their model says about children.
+void collectCells(const QAbstractItemModel *model, const QModelIndex &parent,
+                  bool tree, QStringList *cells, QModelIndex *found = nullptr,
+                  const QString &wanted = {}) {
+  for (int r = 0; r < model->rowCount(parent); ++r) {
+    for (int c = 0; c < model->columnCount(parent); ++c) {
+      const QModelIndex index = model->index(r, c, parent);
+      const QString text = index.data().toString();
+      if (found && !found->isValid() && text == wanted) *found = index;
+      cells->append(text);
+    }
+    const QModelIndex first = model->index(r, 0, parent);
+    if (tree && model->hasChildren(first))
+      collectCells(model, first, tree, cells, found, wanted);
+  }
+}
+
+QMetaProperty textProperty(const QObject *o) {
+  const QMetaObject *meta = o->metaObject();
+  const int index = meta->indexOfProperty("text");
+  return index < 0 ? QMetaProperty{} : meta->property(index);
+}
+
 QString displayedText(QObject *o, bool *ok) {
   *ok = true;
   if (auto w = qobject_cast<QLabel *>(o)) return w->text();
@@ -281,6 +347,10 @@ QString displayedText(QObject *o, bool *ok) {
   if (auto w = qobject_cast<QGroupBox *>(o)) return w->title();
   if (auto w = qobject_cast<QProgressBar *>(o)) return w->text();
   if (auto a = qobject_cast<QAction *>(o)) return plain(a->text());
+  // A custom widget, such as the QScintilla editor wrapper, opts in with a
+  // `text` Q_PROPERTY.
+  if (const QMetaProperty p = textProperty(o); p.isReadable())
+    return p.read(o).toString();
   if (auto w = qobject_cast<QWidget *>(o); w && w->isWindow())
     return w->windowTitle();
   *ok = false;
@@ -347,19 +417,41 @@ int guiFind(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
 int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   Options o;
   QString error;
-  if (!parseOptions(argc, argv, {"-button"}, {"-double"}, &o, &error) ||
+  if (!parseOptions(argc, argv, {"-button", "-item"}, {"-double"}, &o,
+                    &error) ||
       o.positional.size() != 1)
     return fail(interp,
-                "usage: gui_click <objName> [-button left|right] [-double]");
+                "usage: gui_click <objName> [-item <text>] [-button left|right] "
+                "[-double]");
   const QString name = o.positional.first();
   const QString button = o.values.value("-button", "left");
   if (button != "left" && button != "right")
     return fail(interp, QString("gui_click %1: -button must be left or right")
                             .arg(name));
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_click %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp, QString("gui_click %1: widget is disabled").arg(name));
+
+  QWidget *target = mouseTarget(w);
+  QPoint pos = target->rect().center();
+  if (o.values.contains("-item")) {
+    const QString item = o.values.value("-item");
+    QAbstractItemView *view = itemViewOf(w);
+    if (!view || !view->model())
+      return fail(interp, QString("gui_click %1: %2 has no items")
+                              .arg(name, w->metaObject()->className()));
+    QStringList cells;
+    QModelIndex index;
+    collectCells(view->model(), view->rootIndex(),
+                 qobject_cast<QTreeView *>(view), &cells, &index, item);
+    if (!index.isValid())
+      return fail(interp, QString("gui_click %1: no item '%2' (items: %3)")
+                              .arg(name, item, cells.mid(0, 10).join(", ")));
+    view->scrollTo(index);
+    target = view->viewport();
+    pos = view->visualRect(index).center();
+  }
 
   const GuiTestAction act{w};
   const bool dbl = o.flags.contains("-double");
@@ -370,8 +462,6 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     pushButton->click();
     return succeed(interp);
   }
-  QWidget *target = mouseTarget(w);
-  const QPoint pos = target->rect().center();
   const Qt::MouseButton b = button == "left" ? Qt::LeftButton : Qt::RightButton;
   sendMouse(target, QEvent::MouseButtonPress, pos, b, b);
   sendMouse(target, QEvent::MouseButtonRelease, pos, b, Qt::NoButton);
@@ -387,12 +477,30 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return succeed(interp);
 }
 
+// A user clicks into a field before typing, and some widgets depend on it: a
+// file dialog rewrites a typed path to the bare file name unless its field has
+// focus. A window that is not active (it has just opened, or another window
+// was clicked) is activated first: activateWindow() asks the window manager,
+// which takes effect later, if at all (not on offscreen), so Qt is also told
+// at once.
+void focusForTyping(QWidget *w) {
+  QWidget *window = w->window();
+  if (!window->isActiveWindow()) {
+    window->activateWindow();
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    QApplication::setActiveWindow(window);
+    QT_WARNING_POP
+  }
+  w->setFocus(Qt::OtherFocusReason);
+}
+
 int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (argc != 3) return fail(interp, "usage: gui_set_text <objName> <text>");
   const QString name = QString::fromUtf8(argv[1]);
   const QString text = QString::fromUtf8(argv[2]);
   QString error;
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_set_text %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp,
@@ -403,6 +511,7 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     if (edit->isReadOnly())
       return fail(interp,
                   QString("gui_set_text %1: widget is read-only").arg(name));
+    focusForTyping(edit);
     // insert() goes through the validator and emits textEdited like typing.
     edit->selectAll();
     edit->insert(text);
@@ -442,6 +551,10 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     edit->setPlainText(text);
     return succeed(interp);
   }
+  if (const QMetaProperty p = textProperty(w); p.isWritable()) {
+    p.write(w, text);
+    return succeed(interp);
+  }
   return fail(interp, QString("gui_set_text %1: %2 does not take text")
                           .arg(name, w->metaObject()->className()));
 }
@@ -455,7 +568,7 @@ int guiSelect(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const QString name = o.positional.at(0);
   const QString item = o.positional.at(1);
   const int column = o.values.value("-column", "0").toInt();
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_select %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp, QString("gui_select %1: widget is disabled").arg(name));
@@ -472,7 +585,12 @@ int guiSelect(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
       for (int i = 0; i < combo->count(); ++i) items << combo->itemText(i);
       return notFound(items);
     }
-    combo->setCurrentIndex(index);
+    // Picking the current item again resets an editable combo's text to it,
+    // as QComboBox does for a click in the popup.
+    if (index == combo->currentIndex() && combo->lineEdit())
+      combo->lineEdit()->setText(item);
+    else
+      combo->setCurrentIndex(index);
     emit combo->activated(index);
     emit combo->textActivated(item);
     return succeed(interp);
@@ -529,12 +647,34 @@ int guiTriggerAction(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
 }
 
 int guiGet(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
-  if (argc != 3) return fail(interp, "usage: gui_get <objName> <property>|-text");
+  if (argc != 3)
+    return fail(interp, "usage: gui_get <objName> <property>|-text|-items");
   const QString name = QString::fromUtf8(argv[1]);
   const QString what = QString::fromUtf8(argv[2]);
   QString error;
   QObject *o = findObject(name, &error);
   if (!o) return fail(interp, QString("gui_get %1: %2").arg(name, error));
+  if (what == "-items") {
+    QStringList items;
+    if (auto combo = qobject_cast<QComboBox *>(o)) {
+      for (int i = 0; i < combo->count(); ++i) items << combo->itemText(i);
+    } else if (QAbstractItemView *view =
+                   o->isWidgetType() ? itemViewOf(static_cast<QWidget *>(o))
+                                     : nullptr;
+               view && view->model()) {
+      collectCells(view->model(), view->rootIndex(),
+                   qobject_cast<QTreeView *>(view), &items);
+    } else {
+      return fail(interp, QString("gui_get %1: %2 has no items")
+                              .arg(name, o->metaObject()->className()));
+    }
+    Tcl_Obj *list = Tcl_NewListObj(0, nullptr);
+    for (const QString &s : items)
+      Tcl_ListObjAppendElement(interp, list,
+                               Tcl_NewStringObj(s.toUtf8().constData(), -1));
+    Tcl_SetObjResult(interp, list);
+    return TCL_OK;
+  }
   if (what == "-text") {
     bool ok{false};
     const QString text = displayedText(o, &ok);
@@ -573,7 +713,7 @@ int guiDrag(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
                               .arg(name));
   }
   QString error;
-  QWidget *w = findWidget(name, {}, &error);
+  QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_drag %1: %2").arg(name, error));
   if (!w->isEnabled())
     return fail(interp, QString("gui_drag %1: widget is disabled").arg(name));
@@ -763,6 +903,7 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const QString capture = QString("%1/%2.png").arg(artifacts, id);
   if (!writeImage(image, capture))
     return fail(interp, QString("%1: cannot write %2").arg(what, capture));
+  GuiTestRunner::instance()->screenshotTaken(capture);
 
   const bool display = GuiTestMode::isDisplayMode();
   auto report = [&](const QString &line) {
@@ -853,7 +994,23 @@ bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,
   return false;
 }
 
+// GUI_TEST_FRAMEWORK_TRACE=<file> gets each user action as it ran, before it
+// runs, since an action that opens a modal dialog returns after the next one.
+static int traced(ClientData proc, Tcl_Interp *interp, int argc,
+                  const char *argv[]) {
+  static const QString path = qEnvironmentVariable("GUI_TEST_FRAMEWORK_TRACE");
+  if (!path.isEmpty()) {
+    QFile file{path};
+    if (file.open(QIODevice::Append | QIODevice::Text))
+      file.write((traceLine(argc, argv) + "\n").toUtf8());
+  }
+  return reinterpret_cast<Tcl_CmdProc *>(proc)(nullptr, interp, argc, argv);
+}
+
 void registerGuiTestCommands(Tcl_Interp *interp) {
+  static const QSet<QString> actions{"gui_click",  "gui_set_text",
+                                     "gui_select", "gui_trigger_action",
+                                     "gui_drag",   "gui_dialog"};
   const std::pair<const char *, Tcl_CmdProc *> commands[] = {
       {"gui_find", guiFind},
       {"gui_click", guiClick},
@@ -870,8 +1027,13 @@ void registerGuiTestCommands(Tcl_Interp *interp) {
       {"gui_test_run", guiTestRun},
       {"gui_test_checkpoint", guiTestCheckpoint},
   };
-  for (const auto &[name, proc] : commands)
-    Tcl_CreateCommand(interp, name, proc, nullptr, nullptr);
+  for (const auto &[name, proc] : commands) {
+    if (actions.contains(name))
+      Tcl_CreateCommand(interp, name, traced,
+                        reinterpret_cast<ClientData>(proc), nullptr);
+    else
+      Tcl_CreateCommand(interp, name, proc, nullptr, nullptr);
+  }
 }
 
 }  // namespace FOEDAG

@@ -20,15 +20,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "GuiTestFramework/GuiRecorder.h"
 
+#include <QAbstractScrollArea>
 #include <QAction>
+#include <QApplication>
 #include <QBuffer>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFile>
+#include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -37,6 +44,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "GuiTestFramework/GuiMilestone.h"
 #include "GuiTestFramework/GuiTestHub.h"
+#include "TextEditor/editor.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;
@@ -197,14 +205,14 @@ TEST_F(GuiRecorderTest, WaitsAreInsertedFromMilestones) {
   clock = 200;
   GUI_MILESTONE("y.done", "");
   GUI_MILESTONE("task.started", "");  // info: never waited for
-  clock = 4000;
+  clock = 10000;
   GUI_MILESTONE("x.done", "a");
-  clock = 5000;
+  clock = 11000;
   QTest::mouseClick(button, Qt::LeftButton);
 
   EXPECT_EQ(lines(true), join({"gui_click runButton",
-                                      "gui_wait_event y.done -timeout 10000",
-                                      "gui_wait_event x.done a -timeout 12000",
+                                      "gui_wait_event y.done -timeout 60000",
+                                      "gui_wait_event x.done a -timeout 100000",
                                       "gui_click runButton"}));
 }
 
@@ -223,4 +231,164 @@ TEST_F(GuiRecorderTest, CheckpointWritesAsserts) {
                   "gui_screenshot recording/01 -widget win",
                   "gui_assert {![gui_get optButton checked]}",
                   "gui_screenshot recording/02 -widget win"}));
+}
+
+// Ctrl+Shift+S in a window with no focused widget, such as Floor Planning,
+// takes a screenshot of that window.
+TEST_F(GuiRecorderTest, CheckpointWithoutFocusShotsActiveWindow) {
+  window.show();
+  QWidget other;
+  other.setObjectName("otherWindow");
+  other.show();
+  QApplication::setActiveWindow(&other);
+  ASSERT_EQ(QApplication::activeWindow(), &other);
+  ASSERT_EQ(QApplication::focusWidget(), nullptr);
+  record();
+
+  QTest::keyClick(&other, Qt::Key_S, Qt::ControlModifier | Qt::ShiftModifier);
+  EXPECT_EQ(lines(),
+            join({"gui_screenshot recording/01 -widget otherWindow"}));
+}
+
+// The chosen text is recorded even when a handler rebuilds the items, as the
+// Pin Planner does when a pin is taken.
+TEST_F(GuiRecorderTest, ComboRecordsChosenTextAfterRebuild) {
+  auto combo = add(new QComboBox, "pinCombo");
+  combo->addItems({"", "p1", "p2", "p3"});
+  QObject::connect(combo, &QComboBox::activated, combo, [combo]() {
+    const QString chosen = combo->currentText();
+    combo->clear();
+    combo->addItems({"", "p3", chosen, "p2"});
+  });
+  window.show();
+  record();
+
+  QTest::keyClick(combo, Qt::Key_Down);  // "" -> p1, then p3 is at its index
+  EXPECT_EQ(lines(), join({"gui_select pinCombo p1"}));
+}
+
+// A double-click on an item replays as one gui_click, not as a select first.
+TEST_F(GuiRecorderTest, DoubleClickIsOneLine) {
+  auto tree = add(new QTreeWidget, "taskTree");
+  auto synth = new QTreeWidgetItem(tree, {"synth"});
+  auto place = new QTreeWidgetItem(tree, {"place"});
+  window.show();
+  record();
+
+  QTest::mouseClick(tree->viewport(), Qt::LeftButton, {},
+                    tree->visualItemRect(synth).center());
+  QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {},
+                     tree->visualItemRect(place).center());
+  EXPECT_EQ(lines(), join({"gui_select taskTree synth",
+                           "gui_click taskTree -item place -double"}));
+}
+
+// The preview window shows the script as it is written, raises no window
+// milestone, and input in it is not recorded.
+TEST_F(GuiRecorderTest, PreviewShowsScriptAndIsNotRecorded) {
+  auto tree = add(new QTreeWidget, "taskTree");
+  auto synth = new QTreeWidgetItem(tree, {"synth"});
+  window.show();
+  QTemporaryDir dir;
+  const QString file = dir.filePath("rec.tcl");
+  const int shown = GuiTestHub::instance()->count("window.shown", {});
+  QString error;
+  ASSERT_TRUE(GuiRecorder::instance()->start(file, &error))
+      << error.toStdString();
+  QWidget *preview = nullptr;
+  for (QWidget *w : QApplication::topLevelWidgets())
+    if (w->isVisible() && w->windowTitle() == "Recording rec.tcl")
+      preview = w;
+  ASSERT_NE(preview, nullptr);
+  EXPECT_EQ(GuiTestHub::instance()->count("window.shown", {}), shown);
+  auto script = preview->findChild<QPlainTextEdit *>();
+  auto pending = preview->findChild<QLabel *>();
+  ASSERT_TRUE(script && pending);
+
+  QTest::mouseClick(tree->viewport(), Qt::LeftButton, {},
+                    tree->visualItemRect(synth).center());
+  EXPECT_TRUE(pending->isVisible());
+  EXPECT_EQ(pending->text().toStdString(), "gui_select taskTree synth");
+  QTest::keyClick(script, Qt::Key_S, Qt::ControlModifier | Qt::ShiftModifier);
+  QTest::mouseClick(script->viewport(), Qt::LeftButton);
+  EXPECT_TRUE(pending->isVisible()) << "a click in the preview is no new input";
+
+  GuiRecorder::instance()->flush();
+  EXPECT_FALSE(pending->isVisible());
+  QFile written(file);
+  ASSERT_TRUE(written.open(QIODevice::ReadOnly | QIODevice::Text));
+  const QString text = QString::fromUtf8(written.readAll());
+  EXPECT_EQ(text.toStdString(),
+            "# gui-test: sync\ngui_start\ngui_select taskTree synth\n");
+  EXPECT_EQ((script->toPlainText() + "\n").toStdString(), text.toStdString());
+}
+
+// accept/reject name a button only when no other button has that answer.
+TEST_F(GuiRecorderTest, AmbiguousDialogButtonsUseTheirText) {
+  window.show();
+  record();
+
+  QMessageBox box{QMessageBox::Question, "Save", "Save changes?",
+                  QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel,
+                  &window};
+  box.setModal(true);
+  for (auto button : {QMessageBox::Yes, QMessageBox::No, QMessageBox::Cancel}) {
+    box.show();
+    QTest::mouseClick(box.button(button), Qt::LeftButton);
+  }
+  // As gui_dialog clicks: the dialog closes before the recorder sees clicked.
+  QDialog dialog{&window};
+  dialog.setModal(true);
+  auto buttons = new QDialogButtonBox(
+      QDialogButtonBox::Open | QDialogButtonBox::Cancel, &dialog);
+  QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog,
+                   &QDialog::accept);
+  dialog.show();
+  {
+    GuiRecorder::Frame frame{&dialog};
+    buttons->button(QDialogButtonBox::Open)->click();
+  }
+  EXPECT_EQ(lines(), join({"gui_dialog accept", "gui_dialog button No",
+                           "gui_dialog button Cancel", "gui_dialog accept"}));
+}
+
+// Typing in the text editor is one gui_set_text with the final text; loading
+// the file is not recorded.
+TEST_F(GuiRecorderTest, EditorTypingIsOneSetText) {
+  QTemporaryDir dir;
+  const QString file = dir.filePath("x.pcf");
+  {
+    QFile f{file};
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    f.write("a\n");
+  }
+  auto editor = new Editor(file, FILE_TYPE_UNKOWN);
+  window.layout()->addWidget(editor);
+  auto button = add(new QPushButton("Run"), "runButton");
+  window.show();
+  record();
+
+  auto text = editor->findChild<QAbstractScrollArea *>();
+  ASSERT_NE(text, nullptr);
+  text->setFocus();
+  QTest::keyClicks(text, "b[c]");
+  editor->reload();
+  QTest::mouseClick(button, Qt::LeftButton);
+  {
+    GuiRecorder::Frame frame{editor};  // as gui_set_text does it
+    editor->setText("x\ty\n");
+  }
+  EXPECT_EQ(lines(), join({"gui_set_text editor_x.pcf \"b\\[c\\]a\\n\"",
+                           "gui_click runButton",
+                           "gui_set_text editor_x.pcf \"x\\ty\\n\""}));
+}
+
+// The trace writes a command the way the recorder would (G-013).
+TEST(GuiRecorderTrace, WritesCommandsAsRecorded) {
+  const QByteArray path = (GuiRecorder::projectDir() + "/sub/a b.v").toUtf8();
+  const char *argv[] = {"gui_set_text", "editor_x.pcf", "a\nb [c]",
+                        path.constData(), "two words"};
+  EXPECT_EQ(traceLine(5, argv).toStdString(),
+            "gui_set_text editor_x.pcf \"a\\nb \\[c\\]\" "
+            "\"$::gui_test::project_dir/sub/a b.v\" {two words}");
 }

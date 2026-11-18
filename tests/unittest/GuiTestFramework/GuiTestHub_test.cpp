@@ -30,6 +30,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "Compiler/TaskManager.h"
 #include "GuiTestFramework/GuiMilestone.h"
 #include "GuiTestFramework/GuiTestCommands.h"
+#include "NewProject/ProjectManager/TaskStatusWatcher.h"
+#include "PinAssignment/PcfObserver.h"
 #include "gtest/gtest.h"
 
 using namespace FOEDAG;
@@ -135,6 +137,22 @@ TEST_F(GuiTestHubTest, TaskManagerBridge) {
   EXPECT_TRUE(wait("task.done"));
 }
 
+TEST_F(GuiTestHubTest, PcfObserverBridge) {
+  PcfObserver observer{nullptr, "/no/such/file.pcf", nullptr, nullptr};
+  GuiTestHub::instance()->takeSnapshot();
+  emit observer.contentChecked(true);
+  EXPECT_TRUE(wait("pcf.checked"));
+}
+
+// A changed design file makes the synthesis result dirty; the Pin Planner
+// shows its outdated mark then.
+TEST_F(GuiTestHubTest, SynthResultDirtyBridge) {
+  GuiTestHub::instance()->takeSnapshot();
+  TaskStatusWatcher::Instance()->onDesignFilesChanged();
+  EXPECT_TRUE(wait("synth.dirty"));
+  TaskStatusWatcher::Instance()->reset();
+}
+
 TEST_F(GuiTestHubTest, DisabledHubCountsNothing) {
   GuiTestHub::instance()->disable();
   GUI_MILESTONE("test.done", "");
@@ -146,4 +164,5 @@ TEST(GuiTestHub, Kinds) {
   EXPECT_EQ(GuiTestHub::kindOf("dialog.shown"), GuiTestHub::Kind::Sync);
   EXPECT_EQ(GuiTestHub::kindOf("task.started"), GuiTestHub::Kind::Info);
   EXPECT_EQ(GuiTestHub::kindOf("busy.on"), GuiTestHub::Kind::Info);
+  EXPECT_EQ(GuiTestHub::kindOf("synth.dirty"), GuiTestHub::Kind::Info);
 }

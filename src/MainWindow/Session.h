@@ -71,6 +71,7 @@ class Session {
   void windowHide();
 
   void setGuiType(FOEDAG::GUI_TYPE newGuiType);
+  FOEDAG::GUI_TYPE GuiType() const { return m_guiType; }
 
   void setWindowModel(MainWindowModel *newWindowModel);
 

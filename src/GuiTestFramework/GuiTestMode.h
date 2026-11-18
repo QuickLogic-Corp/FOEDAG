@@ -37,8 +37,12 @@ void prepareEnvironment(bool replay);
 void applyToApplication();
 
 bool isActive();
-// GUI_TEST_FRAMEWORK_SHOW or GUI_TEST_FRAMEWORK_INTERACTIVE (REQ-036).
+// GUI_TEST_FRAMEWORK_SHOW, GUI_TEST_FRAMEWORK_INTERACTIVE (REQ-036) or debug
+// mode.
 bool isDisplayMode();
+// GUI_TEST_FRAMEWORK_DEBUG=1, a display mode with the replay window: the
+// script's progress, breakpoints, and the result kept on screen at the end.
+bool isDebugMode();
 // GUI_TEST_FRAMEWORK_GOLDEN=update.
 bool isGenGoldensMode();
 

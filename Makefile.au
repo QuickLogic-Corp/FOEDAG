@@ -106,6 +106,10 @@ export MSYSTEM_LC := $(shell echo $(MSYSTEM) | tr '[:upper:]' '[:lower:]')
 export SEVENZIP_DIR_PATH := $(MAKEFILE_DIR_PATH)/7zip
 export SEVENZIP_FILE_PATH := $(SEVENZIP_DIR_PATH)/7z.exe
 export SEVENZIP_SFX_FILE_PATH_W=$(shell cygpath -w "$(SEVENZIP_DIR_PATH)/7z.sfx" | sed 's/\\/\\\\/g')
+# 7-Zip 23.01. www.7-zip.org can be unreachable from CI runners, so the GitHub release goes first.
+SEVENZIP_URLS := https://github.com/ip7z/7zip/releases/download/23.01 https://www.7-zip.org/a
+SEVENZIP_FILES := 7zr.exe:72c98287b2e8f85ea7bb87834b6ce1ce7ce7f41a8c97a81b307d4d4bf900922b \
+	7z2301-x64.exe:26cb6e9f56333682122fafe79dbcdfd51e9f47cc7217dccd29ac6fc33b5598cd
 endif
 
 
@@ -210,8 +214,17 @@ setup7zip:
 ifeq ($(BUILD_PLATFORM),$(filter $(BUILD_PLATFORM),WIN32_MSYS2_MINGW64 WIN32_MSYS2_UCRT64 WIN32_MSYS2_CLANG64))
 	printf "\n\n >>>7zip setup <<<\n"
 	mkdir -p $(SEVENZIP_DIR_PATH)
-	wget --quiet https://www.7-zip.org/a/7zr.exe --directory-prefix=$(SEVENZIP_DIR_PATH)
-	wget --quiet https://www.7-zip.org/a/7z2301-x64.exe --directory-prefix=$(SEVENZIP_DIR_PATH)
+	cd $(SEVENZIP_DIR_PATH) && \
+	for entry in $(SEVENZIP_FILES); do \
+		file=$${entry%%:*}; sha=$${entry#*:}; ok=0; \
+		for base in $(SEVENZIP_URLS); do \
+			rm -f $$file; \
+			if wget --quiet --tries=3 --waitretry=10 -O $$file $$base/$$file && \
+				echo "$$sha  $$file" | sha256sum --check --quiet; then ok=1; break; fi; \
+			echo "7zip setup: $$file from $$base failed"; \
+		done; \
+		[ $$ok = 1 ] || exit 1; \
+	done
 	cd $(SEVENZIP_DIR_PATH) && \
 		$(SEVENZIP_DIR_PATH)/7zr.exe x $(SEVENZIP_DIR_PATH)/7z2301-x64.exe -y > /dev/null
 else ifeq ($(BUILD_PLATFORM),$(filter $(BUILD_PLATFORM),UBUNTU_2004 UBUNTU_2204 UBUNTU_2404))

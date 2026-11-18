@@ -4,6 +4,7 @@
 #include "PinsBaseModel.h"
 #include "IODirection.h"
 
+#include "GuiTestFramework/GuiMilestone.h"
 #include "Utils/QtUtils.h"
 
 #include <QCryptographicHash>
@@ -24,6 +25,10 @@ PcfObserver::PcfObserver(QObject* parent, const QString& filePath, PortsModel* p
   connect(&m_checkTimer, &QTimer::timeout, this, &PcfObserver::check);
 
   m_checkTimer.start();
+  GUI_TEST_BRIDGE(this);
+  // Check once the caller is wired up, not on the first tick: that late check
+  // reloads the rows and drops pins the user set meanwhile.
+  QTimer::singleShot(0, this, &PcfObserver::check);
 }
 
 const QList<PcfLineFrame>& PcfObserver::lineFrames(bool update)
@@ -41,6 +46,12 @@ void PcfObserver::forceNextCheck()
   m_forceNextCheck = true;
 }
 
+void PcfObserver::checkNow()
+{
+  m_forceNextCheck = true;
+  check();
+}
+
 void PcfObserver::check()
 {
   QFileInfo fi(m_filePath);
@@ -49,7 +60,9 @@ void PcfObserver::check()
   }
 
   QDateTime lastModified = fi.lastModified();
-  if ((lastModified != m_lastModified) || m_forceNextCheck) {
+  // A synthesis run can rename ports while the pcf file stays the same.
+  const QStringList ports = m_portsModel->listModel()->stringList();
+  if ((lastModified != m_lastModified) || (ports != m_checkedPorts) || m_forceNextCheck) {
     m_errors.clear();
 
     parsePcfFile();
@@ -61,6 +74,7 @@ void PcfObserver::check()
     checkPinsShareSamePhysicalLocation();
 
     m_lastModified = lastModified;
+    m_checkedPorts = ports;
     if (m_forceNextCheck) {
       m_forceNextCheck = false;
     }

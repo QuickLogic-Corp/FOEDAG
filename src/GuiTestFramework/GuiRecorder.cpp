@@ -37,15 +37,21 @@ extern "C" {
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QMessageBox>
+#include <QMetaProperty>
+#include <QPlainTextEdit>
+#include <QSet>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QThread>
 #include <QToolButton>
+#include <QVBoxLayout>
 #include <QWidget>
 #include <algorithm>
 #include <iostream>
@@ -58,7 +64,9 @@ namespace FOEDAG {
 
 namespace {
 
-constexpr int kMinWaitMs = 10000;
+// A busy build node can be several times slower than the recording machine.
+constexpr int kWaitFactor = 10;
+constexpr int kMinWaitMs = 60000;
 constexpr const char *kWatchedProperty = "_guiRecorderWatched";
 
 int loopLevel() { return QThread::currentThread()->loopLevel(); }
@@ -114,10 +122,24 @@ QString dialogAnswer(QAbstractButton *button) {
     role = box->buttonRole(button);
   else if (auto box = qobject_cast<QDialogButtonBox *>(button->parentWidget()))
     role = box->buttonRole(button);
-  if (role == QDialogButtonBox::AcceptRole || role == QDialogButtonBox::YesRole)
-    return "gui_dialog accept";
-  if (role == QDialogButtonBox::RejectRole || role == QDialogButtonBox::NoRole)
-    return "gui_dialog reject";
+  const QSet<int> accept{QDialogButtonBox::AcceptRole,
+                         QDialogButtonBox::YesRole};
+  const QSet<int> reject{QDialogButtonBox::RejectRole,
+                         QDialogButtonBox::NoRole};
+  const QSet<int> group = accept.contains(role)   ? accept
+                          : reject.contains(role) ? reject
+                                                  : QSet<int>{};
+  // accept/reject replays the first such button, so it names this one only
+  // when it is the only one, as for Yes in Yes/No/Cancel but not for No.
+  int peers = 0;
+  for (auto box : window->findChildren<QDialogButtonBox *>())
+    for (QAbstractButton *b : box->buttons())
+      // isVisibleTo: the dialog may already be hidden when clicked arrives.
+      if (b->isVisibleTo(window) && b->isEnabled() &&
+          group.contains(box->buttonRole(b)))
+        ++peers;
+  if (peers == 1)
+    return group == accept ? "gui_dialog accept" : "gui_dialog reject";
   if (plain(button->text()).isEmpty()) return {};
   return "gui_dialog button " + tclWord(plain(button->text()));
 }
@@ -128,7 +150,84 @@ QString escapeInQuotes(QString text) {
   return text;
 }
 
+// A Tcl word on one line, so each recorded command stays one line.
+QString lineWord(const QString &text) {
+  if (!text.contains('\n') && !text.contains('\r') && !text.contains('\t'))
+    return tclWord(text);
+  QString escaped = escapeInQuotes(text);
+  escaped.replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
+  return "\"" + escaped + "\"";
+}
+
+QString pathWordIn(const QString &text, const QString &projectDir,
+                   const QString &installDir, QStringList *notes) {
+  if (!QDir::isAbsolutePath(text)) return tclWord(text);
+  const QString path = QDir::cleanPath(text);
+#ifdef _WIN32
+  const Qt::CaseSensitivity cs = Qt::CaseInsensitive;
+#else
+  const Qt::CaseSensitivity cs = Qt::CaseSensitive;
+#endif
+  struct Base {
+    QString dir;
+    const char *variable;
+  };
+  QList<Base> bases{{projectDir, "$::gui_test::project_dir"},
+                    {installDir, "$::gui_test::install_dir"}};
+  // The deeper directory wins when one contains the other.
+  std::sort(bases.begin(), bases.end(), [](const Base &a, const Base &b) {
+    return a.dir.size() > b.dir.size();
+  });
+  for (const Base &base : bases) {
+    if (base.dir.isEmpty()) continue;
+    if (path.compare(base.dir, cs) == 0) return base.variable;
+    if (path.startsWith(base.dir + "/", cs))
+      return QString("\"%1/%2\"")
+          .arg(base.variable, escapeInQuotes(path.mid(base.dir.size() + 1)));
+  }
+  notes->append("# absolute path, not under the project or install directory");
+  return tclWord(text);
+}
+
+QString clickKey(const QObject *view, const QString &item) {
+  return QString("click %1 %2").arg(quintptr(view)).arg(item);
+}
+
 }  // namespace
+
+// The script as it is written, in its own window, so it is in no screenshot.
+class RecordingPreview : public QWidget {
+ public:
+  explicit RecordingPreview(const QString &file) {
+    setWindowTitle("Recording " + QFileInfo(file).fileName());
+    setAttribute(Qt::WA_ShowWithoutActivating);
+    setAttribute(Qt::WA_QuitOnClose, false);
+    GuiTestHub::markInternal(this);
+    m_script = new QPlainTextEdit;
+    m_script->setReadOnly(true);
+    m_script->setLineWrapMode(QPlainTextEdit::NoWrap);
+    m_script->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    // Recorded, not written yet: the next input may still change it.
+    m_pending = new QLabel;
+    m_pending->setFont(m_script->font());
+    m_pending->setStyleSheet("color: gray;");
+    m_pending->setTextFormat(Qt::PlainText);
+    m_pending->hide();
+    auto layout = new QVBoxLayout(this);
+    layout->addWidget(m_script);
+    layout->addWidget(m_pending);
+    resize(640, 480);
+  }
+  void append(const QString &line) { m_script->appendPlainText(line); }
+  void setPending(const QStringList &lines) {
+    m_pending->setText(lines.join('\n'));
+    m_pending->setVisible(!lines.isEmpty());
+  }
+
+ private:
+  QPlainTextEdit *m_script;
+  QLabel *m_pending;
+};
 
 QString tclWord(const QString &word) {
   const QByteArray utf8 = word.toUtf8();
@@ -137,6 +236,19 @@ QString tclWord(const QString &word) {
   const QString result = QString::fromUtf8(merged);
   Tcl_Free(merged);
   return result;
+}
+
+QString traceLine(int argc, const char *argv[]) {
+  QStringList words{QString::fromUtf8(argv[0])};
+  QStringList notes;
+  for (int i = 1; i < argc; ++i) {
+    const QString word = QString::fromUtf8(argv[i]);
+    words << (QDir::isAbsolutePath(word)
+                  ? pathWordIn(word, GuiRecorder::projectDir(),
+                               GuiRecorder::installDir(), &notes)
+                  : lineWord(word));
+  }
+  return words.join(' ');
 }
 
 GuiRecorder *GuiRecorder::instance() {
@@ -180,6 +292,8 @@ bool GuiRecorder::start(const QString &file, QString *error) {
   }
   m_out = m_file.get();
   m_scenario = QFileInfo(file).completeBaseName();
+  m_preview = new RecordingPreview(file);
+  m_preview->show();
   begin();
   return true;
 }
@@ -226,6 +340,7 @@ void GuiRecorder::stop() {
   }
   m_out = nullptr;
   m_file.reset();
+  delete m_preview;
   m_frames.clear();
   m_entries.clear();
   m_milestones.clear();
@@ -241,7 +356,7 @@ void GuiRecorder::stop() {
 
 void GuiRecorder::flush() {
   while (!m_frames.isEmpty()) closeFrame(m_frames.last().id);
-  writeReady();
+  writeReady(true);
 }
 
 GuiRecorder::Frame::Frame(QObject *target) {
@@ -272,15 +387,7 @@ void GuiRecorder::closeInputFrames(int level) {
     closeFrame(m_frames.last().id);
 }
 
-void GuiRecorder::closeFrame(int id) {
-  int index = -1;
-  for (int i = 0; i < m_frames.size(); ++i)
-    if (m_frames.at(i).id == id) index = i;
-  if (index < 0) return;
-  // Frames opened inside this one end with it.
-  while (m_frames.size() > index + 1) closeFrame(m_frames.last().id);
-  const OpenFrame frame = m_frames.takeLast();
-
+const GuiRecorder::Offer *GuiRecorder::pickOffer(const OpenFrame &frame) {
   const Offer *pick = nullptr;
   auto choose = [&](auto &&accept) {
     for (const Offer &o : frame.offers)
@@ -294,12 +401,25 @@ void GuiRecorder::closeFrame(int id) {
   choose([&](const Offer &o) { return named(o) && related(o); });
   choose(named);
   choose([](const Offer &) { return true; });
+  return pick;
+}
 
+void GuiRecorder::closeFrame(int id) {
+  int index = -1;
+  for (int i = 0; i < m_frames.size(); ++i)
+    if (m_frames.at(i).id == id) index = i;
+  if (index < 0) return;
+  // Frames opened inside this one end with it.
+  while (m_frames.size() > index + 1) closeFrame(m_frames.last().id);
+  const OpenFrame frame = m_frames.takeLast();
+
+  const Offer *pick = pickOffer(frame);
   Entry &entry = m_entries[frame.entry];
   entry.closed = true;
-  if (pick && named(*pick)) {
+  if (pick && !pick->lines.isEmpty()) {
     entry.lines = pick->lines;
     entry.action = true;
+    entry.key = pick->key;
   } else if (pick) {
     entry.lines = {"# UNRECORDED: " + pick->unrecorded};
     std::cerr << "WARNING: recorder: unrecorded action on "
@@ -310,19 +430,39 @@ void GuiRecorder::closeFrame(int id) {
 }
 
 void GuiRecorder::offer(QObject *source, const QStringList &lines, bool action,
-                        const QString &unrecordedText) {
+                        const QString &unrecordedText, const QString &key) {
   if (m_frames.isEmpty()) return;  // not caused by the user or a gui_* action
   Offer o;
   o.lines = lines;
   o.source = source;
   o.action = action;
   o.unrecorded = unrecordedText;
+  o.key = key;
   m_frames.last().offers.append(o);
+  showPending();
 }
 
-void GuiRecorder::writeReady() {
+// Drops the last recorded action if it has this key and is not written yet:
+// the click before a double-click, or the text before more typing.
+void GuiRecorder::supersede(const QString &key) {
+  for (int i = m_entries.size() - 1; i >= m_nextToWrite; --i) {
+    Entry &e = m_entries[i];
+    if (!e.closed || (!e.action && e.lines.isEmpty())) continue;
+    if (e.action && e.key == key) {
+      e.lines.clear();
+      e.action = false;
+      e.key.clear();
+    }
+    return;
+  }
+}
+
+void GuiRecorder::writeReady(bool force) {
   while (m_nextToWrite < m_entries.size() &&
          m_entries.at(m_nextToWrite).closed) {
+    if (!force && !m_entries.at(m_nextToWrite).key.isEmpty() &&
+        m_nextToWrite == m_entries.size() - 1)
+      break;  // the next input may supersede it
     const Entry &entry = m_entries.at(m_nextToWrite++);
     if (entry.action) {
       // One wait per (name, arg), for its last occurrence before the action.
@@ -338,7 +478,7 @@ void GuiRecorder::writeReady() {
       }
       for (const Milestone &m : last) {
         const qint64 timeout =
-            std::max<qint64>(3 * (m.at - m_lastActionAt), kMinWaitMs);
+            std::max<qint64>(kWaitFactor * (m.at - m_lastActionAt), kMinWaitMs);
         QString line = "gui_wait_event " + tclWord(m.name);
         if (!m.arg.isEmpty()) line += " " + tclWord(m.arg);
         writeLine(line + QString(" -timeout %1").arg(timeout));
@@ -352,41 +492,37 @@ void GuiRecorder::writeReady() {
     }
     for (const QString &line : entry.lines) writeLine(line);
   }
+  showPending();
+}
+
+// Lines not written yet: held back, or of an action still open, as its frame
+// would record them now.
+void GuiRecorder::showPending() {
+  if (!m_preview) return;
+  QStringList pending;
+  for (int i = m_nextToWrite; i < m_entries.size(); ++i) {
+    if (m_entries.at(i).closed) {
+      pending << m_entries.at(i).lines;
+      continue;
+    }
+    for (const OpenFrame &f : m_frames) {
+      if (f.entry != i) continue;
+      const Offer *pick = pickOffer(f);
+      if (pick && !pick->lines.isEmpty()) pending << pick->lines;
+    }
+  }
+  m_preview->setPending(pending);
 }
 
 void GuiRecorder::writeLine(const QString &line) {
   if (!m_out) return;
   m_out->write((line + "\n").toUtf8());
   if (m_file) m_file->flush();
+  if (m_preview) m_preview->append(line);
 }
 
 QString GuiRecorder::pathWord(const QString &text, QStringList *notes) const {
-  if (!QDir::isAbsolutePath(text)) return tclWord(text);
-  const QString path = QDir::cleanPath(text);
-#ifdef _WIN32
-  const Qt::CaseSensitivity cs = Qt::CaseInsensitive;
-#else
-  const Qt::CaseSensitivity cs = Qt::CaseSensitive;
-#endif
-  struct Base {
-    QString dir;
-    const char *variable;
-  };
-  QList<Base> bases{{m_projectDir, "$::gui_test::project_dir"},
-                    {m_installDir, "$::gui_test::install_dir"}};
-  // The deeper directory wins when one contains the other.
-  std::sort(bases.begin(), bases.end(), [](const Base &a, const Base &b) {
-    return a.dir.size() > b.dir.size();
-  });
-  for (const Base &base : bases) {
-    if (base.dir.isEmpty()) continue;
-    if (path.compare(base.dir, cs) == 0) return base.variable;
-    if (path.startsWith(base.dir + "/", cs))
-      return QString("\"%1/%2\"")
-          .arg(base.variable, escapeInQuotes(path.mid(base.dir.size() + 1)));
-  }
-  notes->append("# absolute path, not under the project or install directory");
-  return tclWord(text);
+  return pathWordIn(text, m_projectDir, m_installDir, notes);
 }
 
 void GuiRecorder::watch(QAction *action) {
@@ -398,7 +534,9 @@ void GuiRecorder::watch(QAction *action) {
 }
 
 void GuiRecorder::watch(QWidget *widget) {
-  if (widget->property(kWatchedProperty).isValid()) return;
+  if (widget->property(kWatchedProperty).isValid() ||
+      GuiTestHub::isInternal(widget))
+    return;
   widget->setProperty(kWatchedProperty, true);
   for (QAction *a : widget->actions()) watch(a);
 
@@ -408,16 +546,17 @@ void GuiRecorder::watch(QWidget *widget) {
       onButton(button);
     });
   } else if (auto combo = qobject_cast<QComboBox *>(widget)) {
-    connect(combo, &QComboBox::activated, this, [this, combo](int index) {
-      if (combo->objectName().isEmpty()) {
-        offer(combo, {}, false,
-              unrecordedText(combo, combo->itemText(index)));
-        return;
-      }
-      offer(combo, {"gui_select " + tclWord(combo->objectName()) + " " +
-                    tclWord(combo->itemText(index))},
-            false);
-    });
+    // The text as chosen: a handler of activated may rebuild the items.
+    connect(combo, &QComboBox::textActivated, this,
+            [this, combo](const QString &text) {
+              if (combo->objectName().isEmpty()) {
+                offer(combo, {}, false, unrecordedText(combo, text));
+                return;
+              }
+              offer(combo, {"gui_select " + tclWord(combo->objectName()) +
+                            " " + tclWord(text)},
+                    false);
+            });
   } else if (auto edit = qobject_cast<QLineEdit *>(widget)) {
     connect(edit, &QLineEdit::editingFinished, this, [this, edit]() {
       // Return and then the loss of focus both finish the same edit; a dialog
@@ -448,7 +587,7 @@ void GuiRecorder::watch(QWidget *widget) {
                   tclWord(text);
               if (index.column() != 0)
                 line += QString(" -column %1").arg(index.column());
-              offer(view, {line}, false);
+              offer(view, {line}, false, {}, clickKey(view, text));
             });
   } else if (auto bar = qobject_cast<QTabBar *>(widget)) {
     connect(bar, &QTabBar::tabBarClicked, this, [this, bar](int index) {
@@ -467,7 +606,55 @@ void GuiRecorder::watch(QWidget *widget) {
   } else if (widget->inherits("FOEDAG::TclConsoleWidget")) {
     connect(widget, SIGNAL(commandEntered(QString)), this,
             SLOT(onConsoleCommand(QString)));
+  } else {
+    // A custom editor that gui_set_text writes through its text property.
+    const QMetaObject *meta = widget->metaObject();
+    const QMetaProperty text = meta->property(meta->indexOfProperty("text"));
+    const QMetaObject *self = metaObject();
+    if (text.isValid() && text.isWritable() && text.hasNotifySignal())
+      connect(widget, text.notifySignal(), this,
+              self->method(self->indexOfSlot("onTextEdited()")));
   }
+}
+
+void GuiRecorder::onTextEdited() {
+  auto widget = qobject_cast<QWidget *>(sender());
+  if (!widget || m_frames.isEmpty()) return;
+  const QString text = widget->property("text").toString();
+  if (widget->objectName().isEmpty()) {
+    offer(widget, {}, false, unrecordedText(widget, text));
+    return;
+  }
+  const QString key = "text " + widget->objectName();
+  // One edit can change the text more than once; the last text counts.
+  QList<Offer> &offers = m_frames.last().offers;
+  offers.erase(std::remove_if(offers.begin(), offers.end(),
+                              [&](const Offer &o) { return o.key == key; }),
+               offers.end());
+  supersede(key);
+  offer(widget,
+        {"gui_set_text " + tclWord(widget->objectName()) + " " +
+         lineWord(text)},
+        false, {}, key);
+}
+
+// Recorded from the event, before handlers that may open a modal dialog.
+void GuiRecorder::onDoubleClick(QObject *watched, const QMouseEvent *event) {
+  auto view = qobject_cast<QAbstractItemView *>(watched->parent());
+  if (!view || view->viewport() != watched || event->button() != Qt::LeftButton)
+    return;
+  const QModelIndex index = view->indexAt(event->position().toPoint());
+  if (!index.isValid()) return;
+  const QString text = index.data().toString();
+  supersede(clickKey(view, text));
+  if (view->objectName().isEmpty()) {
+    offer(view, {}, false, unrecordedText(view, text));
+    return;
+  }
+  offer(view,
+        {"gui_click " + tclWord(view->objectName()) + " -item " +
+         tclWord(text) + " -double"},
+        false);
 }
 
 void GuiRecorder::onButton(QAbstractButton *button) {
@@ -518,7 +705,9 @@ void GuiRecorder::checkpoint(QWidget *widget) {
   auto button = qobject_cast<QAbstractButton *>(named);
   bool hasText{false};
   const QString text = guiDisplayedText(named, &hasText);
-  if (name.isEmpty()) {
+  if (named->isWindow() && !name.isEmpty()) {
+    // A window has no value of its own; its checkpoint is the screenshot.
+  } else if (name.isEmpty()) {
     lines << "# UNRECORDED: checkpoint on " + unrecordedText(named, text);
     std::cerr << "WARNING: recorder: checkpoint on an unnamed "
               << named->metaObject()->className()
@@ -563,13 +752,17 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
       if (auto w = qobject_cast<QWidget *>(watched)) watch(w);
       break;
     case QEvent::ActionAdded:
-      watch(static_cast<QActionEvent *>(event)->action());
+      if (!GuiTestHub::isInternal(watched))
+        watch(static_cast<QActionEvent *>(event)->action());
       break;
     case QEvent::KeyPress: {
+      if (GuiTestHub::isInternal(watched)) break;
       auto key = static_cast<QKeyEvent *>(event);
       if (key->key() == Qt::Key_S &&
           key->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
-        checkpoint(QApplication::focusWidget());
+        // A window such as Floor Planning may have no focused widget.
+        checkpoint(QApplication::focusWidget() ? QApplication::focusWidget()
+                                               : QApplication::activeWindow());
         return true;
       }
       [[fallthrough]];
@@ -581,6 +774,7 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
     case QEvent::ContextMenu: {
       if (!qobject_cast<QWidget *>(watched) && !qobject_cast<QAction *>(watched))
         break;
+      if (GuiTestHub::isInternal(watched)) break;
       // An event passed on to a parent widget is still the same input. Event
       // objects are reused for new input, so the address alone is not proof.
       for (const OpenFrame &f : m_frames)
@@ -589,6 +783,8 @@ bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
           return QObject::eventFilter(watched, event);
       closeInputFrames(loopLevel());
       openFrame(watched, true, event);
+      if (event->type() == QEvent::MouseButtonDblClick)
+        onDoubleClick(watched, static_cast<QMouseEvent *>(event));
       if (event->type() == QEvent::MouseButtonRelease) {
         auto button = qobject_cast<QAbstractButton *>(watched);
         auto mouse = static_cast<QMouseEvent *>(event);

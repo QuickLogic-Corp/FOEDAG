@@ -50,9 +50,14 @@ void applyToApplication() {
 
 bool isActive() { return active; }
 
+bool isDebugMode() {
+  return qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_DEBUG") == 1;
+}
+
 bool isDisplayMode() {
   return qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_SHOW") == 1 ||
-         qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_INTERACTIVE") == 1;
+         qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_INTERACTIVE") == 1 ||
+         isDebugMode();
 }
 
 bool isGenGoldensMode() {

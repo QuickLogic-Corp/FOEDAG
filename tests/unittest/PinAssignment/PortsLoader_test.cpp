@@ -20,8 +20,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "PinAssignment/PortsLoader.h"
+#include "PinAssignment/QLPortsLoader.h"
 #include "gtest/gtest.h"
 using namespace FOEDAG;
+#include <QFile>
+#include <QTemporaryDir>
 #include <filesystem>
 
 TEST(PortsLoader, LoadGeneral) {
@@ -98,4 +101,30 @@ TEST(PortsLoader, LoadCorruptedJson) {
   auto [res, error] = loader.load(":/PinAssignment/corrupted.json");
   EXPECT_EQ(res, false) << error.toStdString();
   EXPECT_NE(error, QString{});
+}
+
+// Ports are listed in natural order, inputs first, whatever the order in the
+// netlist; the clock is left out.
+TEST(QLPortsLoader, NaturalOrder) {
+  QTemporaryDir dir;
+  const QString blif = dir.filePath("design.blif");
+  QFile file{blif};
+  ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+  file.write(
+      ".model top\n"
+      ".inputs clk reset in[10] in[2]\n"
+      ".outputs count[0] count[3] count[10] count[2] count[1] count[007]\n"
+      ".subckt dffr C=clk D=x Q=y\n"
+      ".end\n");
+  file.close();
+
+  PortsModel model;
+  QLPortsLoader loader{&model};
+  auto [res, error] = loader.load(blif);
+  ASSERT_TRUE(res) << error.toStdString();
+  QStringList names;
+  for (const auto &port : model.ports().at(0).ports) names << port.name;
+  EXPECT_EQ(names, QStringList({"in[2]", "in[10]", "reset", "count[0]",
+                                "count[1]", "count[2]", "count[3]",
+                                "count[007]", "count[10]"}));
 }

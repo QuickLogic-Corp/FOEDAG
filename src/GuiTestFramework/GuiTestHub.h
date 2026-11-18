@@ -24,6 +24,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QObject>
 #include <QStringList>
 
+class QWidget;
+
 namespace FOEDAG {
 
 // Counts named milestones raised by the application in replay mode, so that
@@ -36,6 +38,10 @@ class GuiTestHub : public QObject {
 
   static GuiTestHub *instance();
   static Kind kindOf(const QString &name);
+  // A window of the test framework itself: it raises no milestone and the
+  // recorder does not record it.
+  static void markInternal(QWidget *window);
+  static bool isInternal(const QObject *object);
 
   void enable();
   void disable();

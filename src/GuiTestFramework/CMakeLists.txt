@@ -29,6 +29,7 @@ set (SRC_CPP_LIST
   GuiTestHub.cpp
   GuiTestMode.cpp
   GuiTestRunner.cpp
+  GuiTestScriptView.cpp
 )
 
 set (SRC_H_LIST
@@ -39,6 +40,7 @@ set (SRC_H_LIST
   GuiTestHub.h
   GuiTestMode.h
   GuiTestRunner.h
+  GuiTestScriptView.h
 )
 
 add_library(guitestframework STATIC

@@ -4,8 +4,41 @@
 #include <QFile>
 #include <QSet>
 #include <QRegularExpression>
+#include <QStringView>
+#include <algorithm>
 
 namespace FOEDAG {
+
+namespace {
+
+// Natural order, so count[2] comes before count[10]: a run of digits compares
+// by its value, anything else as text.
+bool naturalLess(const QString &a, const QString &b) {
+  qsizetype i = 0;
+  qsizetype j = 0;
+  while (i < a.size() && j < b.size()) {
+    if (!a.at(i).isDigit() || !b.at(j).isDigit()) {
+      if (a.at(i) != b.at(j)) return a.at(i) < b.at(j);
+      ++i;
+      ++j;
+      continue;
+    }
+    auto number = [](const QString &s, qsizetype &k) {
+      const qsizetype start = k;
+      while (k < s.size() && s.at(k).isDigit()) ++k;
+      QStringView digits = QStringView{s}.mid(start, k - start);
+      while (digits.size() > 1 && digits.front() == u'0') digits = digits.mid(1);
+      return digits;
+    };
+    const QStringView x = number(a, i);
+    const QStringView y = number(b, j);
+    if (x.size() != y.size()) return x.size() < y.size();
+    if (x != y) return x < y;
+  }
+  return a.size() - i < b.size() - j;
+}
+
+}  // namespace
 
 QLPortsLoader::QLPortsLoader(PortsModel *model, QObject *parent)
     : PortsLoader(model, parent) {}
@@ -43,6 +76,9 @@ std::pair<bool, QString> QLPortsLoader::load(const QString& filePath) {
     }
   }
 
+  // The netlist lists bus bits in no useful order (count[0], count[3], ...).
+  std::sort(inputs.begin(), inputs.end(), naturalLess);
+  std::sort(outputs.begin(), outputs.end(), naturalLess);
   IOPortGroup group;
   for (const QString& input: inputs) {
     if (!clocks.contains(input)) {

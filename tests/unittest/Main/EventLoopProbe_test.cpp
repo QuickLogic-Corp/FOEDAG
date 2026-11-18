@@ -77,5 +77,6 @@ TEST(EventLoopProbe, reports_the_blocked_time_per_period) {
   EXPECT_GE(second["max_lag_ms"].toInt(), 590);
   EXPECT_GT(first["ticks"].toInt(), 0);
   EXPECT_GT(second["t_ms"].toInt(), first["t_ms"].toInt());
+  f.close();  // Windows cannot delete an open file
   std::filesystem::remove(path);
 }

@@ -25,6 +25,8 @@ public slots:
   void onDesignFilesChanged();
 
  private:
+  TaskStatusWatcher();
+
   bool m_isSynthResultDirty = false;
 };
 

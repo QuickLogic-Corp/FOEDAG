@@ -33,6 +33,8 @@ set (CPP_LIST
 #    PinAssignment/PinAssignmentCreator_test.cpp // TODO @volodymyrk RG-181
 #    PinAssignment/PinsBaseModel_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/PortsLoader_test.cpp
+    PinAssignment/PcfObserver_test.cpp
+    PinAssignment/PortsView_test.cpp
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
@@ -48,11 +50,19 @@ set (CPP_LIST
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp
     Compiler/BlifParser_test.cpp
+    Compiler/PackLayout_test.cpp
+    Compiler/QLMetricsManager_test.cpp
+    Compiler/EngineStatusRefresh_test.cpp
+    Compiler/NoIncremental_test.cpp
     Compiler/CommandWrapper_test.cpp
     Compiler/TaskCompilationStateManager_test.cpp
     Compiler/FlowEngineClient_test.cpp
     Compiler/EngineBackend_test.cpp
     Compiler/PrivateTempDir_test.cpp
+    Compiler/DumpOptions_test.cpp
+    Compiler/DumpOptionsGuard_test.cpp
+    Compiler/EncryptedCopy_test.cpp
+    Compiler/ClockBinding_test.cpp
     Main/EventLoopProbe_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp

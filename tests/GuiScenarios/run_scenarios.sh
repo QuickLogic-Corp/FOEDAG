@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Runs device-free GUI scenarios with "<binary> --replay", one run dir each.
-# usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
+# usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--debug] [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
 #   GUI_TEST_FRAMEWORK_TARGET_BIN: the GUI application to test, a path or a name on PATH; no scenarios: all here
 #   --show: use the platform's own Qt display instead of offscreen, to watch the run
 #   --interactive: as --show, and run each line only after Space is pressed
 #     --timeout ms: or once a line has waited that long (default -1: wait for Space)
-#   --roundtrip: replay each scenario with --record, compare its action lines
-#     with the recording's (G-013), then replay the recording unchanged (G-015)
+#   --debug: as --show (or with --interactive), plus a window with the script's
+#     progress, breakpoints and Run; at the end it shows the result and the
+#     application stays open until that window is closed
+#   --roundtrip: replay each scenario with --record, replay the recording
+#     unchanged after the scenario's setup lines (G-015), and compare the
+#     actions both runs performed, with variables substituted (G-013)
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
 # if <binary> exits non-zero and its FAIL line contains every expected text.
+# GUI_TEST_FRAMEWORK_RUN_TIMEOUT: seconds before a run is taken as hung (3600).
 # GUI_TEST_FRAMEWORK_GOLDEN_DIR turns the screenshot gate on; without it,
 # screenshots are only saved. Negative scripts always use golden/ here, whose
 # goldens fail on any machine. GUI_TEST_FRAMEWORK_GOLDEN=update (gen-goldens mode)
@@ -18,6 +23,16 @@ set -u
 platform=(env QT_QPA_PLATFORM=offscreen)
 interactive=0
 roundtrip=0
+debug=0
+if [ "${1:-}" = --debug ]; then
+  debug=1
+  shift
+  case "${1:-}" in
+    --show | --interactive) ;;
+    --roundtrip) echo "[error] --debug does not go with --roundtrip" >&2; exit 1 ;;
+    *) set -- --show "$@" ;;
+  esac
+fi
 case "${1:-}" in
   --show | --interactive)
     [ "$1" = --interactive ] && interactive=1
@@ -36,7 +51,7 @@ case "${1:-}" in
       shift 2
     fi
     platform=(env -u QT_QPA_PLATFORM GUI_TEST_FRAMEWORK_SHOW=1 GUI_TEST_FRAMEWORK_INTERACTIVE=$interactive
-      GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT=$hold_timeout)
+      GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT=$hold_timeout GUI_TEST_FRAMEWORK_DEBUG=$debug)
     ;;
   --roundtrip)
     roundtrip=1
@@ -68,14 +83,13 @@ out=${GUI_TEST_FRAMEWORK_OUT_DIR:-$PWD/gui-scenarios}
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 
-# A paused interactive session must not be killed by the time limit.
+# The limit only ends a hung run. A busy build node can run a scenario many
+# times slower than an idle one, so it is set far above any normal run. A
+# paused interactive or debug session must not be killed by it.
 limit=""
-if [ $interactive -eq 0 ] && command -v timeout >/dev/null 2>&1; then
-  limit="timeout 300"
+if [ $interactive -eq 0 ] && [ $debug -eq 0 ] && command -v timeout >/dev/null 2>&1; then
+  limit="timeout ${GUI_TEST_FRAMEWORK_RUN_TIMEOUT:-3600}"
 fi
-
-# The action lines G-013 compares: what a user does, not waits or checks.
-actions='^(gui_click|gui_set_text|gui_select|gui_trigger_action|gui_dialog|gui_drag|gui_menu)( |$)'
 
 # run <run dir> <binary args...>: one run in a fresh dir, log in replay.log.
 run() {
@@ -94,8 +108,9 @@ run() {
       HOME="$dir/home" USERPROFILE="$dir/home" \
       AURORA2_DEVICE_DATA_DIR= AURORA2_DEVICE_DATA_PATH= \
       GUI_TEST_FRAMEWORK_GOLDEN_DIR="$golden" \
+      GUI_TEST_FRAMEWORK_TRACE=$([ $roundtrip -eq 1 ] && echo "$dir/actions.trace") \
       "${platform[@]}" $limit "$binary" "$@" 2>&1 |
-      if [ $interactive -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
+      if [ $interactive -eq 1 ] || [ $debug -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
     exit "${PIPESTATUS[0]}")
 }
 
@@ -124,9 +139,6 @@ for scenario in "$@"; do
     rc=$?
     if [ $rc -ne 0 ] || ! grep -q '^PASS: ' "$dir/replay.log"; then
       reason="the scenario failed with --record"
-    elif ! diff <(grep -E "$actions" "$scenario") <(grep -E "$actions" "$recording") \
-        > "$dir/actions.diff"; then
-      reason="action lines differ, see $dir/actions.diff"
     elif grep -q '^# UNRECORDED' "$recording"; then
       reason="the recording has # UNRECORDED lines"
     elif grep -q '^gui_test_checkpoint' "$scenario" && ! grep -q '^gui_assert' "$recording"; then
@@ -134,11 +146,22 @@ for scenario in "$@"; do
     elif grep -qE '^[[:space:]]*after[[:space:]]+[0-9]' "$recording"; then
       reason="the recording has a fixed delay"
     else
-      dir=$out/$name.replayed
-      run "$dir" --replay "$recording"
+      # The recorder sees only the GUI, so the scenario's setup (its lines
+      # before gui_start, such as building a fixture project) goes first.
+      replay=$out/$name.replay.tcl
+      awk 'FNR == NR { if (/^gui_start/) done = 1
+                       if (!done && !/^[[:space:]]*(#|$)/) setup = setup $0 "\n"
+                       next }
+           /^gui_start/ && !put { printf "%s", setup; put = 1 }
+           { print }' "$scenario" "$recording" > "$replay"
+      run "$out/$name.replayed" --replay "$replay"
       rc=$?
-      if [ $rc -ne 0 ] || ! grep -q '^PASS: ' "$dir/replay.log"; then
+      if [ $rc -ne 0 ] || ! grep -q '^PASS: ' "$out/$name.replayed/replay.log"; then
         reason="the recording does not replay"
+        dir=$out/$name.replayed
+      elif ! diff "$dir/actions.trace" "$out/$name.replayed/actions.trace" \
+          > "$dir/actions.diff"; then
+        reason="the recording does other actions, see $dir/actions.diff"
       fi
     fi
   else

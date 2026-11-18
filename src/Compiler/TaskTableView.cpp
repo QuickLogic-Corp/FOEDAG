@@ -110,9 +110,28 @@ void TaskTableView::setModel(QAbstractItemModel *model) {
     auto statusIndex = this->model()->index(i, StatusCol);
     // Table view can't play gif animations automatically, so we set QLabel,
     // which can.
-    setIndexWidget(statusIndex, new QLabel);
+    auto statusLabel = new QLabel;
+    setIndexWidget(statusIndex, statusLabel);
     auto task = m_taskManager->task(statusIndex.data(TaskId).toUInt());
     connect(task, &Task::enableChanged, this, [this]() { update(); });
+    // The status is shown only as an icon; the property lets GUI scenarios
+    // read it with `gui_get taskStatus_<title> status`.
+    if (task && task->type() == TaskType::Action) {
+      statusLabel->setObjectName("taskStatus_" + task->title());
+      auto setStatus = [statusLabel](TaskStatus status) {
+        QString name;
+        switch (status) {
+          case TaskStatus::None: name = "None"; break;
+          case TaskStatus::InProgress: name = "InProgress"; break;
+          case TaskStatus::Success: name = "Success"; break;
+          case TaskStatus::Fail: name = "Fail"; break;
+          case TaskStatus::Dirty: name = "Dirty"; break;
+        }
+        statusLabel->setProperty("status", name);
+      };
+      setStatus(task->status());
+      connect(task, &Task::statusChanged, statusLabel, setStatus);
+    }
     if (task && ((task->type() == TaskType::Settings) ||
                  (task->type() == TaskType::Button))) {
       auto index = this->model()->index(i, TitleCol);

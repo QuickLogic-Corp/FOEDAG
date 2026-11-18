@@ -101,6 +101,7 @@ PortsView::PortsView(PinsBaseModel *model, QWidget *parent)
   setColumnWidth(InternalPinsCol, 150);
 #endif
   resizeColumnToContents(PackagePinCol);
+  header()->setSectionResizeMode(DirCol, QHeaderView::ResizeToContents);
   hideColumn(ModeCol);
   hideColumn(InternalPinsCol);
 #endif
@@ -228,6 +229,7 @@ void PortsView::insertTableItem(QTreeWidgetItem *parent, const IOPort &port) {
   }
 #endif
 
+  combo->setObjectName("pin_" + port.name);
   combo->setAutoFillBackground(true);
   combo->setEditable(true);
 #ifdef UPSTREAM_PINPLANNER

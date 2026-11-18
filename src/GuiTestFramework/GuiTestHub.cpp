@@ -48,9 +48,12 @@ struct BridgeEntry {
 constexpr BridgeEntry kBridges[] = {
     {"FOEDAG::TaskManager", "started()", "task.started"},
     {"FOEDAG::TaskManager", "done()", "task.done"},
+    {"FOEDAG::PcfObserver", "contentChecked(bool)", "pcf.checked"},
+    {"FOEDAG::TaskStatusWatcher", "synthResultDirty()", "synth.dirty"},
 };
 
 constexpr int kRecentSize = 10;
+constexpr const char *kInternalProperty = "_guiTestInternal";
 const QChar kArgSeparator{0x1f};
 
 class BridgeRelay : public QObject {
@@ -66,12 +69,24 @@ class BridgeRelay : public QObject {
 };
 
 bool isTrackedWindow(QWidget *w) {
-  if (!w->isWindow()) return false;
+  if (!w->isWindow() || GuiTestHub::isInternal(w)) return false;
   const Qt::WindowType type = w->windowType();
   return type != Qt::Popup && type != Qt::ToolTip && type != Qt::SplashScreen;
 }
 
 }  // namespace
+
+void GuiTestHub::markInternal(QWidget *window) {
+  window->setProperty(kInternalProperty, true);
+}
+
+// The parent chain also covers popups, such as a context menu, opened there.
+bool GuiTestHub::isInternal(const QObject *object) {
+  for (; object; object = object->parent())
+    if (object->isWidgetType() && object->property(kInternalProperty).toBool())
+      return true;
+  return false;
+}
 
 GuiTestHub *GuiTestHub::instance() {
   static GuiTestHub *hub = new GuiTestHub;
@@ -79,7 +94,10 @@ GuiTestHub *GuiTestHub::instance() {
 }
 
 GuiTestHub::Kind GuiTestHub::kindOf(const QString &name) {
-  static const QStringList info{"task.started", "process.started", "busy.on"};
+  // synth.dirty follows a design file edited outside the GUI, which a
+  // recording cannot replay, so the recorder must not wait for it either.
+  static const QStringList info{"task.started", "process.started", "busy.on",
+                                "synth.dirty"};
   return info.contains(name) ? Kind::Info : Kind::Sync;
 }
 

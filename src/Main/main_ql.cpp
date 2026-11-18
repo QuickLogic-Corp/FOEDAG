@@ -63,6 +63,7 @@ int main(int argc, char** argv) {
     compiler = opcompiler_ql;
     compiler->SetUseVerific(cmd->UseVerific());
   }
+  compiler->ForceFullRun(cmd->NoIncremental());
 
   FOEDAG::Foedag* foedag = new FOEDAG::Foedag(
       cmd, mainWindowBuilder, registerAllFoedagCommands, compiler, settings);

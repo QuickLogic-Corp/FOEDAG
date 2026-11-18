@@ -32,9 +32,12 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 class QAbstractButton;
 class QAction;
 class QIODevice;
+class QMouseEvent;
 class QWidget;
 
 namespace FOEDAG {
+
+class RecordingPreview;
 
 // Writes the user's GUI actions as a "# gui-test: sync" replay script
 // (aurora --record). The rules are in aurora2
@@ -82,6 +85,7 @@ class GuiRecorder : public QObject {
 
  private slots:
   void onConsoleCommand(const QString &command);
+  void onTextEdited();
 
  private:
   struct Offer {
@@ -89,6 +93,7 @@ class GuiRecorder : public QObject {
     QString unrecorded;
     QPointer<QObject> source;
     bool action{false};
+    QString key;  // see Entry::key
   };
   struct OpenFrame {
     int id;
@@ -106,6 +111,9 @@ class GuiRecorder : public QObject {
     qint64 openedAt{0};
     quint64 seq{0};  // last milestone seen when the frame opened
     QStringList lines;
+    // Set when a later action may replace this line (supersede()); the line
+    // is held back while it is the newest entry.
+    QString key;
   };
   struct Milestone {
     quint64 seq;
@@ -118,20 +126,25 @@ class GuiRecorder : public QObject {
   void begin();
   int openFrame(QObject *target, bool input, const QEvent *event);
   void closeFrame(int id);
+  static const Offer *pickOffer(const OpenFrame &frame);
   void closeInputFrames(int level);
   void offer(QObject *source, const QStringList &lines, bool action,
-             const QString &unrecordedText = {});
+             const QString &unrecordedText = {}, const QString &key = {});
+  void supersede(const QString &key);
+  void onDoubleClick(QObject *watched, const QMouseEvent *event);
   void watch(QWidget *widget);
   void watch(QAction *action);
   void onButton(QAbstractButton *button);
   void onAction(QAction *action);
   QString pathWord(const QString &text, QStringList *notes) const;
-  void writeReady();
+  void writeReady(bool force = false);
+  void showPending();
   void writeLine(const QString &line);
   qint64 now() const;
 
   QIODevice *m_out{nullptr};
   std::unique_ptr<QFile> m_file;
+  QPointer<RecordingPreview> m_preview;
   QList<OpenFrame> m_frames;  // innermost last
   QList<Entry> m_entries;
   int m_nextToWrite{0};
@@ -150,5 +163,9 @@ class GuiRecorder : public QObject {
 
 // Tcl list quoting, so recorded lines are canonical.
 QString tclWord(const QString &word);
+
+// A gui_* command as it ran, written the way the recorder writes it, so a
+// scenario and its recording can be compared after Tcl substitution (G-013).
+QString traceLine(int argc, const char *argv[]);
 
 }  // namespace FOEDAG
