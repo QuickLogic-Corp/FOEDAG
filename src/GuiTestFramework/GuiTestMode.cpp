@@ -23,57 +23,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QApplication>
 #include <QWidget>
 
-#include "tcl.h"
-
-#ifdef __linux__
-#include <execinfo.h>
-#include <sys/prctl.h>
-#include <sys/syscall.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include <cstdarg>
-#include <cstdio>
-#include <cstdlib>
-#endif
-
 namespace FOEDAG::GuiTestMode {
 
 namespace {
 bool active{false};
-
-#ifdef __linux__
-// Temporary diagnostic for the Tcl panic on the RHEL golden node (#2681):
-// prints the panic, the stacks and this thread's std channels, then aborts.
-[[noreturn]] void panicWithBacktrace(const char *format, ...) {
-  va_list args;
-  va_start(args, format);
-  std::vfprintf(stderr, format, args);
-  va_end(args);
-  std::fprintf(stderr, "\n[gui-test] Tcl panic in thread %ld\n", static_cast<long>(syscall(SYS_gettid)));
-  void *frames[64];
-  backtrace_symbols_fd(frames, backtrace(frames, 64), STDERR_FILENO);
-  std::fflush(stderr);
-  char pid[16];
-  std::snprintf(pid, sizeof pid, "%d", getpid());
-  prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY);
-  if (pid_t child = fork(); child == 0) {
-    dup2(STDERR_FILENO, STDOUT_FILENO);
-    execlp("gdb", "gdb", "-p", pid, "-batch", "-ex", "thread apply all bt", nullptr);
-    _exit(127);
-  } else if (child > 0) {
-    waitpid(child, nullptr, 0);
-  }
-  // Last: Tcl may be the broken part.
-  for (int type : {TCL_STDIN, TCL_STDOUT, TCL_STDERR}) {
-    Tcl_Channel channel = Tcl_GetStdChannel(type);
-    std::fprintf(stderr, "[gui-test] std channel %d: %p %s\n", type, static_cast<void *>(channel),
-                 channel ? Tcl_GetChannelName(channel) : "-");
-  }
-  std::abort();
 }
-#endif
-}  // namespace
 
 void prepareEnvironment(bool replay) {
   active = replay;
@@ -87,9 +41,6 @@ void prepareEnvironment(bool replay) {
 
 void applyToApplication() {
   if (!active) return;
-#ifdef __linux__
-  Tcl_SetPanicProc(panicWithBacktrace);
-#endif
   QApplication::setCursorFlashTime(0);
   for (Qt::UIEffect effect :
        {Qt::UI_AnimateCombo, Qt::UI_AnimateMenu, Qt::UI_AnimateTooltip,
