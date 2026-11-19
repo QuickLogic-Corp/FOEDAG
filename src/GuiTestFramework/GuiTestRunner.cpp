@@ -303,6 +303,15 @@ void GuiTestRunner::fail(const QString &message) {
   finish(1);
 }
 
+void GuiTestRunner::warn(const QString &message) {
+  std::cout << "WARN: " << message.toStdString() << std::endl;
+  if (!m_running.isEmpty()) {
+    const Command &command = m_commands.at(m_running.last().index);
+    std::cout << "  at " << m_file.toStdString() << ":" << command.line
+              << ": " << command.text.toStdString() << std::endl;
+  }
+}
+
 void GuiTestRunner::finish(int code) {
   if (GuiRecorder::isActive()) GuiRecorder::instance()->flush();
   if (code == 0) std::cout << "PASS: " << m_file.toStdString() << std::endl;

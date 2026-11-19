@@ -866,23 +866,41 @@ int guiWaitFor(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return fail(interp, message + openDialogNote());
 }
 
-int guiAssert(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
+// gui_assert and gui_warn: TCL_ERROR when <expr> cannot be evaluated;
+// otherwise *message says why it is false, or is empty when it holds.
+int check(Tcl_Interp *interp, const char *name, int argc, const char *argv[],
+          QString *message) {
   if (argc != 2 && argc != 3)
-    return fail(interp, "usage: gui_assert <expr> [message]");
-  const QString expr = QString::fromUtf8(argv[1]);
-  const QString what = QString("gui_assert {%1}").arg(expr);
+    return fail(interp, QString("usage: %1 <expr> [message]").arg(name));
+  const QString what = QString("%1 {%2}").arg(name, QString::fromUtf8(argv[1]));
   int result{0};
   if (Tcl_ExprBoolean(interp, argv[1], &result) != TCL_OK)
     return fail(interp, what + ": " + Tcl_GetStringResult(interp));
   if (result) return succeed(interp);
-  QString message = what + ": false";
-  if (argc == 3) message += ": " + QString::fromUtf8(argv[2]);
+  *message = what + ": false";
+  if (argc == 3) *message += ": " + QString::fromUtf8(argv[2]);
   Tcl_Obj *source = Tcl_NewStringObj(argv[1], -1);
   Tcl_IncrRefCount(source);
   if (Tcl_Obj *values = Tcl_SubstObj(interp, source, TCL_SUBST_ALL))
-    message += QString(" (evaluated: %1)").arg(Tcl_GetString(values));
+    *message += QString(" (evaluated: %1)").arg(Tcl_GetString(values));
   Tcl_DecrRefCount(source);
-  return fail(interp, message);
+  return succeed(interp);
+}
+
+int guiAssert(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
+  QString message;
+  if (check(interp, "gui_assert", argc, argv, &message) != TCL_OK)
+    return TCL_ERROR;
+  return message.isEmpty() ? TCL_OK : fail(interp, message);
+}
+
+// A check on a known defect that must not fail the run until it is fixed.
+int guiWarn(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
+  QString message;
+  if (check(interp, "gui_warn", argc, argv, &message) != TCL_OK)
+    return TCL_ERROR;
+  if (!message.isEmpty()) GuiTestRunner::instance()->warn(message);
+  return TCL_OK;
 }
 
 int guiDialog(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
@@ -1126,6 +1144,7 @@ void registerGuiTestCommands(Tcl_Interp *interp) {
       {"gui_drag", guiDrag},
       {"gui_wait_for", guiWaitFor},
       {"gui_assert", guiAssert},
+      {"gui_warn", guiWarn},
       {"gui_dialog", guiDialog},
       {"gui_wait_event", guiWaitEvent},
       {"gui_screenshot", guiScreenshot},

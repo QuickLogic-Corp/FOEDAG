@@ -44,6 +44,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <functional>
+#include <iostream>
+#include <sstream>
 
 #include "GuiTestFramework/GuiTestCommands.h"
 #include "GuiTestFramework/GuiTestHub.h"
@@ -366,6 +368,27 @@ TEST(GuiTestCommands, RightClickRequestsContextMenu) {
 // The script view grays finished commands, highlights running ones (all lines
 // of a command that spans several), marks the next one, lists each line's
 // screenshots, and is no test target.
+// gui_warn logs a false check and lets the run go on; it still fails on an
+// expression it cannot evaluate, which is a script error.
+TEST(GuiTestCommands, WarnLogsAFalseCheckAndDoesNotFail) {
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  std::ostringstream out;
+  std::streambuf *saved = std::cout.rdbuf(out.rdbuf());
+  const int held = Tcl_Eval(interp, "gui_warn {1 == 1} \"holds\"");
+  const std::string afterHeld = out.str();
+  const int falseCode = Tcl_Eval(interp, "set x 2; gui_warn {$x == 1} \"known issue\"");
+  std::cout.rdbuf(saved);
+  EXPECT_EQ(held, TCL_OK);
+  EXPECT_EQ(afterHeld, "");
+  EXPECT_EQ(falseCode, TCL_OK) << Tcl_GetStringResult(interp);
+  EXPECT_EQ(out.str(),
+            "WARN: gui_warn {$x == 1}: false: known issue (evaluated: 2 == 1)\n");
+  EXPECT_EQ(Tcl_Eval(interp, "gui_warn {$nosuch == 1}"), TCL_ERROR);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_assert {$x == 1}"), TCL_ERROR);
+  Tcl_DeleteInterp(interp);
+}
+
 TEST(GuiTestScriptView, ShowsProgressByCommand) {
   const QVector<GuiTestScriptView::Span> commands{
       {2, 1}, {4, 2}, {6, 1}, {7, 1}};
