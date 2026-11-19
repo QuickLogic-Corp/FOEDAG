@@ -29,6 +29,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QLabel>
+#include <QTimer>
+#include <QIntValidator>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -398,6 +400,78 @@ TEST_F(GuiRecorderTest, TextFinishedByAClickIsWrittenBeforeIt) {
     emit edit->editingFinished();
   }
   EXPECT_EQ(lines(), join({"gui_set_text depth 1", "gui_click generate"}));
+}
+
+// A field that finishes invalid text on losing focus, and warns in a modal
+// box when it does, as the IP Configurator's fields do.
+class WarningField : public QLineEdit {
+ public:
+  WarningField() {
+    setValidator(new QIntValidator(4, 64, this));
+    connect(this, &QLineEdit::editingFinished, this, [this]() {
+      if (!hasAcceptableInput())
+        QMessageBox::warning(this, "Invalid", "Invalid value");
+    });
+  }
+
+ protected:
+  void focusOutEvent(QFocusEvent *e) override {
+    QLineEdit::focusOutEvent(e);
+    if (!hasAcceptableInput()) emit editingFinished();
+  }
+};
+
+// A user's press on a button takes focus from a field that then warns. The
+// box takes the press, so the button is not clicked. The recording must still
+// show the click, after the text and before the answer, so it replays.
+TEST_F(GuiRecorderTest, PressTakenByAFocusOutWarningIsRecorded) {
+  auto edit = add(new WarningField, "depth");
+  auto button = add(new QPushButton("Generate"), "generate");
+  int clicked = 0;
+  QObject::connect(button, &QPushButton::clicked, [&]() { ++clicked; });
+  window.show();
+  QApplication::setActiveWindow(&window);
+  ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
+  record();
+
+  edit->setFocus();
+  QTest::keyClicks(edit, "1");
+  int answered = 0;
+  QTimer answer;
+  QObject::connect(&answer, &QTimer::timeout, [&]() {
+    auto box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+    if (!box || !box->isVisible()) return;
+    ++answered;
+    // The user lets go of the button while the box is up.
+    QTest::mouseRelease(button, Qt::LeftButton);
+    QTest::mouseClick(box->button(QMessageBox::Ok), Qt::LeftButton);
+  });
+  answer.start(10);
+  QTest::mousePress(button, Qt::LeftButton);
+  answer.stop();
+  EXPECT_EQ(answered, 1);
+  EXPECT_EQ(clicked, 0);
+  EXPECT_EQ(lines(), join({"gui_set_text depth 1", "gui_click generate",
+                           "gui_dialog accept"}));
+}
+
+// With a valid value nothing warns: the press reaches the button, and the
+// click is recorded once, after the text.
+TEST_F(GuiRecorderTest, PressThatMovesFocusIsRecordedOnce) {
+  auto edit = add(new WarningField, "depth");
+  auto button = add(new QPushButton("Generate"), "generate");
+  int clicked = 0;
+  QObject::connect(button, &QPushButton::clicked, [&]() { ++clicked; });
+  window.show();
+  QApplication::setActiveWindow(&window);
+  ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
+  record();
+
+  edit->setFocus();
+  QTest::keyClicks(edit, "16");
+  QTest::mouseClick(button, Qt::LeftButton);
+  EXPECT_EQ(clicked, 1);
+  EXPECT_EQ(lines(), join({"gui_set_text depth 16", "gui_click generate"}));
 }
 
 // The trace writes a command the way the recorder would (G-013).

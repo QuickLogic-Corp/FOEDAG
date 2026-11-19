@@ -152,6 +152,11 @@ class GuiRecorder : public QObject {
   QList<Entry> m_entries;
   int m_nextToWrite{0};
   int m_nextFrameId{1};
+  // A user's press on m_pressed moved focus from m_unfocused; the frame
+  // m_pressFrame stands for that press until the press itself arrives.
+  QPointer<QAbstractButton> m_pressed;
+  QPointer<QObject> m_unfocused;
+  int m_pressFrame{0};
   QList<Milestone> m_milestones;
   quint64 m_seq{0};
   quint64 m_writtenSeq{0};
