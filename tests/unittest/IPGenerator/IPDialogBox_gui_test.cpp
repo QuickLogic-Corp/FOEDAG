@@ -107,7 +107,8 @@ TEST(IPDialogBox, OutOfRangeValueIsRefused) {
   ASSERT_NE(definition, nullptr);
   std::vector<SParameter> noValues;
   generator->AddIPInstance(new IPInstance(ip, "v1_0", definition, noValues,
-                                          "demo", (root / "out").string()));
+                                          "demo", (root / "out").string()),
+                           true);
 
   IPDialogBox dialog{DeviceParameters{}, nullptr, QString::fromStdString(ip),
                      {}, {}};

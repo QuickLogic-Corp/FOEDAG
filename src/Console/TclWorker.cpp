@@ -199,7 +199,9 @@ void TclWorker::init(bool batchMode) {
       Tcl_RegisterChannel(m_interpreter, m_channelIn);
     }
   }
-  Tcl_SetStdChannel(m_channelIn, TCL_STDIN);
+  // Tcl < 8.6.10 fills an emptied std slot with the next channel created,
+  // renaming it; a later `open` then panics on the duplicate name.
+  if (m_channelIn) Tcl_SetStdChannel(m_channelIn, TCL_STDIN);
 
   if (!errConsoleChannel) {
     errConsoleChannel = Tcl_CreateChannel(

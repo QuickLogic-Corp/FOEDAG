@@ -102,6 +102,36 @@ TEST(IPGenerate, IpInstanceDupes) {
       << "Ensure the IPInstances count is now 3";
 }
 
+// The Configure IP dialog's preview (configure_ip -template) must not add an
+// instance, nor replace one of the same module name.
+TEST(IPGenerate, PreviewIsKeptApartFromInstances) {
+  IPCatalog* ipCat = new IPCatalog();
+  Compiler* compiler = new Compiler();
+  IPGenerator* ipGen =
+      new IPGenerator(PathUtils::instance().installDir(), ipCat, compiler);
+  std::vector<Connector*> connections;
+  std::vector<Value*> parameters;
+  IPDefinition* def = new IPDefinition(IPDefinition::IPType::Other, "MOCK_IP",
+                                       "MOCK_IP_wrapper", "path_to_nowhere",
+                                       connections, parameters);
+  ipCat->addIP(def);
+  std::vector<SParameter> params;
+
+  IPInstance* fifo_a =
+      new IPInstance("MOCK_IP", "v1_0", def, params, "fifo_a", "out");
+  ipGen->AddIPInstance(fifo_a);
+  IPInstance* reconfigure =
+      new IPInstance("MOCK_IP", "v1_0", def, params, "fifo_a", "tmp");
+  ipGen->AddIPInstance(reconfigure, true);
+  IPInstance* opened =
+      new IPInstance("MOCK_IP", "v1_0", def, params, "MOCK_IP", "tmp");
+  ipGen->AddIPInstance(opened, true);
+
+  ASSERT_EQ(ipGen->IPInstances().size(), 1);
+  EXPECT_EQ(ipGen->IPInstances().front(), fifo_a);
+  EXPECT_EQ(ipGen->PreviewInstance(), opened);
+}
+
 TEST(IPGenerate, CheckAllIPPath) {
   IPCatalog* ipCat = new IPCatalog();
   Compiler* compiler = new Compiler();

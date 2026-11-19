@@ -422,12 +422,18 @@ void GuiRecorder::closeFrame(int id) {
   // Frames opened inside this one end with it.
   while (m_frames.size() > index + 1) closeFrame(m_frames.last().id);
   const OpenFrame frame = m_frames.takeLast();
+  if (frame.id == m_pressFrame) m_pressFrame = 0;
 
   const Offer *pick = pickOffer(frame);
   Entry &entry = m_entries[frame.entry];
   entry.closed = true;
   if (pick && !pick->lines.isEmpty()) {
-    entry.lines = pick->lines;
+    entry.lines.clear();
+    // A click that takes focus finishes the text typed before it.
+    if (!pick->typed)
+      for (const Offer &o : frame.offers)
+        if (o.typed && &o != pick) entry.lines << o.lines;
+    entry.lines << pick->lines;
     entry.action = true;
     entry.key = pick->key;
   } else if (pick) {
@@ -440,7 +446,8 @@ void GuiRecorder::closeFrame(int id) {
 }
 
 void GuiRecorder::offer(QObject *source, const QStringList &lines, bool action,
-                        const QString &unrecordedText, const QString &key) {
+                        const QString &unrecordedText, const QString &key,
+                        bool typed) {
   if (m_frames.isEmpty()) return;  // not caused by the user or a gui_* action
   Offer o;
   o.lines = lines;
@@ -448,6 +455,16 @@ void GuiRecorder::offer(QObject *source, const QStringList &lines, bool action,
   o.action = action;
   o.unrecorded = unrecordedText;
   o.key = key;
+  o.typed = typed;
+  // The field the press took focus from finishes its text once the dialog
+  // that press opened is closed, inside the frame of its answer.
+  if (m_pressFrame && source && source == m_unfocused)
+    for (OpenFrame &f : m_frames)
+      if (f.id == m_pressFrame) {
+        f.offers.append(o);
+        showPending();
+        return;
+      }
   m_frames.last().offers.append(o);
   showPending();
 }
@@ -586,7 +603,7 @@ void GuiRecorder::watch(QWidget *widget) {
       QStringList lines;
       const QString word = pathWord(edit->text(), &lines);
       lines << "gui_set_text " + tclWord(owner->objectName()) + " " + word;
-      offer(edit, lines, false);
+      offer(edit, lines, false, {}, {}, true);
     });
   } else if (auto view = qobject_cast<QAbstractItemView *>(widget)) {
     connect(view, &QAbstractItemView::clicked, this,
@@ -786,8 +803,30 @@ void GuiRecorder::checkpoint(QWidget *widget) {
 bool GuiRecorder::eventFilter(QObject *watched, QEvent *event) {
   switch (event->type()) {
     case QEvent::Show:
-      if (auto w = qobject_cast<QWidget *>(watched)) watch(w);
+      if (auto w = qobject_cast<QWidget *>(watched)) {
+        watch(w);
+        // A dialog opened while focus moves to a pressed button takes the
+        // press, so the button is never clicked. Record the click it was.
+        if (w->isWindow() && w->isModal() && m_pressed &&
+            !m_frames.isEmpty() && m_frames.last().id == m_pressFrame) {
+          onButton(m_pressed);
+          m_pressed = nullptr;
+        }
+      }
       break;
+    case QEvent::FocusOut: {
+      // Qt moves focus before it delivers the press, so before this filter
+      // sees it. A gui_* command's frame records its own click.
+      auto button = qobject_cast<QAbstractButton *>(QApplication::focusWidget());
+      if (static_cast<QFocusEvent *>(event)->reason() != Qt::MouseFocusReason ||
+          !button || (!m_frames.isEmpty() && !m_frames.last().input))
+        break;
+      closeInputFrames(loopLevel());
+      m_pressed = button;
+      m_unfocused = watched;
+      m_pressFrame = openFrame(button, true, nullptr);
+      break;
+    }
     case QEvent::ActionAdded:
       if (!GuiTestHub::isInternal(watched))
         watch(static_cast<QActionEvent *>(event)->action());

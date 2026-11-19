@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
@@ -43,6 +44,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <functional>
+#include <iostream>
+#include <sstream>
 
 #include "GuiTestFramework/GuiTestCommands.h"
 #include "GuiTestFramework/GuiTestHub.h"
@@ -229,9 +232,163 @@ TEST(GuiTestCommands, SetTextFinishesOnlyAcceptableEdits) {
   Tcl_DeleteInterp(interp);
 }
 
+// A field that warns in a modal dialog when it loses focus, as the IP
+// Configurator's invalid fields do.
+class WarnOnFocusOut : public QObject {
+ public:
+  bool warn{false};
+  int warnings{0};
+
+ protected:
+  bool eventFilter(QObject *, QEvent *event) override {
+    if (event->type() == QEvent::FocusOut && warn) {
+      ++warnings;
+      QDialog box;
+      QTimer::singleShot(0, &box, &QDialog::reject);
+      box.exec();
+    }
+    return false;
+  }
+};
+
+// A press moves focus before the click. A dialog the old focus widget opens on
+// losing it takes the click, as it does with a real mouse.
+TEST(GuiTestCommands, ClickMovesFocusAndADialogOnFocusOutTakesIt) {
+  QWidget window;
+  window.setLayout(new QVBoxLayout);
+  auto edit = new QLineEdit;
+  edit->setObjectName("depth");
+  window.layout()->addWidget(edit);
+  auto button = new QPushButton("Generate");
+  button->setObjectName("generate");
+  window.layout()->addWidget(button);
+  int clicked = 0;
+  QObject::connect(button, &QPushButton::clicked, [&]() { ++clicked; });
+  WarnOnFocusOut field;
+  edit->installEventFilter(&field);
+  window.show();
+  QApplication::setActiveWindow(&window);
+  ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  edit->setFocus();
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click generate"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(clicked, 1);
+  EXPECT_TRUE(button->hasFocus());
+
+  edit->setFocus();
+  field.warn = true;
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click generate"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(field.warnings, 1);
+  EXPECT_EQ(clicked, 1);
+  Tcl_DeleteInterp(interp);
+}
+
+// A context menu opened on press, as the Sources tree's is, needs the button
+// held and the cursor on the item. It blocks the click until a later line
+// picks from it; the pick closes it.
+TEST(GuiTestCommands, RightClickOpensMenuThatALaterLinePicksFrom) {
+  QTreeWidget tree;
+  tree.setObjectName("sourcesTree");
+  new QTreeWidgetItem(&tree, QStringList{"fifo"});
+  tree.show();
+  QAction add{"Add IP to Design", &tree};
+  add.setObjectName("actionAddIpToDesign");
+  int added = 0;
+  QObject::connect(&add, &QAction::triggered, [&]() { ++added; });
+  Qt::MouseButtons heldOnPress;
+  QPoint cursorOnPress;
+  QMenu *shown{nullptr};
+  QObject::connect(&tree, &QTreeWidget::itemPressed, [&]() {
+    heldOnPress = qApp->mouseButtons();
+    cursorOnPress = QCursor::pos();
+    QMenu menu{&tree};
+    menu.addAction(&add);
+    shown = &menu;
+    menu.exec(QCursor::pos());
+    shown = nullptr;
+  });
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  bool menuWasOpen{false};
+  int picked = TCL_ERROR;
+  QTimer pick;
+  QObject::connect(&pick, &QTimer::timeout, [&]() {
+    if (!shown || !shown->isVisible()) return;
+    pick.stop();
+    menuWasOpen = true;
+    picked = Tcl_Eval(interp, "gui_trigger_action actionAddIpToDesign");
+  });
+  pick.start(10);
+  QTimer::singleShot(5000, [&]() {
+    if (shown) shown->close();
+  });
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click sourcesTree -item fifo -button right"),
+            TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(heldOnPress, Qt::RightButton);
+  EXPECT_EQ(cursorOnPress,
+            tree.viewport()->mapToGlobal(
+                tree.visualItemRect(tree.topLevelItem(0)).center()));
+  EXPECT_TRUE(menuWasOpen);
+  EXPECT_EQ(picked, TCL_OK);
+  EXPECT_EQ(added, 1);
+  EXPECT_EQ(shown, nullptr) << "the pick closed the menu";
+  EXPECT_EQ(qApp->mouseButtons(), Qt::NoButton);
+  EXPECT_EQ(tree.currentItem(), tree.topLevelItem(0));
+  Tcl_DeleteInterp(interp);
+}
+
+// A widget that asks for context menu requests gets one per right click.
+TEST(GuiTestCommands, RightClickRequestsContextMenu) {
+  QTreeWidget tree;
+  tree.setObjectName("sourcesTree");
+  new QTreeWidgetItem(&tree, QStringList{"fifo"});
+  tree.setContextMenuPolicy(Qt::CustomContextMenu);
+  int requests = 0;
+  QObject::connect(&tree, &QWidget::customContextMenuRequested,
+                   [&]() { ++requests; });
+  tree.show();
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click sourcesTree -item fifo -button right"),
+            TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(requests, 1);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_click sourcesTree -button right -double"),
+            TCL_ERROR);
+  Tcl_DeleteInterp(interp);
+}
+
 // The script view grays finished commands, highlights running ones (all lines
 // of a command that spans several), marks the next one, lists each line's
 // screenshots, and is no test target.
+// gui_warn logs a false check and lets the run go on; it still fails on an
+// expression it cannot evaluate, which is a script error.
+TEST(GuiTestCommands, WarnLogsAFalseCheckAndDoesNotFail) {
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  std::ostringstream out;
+  std::streambuf *saved = std::cout.rdbuf(out.rdbuf());
+  const int held = Tcl_Eval(interp, "gui_warn {1 == 1} \"holds\"");
+  const std::string afterHeld = out.str();
+  const int falseCode = Tcl_Eval(interp, "set x 2; gui_warn {$x == 1} \"known issue\"");
+  std::cout.rdbuf(saved);
+  EXPECT_EQ(held, TCL_OK);
+  EXPECT_EQ(afterHeld, "");
+  EXPECT_EQ(falseCode, TCL_OK) << Tcl_GetStringResult(interp);
+  EXPECT_EQ(out.str(),
+            "WARN: gui_warn {$x == 1}: false: known issue (evaluated: 2 == 1)\n");
+  EXPECT_EQ(Tcl_Eval(interp, "gui_warn {$nosuch == 1}"), TCL_ERROR);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_assert {$x == 1}"), TCL_ERROR);
+  Tcl_DeleteInterp(interp);
+}
+
 TEST(GuiTestScriptView, ShowsProgressByCommand) {
   const QVector<GuiTestScriptView::Span> commands{
       {2, 1}, {4, 2}, {6, 1}, {7, 1}};
