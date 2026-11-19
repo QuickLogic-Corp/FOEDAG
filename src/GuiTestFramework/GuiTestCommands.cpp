@@ -31,6 +31,7 @@ extern "C" {
 #include <QApplication>
 #include <QComboBox>
 #include <QContextMenuEvent>
+#include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -44,18 +45,22 @@ extern "C" {
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMetaProperty>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QProgressBar>
+#include <QPointer>
 #include <QSet>
+#include <QStyleHints>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTextEdit>
 #include <QThread>
 #include <QTimer>
 #include <QTreeView>
+#include <QWindow>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -66,6 +71,17 @@ extern "C" {
 #include "GuiTestHub.h"
 #include "GuiTestMode.h"
 #include "GuiTestRunner.h"
+
+// Exported by QtGui for QTest: delivers mouse input as the window system does.
+QT_BEGIN_NAMESPACE
+Q_GUI_EXPORT void qt_handleMouseEvent(QWindow *window, const QPointF &local,
+                                      const QPointF &global,
+                                      Qt::MouseButtons state,
+                                      Qt::MouseButton button,
+                                      QEvent::Type type,
+                                      Qt::KeyboardModifiers mods,
+                                      int timestamp);
+QT_END_NAMESPACE
 
 namespace FOEDAG {
 
@@ -297,6 +313,52 @@ void sendMouse(QWidget *w, QEvent::Type type, const QPoint &pos,
   QCoreApplication::sendEvent(w, &event);
 }
 
+// A right click as the window system delivers it, so the application sees the
+// button held (QGuiApplication::mouseButtons) and the cursor on the widget, as
+// a context menu opened on press expects. That menu blocks this call until a
+// later line picks from it.
+class ContextMenuSeen : public QObject {
+ public:
+  bool seen{false};
+
+ protected:
+  bool eventFilter(QObject *, QEvent *event) override {
+    if (event->type() == QEvent::ContextMenu) seen = true;
+    return false;
+  }
+};
+
+void rightClick(QWidget *w, const QPoint &pos) {
+  // Far enough apart that two clicks never make a double click.
+  static int timestamp = 0;
+  QPointer<QWidget> target = w;
+  ContextMenuSeen contextMenu;
+  w->installEventFilter(&contextMenu);
+  QWidget *window = w->window();
+  const QPointF global{w->mapToGlobal(pos)};
+  const QPointF local{window->mapFromGlobal(w->mapToGlobal(pos))};
+  QCursor::setPos(global.toPoint());
+  QPointer<QWindow> handle = window->windowHandle();
+  timestamp += QGuiApplication::styleHints()->mouseDoubleClickInterval() + 1;
+  qt_handleMouseEvent(handle, local, global, Qt::RightButton, Qt::RightButton,
+                      QEvent::MouseButtonPress, Qt::NoModifier, timestamp);
+  QCoreApplication::processEvents();
+  if (handle) {
+    qt_handleMouseEvent(handle, local, global, Qt::NoButton, Qt::RightButton,
+                        QEvent::MouseButtonRelease, Qt::NoModifier,
+                        ++timestamp);
+    QCoreApplication::processEvents();
+  }
+  if (!target) return;
+  target->removeEventFilter(&contextMenu);
+  // In tests Qt 6.9 made none for an item view; a widget may still want one.
+  if (!contextMenu.seen) {
+    QContextMenuEvent event{QContextMenuEvent::Mouse, pos,
+                            global.toPoint()};
+    QCoreApplication::sendEvent(target, &event);
+  }
+}
+
 // The view itself, or the only item view inside a composite widget such as
 // the Pin Planner's Errors view.
 QAbstractItemView *itemViewOf(QWidget *w) {
@@ -433,6 +495,10 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (button != "left" && button != "right")
     return fail(interp, QString("gui_click %1: -button must be left or right")
                             .arg(name));
+  if (button == "right" && o.flags.contains("-double"))
+    return fail(interp,
+                QString("gui_click %1: -double is for the left button only")
+                    .arg(name));
   QWidget *w = findWidgetToAct(name, &error);
   if (!w) return fail(interp, QString("gui_click %1: %2").arg(name, error));
   if (!w->isEnabled())
@@ -467,17 +533,19 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     pushButton->click();
     return succeed(interp);
   }
-  const Qt::MouseButton b = button == "left" ? Qt::LeftButton : Qt::RightButton;
-  sendMouse(target, QEvent::MouseButtonPress, pos, b, b);
-  sendMouse(target, QEvent::MouseButtonRelease, pos, b, Qt::NoButton);
-  if (dbl) {
-    sendMouse(target, QEvent::MouseButtonDblClick, pos, b, b);
-    sendMouse(target, QEvent::MouseButtonRelease, pos, b, Qt::NoButton);
+  if (button == "right") {
+    rightClick(target, pos);
+    return succeed(interp);
   }
-  if (b == Qt::RightButton) {
-    QContextMenuEvent menu{QContextMenuEvent::Mouse, pos,
-                           target->mapToGlobal(pos)};
-    QCoreApplication::sendEvent(target, &menu);
+  sendMouse(target, QEvent::MouseButtonPress, pos, Qt::LeftButton,
+            Qt::LeftButton);
+  sendMouse(target, QEvent::MouseButtonRelease, pos, Qt::LeftButton,
+            Qt::NoButton);
+  if (dbl) {
+    sendMouse(target, QEvent::MouseButtonDblClick, pos, Qt::LeftButton,
+              Qt::LeftButton);
+    sendMouse(target, QEvent::MouseButtonRelease, pos, Qt::LeftButton,
+              Qt::NoButton);
   }
   return succeed(interp);
 }
@@ -648,6 +716,14 @@ int guiTriggerAction(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     return fail(interp,
                 QString("gui_trigger_action %1: action is disabled").arg(name));
   const GuiTestAction act{action};
+  // From an open menu, picked as a user does, so the menu closes.
+  if (auto menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+      menu && menu->actions().contains(action)) {
+    menu->setActiveAction(action);
+    QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};
+    QCoreApplication::sendEvent(menu, &enter);
+    return succeed(interp);
+  }
   action->trigger();
   return succeed(interp);
 }

@@ -32,6 +32,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -225,6 +226,84 @@ TEST(GuiTestCommands, SetTextFinishesOnlyAcceptableEdits) {
   ASSERT_EQ(Tcl_Eval(interp, "gui_set_text depth 16"), TCL_OK)
       << Tcl_GetStringResult(interp);
   EXPECT_EQ(finished, 1);
+  Tcl_DeleteInterp(interp);
+}
+
+// A context menu opened on press, as the Sources tree's is, needs the button
+// held and the cursor on the item. It blocks the click until a later line
+// picks from it; the pick closes it.
+TEST(GuiTestCommands, RightClickOpensMenuThatALaterLinePicksFrom) {
+  QTreeWidget tree;
+  tree.setObjectName("sourcesTree");
+  new QTreeWidgetItem(&tree, QStringList{"fifo"});
+  tree.show();
+  QAction add{"Add IP to Design", &tree};
+  add.setObjectName("actionAddIpToDesign");
+  int added = 0;
+  QObject::connect(&add, &QAction::triggered, [&]() { ++added; });
+  Qt::MouseButtons heldOnPress;
+  QPoint cursorOnPress;
+  QMenu *shown{nullptr};
+  QObject::connect(&tree, &QTreeWidget::itemPressed, [&]() {
+    heldOnPress = qApp->mouseButtons();
+    cursorOnPress = QCursor::pos();
+    QMenu menu{&tree};
+    menu.addAction(&add);
+    shown = &menu;
+    menu.exec(QCursor::pos());
+    shown = nullptr;
+  });
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  bool menuWasOpen{false};
+  int picked = TCL_ERROR;
+  QTimer pick;
+  QObject::connect(&pick, &QTimer::timeout, [&]() {
+    if (!shown || !shown->isVisible()) return;
+    pick.stop();
+    menuWasOpen = true;
+    picked = Tcl_Eval(interp, "gui_trigger_action actionAddIpToDesign");
+  });
+  pick.start(10);
+  QTimer::singleShot(5000, [&]() {
+    if (shown) shown->close();
+  });
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click sourcesTree -item fifo -button right"),
+            TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(heldOnPress, Qt::RightButton);
+  EXPECT_EQ(cursorOnPress,
+            tree.viewport()->mapToGlobal(
+                tree.visualItemRect(tree.topLevelItem(0)).center()));
+  EXPECT_TRUE(menuWasOpen);
+  EXPECT_EQ(picked, TCL_OK);
+  EXPECT_EQ(added, 1);
+  EXPECT_EQ(shown, nullptr) << "the pick closed the menu";
+  EXPECT_EQ(qApp->mouseButtons(), Qt::NoButton);
+  EXPECT_EQ(tree.currentItem(), tree.topLevelItem(0));
+  Tcl_DeleteInterp(interp);
+}
+
+// A widget that asks for context menu requests gets one per right click.
+TEST(GuiTestCommands, RightClickRequestsContextMenu) {
+  QTreeWidget tree;
+  tree.setObjectName("sourcesTree");
+  new QTreeWidgetItem(&tree, QStringList{"fifo"});
+  tree.setContextMenuPolicy(Qt::CustomContextMenu);
+  int requests = 0;
+  QObject::connect(&tree, &QWidget::customContextMenuRequested,
+                   [&]() { ++requests; });
+  tree.show();
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click sourcesTree -item fifo -button right"),
+            TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(requests, 1);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_click sourcesTree -button right -double"),
+            TCL_ERROR);
   Tcl_DeleteInterp(interp);
 }
 

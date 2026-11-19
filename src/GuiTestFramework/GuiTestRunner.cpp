@@ -28,6 +28,7 @@ extern "C" {
 #include <QEventLoop>
 #include <QFile>
 #include <QKeyEvent>
+#include <QMenu>
 #include <QTextStream>
 #include <QTimer>
 #include <QWidget>
@@ -281,7 +282,10 @@ bool GuiTestRunner::eventFilter(QObject *watched, QEvent *event) {
   if (event->type() == QEvent::Show && !m_running.isEmpty() &&
       !m_running.last().modal && m_running.last().strictWaits == 0) {
     auto w = qobject_cast<QWidget *>(watched);
-    if (w && w->isWindow() && w->isModal()) m_running.last().modal = w;
+    // A context menu waits for a pick the way a modal dialog waits for an
+    // answer.
+    if (w && w->isWindow() && (w->isModal() || qobject_cast<QMenu *>(w)))
+      m_running.last().modal = w;
   }
   return QObject::eventFilter(watched, event);
 }
