@@ -63,6 +63,7 @@
 #include "Compiler/DumpOptions.h"
 #include "Compiler/PrivateTempDir.h"
 #include "Compiler/TilesCfgParser.h"
+#include "Compiler/WorkerThread.h"
 #include "Log.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "NewProject/ProjectManager/DesignFileWatcher.h"
@@ -887,6 +888,74 @@ write_blif ${OUTPUT_BLIF}
 write_verilog -noexpr -nodec -defparam -norename ${OUTPUT_VERILOG}
 write_edif ${OUTPUT_EDIF}
   )";
+
+bool CompilerOpenFPGA_ql::RunOtp(bool clean, bool production) {
+  if (!hasOpenProject()) {
+    ErrorMessage("otp: open a project first (create_design <name>)");
+    return false;
+  }
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const QLDeviceTarget target = devices->getCurrentDeviceTarget();
+  if (!devices->isDeviceTargetValid(target)) {
+    ErrorMessage("otp: the project has no target device; set one with target_device");
+    return false;
+  }
+  const std::filesystem::path device_dir = devices->deviceTypeDirPath(target);
+
+  // The bundled Python, never the one on PATH (REQ-013). DataPath() varies with the
+  // install layout, so probe both plausible roots, as the add-layout code does.
+#ifdef _WIN32
+  const std::filesystem::path python_rel = std::filesystem::path("envs") / "python.exe";
+#else
+  const std::filesystem::path python_rel =
+      std::filesystem::path("envs") / "python3.8" / "bin" / "python3";
+#endif
+  const std::filesystem::path script_rel =
+      std::filesystem::path("scripts") / "otp" / "run_otp.py";
+  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
+  std::filesystem::path python;
+  std::filesystem::path script;
+  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
+    const std::filesystem::path candidate = (root / python_rel).lexically_normal();
+    if (std::filesystem::exists(candidate)) {
+      python = candidate;
+      script = (root / script_rel).lexically_normal();
+      break;
+    }
+  }
+  if (python.empty()) {
+    ErrorMessage("otp: the bundled Python (" + python_rel.string() +
+                 ") was not found under " + (data_path / "..").lexically_normal().string() +
+                 "; reinstall Aurora");
+    return false;
+  }
+  if (!std::filesystem::exists(script)) {
+    ErrorMessage("otp: " + script.string() +
+                 " is missing; this Aurora was built without OTP support (AURORA_OTP=ON)");
+    return false;
+  }
+
+  // -E: ignore PYTHONPATH and PYTHONHOME, so the launcher is run by path, not with -m.
+  std::vector<std::string> args{"-s",
+                                "-E",
+                                script.string(),
+                                "--project",
+                                std::filesystem::path(ProjManager()->projectPath()).string(),
+                                "--device-dir",
+                                device_dir.string()};
+  if (production) args.emplace_back("--production");
+  if (clean) args.emplace_back("--clean");
+
+  const Return result = FileUtils::ExecuteSystemCommand(
+      python.string(), args, m_out, std::map<std::string, std::string>{}, -1,
+      std::string{}, m_err);
+  if (result.code != 0) {
+    ErrorMessage("otp failed with exit code " + std::to_string(result.code) +
+                 (result.message.empty() ? std::string{} : ": " + result.message));
+    return false;
+  }
+  return true;
+}
 
 bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
                                         bool batchMode) {
@@ -1888,6 +1957,35 @@ bool CompilerOpenFPGA_ql::RegisterCommands(TclInterpreter* interp,
     return TCL_OK;
   };
   interp->registerCmd("route_and_sta", route_and_sta, this, 0);
+
+  // otp [-clean] [-production]: the OTP step after `bitstream` (OTP configuration, design.md
+  // section 6.8). The work runs off the GUI thread, so the window stays responsive (REQ-002);
+  // in batch mode the thread is joined. A non-zero exit is a Tcl error (REQ-005).
+  auto otp = [](void* clientData, Tcl_Interp* interp, int argc,
+                const char* argv[]) -> int {
+    CompilerOpenFPGA_ql* compiler = (CompilerOpenFPGA_ql*)clientData;
+    bool clean = false;
+    bool production = false;
+    for (int i = 1; i < argc; i++) {
+      const std::string arg = argv[i];
+      if (arg == "-clean") {
+        clean = true;
+      } else if (arg == "-production") {
+        production = true;
+      } else {
+        compiler->ErrorMessage("Unknown option for otp: " + arg +
+                               "\nUsage: otp [-clean] [-production]");
+        return TCL_ERROR;
+      }
+    }
+    auto fn = [compiler, clean, production]() -> bool {
+      return compiler->RunOtp(clean, production);
+    };
+    WorkerThread* thread =
+        new WorkerThread{{}, Compiler::Action::NoAction, compiler};
+    return thread->Start(fn) ? TCL_OK : TCL_ERROR;
+  };
+  interp->registerCmd("otp", otp, this, 0);
 
   auto listdir = [](void* clientData, Tcl_Interp* interp, int argc,
                         const char* argv[]) -> int {
