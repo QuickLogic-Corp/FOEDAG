@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QDialog>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
@@ -226,6 +227,61 @@ TEST(GuiTestCommands, SetTextFinishesOnlyAcceptableEdits) {
   ASSERT_EQ(Tcl_Eval(interp, "gui_set_text depth 16"), TCL_OK)
       << Tcl_GetStringResult(interp);
   EXPECT_EQ(finished, 1);
+  Tcl_DeleteInterp(interp);
+}
+
+// A field that warns in a modal dialog when it loses focus, as the IP
+// Configurator's invalid fields do.
+class WarnOnFocusOut : public QObject {
+ public:
+  bool warn{false};
+  int warnings{0};
+
+ protected:
+  bool eventFilter(QObject *, QEvent *event) override {
+    if (event->type() == QEvent::FocusOut && warn) {
+      ++warnings;
+      QDialog box;
+      QTimer::singleShot(0, &box, &QDialog::reject);
+      box.exec();
+    }
+    return false;
+  }
+};
+
+// A press moves focus before the click. A dialog the old focus widget opens on
+// losing it takes the click, as it does with a real mouse.
+TEST(GuiTestCommands, ClickMovesFocusAndADialogOnFocusOutTakesIt) {
+  QWidget window;
+  window.setLayout(new QVBoxLayout);
+  auto edit = new QLineEdit;
+  edit->setObjectName("depth");
+  window.layout()->addWidget(edit);
+  auto button = new QPushButton("Generate");
+  button->setObjectName("generate");
+  window.layout()->addWidget(button);
+  int clicked = 0;
+  QObject::connect(button, &QPushButton::clicked, [&]() { ++clicked; });
+  WarnOnFocusOut field;
+  edit->installEventFilter(&field);
+  window.show();
+  QApplication::setActiveWindow(&window);
+  ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  edit->setFocus();
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click generate"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(clicked, 1);
+  EXPECT_TRUE(button->hasFocus());
+
+  edit->setFocus();
+  field.warn = true;
+  ASSERT_EQ(Tcl_Eval(interp, "gui_click generate"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(field.warnings, 1);
+  EXPECT_EQ(clicked, 1);
   Tcl_DeleteInterp(interp);
 }
 

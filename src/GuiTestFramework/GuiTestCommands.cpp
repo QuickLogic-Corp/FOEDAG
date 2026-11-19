@@ -328,6 +328,19 @@ class ContextMenuSeen : public QObject {
   }
 };
 
+class DialogSeen : public QObject {
+ public:
+  bool seen{false};
+
+ protected:
+  bool eventFilter(QObject *watched, QEvent *event) override {
+    auto w = qobject_cast<QWidget *>(watched);
+    if (event->type() == QEvent::Show && w && w->isWindow() && w->isModal())
+      seen = true;
+    return false;
+  }
+};
+
 void rightClick(QWidget *w, const QPoint &pos) {
   // Far enough apart that two clicks never make a double click.
   static int timestamp = 0;
@@ -530,6 +543,16 @@ int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (pushButton && button == "left" && !dbl) {
     if (GuiRecorder::isActive())
       GuiRecorder::instance()->aboutToClick(pushButton);
+    // A press moves focus first. A dialog the old focus widget opens on losing
+    // it takes the rest of the click, so the button never fires.
+    if (pushButton->focusPolicy() & Qt::ClickFocus) {
+      QPointer<QAbstractButton> target = pushButton;
+      DialogSeen dialog;
+      qApp->installEventFilter(&dialog);
+      pushButton->setFocus(Qt::MouseFocusReason);
+      qApp->removeEventFilter(&dialog);
+      if (dialog.seen || !target) return succeed(interp);
+    }
     pushButton->click();
     return succeed(interp);
   }

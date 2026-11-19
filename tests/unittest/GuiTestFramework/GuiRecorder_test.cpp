@@ -383,6 +383,23 @@ TEST_F(GuiRecorderTest, EditorTypingIsOneSetText) {
                            "gui_set_text editor_x.pcf \"x\\ty\\n\""}));
 }
 
+// A click that takes focus from a field finishes the text typed in it. The
+// text is written first, as the user typed it first.
+TEST_F(GuiRecorderTest, TextFinishedByAClickIsWrittenBeforeIt) {
+  auto edit = add(new QLineEdit, "depth");
+  auto button = add(new QPushButton("Generate"), "generate");
+  window.show();
+  record();
+
+  edit->setText("1");
+  {
+    GuiRecorder::Frame frame{button};  // as gui_click does it
+    GuiRecorder::instance()->aboutToClick(button);
+    emit edit->editingFinished();
+  }
+  EXPECT_EQ(lines(), join({"gui_set_text depth 1", "gui_click generate"}));
+}
+
 // The trace writes a command the way the recorder would (G-013).
 TEST(GuiRecorderTrace, WritesCommandsAsRecorded) {
   const QByteArray path = (GuiRecorder::projectDir() + "/sub/a b.v").toUtf8();

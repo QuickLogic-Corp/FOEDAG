@@ -94,6 +94,7 @@ class GuiRecorder : public QObject {
     QPointer<QObject> source;
     bool action{false};
     QString key;  // see Entry::key
+    bool typed{false};  // a line edit's text, finished by this action
   };
   struct OpenFrame {
     int id;
@@ -129,7 +130,8 @@ class GuiRecorder : public QObject {
   static const Offer *pickOffer(const OpenFrame &frame);
   void closeInputFrames(int level);
   void offer(QObject *source, const QStringList &lines, bool action,
-             const QString &unrecordedText = {}, const QString &key = {});
+             const QString &unrecordedText = {}, const QString &key = {},
+             bool typed = false);
   void supersede(const QString &key);
   void onDoubleClick(QObject *watched, const QMouseEvent *event);
   void onRightPress(QObject *watched, const QMouseEvent *event);

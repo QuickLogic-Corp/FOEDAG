@@ -417,7 +417,12 @@ void GuiRecorder::closeFrame(int id) {
   Entry &entry = m_entries[frame.entry];
   entry.closed = true;
   if (pick && !pick->lines.isEmpty()) {
-    entry.lines = pick->lines;
+    entry.lines.clear();
+    // A click that takes focus finishes the text typed before it.
+    if (!pick->typed)
+      for (const Offer &o : frame.offers)
+        if (o.typed && &o != pick) entry.lines << o.lines;
+    entry.lines << pick->lines;
     entry.action = true;
     entry.key = pick->key;
   } else if (pick) {
@@ -430,7 +435,8 @@ void GuiRecorder::closeFrame(int id) {
 }
 
 void GuiRecorder::offer(QObject *source, const QStringList &lines, bool action,
-                        const QString &unrecordedText, const QString &key) {
+                        const QString &unrecordedText, const QString &key,
+                        bool typed) {
   if (m_frames.isEmpty()) return;  // not caused by the user or a gui_* action
   Offer o;
   o.lines = lines;
@@ -438,6 +444,7 @@ void GuiRecorder::offer(QObject *source, const QStringList &lines, bool action,
   o.action = action;
   o.unrecorded = unrecordedText;
   o.key = key;
+  o.typed = typed;
   m_frames.last().offers.append(o);
   showPending();
 }
@@ -576,7 +583,7 @@ void GuiRecorder::watch(QWidget *widget) {
       QStringList lines;
       const QString word = pathWord(edit->text(), &lines);
       lines << "gui_set_text " + tclWord(owner->objectName()) + " " + word;
-      offer(edit, lines, false);
+      offer(edit, lines, false, {}, {}, true);
     });
   } else if (auto view = qobject_cast<QAbstractItemView *>(widget)) {
     connect(view, &QAbstractItemView::clicked, this,
