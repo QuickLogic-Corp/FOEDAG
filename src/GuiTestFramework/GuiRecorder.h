@@ -94,6 +94,7 @@ class GuiRecorder : public QObject {
     QPointer<QObject> source;
     bool action{false};
     QString key;  // see Entry::key
+    bool typed{false};  // a line edit's text, finished by this action
   };
   struct OpenFrame {
     int id;
@@ -129,9 +130,11 @@ class GuiRecorder : public QObject {
   static const Offer *pickOffer(const OpenFrame &frame);
   void closeInputFrames(int level);
   void offer(QObject *source, const QStringList &lines, bool action,
-             const QString &unrecordedText = {}, const QString &key = {});
+             const QString &unrecordedText = {}, const QString &key = {},
+             bool typed = false);
   void supersede(const QString &key);
   void onDoubleClick(QObject *watched, const QMouseEvent *event);
+  void onRightPress(QObject *watched, const QMouseEvent *event);
   void watch(QWidget *widget);
   void watch(QAction *action);
   void onButton(QAbstractButton *button);
@@ -149,6 +152,11 @@ class GuiRecorder : public QObject {
   QList<Entry> m_entries;
   int m_nextToWrite{0};
   int m_nextFrameId{1};
+  // A user's press on m_pressed moved focus from m_unfocused; the frame
+  // m_pressFrame stands for that press until the press itself arrives.
+  QPointer<QAbstractButton> m_pressed;
+  QPointer<QObject> m_unfocused;
+  int m_pressFrame{0};
   QList<Milestone> m_milestones;
   quint64 m_seq{0};
   quint64 m_writtenSeq{0};

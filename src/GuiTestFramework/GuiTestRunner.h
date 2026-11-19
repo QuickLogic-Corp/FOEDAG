@@ -96,6 +96,8 @@ class GuiTestRunner : public QObject {
   // Ends the run from anywhere, including inside a nested event loop that
   // can no longer unwind.
   [[noreturn]] void fail(const QString &message);
+  // A gui_warn that did not hold: logged with its line; the run goes on.
+  void warn(const QString &message);
 
  protected:
   bool eventFilter(QObject *watched, QEvent *event) override;

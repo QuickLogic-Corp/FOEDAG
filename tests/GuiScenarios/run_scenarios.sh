@@ -181,10 +181,12 @@ for scenario in "$@"; do
   if [ -z "$reason" ]; then
     passed=$((passed + 1))
     echo "PASS $name"
+    grep -A1 '^WARN: ' "$dir/replay.log" | sed 's/^/    /'
   else
     failed=$((failed + 1))
     echo "FAIL $name ($reason; log $dir/replay.log)"
     grep -A1 '^FAIL: ' "$dir/replay.log" | sed 's/^/    /'
+    grep -A1 '^WARN: ' "$dir/replay.log" | sed 's/^/    /'
   fi
 done
 

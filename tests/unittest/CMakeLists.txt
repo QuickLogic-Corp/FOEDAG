@@ -39,6 +39,7 @@ set (CPP_LIST
     PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
     IPGenerator/IPGenerator_test.cpp
+    IPGenerator/IPDialogBox_gui_test.cpp
     FloorPlanning/FloorPlanning_test.cpp
     NewProject/source_grid_test.cpp
     Utils/sequential_map_test.cpp

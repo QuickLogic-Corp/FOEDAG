@@ -817,7 +817,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       return TCL_ERROR;
     }
     if (!out_location.empty()) {
-      generator->setIpOutputLocation(mod_name, version, out_location);
+      if (generated)
+        generator->setIpOutputLocation(mod_name, version, out_location);
     } else {
       out_location = generator->GetProjectIPsPath();
     }
@@ -898,7 +899,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_location);
     instance->Generated(generated);
-    if (!generator->AddIPInstance(instance)) {
+    if (!generator->AddIPInstance(instance, !generated)) {
       ok = false;
     }
     return ok ? TCL_OK : TCL_ERROR;
@@ -953,7 +954,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   return true;
 }
 
-bool IPGenerator::AddIPInstance(IPInstance* instance) {
+bool IPGenerator::AddIPInstance(IPInstance* instance, bool preview) {
   bool status = true;
   const IPDefinition* def = instance->Definition();
 
@@ -963,7 +964,7 @@ bool IPGenerator::AddIPInstance(IPInstance* instance) {
            (targetInstance->Version() == instance->Version());
   };
   auto it = std::find_if(m_instances.begin(), m_instances.end(), isMatch);
-  if (it != m_instances.end()) {
+  if (!preview && it != m_instances.end()) {
     m_instances.erase(it);
   }
 
@@ -1023,7 +1024,10 @@ bool IPGenerator::AddIPInstance(IPInstance* instance) {
       status = false;
     }
   }
-  m_instances.push_back(instance);
+  if (!preview)
+    m_instances.push_back(instance);
+  else if (m_preview.get() != instance)
+    m_preview.reset(instance);
   return status;
 }
 

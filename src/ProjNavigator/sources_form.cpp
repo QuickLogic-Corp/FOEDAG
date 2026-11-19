@@ -542,16 +542,19 @@ void SourcesForm::CreateActions() {
   connect(m_actCloseProject, SIGNAL(triggered()), this, SIGNAL(CloseProject()));
 
   m_actReconfigureIp = new QAction(tr("Reconfigure IP"), m_treeSrcHierachy);
+  m_actReconfigureIp->setObjectName("actionReconfigureIp");
   connect(m_actReconfigureIp, &QAction::triggered, this,
           &SourcesForm::SlotReConfigureIp);
 
   m_actRemoveIp = new QAction(tr("Remove IP from Project"), m_treeSrcHierachy);
+  m_actRemoveIp->setObjectName("actionRemoveIp");
   m_actRemoveIp->setToolTip(
       "Remove the selectd IP instance from the project. Its build files will "
       "remain.");
   connect(m_actRemoveIp, &QAction::triggered, this, &SourcesForm::SlotRemoveIp);
 
   m_actDeleteIp = new QAction(tr("Delete IP"), m_treeSrcHierachy);
+  m_actDeleteIp->setObjectName("actionDeleteIp");
   m_actDeleteIp->setToolTip(
       "Remove the selectd IP instance from the project and delete its build "
       "files.");
@@ -578,6 +581,7 @@ void SourcesForm::CreateActions() {
           &SourcesForm::OpenProjectSettings);
 
   m_actAddIpToProject = new QAction(tr("Add IP to Design"), m_treeSrcHierachy);
+  m_actAddIpToProject->setObjectName("actionAddIpToDesign");
   connect(m_actAddIpToProject, &QAction::triggered, this,
           &SourcesForm::SlotAddIPToDesign);
 }

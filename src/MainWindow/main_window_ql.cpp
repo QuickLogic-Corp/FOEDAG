@@ -1151,6 +1151,7 @@ void MainWindow::createActions() {
           &MainWindow::pinAssignmentActionTriggered);
 
   ipConfiguratorAction = new QAction(tr("IP Configurator"), this);
+  ipConfiguratorAction->setObjectName("actionIpConfigurator");
   ipConfiguratorAction->setCheckable(true);
 #ifdef USE_UPSTREAM_IP_CONFIGURATOR
   ipConfiguratorAction->setEnabled(false);

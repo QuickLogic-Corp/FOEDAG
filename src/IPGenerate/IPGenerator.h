@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 #include <cassert>
 
 #include "nlohmann_json/json.hpp"
@@ -144,7 +145,10 @@ class IPGenerator {
   Compiler* GetCompiler() { return m_compiler; }
   bool RegisterCommands(TclInterpreter* interp, bool batchMode);
   std::vector<IPInstance*> IPInstances() { return m_instances; }
-  bool AddIPInstance(IPInstance* instance);
+  // A preview (configure_ip -template) is kept apart from the instances, so it
+  // never replaces or adds to them.
+  bool AddIPInstance(IPInstance* instance, bool preview = false);
+  IPInstance* PreviewInstance() { return m_preview.get(); }
   IPInstance* GetIPInstance(const std::string& moduleName);
   FOEDAG::Value* GetCatalogParam(IPInstance* instance,
                                  const std::string& paramName);
@@ -182,6 +186,7 @@ class IPGenerator {
   IPCatalog* m_catalog = nullptr;
   Compiler* m_compiler = nullptr;
   std::vector<IPInstance*> m_instances;
+  std::unique_ptr<IPInstance> m_preview;
   std::map<std::string, std::string> m_environment;
 
 private:
