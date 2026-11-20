@@ -131,6 +131,12 @@ TEST(GeneratedDevicePathHelpers, PathIsInsideFollowsASymlinkIntoTheAncestor) {
   EXPECT_TRUE(pathIsInside(base / "outside" / "link", base / "install"));
   EXPECT_TRUE(pathIsInside(base / "outside" / "link" / "not-created-yet", base / "install"));
   EXPECT_FALSE(pathIsInside(base / "outside", base / "install"));
+  // a '..' that cancels a missing dir steps back onto the link, which must still be followed
+  std::filesystem::create_directories(base / "outside" / "real", ec);
+  EXPECT_TRUE(pathIsInside(base / "outside" / "nx" / ".." / "link" / "x", base / "install"));
+  EXPECT_TRUE(pathIsInside(base / "outside" / "real" / "nx" / ".." / ".." / "link" / "y",
+                           base / "install"));
+  EXPECT_FALSE(pathIsInside(base / "outside" / "nx" / ".." / "real" / "z", base / "install"));
   // POSIX follows the link before '..' (lands in install); Win32 collapses '..' as text first.
 #ifdef _WIN32
   EXPECT_FALSE(pathIsInside(base / "outside" / "link" / ".." / "new", base / "install"));

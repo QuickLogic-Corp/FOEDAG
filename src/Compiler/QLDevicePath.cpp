@@ -1,6 +1,7 @@
 #include "QLDevicePath.h"
 
 #include <cstdlib>  // std::getenv
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -81,27 +82,36 @@ bool pathIsInside(const std::filesystem::path& candidate,
   std::error_code ec;
 
   // absolute: a relative target is relative to the cwd, which may be inside the installation.
-  std::filesystem::path candidate_existing = std::filesystem::absolute(candidate, ec);
-  if(ec) { candidate_existing = candidate; ec.clear(); }
-  if(!candidate_existing.has_filename()) { candidate_existing = candidate_existing.parent_path(); }
+  std::filesystem::path candidate_abs = std::filesystem::absolute(candidate, ec);
+  if(ec) { candidate_abs = candidate; ec.clear(); }
+#ifdef _WIN32
+  // Win32 collapses '..' as text before following links; match it.
+  candidate_abs = candidate_abs.lexically_normal();
+#endif
 
-  // resolve as much of the candidate as exists: the target dir may not have been created yet.
-  std::filesystem::path candidate_tail;
-  while(!candidate_existing.empty() && !std::filesystem::exists(candidate_existing, ec)) {
-    std::filesystem::path parent = candidate_existing.parent_path();
-    if(parent == candidate_existing) {
-      break;
+  // Walk the target the way create_directories will: resolve each part that exists, so a
+  // link anywhere is followed, and keep parts not created yet as text. A '..' cancels a
+  // missing part, or else steps up from the resolved path (physical on POSIX).
+  std::filesystem::path candidate_c = candidate_abs.root_path();
+  std::vector<std::filesystem::path> missing;
+  for(const std::filesystem::path& part : candidate_abs.relative_path()) {
+    if(part.empty() || part == ".") {
+      continue;
     }
-    candidate_tail = candidate_tail.empty() ? candidate_existing.filename()
-                                            : candidate_existing.filename() / candidate_tail;
-    candidate_existing = parent;
+    if(part == "..") {
+      if(!missing.empty()) {
+        missing.pop_back();
+      } else {
+        candidate_c = resolveExisting(candidate_c / part);
+      }
+    } else if(missing.empty() && std::filesystem::exists(candidate_c / part, ec)) {
+      candidate_c = resolveExisting(candidate_c / part);
+    } else {
+      missing.push_back(part);
+    }
   }
-
-  // the missing tail holds no links, so collapse its '..' as text; the existing part was
-  // resolved by the OS, so a '..' after a symlink keeps its physical meaning.
-  std::filesystem::path candidate_c = resolveExisting(candidate_existing);
-  if(!candidate_tail.empty()) {
-    candidate_c = (candidate_c / candidate_tail).lexically_normal();
+  for(const std::filesystem::path& part : missing) {
+    candidate_c /= part;
   }
   // same resolver on both sides, so case and separators match whenever both resolve
   const std::filesystem::path ancestor_c = resolveExisting(ancestor);
