@@ -745,6 +745,7 @@ void QLSettingsManager::populateSettingsWidget() {
   QHBoxLayout* dlg_widgetslayout = new QHBoxLayout();
   stackedWidget = new QStackedWidget();
   listWidget = new QListWidget();
+  listWidget->setObjectName("taskSettingsCategories");
   // https://stackoverflow.com/a/48336420/3379867
   listWidget->setStyleSheet(
             "QListWidget {\
@@ -803,6 +804,7 @@ void QLSettingsManager::populateSettingsWidget() {
     // container widget for each 'category' -> this will be each 'page' of the QStackedWidget
     // this container widget will contain all the 'subcategories' of the category -> hence a QTabWidget for each category
     QTabWidget* categoryWidget = new QTabWidget();
+    categoryWidget->setObjectName("taskSettingsTabs_" + QString::fromStdString(categoryId));
     categoryWidget->setProperty("settings_category_id", QString::fromStdString(categoryId));
 
     for (auto [subcategoryId, subcategoryJson] : categoryJson.items()) {

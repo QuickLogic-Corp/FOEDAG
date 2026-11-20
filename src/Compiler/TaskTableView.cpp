@@ -165,6 +165,7 @@ void TaskTableView::customMenuRequested(const QPoint &pos) {
       return;
 
     QMenu *menu = new QMenu(this);
+    menu->setObjectName("taskContextMenu");
     if (task->isEnable()) {
       if (task->type() != TaskType::None) {
         QAction *start = new QAction("Run", this);

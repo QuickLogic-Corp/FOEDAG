@@ -22,6 +22,7 @@ ReportsTreeWidget::ReportsTreeWidget(Compiler *compiler,
     : m_taskManager{taskManager}, m_compiler{compiler} {
   auto layout = new QGridLayout();
   auto treeWidget = new QTreeWidget();
+  treeWidget->setObjectName("reportsTree");
 
   layout->addWidget(treeWidget);
   layout->setContentsMargins(0, 0, 0, 0);

@@ -45,6 +45,12 @@ bool Editor::isModified() const { return m_scintilla->isModified(); }
 
 QString Editor::text() const { return m_scintilla->text(); }
 
+int Editor::selectedLine() const {
+  int lineFrom{-1}, indexFrom{-1}, lineTo{-1}, indexTo{-1};
+  m_scintilla->getSelection(&lineFrom, &indexFrom, &lineTo, &indexTo);
+  return lineFrom;
+}
+
 // Replaces the whole text as one undoable edit, so the editor counts as
 // modified and Save is enabled, as after typing.
 void Editor::setText(const QString &text) {

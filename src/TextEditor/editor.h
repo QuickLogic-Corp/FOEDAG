@@ -29,6 +29,8 @@ class Editor : public QWidget {
   Q_OBJECT
   // Lets GUI scenarios read and type the text with gui_get / gui_set_text.
   Q_PROPERTY(QString text READ text WRITE setText NOTIFY textEdited)
+  // First line of the selection, from 0; -1 when nothing is selected.
+  Q_PROPERTY(int selectedLine READ selectedLine)
  public:
   explicit Editor(QString strFileName, int iFileType,
                   QWidget* parent = nullptr);
@@ -36,6 +38,7 @@ class Editor : public QWidget {
   QString getFileName() const;
   bool isModified() const;
   QString text() const;
+  int selectedLine() const;
   void setText(const QString& text);
   void SetFileWatcher(QFileSystemWatcher* watcher);
 

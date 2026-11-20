@@ -18,6 +18,7 @@ SelectionDialog::SelectionDialog(const QString& title, const std::set<std::strin
 
     for (const auto& item: items) {
         auto* button = new QPushButton(QString::fromStdString(item), this);
+        m_items << button->text();
         layout->addWidget(button);
 
         connect(button, &QPushButton::clicked, this, [this, item]() {

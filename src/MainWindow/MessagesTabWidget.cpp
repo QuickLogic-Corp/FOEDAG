@@ -1,5 +1,6 @@
 #include "MessagesTabWidget.h"
 
+#include <functional>
 #include <utility>
 
 #include <QGridLayout>
@@ -23,8 +24,11 @@ namespace FOEDAG {
 MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
     : m_taskManager{taskManager},
       m_parsers{new VerificParser{}, new TimingAnalysisParser{}} {
+  setObjectName("messagesView");
   auto layout = new QGridLayout();
   auto treeWidget = new QTreeWidget();
+  treeWidget->setObjectName("messagesTree");
+  m_tree = treeWidget;
 
   layout->addWidget(treeWidget);
   layout->setContentsMargins(0, 0, 0, 0);
@@ -59,6 +63,7 @@ MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
         }
       }
       treeWidget->addTopLevelItem(taskItem);
+      m_taskTitles.append(task->title());
     }
   }
 
@@ -80,6 +85,24 @@ MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
 }
 
 MessagesTabWidget::~MessagesTabWidget() { qDeleteAll(m_parsers); }
+
+QStringList MessagesTabWidget::taskMessages() const {
+  QStringList result;
+  std::function<void(const QString &, const QTreeWidgetItem *)> collect =
+      [&](const QString &title, const QTreeWidgetItem *parent) {
+        for (int i = 0; i < parent->childCount(); ++i) {
+          const QTreeWidgetItem *item = parent->child(i);
+          result << QString("%1\t%2\t%3")
+                        .arg(title)
+                        .arg(item->data(0, LineNumberRole).toInt())
+                        .arg(item->text(0));
+          collect(title, item);
+        }
+      };
+  for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+    collect(m_taskTitles.value(i), m_tree->topLevelItem(i));
+  return result;
+}
 
 QTreeWidgetItem *MessagesTabWidget::createTaskMessageItem(
     const TaskMessage &msg, const QString &filePath) {
