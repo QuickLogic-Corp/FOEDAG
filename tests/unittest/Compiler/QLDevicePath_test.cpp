@@ -67,6 +67,30 @@ TEST(GeneratedDevicePathHelpers, PathIsInsideTreatsAnEmptyAncestorAsContainingNo
   std::filesystem::remove_all(base, ec);
 }
 
+TEST(GeneratedDevicePathHelpers, PathIsInsideSeesThroughMissingDirsAndRelativePaths) {
+  std::error_code ec;
+  const std::filesystem::path base =
+      std::filesystem::temp_directory_path(ec) / "foedag_qldevicepath_missing";
+  std::filesystem::remove_all(base, ec);
+  std::filesystem::create_directories(base / "install" / "share", ec);
+  std::filesystem::create_directories(base / "outside", ec);
+
+  // create_directories makes 'nx', then '../..' lands in install
+  EXPECT_TRUE(pathIsInside(base / "outside" / "nx" / ".." / ".." / "install" / "x",
+                           base / "install"));
+  EXPECT_FALSE(pathIsInside(base / "outside" / "nx" / ".." / "y", base / "install"));
+
+  // a relative target that does not exist yet is relative to the cwd
+  const std::filesystem::path saved_cwd = std::filesystem::current_path(ec);
+  std::filesystem::current_path(base / "install", ec);
+  EXPECT_TRUE(pathIsInside("newdir/x", base / "install"));
+  std::filesystem::current_path(base / "outside", ec);
+  EXPECT_FALSE(pathIsInside("newdir/x", base / "install"));
+  std::filesystem::current_path(saved_cwd, ec);
+
+  std::filesystem::remove_all(base, ec);
+}
+
 // libstdc++ cannot create Windows symlinks, so ask the OS directly there.
 bool makeDirectorySymlink(const std::filesystem::path& target,
                           const std::filesystem::path& link) {
@@ -107,6 +131,12 @@ TEST(GeneratedDevicePathHelpers, PathIsInsideFollowsASymlinkIntoTheAncestor) {
   EXPECT_TRUE(pathIsInside(base / "outside" / "link", base / "install"));
   EXPECT_TRUE(pathIsInside(base / "outside" / "link" / "not-created-yet", base / "install"));
   EXPECT_FALSE(pathIsInside(base / "outside", base / "install"));
+  // POSIX follows the link before '..' (lands in install); Win32 collapses '..' as text first.
+#ifdef _WIN32
+  EXPECT_FALSE(pathIsInside(base / "outside" / "link" / ".." / "new", base / "install"));
+#else
+  EXPECT_TRUE(pathIsInside(base / "outside" / "link" / ".." / "new", base / "install"));
+#endif
 
   removeDirectorySymlink(base / "outside" / "link");
   std::filesystem::remove_all(base, ec);

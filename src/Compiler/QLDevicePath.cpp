@@ -80,18 +80,30 @@ bool pathIsInside(const std::filesystem::path& candidate,
 
   std::error_code ec;
 
+  // absolute: a relative target is relative to the cwd, which may be inside the installation.
+  std::filesystem::path candidate_existing = std::filesystem::absolute(candidate, ec);
+  if(ec) { candidate_existing = candidate; ec.clear(); }
+  if(!candidate_existing.has_filename()) { candidate_existing = candidate_existing.parent_path(); }
+
   // resolve as much of the candidate as exists: the target dir may not have been created yet.
-  std::filesystem::path candidate_existing = candidate;
+  std::filesystem::path candidate_tail;
   while(!candidate_existing.empty() && !std::filesystem::exists(candidate_existing, ec)) {
     std::filesystem::path parent = candidate_existing.parent_path();
     if(parent == candidate_existing) {
       break;
     }
+    candidate_tail = candidate_tail.empty() ? candidate_existing.filename()
+                                            : candidate_existing.filename() / candidate_tail;
     candidate_existing = parent;
   }
 
-  // both sides through the same resolver, so their forms (case, separators) match
-  const std::filesystem::path candidate_c = resolveExisting(candidate_existing);
+  // the missing tail holds no links, so collapse its '..' as text; the existing part was
+  // resolved by the OS, so a '..' after a symlink keeps its physical meaning.
+  std::filesystem::path candidate_c = resolveExisting(candidate_existing);
+  if(!candidate_tail.empty()) {
+    candidate_c = (candidate_c / candidate_tail).lexically_normal();
+  }
+  // same resolver on both sides, so case and separators match whenever both resolve
   const std::filesystem::path ancestor_c = resolveExisting(ancestor);
 
   auto candidate_it = candidate_c.begin();
