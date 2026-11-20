@@ -437,6 +437,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string GetSynplifyScriptTemplate() const;
   virtual std::filesystem::path FindSynthSDCPaths();
   virtual bool RegisterCommands(TclInterpreter* interp, bool batchMode);
+  // The `otp` Tcl command: runs scripts/otp/run_otp.py with the bundled Python.
+  bool RunOtp(bool clean, bool production);
   virtual std::pair<bool, std::string> IsDeviceSizeCorrect(
       const std::string& size) const;
   bool VerifyTargetDevice() const;
