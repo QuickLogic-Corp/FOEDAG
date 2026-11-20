@@ -83,9 +83,11 @@ TEST(GeneratedDevicePathHelpers, PathIsInsideSeesThroughMissingDirsAndRelativePa
   // a relative target that does not exist yet is relative to the cwd
   const std::filesystem::path saved_cwd = std::filesystem::current_path(ec);
   std::filesystem::current_path(base / "install", ec);
-  EXPECT_TRUE(pathIsInside("newdir/x", base / "install"));
+  EXPECT_FALSE(ec) << "chdir into install failed: " << ec.message();
+  if(!ec) { EXPECT_TRUE(pathIsInside("newdir/x", base / "install")); }
   std::filesystem::current_path(base / "outside", ec);
-  EXPECT_FALSE(pathIsInside("newdir/x", base / "install"));
+  EXPECT_FALSE(ec) << "chdir into outside failed: " << ec.message();
+  if(!ec) { EXPECT_FALSE(pathIsInside("newdir/x", base / "install")); }
   std::filesystem::current_path(saved_cwd, ec);
 
   std::filesystem::remove_all(base, ec);
