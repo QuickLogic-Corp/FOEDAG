@@ -35,11 +35,7 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     }
 
     DeviceGrid device(descriptor);
-
-    // Partition ids are handed out from a static counter shared with the panel. Reset so a
-    // batch check does not depend on whatever ran before it in the same process.
-    Partition::resetIdGenerator();
-    Region::resetIdGenerator();
+    FloorplanContext& context = *device.context();
 
     QdcSerializer serializer;
     serializer.load(device, qdcPath);
@@ -55,24 +51,23 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
         floorplanningArtifact(projectPath, projectName, "instances.json"));
 
     // Real cell types, as the panel loads them: without them a BRAM named after its RTL
-    // instance (core.u_mem.mem.0.0) is classified by name and counted as CLB logic. Set
-    // even when empty, so a previous project's types are not reused.
+    // instance (core.u_mem.mem.0.0) is classified by name and counted as CLB logic.
     AtomTypeMap atomTypes;
     DspTileMap dspTiles;
     if (haveInstances) {
         loadAtomTypes(projectPath / (rtlModel.top() + "_post_synth_debug.json"), atomTypes,
                       dspTiles);
     }
-    Partition::setAtomTypes(std::move(atomTypes));
-    Partition::setDspTiles(std::move(dspTiles));
+    context.atomTypes = std::move(atomTypes);
+    context.dspTiles = std::move(dspTiles);
 
     AtomNameMap atomNames;
-    int atomsPerTile = Partition::atomsPerTile();
+    int atomsPerTile = context.atomsPerTile;
     const bool haveAtoms =
         loadAtomSets(floorplanningArtifactOrBare(projectPath, projectName, "atomsets.json"),
                      atomNames, atomsPerTile);
     if (haveAtoms) {
-        Partition::setAtomsPerTile(atomsPerTile);
+        context.setAtomsPerTile(atomsPerTile);
         device.setOwnAtomCounts(ownAtomCounts(atomNames));
 
         for (const auto& [id, partition] : device.partitions()) {

@@ -55,6 +55,7 @@ set (FLOORPLANNING_HDR_LIST
   DeviceGrid.h
   Tile.h
   Partition.h
+  FloorplanContext.h
   Region.h
   HierarhyElement.h
   NaturalSort.h

@@ -140,7 +140,7 @@ void SelectedResourcesWidget::setSelectedResources(const ResourceTally& tally,
                     "than a tile count the packer has agreed to -- the same figure, from the "
                     "same arithmetic, that a partition's CLB column reports.")
                      .arg(tally.clbAtoms)
-                     .arg(Partition::atomsPerTile()));
+                     .arg(tally.atomsPerTile));
     setTileValue(Dsp, tally.dsp, tr("One DSP atom occupies one DSP tile, so this is exact."));
     setTileValue(Bram, tally.bram, tr("One BRAM atom occupies one BRAM tile, so this is exact."));
 

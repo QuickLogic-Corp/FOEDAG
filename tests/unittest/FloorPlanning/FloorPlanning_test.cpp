@@ -211,8 +211,6 @@ std::optional<QPointF> findTopRightTilePoint(const fp::DeviceGrid& device, const
 bool test_partition(const fp::Tile::Index& bottomLeftIndex, const fp::Tile::Index& topRightIndex, const std::string& expectedRegionStr)
 {
     std::cout << "testing " << expectedRegionStr << std::endl;
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
 
     fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
 
@@ -222,12 +220,12 @@ bool test_partition(const fp::Tile::Index& bottomLeftIndex, const fp::Tile::Inde
     std::optional<QPointF> bottomLeftPointOpt = findBottomLeftTilePoint(device, bottomLeftIndex);
     std::optional<QPointF> topRightPointOpt = findTopRightTilePoint(device, topRightIndex);
 
-    fp::RegionPtr region = std::make_shared<fp::Region>(bottomLeftPointOpt.value(), topRightPointOpt.value());
+    fp::RegionPtr region = std::make_shared<fp::Region>(device.context()->nextRegionId++, bottomLeftPointOpt.value(), topRightPointOpt.value());
     std::unordered_map<fp::Tile::Index, fp::TilePtr> tiles = device.findTiles(region->rect());
     region->setTiles(tiles);
 
     // create partition
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>("dummy");
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), "dummy");
     fp::HierarhyElements elements = genTestElements();
     for (const auto& element: elements) {
         partition->addElement(element);
@@ -431,9 +429,6 @@ TEST(FloorPlanning, saveLoadPartition)
 // this prevents. Expansion belongs at emission time (REQ-003).
 TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
 {
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-
     fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
     fp::DeviceGrid device(descriptor);
 
@@ -442,10 +437,10 @@ TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
     ASSERT_TRUE(bl.has_value());
     ASSERT_TRUE(tr.has_value());
 
-    fp::RegionPtr region = std::make_shared<fp::Region>(bl.value(), tr.value());
+    fp::RegionPtr region = std::make_shared<fp::Region>(device.context()->nextRegionId++, bl.value(), tr.value());
     region->setTiles(device.findTiles(region->rect()));
 
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p_rtl_only");
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), "p_rtl_only");
     partition->addRegion(region);
 
     // An element that HAS resolved VPR names -- the case that used to leak them into the file.
@@ -475,9 +470,6 @@ TEST(QdcSerializer, ResolvedVprNamesAreNeverWrittenToTheQdc)
 // post-synthesis-facing expansion at all.
 TEST(QdcSerializer, AWholeInstanceIsWrittenAsItsRtlNameNotAGlob)
 {
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-
     fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
     fp::DeviceGrid device(descriptor);
 
@@ -486,10 +478,10 @@ TEST(QdcSerializer, AWholeInstanceIsWrittenAsItsRtlNameNotAGlob)
     ASSERT_TRUE(bl.has_value());
     ASSERT_TRUE(tr.has_value());
 
-    fp::RegionPtr region = std::make_shared<fp::Region>(bl.value(), tr.value());
+    fp::RegionPtr region = std::make_shared<fp::Region>(device.context()->nextRegionId++, bl.value(), tr.value());
     region->setTiles(device.findTiles(region->rect()));
 
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p1");
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), "p1");
     partition->addRegion(region);
     // isLeaf=false is the whole-subtree selection -- the case that used to grow a suffix.
     partition->addElement(fp::HierarhyElement{"dut.instPerm20009", /*isLeaf=*/false});
@@ -510,9 +502,6 @@ TEST(QdcSerializer, AWholeInstanceIsWrittenAsItsRtlNameNotAGlob)
 // constraint.
 TEST(QdcSerializer, ALegacyWildcardLoadsAsTheRtlNameAndIsNormalisedOnSave)
 {
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-
     fp::DeviceGridDescriptorPtr descriptor = genTestDescriptor();
     fp::DeviceGrid device(descriptor);
 
@@ -537,9 +526,6 @@ TEST(QdcSerializer, ALegacyWildcardLoadsAsTheRtlNameAndIsNormalisedOnSave)
 // "cluster[*]", which the flow turns into ^cluster\[\d+\]$ and which matches no atom.
 TEST(QdcSerializer, APatternIsKeptAsWrittenThroughASave)
 {
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-
     fp::DeviceGrid device(genTestDescriptor());
     fp::QdcSerializer qdc;
     qdc.load(device, std::vector<std::string>{"set_region cluster[*].* clb(2,2):clb(4,4) p1"});
@@ -889,7 +875,8 @@ QStandardItem* itemWithPath(QStandardItem* parent, const QString& path)
 
 struct PatternTree {
     fp::SynthResourceHierarchyWidget widget;
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p");
+    fp::PartitionPtr partition =
+        std::make_shared<fp::Partition>(std::make_shared<fp::FloorplanContext>(), "p");
     QStandardItem* root = nullptr;
 
     PatternTree()
@@ -1308,29 +1295,29 @@ fp::DesignResourceEntry entry(int clbEst, int dsp, int bram)
 
 TEST(PartitionResources, AnElementWithNoAtomsContributesNothing)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // The panel does not open before synthesis, so an element with no atoms is a genuinely
     // empty instance rather than a not-yet-synthesised one. It must contribute 0 -- there is
     // no longer a pre-synthesis estimate to stand in, and inventing one would size a region
     // for logic that does not exist.
-    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
+    ctx->designResources = makeResources(1, {{"i_mul_24", entry(40, 4, 0)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
 
     EXPECT_EQ(partition.clbRequiredCount(), 0);
     EXPECT_EQ(partition.dspRequiredCount(), 0);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, AtomsAreTheOnlySourceOfTheRequiredColumns)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // An element that HAS atoms is counted from them, exactly. design_resources.json names
     // this instance with a clb_est of 40 and that figure must not reach the column.
-    fp::Partition::setDesignResources(makeResources(1, {{"i_mul_24", entry(40, 4, 0)}}));
-    fp::Partition::setAtomsPerTile(14);
+    ctx->designResources = makeResources(1, {{"i_mul_24", entry(40, 4, 0)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{
         "i_mul_24", /*isLeaf*/ true,
         std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}});
@@ -1338,11 +1325,11 @@ TEST(PartitionResources, AtomsAreTheOnlySourceOfTheRequiredColumns)
     EXPECT_EQ(partition.clbRequiredCount(), 1);  // 3 atoms / 14 per tile, rounded up
     EXPECT_EQ(partition.dspRequiredCount(), 0);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // One DSP-V4 is several QL_DSP4_* leaf atoms in one tile; only its QL_DSP4_MULT
     // counts, in both the partition column and the selection tally.
     const std::set<std::string> atoms{"u.QL_DSP4.u_mult", "u.QL_DSP4.g_acc.ff",
@@ -1350,9 +1337,9 @@ TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
     const fp::AtomTypeMap types{{"u.QL_DSP4.u_mult", "QL_DSP4_MULT"},
                                 {"u.QL_DSP4.g_acc.ff", "QL_DSP4_ACC_DFFRE_64"},
                                 {"u.QL_DSP4.g_add.u_alu", "QL_DSP4_ALU_ADD"}};
-    fp::Partition::setAtomTypes(types);
+    ctx->atomTypes = types;
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"u", /*isLeaf*/ true, atoms});
     EXPECT_EQ(partition.dspRequiredCount(), 1);
     EXPECT_EQ(partition.clbRequiredCount(), 0);
@@ -1361,7 +1348,6 @@ TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
     EXPECT_EQ(tally.dsp, 1);
     EXPECT_EQ(tally.atoms(), 3);
 
-    fp::Partition::setAtomTypes(fp::AtomTypeMap{});
 }
 
 namespace {
@@ -1444,12 +1430,13 @@ TEST(DspTiles, ASelectionWithoutTheMultiplierStillCountsItsTile)
 
 TEST(DspTiles, APartitionCountsEachTileOnceAcrossItsElements)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     const TwoDspTiles netlist;
     ASSERT_TRUE(netlist.loaded);
-    fp::Partition::setAtomTypes(netlist.types);
-    fp::Partition::setDspTiles(netlist.tiles);
+    ctx->atomTypes = netlist.types;
+    ctx->dspTiles = netlist.tiles;
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"core.u_mul0", true, {kAccA}});
     EXPECT_EQ(partition.dspRequiredCount(), 1);
     partition.addElement(fp::HierarhyElement{"core", true, {kMulA, kAluA}});
@@ -1460,46 +1447,44 @@ TEST(DspTiles, APartitionCountsEachTileOnceAcrossItsElements)
     partition.clearElemenets();
     EXPECT_EQ(partition.dspRequiredCount(), 0);
 
-    fp::Partition::setDspTiles(fp::DspTileMap{});
-    fp::Partition::setAtomTypes(fp::AtomTypeMap{});
 }
 
 TEST(PartitionResources, DesignResourceEntriesNeverFeedThePerPartitionTally)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // The entries NEST -- an ancestor's counts already include its descendants' -- so adding
     // them to a per-partition tally would double-count a partition holding both a parent and
     // a child. The tally is atom-based for exactly that reason.
-    fp::Partition::setDesignResources(makeResources(2, {{"i_mul_24", entry(40, 4, 0)}}));
+    ctx->designResources = makeResources(2, {{"i_mul_24", entry(40, 4, 0)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
 
     EXPECT_EQ(partition.clbRequiredCount(), 0);
     EXPECT_EQ(partition.dspRequiredCount(), 0);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, NoDesignResourcesFileLeavesTheOldBehaviourUntouched)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // A project that has never been compiled, or a device whose template has no P2/P3
     // blocks, must behave exactly as it did before this stage existed.
-    fp::Partition::setDesignResources(fp::DesignResources{});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
 
     EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_FALSE(fp::Partition::designResources().valid());
+    EXPECT_FALSE(ctx->designResources.valid());
 }
 
 TEST(PartitionResources, ClearingElementsAlsoClearsTheTally)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // clearElemenets() is what a reload goes through; atoms surviving it would be counted a
     // second time when the elements come back.
-    fp::Partition::setAtomsPerTile(14);
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     const fp::HierarhyElement element{
         "i_mul_24", /*isLeaf*/ true,
         std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}};
@@ -1531,49 +1516,50 @@ fp::DesignResourceEntry entryWithActual(int clbEst, int clbActual, bool shared =
 
 TEST(PartitionResources, NestedMeasuredTilesAreNotCountedTwice)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // atomsets.json entries NEST, so a parent's clb_actual already includes its children's.
     // A partition holding both must count the parent only.
-    fp::Partition::setDesignResources(makeResources(2, {
+    ctx->designResources = makeResources(2, {
         {"dut", entryWithActual(100, 90)},
         {"dut.a", entryWithActual(40, 35)},
-    }));
+    });
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"dut", true});
     partition.addElement(fp::HierarhyElement{"dut.a", true});
 
     EXPECT_EQ(partition.resourceContribution().clbActual, 90);  // not 125
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, SiblingsOnDifferentBranchesStillAddUp)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // Only ancestors collapse -- two unrelated instances are both maximal.
-    fp::Partition::setDesignResources(makeResources(2, {
+    ctx->designResources = makeResources(2, {
         {"dut.a", entryWithActual(40, 35)},
         {"dut.b", entryWithActual(25, 20)},
-    }));
+    });
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"dut.a", true});
     partition.addElement(fp::HierarhyElement{"dut.b", true});
 
     EXPECT_EQ(partition.resourceContribution().clbActual, 55);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, APatternSumsTheMeasuredTilesOfTheInstancesItMatches)
 {
-    fp::Partition::setDesignResources(makeResources(2, {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    ctx->designResources = makeResources(2, {
         {"cluster[0]", entryWithActual(2, 2)},
         {"cluster[0].clb", entryWithActual(2, 2)},
         {"cluster[1]", entryWithActual(2, 3)},
         {"other", entryWithActual(5, 5)},
-    }));
+    });
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"cluster[*].*", false});
 
     const auto contribution = partition.resourceContribution();
@@ -1581,29 +1567,29 @@ TEST(PartitionResources, APatternSumsTheMeasuredTilesOfTheInstancesItMatches)
     EXPECT_EQ(contribution.clbActual, 5);
     EXPECT_FALSE(contribution.actualPartial);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, APatternThatMatchesNothingIsPartial)
 {
-    fp::Partition::setDesignResources(makeResources(2, {{"other", entryWithActual(5, 5)}}));
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    ctx->designResources = makeResources(2, {{"other", entryWithActual(5, 5)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"cluster[*].*", false});
 
     const auto contribution = partition.resourceContribution();
     EXPECT_FALSE(contribution.hasActual);
     EXPECT_TRUE(contribution.actualPartial);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, MeasuredTilesAreReportedSeparatelyFromTheEstimate)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // clb_actual is a measurement and clb_est a projection; they must not be conflated.
-    fp::Partition::setDesignResources(makeResources(2, {{"i_a", entryWithActual(40, 37)}}));
+    ctx->designResources = makeResources(2, {{"i_a", entryWithActual(40, 37)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_a", true});
 
     const auto contribution = partition.resourceContribution();
@@ -1611,31 +1597,31 @@ TEST(PartitionResources, MeasuredTilesAreReportedSeparatelyFromTheEstimate)
     EXPECT_EQ(contribution.clbActual, 37);
     EXPECT_FALSE(contribution.actualShared);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, SharedClustersMakeTheMeasuredTotalAnUpperBound)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // A cluster holding atoms from two branches is counted for both, so the sum over-counts
     // and the UI must not present it as exact.
-    fp::Partition::setDesignResources(makeResources(2, {
+    ctx->designResources = makeResources(2, {
         {"i_a", entryWithActual(10, 8, /*shared*/ true)},
-    }));
+    });
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_a", true});
 
     EXPECT_TRUE(partition.resourceContribution().actualShared);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, AnElementWithNoMeasurementMarksTheTotalIncomplete)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // Silently summing what IS measured would understate the partition without saying so.
-    fp::Partition::setDesignResources(makeResources(2, {{"i_a", entryWithActual(10, 8)}}));
+    ctx->designResources = makeResources(2, {{"i_a", entryWithActual(10, 8)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_a", true});
     partition.addElement(fp::HierarhyElement{"i_unknown", true});
 
@@ -1643,20 +1629,19 @@ TEST(PartitionResources, AnElementWithNoMeasurementMarksTheTotalIncomplete)
     EXPECT_TRUE(contribution.hasActual);
     EXPECT_TRUE(contribution.actualPartial);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 TEST(PartitionResources, NoPlacementMeansNoMeasuredTiles)
 {
+    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // Tiers 1 and 2 have no clb_actual at all; the column must stay empty rather than 0.
-    fp::Partition::setDesignResources(makeResources(2, {{"i_a", entry(10, 0, 0)}}));
+    ctx->designResources = makeResources(2, {{"i_a", entry(10, 0, 0)}});
 
-    fp::Partition partition("p");
+    fp::Partition partition(ctx, "p");
     partition.addElement(fp::HierarhyElement{"i_a", true});
 
     EXPECT_FALSE(partition.resourceContribution().hasActual);
 
-    fp::Partition::setDesignResources(fp::DesignResources{});
 }
 
 // [aurora2#1725] DeviceGrid::checkIssues() severity. Shared by the panel, which refuses to
@@ -1671,12 +1656,12 @@ fp::PartitionPtr constrain(fp::DeviceGrid& device,
                            const fp::Tile::Index& topRightIndex,
                            const std::set<std::string>& atoms)
 {
-    fp::RegionPtr region = std::make_shared<fp::Region>(
+    fp::RegionPtr region = std::make_shared<fp::Region>(device.context()->nextRegionId++, 
         findBottomLeftTilePoint(device, bottomLeftIndex).value(),
         findTopRightTilePoint(device, topRightIndex).value());
     region->setTiles(device.findTiles(region->rect()));
 
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p");
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), "p");
     partition->addElement(fp::HierarhyElement{"dut.i_a", /*isLeaf*/ true, atoms});
     partition->addRegion(region);
     device.addPartition(partition);
@@ -1711,9 +1696,6 @@ TEST(FloorplanIssues, AClbShortfallIsAnErrorNotAWarning)
     // flow works, so it must stop the user rather than let them run it and find out. It was
     // a warning until the clb estimate proved to run optimistic -- short by the estimate is
     // short in the direction that fails.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-    fp::Partition::setAtomsPerTile(14);
 
     fp::DeviceGrid device(genTestDescriptor());
     // clb(2,2):clb(2,4) is 3 clb tiles; 100 atoms at 14 per tile needs 8.
@@ -1730,9 +1712,6 @@ TEST(FloorplanIssues, ADspShortfallIsAnErrorToo)
 {
     // dsp/bram carry none of the clb estimate's uncertainty -- one atom is one whole tile --
     // so a shortfall there is arithmetic, not a guess.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-    fp::Partition::setAtomsPerTile(14);
 
     fp::DeviceGrid device(genTestDescriptor());
     fp::PartitionPtr partition =
@@ -1755,9 +1734,6 @@ TEST(FloorplanIssues, EnoughClbTilesButNoPackingSlackIsAnErrorToo)
     // 20 clb and filled all 22 tiles it was given. It was a warning while "not short by the
     // estimate" was read as "not short"; it is an error now, so the panel will not save it
     // and a batch compile will not run it.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-    fp::Partition::setAtomsPerTile(14);
 
     fp::DeviceGrid device(genTestDescriptor());
     // 3 clb tiles for 29 atoms -> 3 required, exactly met, nothing spare.
@@ -1774,9 +1750,6 @@ TEST(FloorplanIssues, ARegionWithRoomToSpareIsNoIssueAtAll)
 {
     // The other side of the margin: clear it and nothing is reported. Without this, the two
     // checks above would still pass if every floorplan were declared an error.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-    fp::Partition::setAtomsPerTile(14);
 
     fp::DeviceGrid device(genTestDescriptor());
     // clb(2,2):clb(2,9) is 8 clb tiles; 29 atoms need 3, so there is well over the 25%
@@ -1795,12 +1768,12 @@ namespace {
 // One partition naming `paths`, constrained to clb(2,2):clb(2,9).
 fp::PartitionPtr constrainNames(fp::DeviceGrid& device, const std::vector<std::string>& paths)
 {
-    fp::RegionPtr region = std::make_shared<fp::Region>(
+    fp::RegionPtr region = std::make_shared<fp::Region>(device.context()->nextRegionId++, 
         findBottomLeftTilePoint(device, {2, 2}).value(),
         findTopRightTilePoint(device, {2, 9}).value());
     region->setTiles(device.findTiles(region->rect()));
 
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>("p");
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), "p");
     for (const std::string& path: paths) {
         partition->addElement(fp::HierarhyElement{path, /*isLeaf*/ true});
     }
@@ -1815,8 +1788,6 @@ TEST(FloorplanIssues, ANameOutsideTheRtlHierarchyIsAnError)
 {
     // A hand-edited .qdc with a typo: VPR skips the name ("was not found, skipping atom"),
     // so the constraint does nothing.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
 
     fp::DeviceGrid device(genTestDescriptor());
     device.setRtlInstances({"top", "dut", "dut.i_a"});
@@ -1830,8 +1801,6 @@ TEST(FloorplanIssues, AConstantDriverIsAWarningNotAnError)
 {
     // $false/$true/$undef are atoms synthesis adds to drive constants. VPR places them, but
     // the panel has no row for them and shows their partition empty.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
 
     fp::DeviceGrid device(genTestDescriptor());
     device.setRtlInstances({"top", "dut", "dut.i_a"});
@@ -1845,8 +1814,6 @@ TEST(FloorplanIssues, AConstantDriverIsAWarningNotAnError)
 TEST(FloorplanIssues, InstancesTheirParentsAndGlobsAreKnownNames)
 {
     // "cluster[0]" is a generate label: never an instance itself, only the parent of one.
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
 
     fp::DeviceGrid device(genTestDescriptor());
     device.setRtlInstances({"top", "dut", "dut.i_a", "cluster[0].clb"});
@@ -1859,9 +1826,6 @@ TEST(FloorplanIssues, InstancesTheirParentsAndGlobsAreKnownNames)
 
 TEST(FloorplanIssues, WithoutAnInstanceListNoNameIsChecked)
 {
-    fp::Partition::resetIdGenerator();
-    fp::Region::resetIdGenerator();
-
     fp::DeviceGrid device(genTestDescriptor());
     constrainNames(device, {"dut.i_typo"});
 
@@ -2197,7 +2161,6 @@ TEST(SelectedResources, EveryBramCellTypeTheQlfPluginEmitsCountsAsBram)
 
 TEST(SelectedResources, SelectingInstancesTalliesWhatTheyCost)
 {
-    fp::Partition::setAtomsPerTile(14);
     fp::SynthResourceHierarchyWidget tree(
         fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
     tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
@@ -2235,7 +2198,6 @@ TEST(SelectedResources, AParentAndItsChildAreNotCountedTwice)
     // atomsets.json entries are subtree-inclusive, so summing the selected instances'
     // tallies would charge dut.b.sub's 3 DSPs twice when both rows are selected. The union
     // of their atom sets is what gets tallied, which cannot double count.
-    fp::Partition::setAtomsPerTile(14);
     fp::SynthResourceHierarchyWidget tree(
         fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
     tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
@@ -2261,9 +2223,6 @@ TEST(SelectedResources, CountingBramAndDspRowByRowMatchesTheRootSelection)
     // picosoc: the cpu's register file is an array, not a module, so its two BRAMs belong to
     // soc.cpu itself, beside its pcpi_mul child. Counting the rows whose Type lists a bram or
     // dsp, each for its own atoms, has to reach what selecting the root reports.
-    fp::Partition::setAtomsPerTile(14);
-    fp::Partition::setAtomTypes({});
-    fp::Partition::setDspTiles({});
     const std::vector<std::string> cpuOwn{"soc.cpu.cpuregs.0.0_TDP_ECC36K",
                                           "soc.cpu.cpuregs.1.0_TDP_ECC36K", "soc.cpu.n_$lut"};
     const std::vector<std::string> mul{"soc.cpu.pcpi_mul.m_QL_DSP2_MULT", "soc.cpu.pcpi_mul.n_$lut"};
@@ -2328,7 +2287,6 @@ TEST(SynthResourceHierarchy, ParentTypeListsTheWholeSubtree)
 {
     // fft256's memSys holds only logic itself and its BRAMs in nested instances: its Type
     // must still say bram.
-    fp::Partition::setAtomTypes({});
     const std::vector<std::string> own{"top.mem.n_$lut"};
     const std::vector<std::string> bank{"top.mem.bank.ram_TDP_ECC36K", "top.mem.bank.n_$lut"};
     std::vector<std::string> mem = own;
@@ -2393,7 +2351,6 @@ TEST(SelectedResources, TheAtomsTabNamesCellsAsSynthesisNamedThem)
 {
     // Raw netlist names, not friendlier labels: they are what the Atom List column shows and
     // what a user greps the .blif for.
-    fp::Partition::setAtomsPerTile(14);
     fp::SynthResourceHierarchyWidget tree(
         fp::SynthResourceHierarchyWidget::Flag::ShowSelectedResources);
     tree.build(fp::NaturalStringSet{"dut.a", "dut.b", "dut.b.sub", "dut.c"});
@@ -3127,4 +3084,25 @@ TEST(SynthResourceHierarchyTree, FindAtomMatchesAVprName)
     QStandardItem* core = itemWithPath(model->invisibleRootItem(), "core");
     ASSERT_NE(core, nullptr);
     EXPECT_TRUE(view->isRowHidden(core->row(), core->parent()->index()));
+}
+
+// Review U1: the batch checker builds its own DeviceGrid in the same process as an open panel.
+// Loading a .qdc into that grid must not reset the panel's ID counters or its netlist data.
+TEST(FloorplanContext, AnotherGridLeavesThePanelsStateAlone)
+{
+    fp::DeviceGrid panel(genTestDescriptor());
+    panel.addPartition(std::make_shared<fp::Partition>(panel.context(), "p0"));
+    panel.addPartition(std::make_shared<fp::Partition>(panel.context(), "p1"));
+    panel.context()->setAtomsPerTile(10);
+
+    fp::DeviceGrid batch(genTestDescriptor());
+    fp::QdcSerializer qdc;
+    qdc.load(batch, std::vector<std::string>{"set_region dut.i_a clb(2,2):clb(4,4) b0"});
+    batch.context()->setAtomsPerTile(20);
+    ASSERT_EQ(batch.partitions().size(), 1u);
+
+    panel.addPartition(std::make_shared<fp::Partition>(panel.context(), "p2"));
+    ASSERT_EQ(panel.partitions().size(), 3u) << "a reused ID replaces a partition silently";
+    EXPECT_EQ(panel.partition(2)->name(), "p2");
+    EXPECT_EQ(panel.context()->atomsPerTile, 10);
 }

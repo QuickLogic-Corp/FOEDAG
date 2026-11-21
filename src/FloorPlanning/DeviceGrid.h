@@ -35,6 +35,8 @@ public:
     ~DeviceGrid()=default;
 
     void constructTiles(const DeviceGridDescriptorPtr& device);
+
+    const FloorplanContextPtr& context() const { return m_context; }
     void clearPartitions() {
         m_partitions.clear();
     }
@@ -107,6 +109,7 @@ public:
 
 private:
     DeviceGridDescriptorPtr m_descriptor;
+    FloorplanContextPtr m_context = std::make_shared<FloorplanContext>();
 
     IssuesPtr m_issues;
 

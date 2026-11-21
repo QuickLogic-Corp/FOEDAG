@@ -3,6 +3,7 @@
 #include "Region.h"
 #include "HierarhyElement.h"
 #include "AtomSets.h"
+#include "FloorplanContext.h"
 
 #include <QPoint>
 #include <QRect>
@@ -14,44 +15,10 @@
 namespace fp {
 
 class Partition {
-    static int s_idGenerator;
-    static int s_atomsPerTile;
-    static DesignResources s_designResources;
-    static AtomTypeMap s_atomTypes;
-    static DspTileMap s_dspTiles;
 public:
-    static void resetIdGenerator() { s_idGenerator = 0; }
+    explicit Partition(FloorplanContextPtr context, const std::string& name = "");
 
-    // [aurora2#1725 stage P7] design_resources.json. Static for the same reason
-    // s_atomsPerTile is: it describes the design every partition is measured against,
-    // not one partition.
-    static void setDesignResources(DesignResources resources) {
-        s_designResources = std::move(resources);
-    }
-    static const DesignResources& designResources() { return s_designResources; }
-
-    // [aurora2#1725] atoms_per_tile from atomsets.json -- the packing density hint of
-    // spec A.13.3, the same divisor its est_tiles field uses. Needed because clb atoms
-    // and clb tiles are different units (see clbRequiredCount()). Static, like
-    // s_idGenerator: it describes the netlist every partition is measured against, not
-    // one partition. Left at the A.13.3 default when atomsets.json doesn't say.
-    static void setAtomsPerTile(int atomsPerTile) {
-        s_atomsPerTile = (atomsPerTile > 0) ? atomsPerTile : 1;
-    }
-    static int atomsPerTile() { return s_atomsPerTile; }
-
-    // [aurora2#2377] Each atom's real Yosys cell type, from <top>_post_synth_debug.json
-    // (AtomSets::loadAtomTypes()). Static for the same reason s_atomsPerTile is: it
-    // describes the netlist every partition's atoms are classified against, not one
-    // partition. Empty leaves addElement() on classifyAtomType()'s pre-2377
-    // name-substring guess, which silently miscounts a hard macro that keeps its RTL
-    // instance name (a BRAM, say) as CLB.
-    static void setAtomTypes(AtomTypeMap atomTypes) { s_atomTypes = std::move(atomTypes); }
-    static const AtomTypeMap& atomTypes() { return s_atomTypes; }
-    static void setDspTiles(DspTileMap dspTiles) { s_dspTiles = std::move(dspTiles); }
-    static const DspTileMap& dspTiles() { return s_dspTiles; }
-
-    Partition(const std::string& name = "");
+    const FloorplanContext& context() const { return *m_context; }
 
     void setName(const std::string& name) { m_name = name; }
 
@@ -88,11 +55,13 @@ public:
         // what the design needs -- as opposed to *Available*Count() below, which is
         // what the partition's regions physically have room for.
         for (const std::string& atomName : element.vprNames) {
-            const auto typeIt = s_atomTypes.find(atomName);
-            const std::string realType = (typeIt != s_atomTypes.end()) ? typeIt->second : "";
+            const auto typeIt = m_context->atomTypes.find(atomName);
+            const std::string realType =
+                (typeIt != m_context->atomTypes.end()) ? typeIt->second : "";
             const QString type = classifyAtomType(atomName, realType);
             if (type == "dsp") {
-                if (const auto tile = s_dspTiles.find(atomName); tile != s_dspTiles.end()) {
+                if (const auto tile = m_context->dspTiles.find(atomName);
+                    tile != m_context->dspTiles.end()) {
                     if (m_dspTileIds.insert(tile->second).second) ++m_dspRequiredCount;
                 } else if (countsAsDspTile(realType)) ++m_dspRequiredCount;
             } else if (type == "bram") ++m_bramRequiredCount;
@@ -118,7 +87,8 @@ public:
 
     ResourceContribution resourceContribution() const {
         ResourceContribution out;
-        if (!s_designResources.valid() || m_elements.empty()) {
+        const DesignResources& designResources = m_context->designResources;
+        if (!designResources.valid() || m_elements.empty()) {
             return out;
         }
         std::set<std::string> paths;
@@ -128,7 +98,7 @@ public:
                 continue;
             }
             bool matched = false;
-            for (const auto& [instance, entry] : s_designResources.instances) {
+            for (const auto& [instance, entry] : designResources.instances) {
                 if (elementPatternCovers(element.path, instance)) {
                     paths.insert(instance);
                     matched = true;
@@ -140,8 +110,8 @@ public:
             if (hasAncestorIn(path, paths)) {
                 continue;  // already accounted for by the ancestor, since entries nest
             }
-            const auto it = s_designResources.instances.find(path);
-            if (it == s_designResources.instances.end()) {
+            const auto it = designResources.instances.find(path);
+            if (it == designResources.instances.end()) {
                 out.actualPartial = true;
                 continue;
             }
@@ -171,7 +141,7 @@ public:
     // carries the A.13.2b safety margin), so it is added after the atom->tile division,
     // not before it.
     int clbRequiredCount() const {
-        return (m_clbAtomCount + s_atomsPerTile - 1) / s_atomsPerTile;
+        return (m_clbAtomCount + m_context->atomsPerTile - 1) / m_context->atomsPerTile;
     }
     int dspRequiredCount() const { return m_dspRequiredCount; }
     int bramRequiredCount() const { return m_bramRequiredCount; }
@@ -194,6 +164,7 @@ public:
     const QRectF& rect() const { return m_rect; }
 
 private:
+    FloorplanContextPtr m_context;
     int m_id = -1;
     std::string m_name;
     std::string m_comment;

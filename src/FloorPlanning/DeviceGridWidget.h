@@ -54,6 +54,8 @@ public:
 
     void setScrollToPartitionWhenSelected(bool flag) { m_isScrollToPartitionWhenSelected = flag; }
 
+    const FloorplanContextPtr& context() const { return m_device.context(); }
+
     // [aurora2#1725] Per-instance count of directly-owned atoms, for DeviceGrid's
     // unconstrained-own-logic warning. See FloorPlanningWidget::setAtomNames().
     void setOwnAtomCounts(std::map<std::string, int> ownAtomCounts) {

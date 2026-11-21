@@ -55,6 +55,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
 
     m_deviceWidget = new DeviceGridWidget;
     m_deviceWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_synthResourcesWidget->setContext(m_deviceWidget->context());
 
     // right pane
     QWidget* wRightPane = new QWidget;
@@ -76,6 +77,7 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
 
     int flags = SynthResourceHierarchyWidget::Flag::ShowOnlyCheckedItems | SynthResourceHierarchyWidget::Flag::HidePartitionsColumn;
     m_partitionResourcesWidget = new SynthResourceHierarchyWidget(flags);
+    m_partitionResourcesWidget->setContext(m_deviceWidget->context());
     m_partitionResourcesWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     m_partitionResourcesWidget->setViewLabelTemplate(tr("Partition '%1' netlist:"));
     rightPaneLayout->addWidget(m_partitionResourcesWidget);
@@ -564,10 +566,12 @@ void FloorPlanningWidget::setAtomTypes(AtomTypeMap atomTypes)
 {
     m_synthResourcesWidget->setAtomTypes(atomTypes);
     m_partitionResourcesWidget->setAtomTypes(atomTypes);
-    // [aurora2#2377] Partition holds this statically like s_designResources/s_atomsPerTile:
-    // it describes the netlist every partition's clb/dsp/bram counts are classified
-    // against, not one partition.
-    Partition::setAtomTypes(std::move(atomTypes));
+    m_deviceWidget->context()->atomTypes = std::move(atomTypes);
+}
+
+void FloorPlanningWidget::setDspTiles(DspTileMap dspTiles)
+{
+    m_deviceWidget->context()->dspTiles = std::move(dspTiles);
 }
 
 void FloorPlanningWidget::setVprAtomNames(VprAtomNameMap vprNames)
@@ -598,14 +602,17 @@ void FloorPlanningWidget::setPlacementVerdicts(std::map<std::string, InstancePla
     m_partitionResourcesWidget->setPlacementVerdicts(std::move(placements));
 }
 
+FloorplanContext& FloorPlanningWidget::context() const
+{
+    return *m_deviceWidget->context();
+}
+
 void FloorPlanningWidget::setDesignResources(DesignResources resources)
 {
-    // An invalid set means "this project has no design_resources.json". It must still be
-    // stored: Partition holds these statically, so an early return here would leave the
-    // PREVIOUS project's figures in place and size this project's partitions from them --
-    // silently, and marked as though they described this design.
+    // An invalid set means "this project has no design_resources.json". Store it anyway, so
+    // figures loaded earlier into this panel are not kept.
     if (!resources.valid()) {
-        Partition::setDesignResources(DesignResources{});
+        m_deviceWidget->context()->designResources = DesignResources{};
         return;
     }
 
@@ -621,7 +628,7 @@ void FloorPlanningWidget::setDesignResources(DesignResources resources)
                         .arg(QString::fromStdString(resources.tierName))
                         .arg(static_cast<int>(resources.instances.size())));
 
-    Partition::setDesignResources(std::move(resources));
+    m_deviceWidget->context()->designResources = std::move(resources);
 }
 
 void FloorPlanningWidget::setDeviceGridDescriptor(const DeviceGridDescriptorPtr& descriptor)

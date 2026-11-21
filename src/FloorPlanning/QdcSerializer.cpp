@@ -162,8 +162,7 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
 
     m_reservedContent.clear();
     device.clearPartitions();
-    Partition::resetIdGenerator();
-    Region::resetIdGenerator();
+    device.context()->resetIds();
 
     for (const std::string& line: lines) {
         if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
@@ -242,7 +241,7 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                 continue;
             }
 
-            PartitionPtr partition = std::make_shared<Partition>(partitionName);
+            PartitionPtr partition = std::make_shared<Partition>(device.context(), partitionName);
             partition->setComment(trailingComment);
             device.addPartition(partition);
 

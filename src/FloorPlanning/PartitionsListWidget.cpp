@@ -349,7 +349,7 @@ void PartitionsListWidget::updateResourceSourceLabel(const std::map<int, Partiti
     // Only ever a hint, at any tier: CLB required is atoms divided by packing density, not
     // the tile count the placer will settle on. "Placed" is where the real figure lives.
     text += tr("  CLB is a sizing hint in tiles, not a placement result.");
-    if (Partition::designResources().tier >= 2) {
+    if (partitions.begin()->second->context().designResources.tier >= 2) {
         text += tr("  Placed shows tiles measured from the placement.");
     }
 

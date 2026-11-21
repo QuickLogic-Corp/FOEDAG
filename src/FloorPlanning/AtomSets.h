@@ -98,6 +98,7 @@ struct ResourceTally {
     int dspAtoms = 0;
     int dsp = 0;        // tiles: see countsAsDspTile()
     int bram = 0;       // one atom, one tile
+    int atomsPerTile = 1;
     int atoms() const { return clbAtoms + dspAtoms + bram; }
 };
 
@@ -107,7 +108,7 @@ struct ResourceTally {
 // [aurora2#2377] atomTypes, when given, wins over classifyAtomType()'s name-substring
 // guess for any atom it names -- see classifyAtomType()'s own realType parameter. Empty by
 // default: the "Selected RTL Resources" tally and Partition's running counts must agree on
-// what an atom is, so the caller passes Partition::atomTypes() rather than this defaulting
+// what an atom is, so the caller passes FloorplanContext::atomTypes rather than this defaulting
 // to some second, independent source of the same map.
 ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
                              const AtomTypeMap& atomTypes = {},

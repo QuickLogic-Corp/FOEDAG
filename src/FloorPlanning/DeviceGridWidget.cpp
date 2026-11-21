@@ -178,7 +178,7 @@ void DeviceGridWidget::startNewRegionSelection(const QPointF& worldCoord)
             return;
         }
     }
-    m_newRegion = std::make_shared<Region>(worldCoord);
+    m_newRegion = std::make_shared<Region>(m_device.context()->nextRegionId++, worldCoord);
     update();
 }
 
@@ -859,7 +859,7 @@ void DeviceGridWidget::setWorldCenter(const QPointF& worldCenter)
 
 void DeviceGridWidget::createNewPartition(const std::string& partitionName)
 {
-    PartitionPtr partition = std::make_shared<Partition>(partitionName);
+    PartitionPtr partition = std::make_shared<Partition>(m_device.context(), partitionName);
     m_device.addPartition(partition);
     reportPartitionChanges();
     selectPartition(partition); // automatically select

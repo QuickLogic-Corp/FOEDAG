@@ -49,6 +49,7 @@ public:
     // type, from <top>_post_synth_debug.json. Both trees show the Type column, so both
     // are told, same as setAtomNames().
     void setAtomTypes(AtomTypeMap atomTypes);
+    void setDspTiles(DspTileMap dspTiles);
 
     // [aurora2#1725] The "VPR Name" column of both trees, from the constraints manifest.
     void setVprAtomNames(VprAtomNameMap vprNames);
@@ -56,7 +57,9 @@ public:
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
     // one tile, so a partition's required clb can be reported in the same unit as what its
     // regions have available.
-    void setAtomsPerTile(int atomsPerTile) { Partition::setAtomsPerTile(atomsPerTile); }
+    void setAtomsPerTile(int atomsPerTile) { context().setAtomsPerTile(atomsPerTile); }
+
+    FloorplanContext& context() const;
 
     // [aurora2#1725 stage P4] Per-instance verdicts from validation.json, so the trees can
     // grey out what synthesis deleted and flag what is only partially trustworthy.

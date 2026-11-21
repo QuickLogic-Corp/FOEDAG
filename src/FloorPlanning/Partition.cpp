@@ -6,23 +6,9 @@
 
 namespace fp {
 
-int Partition::s_idGenerator = 0;
-
-// atomsets.json's own default (spec A.13.3). Overridden by setAtomsPerTile() once the
-// project's atomsets.json has been read.
-int Partition::s_atomsPerTile = 14;
-
-// [aurora2#1725 stage P7] Empty until design_resources.json is read; tier 0 means "no file",
-// so addElement()'s estimate path stays off until a tier-1 file actually arrives.
-DesignResources Partition::s_designResources{};
-
-// [aurora2#2377] Empty until <top>_post_synth_debug.json is read; addElement() falls back
-// to classifyAtomType()'s name-substring guess for any atom with no entry here.
-AtomTypeMap Partition::s_atomTypes{};
-DspTileMap Partition::s_dspTiles{};
-
-Partition::Partition(const std::string& name): m_name(name) {
-  m_id = s_idGenerator++;
+Partition::Partition(FloorplanContextPtr context, const std::string& name)
+    : m_context(std::move(context)), m_name(name) {
+  m_id = m_context->nextPartitionId++;
   setColor(colorFromIndex(m_id));
   if (m_name.empty()) {
     m_name = "partition" + std::to_string(m_id);

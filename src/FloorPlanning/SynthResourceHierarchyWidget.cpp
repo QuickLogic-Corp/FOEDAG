@@ -968,8 +968,8 @@ void SynthResourceHierarchyWidget::updateSelectedResources()
     // Tiles from the atom set, cell types from the counts: two routes to the same selection,
     // both of which drop what a parent and its child name in common.
     m_selectedResourcesWidget->setSelectedResources(
-        tallyResources(atoms, Partition::atomsPerTile(), Partition::atomTypes(),
-                       Partition::dspTiles()),
+        tallyResources(atoms, m_context->atomsPerTile, m_context->atomTypes,
+                       m_context->dspTiles),
         tallyAtomResources(m_atomResources, paths),
         instances);
 }

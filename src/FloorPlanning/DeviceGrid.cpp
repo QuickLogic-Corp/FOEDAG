@@ -180,7 +180,7 @@ void DeviceGrid::alignRegion(const RegionPtr& region)
 void DeviceGrid::restoreRegion(const PartitionPtr& partition, const Tile::Index& bottomLeftIndex, const Tile::Index& topRightIndex, bool excludeIoTiles)
 {
     QRectF rect = getAlignedRect(bottomLeftIndex, topRightIndex);
-    RegionPtr region = std::make_shared<Region>(rect);
+    RegionPtr region = std::make_shared<Region>(m_context->nextRegionId++, rect);
     const auto tiles = findTiles(rect, excludeIoTiles);
     region->setTiles(tiles);
     partition->addRegion(region);
@@ -332,7 +332,7 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
             }
             const std::string tip = (label == "clb")
                 ? "Estimated from this partition's clb atoms at "
-                  + std::to_string(Partition::atomsPerTile())
+                  + std::to_string(m_context->atomsPerTile)
                   + " atoms per tile. Real density varies with the logic, so the shortfall is "
                     "approximate -- but the region has to cover more clb tiles, or some "
                     "elements belong in another partition."

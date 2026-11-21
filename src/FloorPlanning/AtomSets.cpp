@@ -184,6 +184,7 @@ ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPe
                              const AtomTypeMap& atomTypes, const DspTileMap& dspTiles)
 {
     ResourceTally tally;
+    tally.atomsPerTile = (atomsPerTile > 0) ? atomsPerTile : 1;
     std::set<std::string> dspTileIds;
     for (const std::string& atom : atomNames) {
         const auto typeIt = atomTypes.find(atom);
@@ -203,8 +204,7 @@ ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPe
         }
     }
     tally.dsp += static_cast<int>(dspTileIds.size());
-    const int perTile = (atomsPerTile > 0) ? atomsPerTile : 1;
-    tally.clbTiles = (tally.clbAtoms + perTile - 1) / perTile;
+    tally.clbTiles = (tally.clbAtoms + tally.atomsPerTile - 1) / tally.atomsPerTile;
     return tally;
 }
 

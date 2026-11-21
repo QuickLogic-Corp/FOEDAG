@@ -2442,7 +2442,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     // different tile counts for the same .qdc.
     fp::AtomNameMap atomNames;
     fp::AtomResourceMap atomResources;
-    int atomsPerTile = fp::Partition::atomsPerTile();  // A.13.3 default unless the file says
+    int atomsPerTile = fp::FloorplanContext::kDefaultAtomsPerTile;  // unless the file says
     if (!fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile)) {
       error = tr("Cannot load floorplanning data: %1 is unreadable or malformed.")
                   .arg(QString::fromStdString(atomsetsJsonPath.string()));
@@ -2461,9 +2461,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // name-substring guess, which misclassifies a hard macro that keeps its RTL instance
   // name (a BRAM, say) as CLB.
   //
-  // Called unconditionally, empty map and all: Partition holds this statically (like
-  // s_designResources), so skipping the call on a project with no debug json would leave
-  // the PREVIOUS project's types in place and classify this one's atoms against them.
+  // Called unconditionally, empty map and all, so types loaded earlier into the panel are
+  // not kept for a project with no debug json.
   {
     fp::AtomTypeMap atomTypes;
     std::filesystem::path debugJsonPath =
@@ -2471,7 +2470,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
         (compiler->ProjManager()->DesignTopModule() + "_post_synth_debug.json");
     fp::DspTileMap dspTiles;
     fp::loadAtomTypes(debugJsonPath, atomTypes, dspTiles);
-    fp::Partition::setDspTiles(std::move(dspTiles));
+    m_floorPlanningWidget->setDspTiles(std::move(dspTiles));
     m_floorPlanningWidget->setAtomTypes(std::move(atomTypes));
   }
 
@@ -2496,9 +2495,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // compiled, and for devices whose template has no P2/P3 blocks -- both leave the panel
   // exactly as it was before this stage existed, so a missing file is not an error.
   //
-  // Cleared up front rather than only on success: Partition holds these statically, so a
-  // project with no design_resources.json -- or an unreadable one -- would otherwise keep
-  // sizing its partitions from whichever project was open last.
+  // Cleared up front rather than only on success, so a missing or unreadable
+  // design_resources.json does not keep the figures loaded earlier into this panel.
   m_floorPlanningWidget->setDesignResources(fp::DesignResources{});
 
   std::filesystem::path designResourcesPath =
@@ -2611,7 +2609,7 @@ void MainWindow::refreshFloorPlanningData()
   // populated with, so comparing it against what is now on disk answers that directly:
   // tier 1 arriving after a synthesis, or tier 2 after a placement, is worth interrupting
   // for; another compile that produced nothing newer is not.
-  const int loadedTier = fp::Partition::designResources().tier;
+  const int loadedTier = m_floorPlanningWidget->context().designResources.tier;
   int diskTier = 0;
   {
     std::filesystem::path path =

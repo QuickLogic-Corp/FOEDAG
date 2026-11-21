@@ -57,6 +57,10 @@ public:
 
     explicit SynthResourceHierarchyWidget(int flags = Flag::None, QWidget* parent = nullptr);
 
+    // The panel's FloorplanContext, for the tally of selected resources. Defaults to a context
+    // of its own, for a widget used outside a panel.
+    void setContext(FloorplanContextPtr context) { m_context = std::move(context); }
+
     void setViewLabelTemplate(const QString& label) {
         m_viewLabelTemplate = label;
         m_lbView->setVisible(true);
@@ -169,6 +173,7 @@ private:
     std::map<std::string, std::vector<std::string>, NaturalLess> m_atomNames;
     AtomResourceMap m_atomResources;
     AtomTypeMap m_atomTypes;
+    FloorplanContextPtr m_context = std::make_shared<FloorplanContext>();
     VprAtomNameMap m_vprAtomNames;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
