@@ -938,6 +938,48 @@ int guiDialog(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return succeed(interp);
 }
 
+QMenu *openMenu() {
+  return qobject_cast<QMenu *>(QApplication::activePopupWidget());
+}
+
+int guiMenu(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
+  Options o;
+  QString error;
+  int timeoutMs{0};
+  if (!parseOptions(argc, argv, {"-timeout"}, {}, &o, &error) ||
+      o.positional.size() != 1 || !timeoutOption(o, &timeoutMs, &error))
+    return fail(interp, "usage: gui_menu <itemText> [-timeout ms]");
+  const QString item = o.positional.first();
+  const QString what = "gui_menu " + item;
+
+  if (!waitUntil([]() { return openMenu() != nullptr; }, timeoutMs, what,
+                 false))
+    return fail(interp,
+                QString("%1: no menu open within %2 ms").arg(what).arg(timeoutMs));
+  QMenu *menu = openMenu();
+  QAction *found{nullptr};
+  QStringList items;
+  for (QAction *a : menu->actions()) {
+    if (a->isSeparator() || !a->isVisible()) continue;
+    items << plain(a->text());
+    if (!found && plain(a->text()) == item) found = a;
+  }
+  if (!found)
+    return fail(interp, QString("%1: no item '%2' (items: %3)")
+                            .arg(what, item, items.join(", ")));
+  if (!found->isEnabled())
+    return fail(interp, QString("%1: item is disabled").arg(what));
+
+  // A click, so the menu closes and triggers the item in Qt's own order.
+  const GuiTestAction act{menu};
+  const QPoint pos = menu->actionGeometry(found).center();
+  sendMouse(menu, QEvent::MouseButtonPress, pos, Qt::LeftButton,
+            Qt::LeftButton);
+  sendMouse(menu, QEvent::MouseButtonRelease, pos, Qt::LeftButton,
+            Qt::NoButton);
+  return succeed(interp);
+}
+
 int guiWaitEvent(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   Options o;
   QString error;
@@ -1133,7 +1175,8 @@ static int traced(ClientData proc, Tcl_Interp *interp, int argc,
 void registerGuiTestCommands(Tcl_Interp *interp) {
   static const QSet<QString> actions{"gui_click",  "gui_set_text",
                                      "gui_select", "gui_trigger_action",
-                                     "gui_drag",   "gui_dialog"};
+                                     "gui_drag",   "gui_dialog",
+                                     "gui_menu"};
   const std::pair<const char *, Tcl_CmdProc *> commands[] = {
       {"gui_find", guiFind},
       {"gui_click", guiClick},
@@ -1146,6 +1189,7 @@ void registerGuiTestCommands(Tcl_Interp *interp) {
       {"gui_assert", guiAssert},
       {"gui_warn", guiWarn},
       {"gui_dialog", guiDialog},
+      {"gui_menu", guiMenu},
       {"gui_wait_event", guiWaitEvent},
       {"gui_screenshot", guiScreenshot},
       {"gui_test_run", guiTestRun},

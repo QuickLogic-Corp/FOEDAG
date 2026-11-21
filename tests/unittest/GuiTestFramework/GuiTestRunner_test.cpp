@@ -507,3 +507,39 @@ TEST(GuiTestSpaceGate, RunsToBreakpoint) {
   EXPECT_FALSE(gate.arrive(false));
   EXPECT_TRUE(gate.isOpen());
 }
+
+// gui_menu picks an item of the open context menu by its text, as a click
+// does: the menu closes, and the item and the menu report the pick.
+TEST(GuiTestCommands, MenuPicksItemByText) {
+  QWidget window;
+  window.show();
+  auto menu = new QMenu(&window);
+  menu->addAction("Run");
+  QAction *logs = menu->addAction("View &Logs");
+  menu->addSeparator();
+  menu->addAction("Disabled")->setEnabled(false);
+  int picked = 0;
+  QObject::connect(logs, &QAction::triggered, [&]() { ++picked; });
+  QSignalSpy menuTriggered{menu, &QMenu::triggered};
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  auto result = [interp]() { return std::string{Tcl_GetStringResult(interp)}; };
+  EXPECT_EQ(Tcl_Eval(interp, "gui_menu Run -timeout 0"), TCL_ERROR);
+  EXPECT_NE(result().find("no menu open"), std::string::npos) << result();
+
+  menu->popup(window.mapToGlobal(QPoint{10, 10}));
+  ASSERT_TRUE(menu->isVisible());
+  EXPECT_EQ(Tcl_Eval(interp, "gui_menu Missing"), TCL_ERROR);
+  EXPECT_NE(result().find("items: Run, View Logs, Disabled"), std::string::npos)
+      << result();
+  EXPECT_EQ(Tcl_Eval(interp, "gui_menu Disabled"), TCL_ERROR);
+  EXPECT_NE(result().find("item is disabled"), std::string::npos) << result();
+  EXPECT_TRUE(menu->isVisible());
+
+  EXPECT_EQ(Tcl_Eval(interp, "gui_menu {View Logs}"), TCL_OK) << result();
+  EXPECT_EQ(picked, 1);
+  EXPECT_EQ(menuTriggered.count(), 1);
+  EXPECT_FALSE(menu->isVisible());
+  Tcl_DeleteInterp(interp);
+}

@@ -44,6 +44,7 @@ class RoundProgressWidget;
 
 class NCriticalPathView final : public QTreeView {
   Q_OBJECT
+  Q_PROPERTY(QString selectedPathElements READ getSelectedPathElements)
 
   const int INDENT_SIZE = 150;
 
