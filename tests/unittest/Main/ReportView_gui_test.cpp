@@ -69,3 +69,28 @@ TEST(ReportView, EachSelectorEntryShowsItsOwnPage) {
   EXPECT_EQ(selector->itemText(1), "Empty");
   EXPECT_EQ(pages->widget(1)->objectName(), "reportNoData");
 }
+
+// Opening a report whose tab is open refills that tab: the second report
+// replaces the first, its "Select Data Table" row included.
+TEST(ReportView, RefillReplacesThePreviousReport) {
+  ITaskReport::DataReports first;
+  first.push_back(table("Timing Data", {{"Setup WNS", "-1.6 ns"}}));
+  first.push_back(table("Histogram", {{"-2", "-1"}}));
+  DefaultTaskReport corner1{std::move(first), "STA - Report Static Timing"};
+  ITaskReport::DataReports second;
+  second.push_back(table("Timing Data", {{"Setup WNS", "-2.4 ns"}}));
+  DefaultTaskReport corner2{std::move(second), "STA - Report Static Timing"};
+
+  QWidget page;
+  auto layout = new QVBoxLayout(&page);
+  generateReport(corner1, layout);
+  generateReport(corner2, layout);
+
+  const auto selectors = page.findChildren<QComboBox *>("reportTableSelector");
+  const auto pages = page.findChildren<QStackedWidget *>("reportTables");
+  ASSERT_EQ(selectors.size(), 1);
+  ASSERT_EQ(pages.size(), 1);
+  EXPECT_EQ(selectors.first()->count(), 1);
+  EXPECT_EQ(pages.first()->count(), 1);
+  EXPECT_EQ(page.findChildren<QLabel *>().size(), 1) << "one Select Data Table label";
+}

@@ -33,7 +33,8 @@ class ITaskReport;
 class ITaskReportManager;
 class Task;
 
-// Adds the report's "Select Data Table" selector and one page per table.
+// Fills the layout with the report's "Select Data Table" selector and one page
+// per table, replacing what it held.
 void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout);
 
 QDialog* createTaskDialog(const QString& taskName);

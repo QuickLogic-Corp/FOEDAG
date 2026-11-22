@@ -72,9 +72,20 @@ QLabel* createTitleLabel(const QString& text) {
 
   return titleLabel;
 }
+
+// Deletes every item of `layout` with its widgets, nested layouts included:
+// the "Select Data Table" row is one.
+void clearLayout(QLayout* layout) {
+  while (QLayoutItem* item = layout->takeAt(0)) {
+    if (QLayout* child = item->layout()) clearLayout(child);
+    delete item->widget();
+    delete item;
+  }
+}
 }  // namespace
 
 void FOEDAG::generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
+  clearLayout(reportLayout);
   QLabel* reportTablesSelectionLabel = new QLabel("Select Data Table:");
   QComboBox* reportTablesSelectionComboBox = new QComboBox();
   reportTablesSelectionComboBox->setObjectName("reportTableSelector");
@@ -339,13 +350,6 @@ void openReportView(Compiler* compiler, const Task* task,
       tabWidget->setCurrentIndex(i);
       auto reportLayout{
           dynamic_cast<QVBoxLayout*>(tabWidget->currentWidget()->layout())};
-
-      // clear previous report
-      QLayoutItem* item;
-      while ((item = reportLayout->takeAt(0)) != nullptr) {
-        delete item->widget();
-        delete item;
-      }
 
       generateReport(report, reportLayout);
 
