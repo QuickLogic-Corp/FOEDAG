@@ -82,8 +82,13 @@ public:
     bool hasUnsavedChanges() const { return m_hasUnsavedChanges; }
 
     // [aurora2#1725 stage P7] Save on the user's behalf when they answer "Save" to that
-    // prompt. No-ops when there is nothing to write, exactly as the button does.
-    void saveUnsavedChanges() { saveQdc(); }
+    // prompt. No-ops when there is nothing to write, exactly as the button does. False when
+    // the save was refused or failed; saveQdc() has already told the user why.
+    bool saveUnsavedChanges()
+    {
+        saveQdc();
+        return !m_hasUnsavedChanges;
+    }
 
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);

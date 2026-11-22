@@ -18,6 +18,7 @@ struct FloorplanContext {
 
     int atomsPerTile = kDefaultAtomsPerTile;
     DesignResources designResources;
+    std::string netlistSha256;
     AtomTypeMap atomTypes;
     DspTileMap dspTiles;
 

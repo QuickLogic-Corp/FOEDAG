@@ -2443,12 +2443,15 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     fp::AtomNameMap atomNames;
     fp::AtomResourceMap atomResources;
     int atomsPerTile = fp::FloorplanContext::kDefaultAtomsPerTile;  // unless the file says
-    if (!fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile)) {
+    std::string netlistSha256;
+    if (!fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile,
+                          netlistSha256)) {
       error = tr("Cannot load floorplanning data: %1 is unreadable or malformed.")
                   .arg(QString::fromStdString(atomsetsJsonPath.string()));
       return false;
     }
     m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
+    m_floorPlanningWidget->context().netlistSha256 = std::move(netlistSha256);
     m_floorPlanningWidget->setAtomNames(std::move(atomNames));
     // The same file's "resources" map: the cell types behind those atoms, which the
     // Atoms tab of "Selected RTL Resources" reports.
@@ -2605,11 +2608,10 @@ void MainWindow::refreshFloorPlanningData()
   }
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
 
-  // Only ask when there is genuinely better data to load. The panel keeps the tier it was
-  // populated with, so comparing it against what is now on disk answers that directly:
-  // tier 1 arriving after a synthesis, or tier 2 after a placement, is worth interrupting
-  // for; another compile that produced nothing newer is not.
-  const int loadedTier = m_floorPlanningWidget->context().designResources.tier;
+  // Only ask when there is genuinely newer data to load: a re-synthesised netlist, or
+  // better resource figures for the same one (tier 1 after a synthesis, tier 2 after a
+  // placement). Another compile that produced nothing newer is not worth interrupting for.
+  const fp::FloorplanContext& loaded = m_floorPlanningWidget->context();
   int diskTier = 0;
   {
     std::filesystem::path path =
@@ -2628,7 +2630,12 @@ void MainWindow::refreshFloorPlanningData()
       }
     }
   }
-  if (diskTier <= loadedTier) {
+  const std::string diskSha256 = fp::readNetlistSha256(
+      fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
+                                      compiler->ProjManager()->projectName(), "atomsets.json"));
+  const bool netlistChanged = (diskSha256 != loaded.netlistSha256);
+  if (!fp::floorplanReloadNeeded(loaded.designResources.tier, loaded.netlistSha256, diskTier,
+                                 diskSha256)) {
     return;
   }
 
@@ -2644,10 +2651,14 @@ void MainWindow::refreshFloorPlanningData()
   // [aurora2#1725 stage P7] Name the source that arrived rather than its level number.
   // The reason to interrupt is that the figures got better, which "tier 2" only conveys to
   // someone who already knows the ladder.
-  const QString arrived = (diskTier >= 2)
-                              ? tr("measured from the placement")
-                              : tr("counted from the post-synthesis netlist");
-  box.setText(tr("More accurate resource data is available: %1.").arg(arrived));
+  if (netlistChanged) {
+    box.setText(tr("The design was re-synthesised; the panel shows the previous netlist."));
+  } else {
+    const QString arrived = (diskTier >= 2)
+                                ? tr("measured from the placement")
+                                : tr("counted from the post-synthesis netlist");
+    box.setText(tr("More accurate resource data is available: %1.").arg(arrived));
+  }
   box.setInformativeText(
       dirty ? tr("Restarting floorplanning reloads the panel from the .qdc on disk, so your "
                  "unsaved changes must be saved first.\n\n"
@@ -2670,8 +2681,11 @@ void MainWindow::refreshFloorPlanningData()
     return;
   }
 
-  if (dirty) {
-    m_floorPlanningWidget->saveUnsavedChanges();
+  if (dirty && !m_floorPlanningWidget->saveUnsavedChanges()) {
+    compiler->Message(
+        "Floor Planning: the .qdc was not saved, so floorplanning was not restarted and your "
+        "edits are kept. Fix what the panel reports, save, then restart floorplanning.");
+    return;
   }
 
   QString error;

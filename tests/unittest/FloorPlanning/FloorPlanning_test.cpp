@@ -24,12 +24,15 @@
 #include <QTemporaryDir>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include <QMessageBox>
+#include <QTimer>
 #include <QSignalSpy>
 
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <set>
 
 #include "gtest/gtest.h"
 
@@ -2021,6 +2024,108 @@ TEST(QdcSerializer, AValidRegionStillLoadsNormally)
     EXPECT_FALSE(partition->regions().empty());
 }
 
+namespace {
+
+std::set<std::string> elementPaths(const fp::PartitionPtr& partition)
+{
+    std::set<std::string> paths;
+    for (const fp::HierarhyElement& element : partition->elements()) {
+        paths.insert(element.path);
+    }
+    return paths;
+}
+
+}  // namespace
+
+TEST(QdcSerializer, BlanksAfterCommasDoNotSplitTheLists)
+{
+    const auto qdc = writeQdc("fp_qdc_blanks",
+                              "set_region i_a, i_b  clb(2, 2):clb(4,4), clb(6,6) p1\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+
+    ASSERT_EQ(device.partitions().size(), 1u);
+    const auto& partition = device.partitions().at(0);
+    EXPECT_EQ(partition->name(), "p1");
+    EXPECT_EQ(elementPaths(partition), (std::set<std::string>{"i_a", "i_b"}));
+    EXPECT_EQ(partition->regions().size(), 2u);
+}
+
+TEST(QdcSerializer, AQuotedNameKeepsItsBlankAndHashThroughARoundTrip)
+{
+    const auto qdc = writeQdc("fp_qdc_quoted",
+                              "set_region \"dut.my inst#1\",i_b clb(2,2):clb(4,4) p1  # note\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+    ASSERT_EQ(device.partitions().size(), 1u);
+    EXPECT_EQ(elementPaths(device.partitions().at(0)),
+              (std::set<std::string>{"dut.my inst#1", "i_b"}));
+    EXPECT_EQ(device.partitions().at(0)->comment(), "# note");
+
+    ASSERT_TRUE(serializer.save(device, qdc));
+    fp::DeviceGrid reloaded(genTestDescriptor());
+    serializer.load(reloaded, qdc);
+    ASSERT_EQ(reloaded.partitions().size(), 1u);
+    EXPECT_EQ(elementPaths(reloaded.partitions().at(0)),
+              (std::set<std::string>{"dut.my inst#1", "i_b"}));
+    EXPECT_EQ(reloaded.partitions().at(0)->name(), "p1");
+}
+
+TEST(QdcSerializer, LinesNamingOnePartitionAreMergedIntoIt)
+{
+    const auto qdc = writeQdc("fp_qdc_merge",
+                              "set_region i_a clb(2,2):clb(4,4) p1\n"
+                              "set_region i_b clb(6,6) p1\n"
+                              "set_region i_c clb(8,8) p2\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+
+    ASSERT_EQ(device.partitions().size(), 2u);
+    const auto& p1 = device.partitions().at(0);
+    EXPECT_EQ(p1->name(), "p1");
+    EXPECT_EQ(elementPaths(p1), (std::set<std::string>{"i_a", "i_b"}));
+    EXPECT_EQ(p1->regions().size(), 2u);
+
+    ASSERT_TRUE(serializer.save(device, qdc));
+    const std::string content = readAll(qdc);
+    EXPECT_EQ(content.find("p1"), content.rfind("p1")) << "p1 must be written once";
+}
+
+TEST(QdcSerializer, CrlfLineEndingsLoadLikeLf)
+{
+    const auto qdc = writeQdc("fp_qdc_crlf",
+                              "# header\r\n"
+                              "set_region \\\r\n"
+                              "i_a,\\\r\n"
+                              "i_b \\\r\n"
+                              "clb(2,2):clb(4,4) \\\r\n"
+                              "p1\r\n");
+
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, qdc);
+
+    ASSERT_EQ(device.partitions().size(), 1u);
+    EXPECT_EQ(device.partitions().at(0)->name(), "p1");
+    EXPECT_EQ(elementPaths(device.partitions().at(0)), (std::set<std::string>{"i_a", "i_b"}));
+}
+
+TEST(QdcSerializer, AnExtraWordIsKeptAsAnUnparsableLine)
+{
+    fp::DeviceGrid device(genTestDescriptor());
+    fp::QdcSerializer serializer;
+    serializer.load(device, std::vector<std::string>{"set_region i_a clb(2,2) p1 stray"});
+    EXPECT_TRUE(device.partitions().empty());
+    EXPECT_FALSE(fp::QdcSerializer::parseSetRegion("set_region i_a clb(2,2) p1 stray"));
+    EXPECT_FALSE(fp::QdcSerializer::parseSetRegion("set_region \"i_a clb(2,2) p1"));
+}
+
 // [aurora2#1725] "Selected RTL Resources" -- the table under the RTL hierarchy tree that
 // says what the selected instances would cost. Selection drives it, deliberately: checking an
 // instance assigns it to a partition, so asking "how big would this have to be?" must not be
@@ -2408,7 +2513,9 @@ TEST(SelectedResources, ALoadedAtomsetsFileCarriesBothHalves)
     fp::AtomNameMap names;
     fp::AtomResourceMap resources;
     int atomsPerTile = 1;
-    ASSERT_TRUE(fp::loadAtomSets(path, names, resources, atomsPerTile));
+    std::string netlistSha256 = "stale";
+    ASSERT_TRUE(fp::loadAtomSets(path, names, resources, atomsPerTile, netlistSha256));
+    EXPECT_EQ(netlistSha256, "") << "a table with no hash must not keep the previous one";
 
     EXPECT_EQ(atomsPerTile, 14);
     EXPECT_EQ(names["dut.a"].size(), 3u);
@@ -3105,4 +3212,55 @@ TEST(FloorplanContext, AnotherGridLeavesThePanelsStateAlone)
     ASSERT_EQ(panel.partitions().size(), 3u) << "a reused ID replaces a partition silently";
     EXPECT_EQ(panel.partition(2)->name(), "p2");
     EXPECT_EQ(panel.context()->atomsPerTile, 10);
+}
+
+TEST(FloorplanRefresh, ATableForAnotherNetlistIsReloadedWhateverTheTier)
+{
+    const std::string table = R"({"atoms_per_tile": 14, "atomsets": {"dut.a": {"atoms": []}}, )";
+    const auto before = writeQdc("fp_refresh_before", table + R"("netlist_sha256": "aaa"})");
+    const auto after = writeQdc("fp_refresh_after", table + R"("netlist_sha256": "bbb"})");
+
+    fp::AtomNameMap names;
+    fp::AtomResourceMap resources;
+    int atomsPerTile = 1;
+    std::string loadedSha256;
+    ASSERT_TRUE(fp::loadAtomSets(before, names, resources, atomsPerTile, loadedSha256));
+    EXPECT_EQ(loadedSha256, "aaa");
+    const std::string diskSha256 = fp::readNetlistSha256(after);
+    EXPECT_EQ(diskSha256, "bbb");
+
+    EXPECT_TRUE(fp::floorplanReloadNeeded(2, loadedSha256, 1, diskSha256))
+        << "a re-synthesised netlist must not wait for a better tier";
+    EXPECT_TRUE(fp::floorplanReloadNeeded(1, loadedSha256, 1, diskSha256));
+    EXPECT_FALSE(fp::floorplanReloadNeeded(1, loadedSha256, 1, loadedSha256));
+    EXPECT_TRUE(fp::floorplanReloadNeeded(1, loadedSha256, 2, loadedSha256));
+    EXPECT_EQ(fp::readNetlistSha256(std::filesystem::temp_directory_path() / "fp_no_such.json"),
+              "");
+}
+
+TEST(FloorplanRefresh, ARefusedSaveKeepsThePartitionAndSaysWhy)
+{
+    fp::FloorPlanningWidget panel(QStringLiteral("refresh-test"));
+    prepare(panel, 1366);
+    auto* grid = panel.findChild<fp::DeviceGridWidget*>();
+    ASSERT_NE(grid, nullptr);
+    grid->createNewPartition("p_invalid");  // no elements, no region: an error
+    ASSERT_TRUE(panel.hasUnsavedChanges());
+
+    QString reason;
+    QTimer::singleShot(0, [&reason]() {
+        if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+            reason = box->text();
+            box->close();
+        }
+    });
+    EXPECT_FALSE(panel.saveUnsavedChanges());
+    EXPECT_TRUE(panel.hasUnsavedChanges());
+    EXPECT_TRUE(reason.contains("errors")) << reason.toStdString();
+
+    auto* list = panel.findChild<fp::PartitionsListWidget*>();
+    ASSERT_NE(list, nullptr);
+    auto* table = list->findChild<QTableWidget*>();
+    ASSERT_NE(table, nullptr);
+    EXPECT_FALSE(table->findItems("p_invalid", Qt::MatchExactly).isEmpty());
 }

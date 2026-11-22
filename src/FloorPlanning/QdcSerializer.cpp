@@ -8,11 +8,114 @@
 
 #include <QDebug>
 
+#include <map>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace fp {
+
+namespace {
+
+bool isBlank(char c) { return c == ' ' || c == '\t' || c == '\r'; }
+
+std::string unquote(const std::string& word)
+{
+    if (word.size() >= 2 && word.front() == '"' && word.back() == '"') {
+        return word.substr(1, word.size() - 2);
+    }
+    return word;
+}
+
+// A name with a blank, comma or '#' would otherwise read back as several words, a list or a
+// comment.
+std::string quoteIfNeeded(const std::string& name)
+{
+    return (name.find_first_of(" \t,#") == std::string::npos) ? name : '"' + name + '"';
+}
+
+// Splits on commas outside quotes and parentheses.
+std::vector<std::string> splitList(const std::string& word)
+{
+    std::vector<std::string> items;
+    std::string current;
+    bool quoted = false;
+    int depth = 0;
+    auto flush = [&]() {
+        if (!current.empty()) {
+            items.push_back(unquote(current));
+        }
+        current.clear();
+    };
+    for (char c : word) {
+        if (c == '"') {
+            quoted = !quoted;
+        } else if (!quoted && c == '(') {
+            ++depth;
+        } else if (!quoted && c == ')') {
+            --depth;
+        } else if (!quoted && depth == 0 && c == ',') {
+            flush();
+            continue;
+        }
+        current += c;
+    }
+    flush();
+    return items;
+}
+
+}  // namespace
+
+std::optional<SetRegionCommand> QdcSerializer::parseSetRegion(const std::string& line)
+{
+    SetRegionCommand command;
+    std::vector<std::string> words;
+    std::string current;
+    bool quoted = false;
+    int depth = 0;
+    bool gap = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (!quoted && c == '#') {
+            command.comment = line.substr(i);
+            FOEDAG::StringUtils::trim(command.comment);
+            break;
+        }
+        if (!quoted && isBlank(c)) {
+            gap = true;
+            continue;
+        }
+        if (gap && depth == 0 && !current.empty() && current.back() != ',' && c != ',') {
+            words.push_back(current);
+            current.clear();
+        }
+        gap = false;
+        if (c == '"') {
+            quoted = !quoted;
+        } else if (!quoted && c == '(') {
+            ++depth;
+        } else if (!quoted && c == ')') {
+            --depth;
+        }
+        current += c;
+    }
+    if (!current.empty()) {
+        words.push_back(current);
+    }
+
+    if (quoted || depth != 0 || words.size() < 3 || words.size() > 4 || words[0] != "set_region") {
+        return std::nullopt;
+    }
+    command.elements = splitList(words[1]);
+    command.regions = splitList(words[2]);
+    if (words.size() == 4) {
+        command.partitionName = unquote(words[3]);
+    }
+    if (command.elements.empty() || command.regions.empty()) {
+        return std::nullopt;
+    }
+    return command;
+}
 
 bool QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
@@ -44,7 +147,7 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
-            elementsStr += element.path;
+            elementsStr += quoteIfNeeded(element.path);
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {
                 elementsStr += ",";
@@ -105,7 +208,7 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         line += " ";
         line += lfCommandDelimiter();
 
-        line += partition->name();
+        line += quoteIfNeeded(partition->name());
 
         if (!partition->comment().empty()) {
             line += "  ";
@@ -132,58 +235,17 @@ void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& overri
 
 void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lines)
 {
-    auto splitRegionsIgnoringParens = [](const std::string& s, char delimiter)->std::vector<std::string> {
-        std::vector<std::string> result;
-        std::string current;
-
-        int depth = 0;
-
-        for (char c : s) {
-            if (c == '(') {
-                depth++;
-                current += c;
-            } else if (c == ')') {
-                depth--;
-                current += c;
-            } else if (c == delimiter && depth == 0) {
-                result.push_back(current);
-                current.clear();
-            } else {
-                current += c;
-            }
-        }
-
-        if (!current.empty()) {
-            result.push_back(current);
-        }
-
-        return result;
-    };
-
     m_reservedContent.clear();
     device.clearPartitions();
     device.context()->resetIds();
 
+    // A partition named on several lines is one partition with the union of their elements
+    // and regions; two partitions with one name would collide in _constraints.xml.
+    std::map<std::string, PartitionPtr> partitionsByName;
+
     for (const std::string& line: lines) {
         if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
-            // Split any trailing comment off BEFORE tokenizing: its words would otherwise
-            // count as command tokens, and the partition name -- taken only when there are
-            // exactly four -- would be silently lost.
-            std::string commandPart = line;
-            std::string trailingComment;
-            if (auto hash = line.find('#'); hash != std::string::npos) {
-                trailingComment = line.substr(hash);
-                trailingComment = FOEDAG::StringUtils::trim(trailingComment);
-                commandPart = line.substr(0, hash);
-                commandPart = FOEDAG::StringUtils::trim(commandPart);
-            }
-
-            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(commandPart, " ");
-            // extract partition name [optionally]
-            std::string partitionName = "";
-            if (cmdTokens.size() == 4) {
-                partitionName = cmdTokens[3];
-            }
+            const std::optional<SetRegionCommand> command = parseSetRegion(line);
 
             // [aurora2#1725] Parse every region BEFORE anything reaches the device. The
             // partition used to be added first and each region restored as it parsed, so one
@@ -199,9 +261,8 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
             std::vector<std::pair<Tile::Index, Tile::Index>> parsedRegions;
             bool regionsOk = true;
 
-            if (cmdTokens.size() >= 3) {
-                std::vector<std::string> regionsStr = splitRegionsIgnoringParens(cmdTokens[2], ',');
-                for (const std::string& regionStr: regionsStr) {
+            if (command) {
+                for (const std::string& regionStr: command->regions) {
                     std::vector<std::string> regionTokens = FOEDAG::StringUtils::tokenize(regionStr, ":");
                     std::optional<TileDescriptor> bottomLeftOpt;
                     std::optional<TileDescriptor> topRightOpt;
@@ -241,12 +302,25 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
                 continue;
             }
 
-            PartitionPtr partition = std::make_shared<Partition>(device.context(), partitionName);
-            partition->setComment(trailingComment);
-            device.addPartition(partition);
+            const std::string& partitionName = command->partitionName;
+            PartitionPtr partition;
+            if (const auto named = partitionsByName.find(partitionName);
+                !partitionName.empty() && named != partitionsByName.end()) {
+                partition = named->second;
+                if (!command->comment.empty()) {
+                    partition->setComment(partition->comment().empty()
+                                              ? command->comment
+                                              : partition->comment() + " " + command->comment);
+                }
+            } else {
+                partition = std::make_shared<Partition>(device.context(), partitionName);
+                partition->setComment(command->comment);
+                device.addPartition(partition);
+                if (!partitionName.empty()) {
+                    partitionsByName[partitionName] = partition;
+                }
+            }
 
-            // extract elements
-            std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
             // A ".*" suffix is still accepted: serialize() wrote one for every non-leaf
             // element until stage P1, and the testcase .qdc files are hand-written in that
             // form. It is stripped rather than kept, so the path stored here is the RTL name
@@ -255,7 +329,7 @@ void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lin
             // isLeaf is a note about the tree, not about the file, and a bare path cannot say
             // which it was -- so it never decides anything outside the panel, which recomputes
             // it from the rows it actually has (see fillPartitionWithSelectedElements()).
-            for (std::string path: pathesDirtyTokens) {
+            for (std::string path: command->elements) {
                 const bool subtree = FOEDAG::StringUtils::endsWith(path, ".*");
                 if (isElementPattern(subtree ? path.substr(0, path.size() - 2) : path)) {
                     // A pattern stays as written: without its ".*" the flow would match
@@ -282,7 +356,6 @@ std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path
 {
     std::vector<std::string> commands;
     std::string content = FOEDAG::FileUtils::GetFileContent(filePath);
-    FOEDAG::StringUtils::replaceAllInPlace(content, "  ", " ");
 
     // Fixes CRLF -> LF, valid case for WIN32 platform
     FOEDAG::StringUtils::replaceAllInPlace(content, "\r", "");

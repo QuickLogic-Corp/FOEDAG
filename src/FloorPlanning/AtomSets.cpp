@@ -11,14 +11,25 @@
 
 namespace fp {
 
+namespace {
+
+std::string netlistSha256Of(const nlohmann::json& doc)
+{
+    const auto it = doc.find("netlist_sha256");
+    return (it != doc.end() && it->is_string()) ? it->get<std::string>() : std::string{};
+}
+
+}  // namespace
+
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames, int& atomsPerTile)
 {
-    AtomResourceMap ignored;
-    return loadAtomSets(path, atomNames, ignored, atomsPerTile);
+    AtomResourceMap ignoredResources;
+    std::string ignoredSha256;
+    return loadAtomSets(path, atomNames, ignoredResources, atomsPerTile, ignoredSha256);
 }
 
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
-                  AtomResourceMap& atomResources, int& atomsPerTile)
+                  AtomResourceMap& atomResources, int& atomsPerTile, std::string& netlistSha256)
 {
     std::ifstream stream(path);
     if (!stream) {
@@ -42,6 +53,7 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
     if (!doc.contains("atomsets") || !doc["atomsets"].is_object()) {
         return false;
     }
+    netlistSha256 = netlistSha256Of(doc);
     for (auto it = doc["atomsets"].begin(); it != doc["atomsets"].end(); ++it) {
         std::vector<std::string> atoms;
         if (it.value().contains("atoms")) {
@@ -75,6 +87,27 @@ bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
         }
     }
     return true;
+}
+
+std::string readNetlistSha256(const std::filesystem::path& path)
+{
+    std::ifstream stream(path);
+    if (!stream) {
+        return {};
+    }
+    try {
+        nlohmann::json doc;
+        stream >> doc;
+        return netlistSha256Of(doc);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+bool floorplanReloadNeeded(int loadedTier, const std::string& loadedSha256, int diskTier,
+                           const std::string& diskSha256)
+{
+    return diskSha256 != loadedSha256 || diskTier > loadedTier;
 }
 
 std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::string& path)

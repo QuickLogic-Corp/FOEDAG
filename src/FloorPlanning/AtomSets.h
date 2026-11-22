@@ -33,10 +33,19 @@ using AtomResourceMap = std::map<std::string, std::map<std::string, int>, Natura
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
                   int& atomsPerTile);
 
-// As above, and also the per-instance cell-type counts. A separate overload rather than a
-// wider AtomNameMap: the batch checker (REQ-004) sizes regions and has no use for them.
+// As above, and also the per-instance cell-type counts and the hash of the netlist the table
+// describes ("" when absent). A separate overload rather than a wider AtomNameMap: the batch
+// checker (REQ-004) sizes regions and has no use for them.
 bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
-                  AtomResourceMap& atomResources, int& atomsPerTile);
+                  AtomResourceMap& atomResources, int& atomsPerTile, std::string& netlistSha256);
+
+// The table's netlist_sha256, or "" when the file is missing, unreadable or has none.
+std::string readNetlistSha256(const std::filesystem::path& path);
+
+// Whether the panel should offer to reload after a compile: a different netlist always does,
+// whatever the tier; the same netlist does only when better resource figures arrived.
+bool floorplanReloadNeeded(int loadedTier, const std::string& loadedSha256, int diskTier,
+                           const std::string& diskSha256);
 
 // [aurora2#2377] Atom name -> its real Yosys cell type ("sdffre", "$lut",
 // "TDP_ECC36K_FIFO_ASYNC_...", ...), read from <top>_post_synth_debug.json -- the full
