@@ -73,10 +73,24 @@ QLabel* createTitleLabel(const QString& text) {
   return titleLabel;
 }
 
-void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
+// Deletes every item of `layout` with its widgets, nested layouts included:
+// the "Select Data Table" row is one.
+void clearLayout(QLayout* layout) {
+  while (QLayoutItem* item = layout->takeAt(0)) {
+    if (QLayout* child = item->layout()) clearLayout(child);
+    delete item->widget();
+    delete item;
+  }
+}
+}  // namespace
+
+void FOEDAG::generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
+  clearLayout(reportLayout);
   QLabel* reportTablesSelectionLabel = new QLabel("Select Data Table:");
   QComboBox* reportTablesSelectionComboBox = new QComboBox();
+  reportTablesSelectionComboBox->setObjectName("reportTableSelector");
   QStackedWidget* reportTablesStackedWidget = new QStackedWidget();
+  reportTablesStackedWidget->setObjectName("reportTables");
 
 
 
@@ -91,8 +105,9 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
       // reportLayout->addWidget(
       //     new QLabel("No statistics data found to generate report."), 1,
       //     Qt::AlignTop);
-      reportTablesSelectionComboBox->addItem("No Tables Available");
-      reportTablesStackedWidget->addWidget(new QLabel("No statistics data found to generate report."));
+      auto noData = new QLabel("No statistics data found to generate report.");
+      noData->setObjectName("reportNoData");
+      reportTablesStackedWidget->addWidget(noData);
       continue;
     }
     if(dataReportName == "Detailed Resource Utilization") {
@@ -201,6 +216,7 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
 
 
       QTreeView *treeView = new QTreeView();
+      treeView->setObjectName("reportTree");
       treeView->setEditTriggers(QAbstractItemView::NoEditTriggers);
       treeView->setSelectionMode(QAbstractItemView::NoSelection);
       treeView->setSortingEnabled(false);
@@ -276,6 +292,7 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
     } // testing data report
     else {
       auto reportsView = new QTableWidget();
+      reportsView->setObjectName("reportTable");
       // Fill columns
       auto columns = dataReport->getColumns();
       reportsView->setColumnCount(columns.size());
@@ -321,6 +338,8 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
   reportLayout->addWidget(reportTablesStackedWidget);
 }
 
+namespace {
+
 void openReportView(Compiler* compiler, const Task* task,
                     const ITaskReport& report) {
   auto reportName = report.getName();
@@ -332,13 +351,6 @@ void openReportView(Compiler* compiler, const Task* task,
       auto reportLayout{
           dynamic_cast<QVBoxLayout*>(tabWidget->currentWidget()->layout())};
 
-      // clear previous report
-      QLayoutItem* item;
-      while ((item = reportLayout->takeAt(0)) != nullptr) {
-        delete item->widget();
-        delete item;
-      }
-
       generateReport(report, reportLayout);
 
       newReport = false;
@@ -348,13 +360,20 @@ void openReportView(Compiler* compiler, const Task* task,
 
   if (newReport) {
     auto reportsWidget = new QWidget;
+    reportsWidget->setObjectName("reportView");
     auto reportLayout = new QVBoxLayout;
     reportLayout->setContentsMargins(20, 20, 0, 0);
 
     generateReport(report, reportLayout);
     reportsWidget->setLayout(reportLayout);
 
-    tabWidget->addTab(reportsWidget, reportName);
+    const int index = tabWidget->addTab(reportsWidget, reportName);
+    QTabBar* tabBar = tabWidget->tabBar();
+    const auto closeSide = static_cast<QTabBar::ButtonPosition>(
+        tabBar->style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition,
+                                   nullptr, tabBar));
+    if (QWidget* closeButton = tabBar->tabButton(index, closeSide))
+      closeButton->setObjectName("reportCloseTab_" + reportName);
     tabWidget->setCurrentWidget(reportsWidget);
 
     QObject::connect(

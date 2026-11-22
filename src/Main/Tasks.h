@@ -24,11 +24,18 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QDialog>
 
+class QVBoxLayout;
+
 namespace FOEDAG {
 
 class Compiler;
+class ITaskReport;
 class ITaskReportManager;
 class Task;
+
+// Fills the layout with the report's "Select Data Table" selector and one page
+// per table, replacing what it held.
+void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout);
 
 QDialog* createTaskDialog(const QString& taskName);
 void handleTaskDialogRequested(const QString& category);

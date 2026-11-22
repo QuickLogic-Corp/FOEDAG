@@ -46,13 +46,20 @@ struct Sidecar {
 // A missing file gives the defaults; a broken one sets error.
 Sidecar readSidecar(const QString &path, QString *error);
 
+// A widget to fill. On an item view, keepColumns > 0 leaves its first columns,
+// their header cells and the row numbers unfilled.
+struct Mask {
+  QWidget *widget{nullptr};
+  int keepColumns{0};
+};
+
 // Grabs the widget with every mask filled.
-QImage capture(QWidget *widget, const QList<QWidget *> &maskWidgets,
+QImage capture(QWidget *widget, const QList<Mask> &maskWidgets,
                const QList<QRect> &maskRects);
 
 // Grabs until two grabs in a row are identical. False if the image is
 // still changing when the timeout expires ("unstable").
-bool settle(QWidget *widget, const QList<QWidget *> &maskWidgets,
+bool settle(QWidget *widget, const QList<Mask> &maskWidgets,
             const QList<QRect> &maskRects, int timeoutMs, QImage *image);
 
 // Pixels whose channels differ by more than the tolerance; -1 when the

@@ -8,6 +8,8 @@ namespace FOEDAG {
 
 class MultiComboBox : public QWidget {
     Q_OBJECT
+    // The checked items joined by commas; lets GUI tests read and set them.
+    Q_PROPERTY(QString text READ currentText WRITE setCurrentText NOTIFY currentTextChanged)
 
 public:
     explicit MultiComboBox(QWidget* parent=nullptr);

@@ -1,11 +1,13 @@
 #include "MessagesTabWidget.h"
 
+#include <functional>
 #include <utility>
 
 #include <QGridLayout>
 #include <QTreeWidget>
 
 #include "Compiler/TaskManager.h"
+#include "Compiler/WildcardFileFinder.h"
 #include "MessageItemParser.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "TextEditor/text_editor_form.h"
@@ -23,8 +25,11 @@ namespace FOEDAG {
 MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
     : m_taskManager{taskManager},
       m_parsers{new VerificParser{}, new TimingAnalysisParser{}} {
+  setObjectName("messagesView");
   auto layout = new QGridLayout();
   auto treeWidget = new QTreeWidget();
+  treeWidget->setObjectName("messagesTree");
+  m_tree = treeWidget;
 
   layout->addWidget(treeWidget);
   layout->setContentsMargins(0, 0, 0, 0);
@@ -41,6 +46,14 @@ MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
     if (auto reportManager = reports.getReportManager(taskId)) {
       auto filePath = task->logFileReadPath();
       filePath.replace(PROJECT_OSRCDIR, Project::Instance()->projectPath());
+      // STA's log is a pattern, as it writes one file per corner.
+      if (filePath.contains('*')) {
+        const std::filesystem::path pattern{filePath.toStdString()};
+        WildcardFileFinder finder{pattern.parent_path(),
+                                  pattern.filename().string()};
+        if (auto found = finder.defaultFilePath(); !found.empty())
+          filePath = QString::fromStdString(found.string());
+      }
 
       const bool fileExists{FileUtils::FileExists(filePath.toStdString())};
       if (!fileExists)
@@ -59,6 +72,7 @@ MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
         }
       }
       treeWidget->addTopLevelItem(taskItem);
+      m_taskTitles.append(task->title());
     }
   }
 
@@ -80,6 +94,24 @@ MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
 }
 
 MessagesTabWidget::~MessagesTabWidget() { qDeleteAll(m_parsers); }
+
+QStringList MessagesTabWidget::taskMessages() const {
+  QStringList result;
+  std::function<void(const QString &, const QTreeWidgetItem *)> collect =
+      [&](const QString &title, const QTreeWidgetItem *parent) {
+        for (int i = 0; i < parent->childCount(); ++i) {
+          const QTreeWidgetItem *item = parent->child(i);
+          result << QString("%1\t%2\t%3")
+                        .arg(title)
+                        .arg(item->data(0, LineNumberRole).toInt())
+                        .arg(item->text(0));
+          collect(title, item);
+        }
+      };
+  for (int i = 0; i < m_tree->topLevelItemCount(); ++i)
+    collect(m_taskTitles.value(i), m_tree->topLevelItem(i));
+  return result;
+}
 
 QTreeWidgetItem *MessagesTabWidget::createTaskMessageItem(
     const TaskMessage &msg, const QString &filePath) {

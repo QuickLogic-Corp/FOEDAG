@@ -6079,6 +6079,16 @@ bool CompilerOpenFPGA_ql::collectStaDevices(std::map<std::string, QLDeviceTarget
   return true;
 }
 
+// The route file the base VPR command passes: the vpr > filename > route_file
+// setting, else <project>_post_synth.route, both relative to the project dir.
+static std::filesystem::path designRouteFile(ProjectManager* projectManager) {
+  const std::filesystem::path projectPath{projectManager->projectPath()};
+  const std::string custom =
+      QLSettingsManager::getStringValue("vpr", "filename", "route_file");
+  if (!custom.empty()) return projectPath / custom;
+  return projectPath / (projectManager->projectName() + "_post_synth.route");
+}
+
 QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staProfile) const
 {
   std::map<std::string, QLDeviceTarget> devices;
@@ -6268,6 +6278,27 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     // run sta with current device
     devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   }
+
+  // With flat routing, each corner's STA re-routes for its own architecture
+  // (uniqueStaVprOptions, #1267) and rewrites the design's route file, which
+  // a later STA or bitstream run loads with the PnR architecture. Put the
+  // design's routing back once the corners are done.
+  const std::filesystem::path routeFile = designRouteFile(ProjManager());
+  const std::filesystem::path routeBackup = routeFile.string() + ".pre_sta";
+  std::error_code copyError;
+  const bool restoreRoute =
+      !devices.count("") &&
+      std::filesystem::copy_file(routeFile, routeBackup,
+                                 std::filesystem::copy_options::overwrite_existing,
+                                 copyError);
+  auto restore = sg::make_scope_guard([&] {
+    if (!restoreRoute) return;
+    std::error_code error;
+    std::filesystem::copy_file(routeBackup, routeFile,
+                               std::filesystem::copy_options::overwrite_existing,
+                               error);
+    std::filesystem::remove(routeBackup, error);
+  });
 
   for (const auto& [profile, device]: devices) {
     if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {
@@ -6664,6 +6695,27 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   if (m_engineSelected) {
     cleanRemovedStaProfiles(devices);
   }
+
+  // With flat routing, each corner's STA re-routes for its own architecture
+  // (uniqueStaVprOptions, #1267) and rewrites the design's route file, which
+  // a later STA or bitstream run loads with the PnR architecture. Put the
+  // design's routing back once the corners are done.
+  const std::filesystem::path routeFile = designRouteFile(ProjManager());
+  const std::filesystem::path routeBackup = routeFile.string() + ".pre_sta";
+  std::error_code copyError;
+  const bool restoreRoute =
+      !devices.count("") &&
+      std::filesystem::copy_file(routeFile, routeBackup,
+                                 std::filesystem::copy_options::overwrite_existing,
+                                 copyError);
+  auto restore = sg::make_scope_guard([&] {
+    if (!restoreRoute) return;
+    std::error_code error;
+    std::filesystem::copy_file(routeBackup, routeFile,
+                               std::filesystem::copy_options::overwrite_existing,
+                               error);
+    std::filesystem::remove(routeBackup, error);
+  });
 
   for (const auto& [profile, device]: devices) {
     if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {

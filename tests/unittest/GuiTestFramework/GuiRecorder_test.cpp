@@ -36,6 +36,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QDockWidget>
+#include <QMainWindow>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
@@ -154,6 +156,37 @@ TEST_F(GuiRecorderTest, WidgetTypesMapToCommands) {
                                   "gui_set_text nameEdit {two words}",
                                   "gui_trigger_action actionExit",
                                   "gui_dialog accept", "gui_dialog reject"}));
+}
+
+// A click on a tab of the main window's dock tab bar, which Qt leaves
+// unnamed, is recorded by the dock's name.
+TEST_F(GuiRecorderTest, DockTabRecordsDockName) {
+  QMainWindow main;
+  auto console = new QDockWidget("Console", &main);
+  console->setObjectName("consoleDock");
+  main.addDockWidget(Qt::BottomDockWidgetArea, console);
+  auto reports = new QDockWidget("Reports", &main);
+  reports->setObjectName("reportsDock");
+  main.addDockWidget(Qt::BottomDockWidgetArea, reports);
+  main.tabifyDockWidget(console, reports);
+  // A reopened project leaves the old dock alive, out of the layout.
+  auto stale = new QDockWidget("Reports", &main);
+  stale->setObjectName("reportsDock");
+  main.addDockWidget(Qt::BottomDockWidgetArea, stale);
+  main.removeDockWidget(stale);
+  console->raise();
+  main.show();
+  QTest::qWait(50);
+  record();
+
+  QTabBar *bar{nullptr};
+  for (QTabBar *b : main.findChildren<QTabBar *>(Qt::FindDirectChildrenOnly))
+    if (b->isVisible()) bar = b;
+  ASSERT_NE(bar, nullptr);
+  ASSERT_EQ(bar->tabText(1), "Reports");
+  QTest::mouseClick(bar, Qt::LeftButton, {}, bar->tabRect(1).center());
+
+  EXPECT_EQ(lines(), "gui_click reportsDock -tab");
 }
 
 // U-012: an unnamed widget gives a comment and a warning, no gui_* line.

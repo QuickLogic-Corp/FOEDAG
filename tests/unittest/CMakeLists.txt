@@ -47,6 +47,7 @@ set (CPP_LIST
     PinAssignment/TestLoader.cpp
     PinAssignment/TestPortsLoader.cpp
     Compiler/CompilerDefines_test.cpp
+    Compiler/WildcardFileFinder_test.cpp
     Compiler/QLDeviceManager_test.cpp
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp
@@ -65,6 +66,7 @@ set (CPP_LIST
     Compiler/EncryptedCopy_test.cpp
     Compiler/ClockBinding_test.cpp
     Main/EventLoopProbe_test.cpp
+    Main/ReportView_gui_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp

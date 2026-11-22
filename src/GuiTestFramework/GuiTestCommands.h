@@ -22,7 +22,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <QString>
 
+class QDockWidget;
 class QObject;
+class QTabBar;
 struct Tcl_Interp;
 
 namespace FOEDAG {
@@ -33,6 +35,10 @@ void registerGuiTestCommands(Tcl_Interp *interp);
 // The text gui_get -text reports for a widget or action; ok is false when it
 // shows none.
 QString guiDisplayedText(QObject *object, bool *ok);
+
+// The dock that tab `index` of a main window's dock tab bar shows, matched by
+// title; nullptr when `bar` is not such a bar or the title is not unique.
+QDockWidget *dockOfTab(QTabBar *bar, int index);
 
 // Waits for a milestone raised after the last gui_* action (REQ-030).
 bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,

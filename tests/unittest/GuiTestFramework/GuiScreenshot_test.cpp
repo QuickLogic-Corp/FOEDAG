@@ -29,7 +29,9 @@ extern "C" {
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
+#include <QHeaderView>
 #include <QPainter>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -114,6 +116,60 @@ TEST(GuiScreenshot, ComparatorSelfTest) {
   const QList<QRect> mask{QRect{20, 0, 100, 30}};
   EXPECT_EQ(countDifferences(capture(&a, {}, mask), capture(&b, {}, mask), 0),
             0);
+}
+
+// -keep-columns 1 fills a table from its second column on, header included,
+// and leaves the first column, its header cell and the row numbers visible.
+TEST(GuiScreenshot, MaskKeepsFirstColumns) {
+  QTableWidget table{3, 2};
+  table.setObjectName("maskedTable");
+  table.setHorizontalHeaderLabels({"Statistics", "Value"});
+  for (int r = 0; r < 3; ++r) {
+    table.setItem(r, 0, new QTableWidgetItem(QString("name %1").arg(r)));
+    table.setItem(r, 1, new QTableWidgetItem(QString::number(r * 7)));
+  }
+  table.resize(300, 160);
+  table.show();
+  QTest::qWait(50);
+
+  auto cell = [&](int row, int column) {
+    return table.viewport()->mapTo(
+        &table, table.visualRect(table.model()->index(row, column)).center());
+  };
+  auto headerCell = [&](int column) {
+    QHeaderView *h = table.horizontalHeader();
+    return h->mapTo(&table, QPoint{h->sectionViewportPosition(column) +
+                                       h->sectionSize(column) / 2,
+                                   h->height() / 2});
+  };
+  const QPoint rowNumber = table.verticalHeader()->mapTo(
+      &table, QPoint{table.verticalHeader()->width() / 2,
+                     table.verticalHeader()->sectionViewportPosition(1) +
+                         table.horizontalHeader()->height() + 5});
+
+  const QImage kept = capture(&table, {{&table, 1}}, {});
+  EXPECT_EQ(QColor{kept.pixel(cell(1, 1))}, kMaskColor);
+  EXPECT_EQ(QColor{kept.pixel(headerCell(1))}, kMaskColor);
+  EXPECT_NE(QColor{kept.pixel(cell(1, 0))}, kMaskColor);
+  EXPECT_NE(QColor{kept.pixel(headerCell(0))}, kMaskColor);
+  EXPECT_NE(QColor{kept.pixel(rowNumber)}, kMaskColor);
+
+  const QImage whole = capture(&table, {{&table, 0}}, {});
+  EXPECT_EQ(QColor{whole.pixel(cell(1, 0))}, kMaskColor);
+
+  QLabel label{"not a table"};
+  label.setObjectName("plainLabel");
+  label.show();
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_screenshot s/x -widget maskedTable -keep-columns 1"),
+            TCL_ERROR);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_screenshot s/x -widget maskedTable -mask plainLabel "
+                             "-keep-columns 1"),
+            TCL_ERROR);
+  EXPECT_STREQ(Tcl_GetStringResult(interp),
+               "gui_screenshot s/x: mask plainLabel: -keep-columns needs a table or tree");
+  Tcl_DeleteInterp(interp);
 }
 
 // U-005: tolerance and the differing-pixel budget.

@@ -24,11 +24,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
+#include <QHeaderView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
+#include <QTableView>
 #include <QTimer>
+#include <QTreeView>
 #include <QWidget>
 #include <algorithm>
 #include <cstdlib>
@@ -77,7 +80,26 @@ Sidecar readSidecar(const QString &path, QString *error) {
   return sidecar;
 }
 
-QImage capture(QWidget *widget, const QList<QWidget *> &maskWidgets,
+// The part of `mask` to fill, in `widget`'s coordinates: the whole widget, or
+// on a table or tree from column keepColumns rightwards, header included.
+QRect maskRect(QWidget *widget, const Mask &mask) {
+  QWidget *w = mask.widget;
+  QRect rect{w->mapTo(widget, QPoint{0, 0}), w->size()};
+  if (mask.keepColumns <= 0) return rect;
+  QHeaderView *header{nullptr};
+  if (auto table = qobject_cast<QTableView *>(w)) header = table->horizontalHeader();
+  if (auto tree = qobject_cast<QTreeView *>(w)) header = tree->header();
+  if (!header || mask.keepColumns >= header->count()) return {};
+  const int x = header->viewport()
+                    ->mapTo(widget, QPoint{header->sectionViewportPosition(
+                                               mask.keepColumns),
+                                           0})
+                    .x();
+  rect.setLeft(std::max(rect.left(), x));
+  return rect;
+}
+
+QImage capture(QWidget *widget, const QList<Mask> &maskWidgets,
                const QList<QRect> &maskRects) {
   QImage image = widget->grab().toImage().convertToFormat(
       QImage::Format_ARGB32);
@@ -85,10 +107,9 @@ QImage capture(QWidget *widget, const QList<QWidget *> &maskWidgets,
   painter.setCompositionMode(QPainter::CompositionMode_Source);
   // grab() renders at the device pixel ratio; masks are in widget pixels.
   painter.scale(image.devicePixelRatio(), image.devicePixelRatio());
-  for (QWidget *mask : maskWidgets) {
-    if (!mask->isVisible()) continue;
-    const QRect rect{mask->mapTo(widget, QPoint{0, 0}), mask->size()};
-    painter.fillRect(rect, kMaskColor);
+  for (const Mask &mask : maskWidgets) {
+    if (!mask.widget->isVisible()) continue;
+    painter.fillRect(maskRect(widget, mask), kMaskColor);
   }
   for (const QRect &rect : maskRects) painter.fillRect(rect, kMaskColor);
   painter.end();
@@ -96,7 +117,7 @@ QImage capture(QWidget *widget, const QList<QWidget *> &maskWidgets,
   return image;
 }
 
-bool settle(QWidget *widget, const QList<QWidget *> &maskWidgets,
+bool settle(QWidget *widget, const QList<Mask> &maskWidgets,
             const QList<QRect> &maskRects, int timeoutMs, QImage *image) {
   QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
   QCoreApplication::processEvents();

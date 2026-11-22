@@ -14,6 +14,7 @@ QString DialogUtils::execUserSelectionOfActiveProfile(const std::set<std::string
     QString profile{""}; // default profile, when no multiple report is enabled
     if (!profiles.empty()) {
         SelectionDialog dialog("Select profile", profiles, nullptr);
+        dialog.setObjectName("profileSelectionDialog");
         if (dialog.exec() == QDialog::Accepted) {
             profile = dialog.selectedText();
         }
