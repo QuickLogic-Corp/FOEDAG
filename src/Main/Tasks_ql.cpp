@@ -206,7 +206,6 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
 
       QTreeView *treeView = new QTreeView();
       treeView->setObjectName("reportTree");
-      treeView->viewport()->setObjectName("reportCells");
       treeView->setEditTriggers(QAbstractItemView::NoEditTriggers);
       treeView->setSelectionMode(QAbstractItemView::NoSelection);
       treeView->setSortingEnabled(false);
@@ -283,7 +282,6 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
     else {
       auto reportsView = new QTableWidget();
       reportsView->setObjectName("reportTable");
-      reportsView->viewport()->setObjectName("reportCells");
       // Fill columns
       auto columns = dataReport->getColumns();
       reportsView->setColumnCount(columns.size());

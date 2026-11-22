@@ -838,12 +838,29 @@ int guiTriggerAction(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
 
 int guiGet(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (argc != 3)
-    return fail(interp, "usage: gui_get <objName> <property>|-text|-items");
+    return fail(interp, "usage: gui_get <objName> <property>|-text|-items|-columns");
   const QString name = QString::fromUtf8(argv[1]);
   const QString what = QString::fromUtf8(argv[2]);
   QString error;
   QObject *o = findObject(name, &error);
   if (!o) return fail(interp, QString("gui_get %1: %2").arg(name, error));
+  if (what == "-columns") {
+    QAbstractItemView *view =
+        o->isWidgetType() ? itemViewOf(static_cast<QWidget *>(o)) : nullptr;
+    if (!view || !view->model())
+      return fail(interp, QString("gui_get %1: %2 has no columns")
+                              .arg(name, o->metaObject()->className()));
+    QAbstractItemModel *model = view->model();
+    Tcl_Obj *list = Tcl_NewListObj(0, nullptr);
+    for (int c = 0; c < model->columnCount(view->rootIndex()); ++c)
+      Tcl_ListObjAppendElement(
+          interp, list,
+          Tcl_NewStringObj(
+              model->headerData(c, Qt::Horizontal).toString().toUtf8().constData(),
+              -1));
+    Tcl_SetObjResult(interp, list);
+    return TCL_OK;
+  }
   if (what == "-items") {
     QStringList items;
     if (auto combo = qobject_cast<QComboBox *>(o)) {

@@ -203,6 +203,29 @@ TEST(GuiTestCommands, DockBehindTabIsHiddenUntilItsTabIsClicked) {
   Tcl_DeleteInterp(interp);
 }
 
+// gui_get -columns lists an item view's column headers, which -items leaves out.
+TEST(GuiTestCommands, GetColumnsListsHeaders) {
+  QTreeWidget tree;
+  tree.setObjectName("reportTable");
+  tree.setHeaderLabels({"Block type", "Number of blocks"});
+  new QTreeWidgetItem(&tree, {"clb", "3"});
+  QLabel label{"no columns"};
+  label.setObjectName("plainLabel");
+  tree.show();
+  label.show();
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_get reportTable -columns"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_STREQ(Tcl_GetStringResult(interp), "{Block type} {Number of blocks}");
+  ASSERT_EQ(Tcl_Eval(interp, "gui_get reportTable -items"), TCL_OK);
+  EXPECT_STREQ(Tcl_GetStringResult(interp), "clb 3");
+  EXPECT_EQ(Tcl_Eval(interp, "gui_get plainLabel -columns"), TCL_ERROR);
+  EXPECT_STREQ(Tcl_GetStringResult(interp), "gui_get plainLabel: QLabel has no columns");
+  Tcl_DeleteInterp(interp);
+}
+
 // A file dialog rewrites a typed path to the bare file name unless its field
 // has focus. gui_set_text types with focus, as a user does, even when another
 // window is active, such as the replay window after Run.
