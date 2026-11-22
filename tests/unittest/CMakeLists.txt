@@ -47,6 +47,7 @@ set (CPP_LIST
     PinAssignment/TestLoader.cpp
     PinAssignment/TestPortsLoader.cpp
     Compiler/CompilerDefines_test.cpp
+    Compiler/WildcardFileFinder_test.cpp
     Compiler/QLDeviceManager_test.cpp
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp

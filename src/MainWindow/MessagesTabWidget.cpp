@@ -7,6 +7,7 @@
 #include <QTreeWidget>
 
 #include "Compiler/TaskManager.h"
+#include "Compiler/WildcardFileFinder.h"
 #include "MessageItemParser.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "TextEditor/text_editor_form.h"
@@ -45,6 +46,14 @@ MessagesTabWidget::MessagesTabWidget(const TaskManager &taskManager)
     if (auto reportManager = reports.getReportManager(taskId)) {
       auto filePath = task->logFileReadPath();
       filePath.replace(PROJECT_OSRCDIR, Project::Instance()->projectPath());
+      // STA's log is a pattern, as it writes one file per corner.
+      if (filePath.contains('*')) {
+        const std::filesystem::path pattern{filePath.toStdString()};
+        WildcardFileFinder finder{pattern.parent_path(),
+                                  pattern.filename().string()};
+        if (auto found = finder.defaultFilePath(); !found.empty())
+          filePath = QString::fromStdString(found.string());
+      }
 
       const bool fileExists{FileUtils::FileExists(filePath.toStdString())};
       if (!fileExists)

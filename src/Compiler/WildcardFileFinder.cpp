@@ -50,6 +50,13 @@ WildcardFileFinder::WildcardFileFinder(const std::filesystem::path& path, const 
   }
 }
 
+std::filesystem::path WildcardFileFinder::defaultFilePath() const
+{
+  if (hasProfiles()) return m_path / m_profileToFileNameMap.at(m_firstProfile);
+  if (!m_baseFileName.empty()) return baseFilePath();
+  return {};
+}
+
 std::string WildcardFileFinder::defaultProfile() const
 {
   // From the user's perspective, for reports which share same data,
