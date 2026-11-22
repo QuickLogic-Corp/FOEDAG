@@ -72,8 +72,9 @@ QLabel* createTitleLabel(const QString& text) {
 
   return titleLabel;
 }
+}  // namespace
 
-void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
+void FOEDAG::generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
   QLabel* reportTablesSelectionLabel = new QLabel("Select Data Table:");
   QComboBox* reportTablesSelectionComboBox = new QComboBox();
   reportTablesSelectionComboBox->setObjectName("reportTableSelector");
@@ -93,7 +94,6 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
       // reportLayout->addWidget(
       //     new QLabel("No statistics data found to generate report."), 1,
       //     Qt::AlignTop);
-      reportTablesSelectionComboBox->addItem("No Tables Available");
       auto noData = new QLabel("No statistics data found to generate report.");
       noData->setObjectName("reportNoData");
       reportTablesStackedWidget->addWidget(noData);
@@ -326,6 +326,8 @@ void generateReport(const ITaskReport& report, QVBoxLayout* reportLayout) {
   reportLayout->addSpacing(20);
   reportLayout->addWidget(reportTablesStackedWidget);
 }
+
+namespace {
 
 void openReportView(Compiler* compiler, const Task* task,
                     const ITaskReport& report) {

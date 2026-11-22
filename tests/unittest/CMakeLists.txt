@@ -66,6 +66,7 @@ set (CPP_LIST
     Compiler/EncryptedCopy_test.cpp
     Compiler/ClockBinding_test.cpp
     Main/EventLoopProbe_test.cpp
+    Main/ReportView_gui_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
