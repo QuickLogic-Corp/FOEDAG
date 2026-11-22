@@ -58,6 +58,7 @@ extern "C" {
 #include <QStyleHints>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QTableView>
 #include <QTextEdit>
 #include <QThread>
 #include <QTimer>
@@ -1113,16 +1114,26 @@ bool writeImage(const QImage &image, const QString &path) {
 int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const char *usage =
       "usage: gui_screenshot <scenario>/<step> [-widget objName] "
-      "[-mask objName ...]";
+      "[-mask objName [-keep-columns n] ...]";
   QString id;
   QString widgetName;
-  QStringList maskNames;
+  QList<std::pair<QString, int>> maskNames;
   for (int i = 1; i < argc; ++i) {
     const QString arg = QString::fromUtf8(argv[i]);
-    if (arg == "-widget" || arg == "-mask") {
+    if (arg == "-widget" || arg == "-mask" || arg == "-keep-columns") {
       if (i + 1 >= argc) return fail(interp, usage);
       const QString value = QString::fromUtf8(argv[++i]);
-      arg == "-widget" ? void(widgetName = value) : void(maskNames << value);
+      if (arg == "-widget") {
+        widgetName = value;
+      } else if (arg == "-mask") {
+        maskNames.append({value, 0});
+      } else {
+        bool ok{false};
+        const int keep = value.toInt(&ok);
+        if (maskNames.isEmpty() || maskNames.last().second || !ok || keep < 1)
+          return fail(interp, usage);
+        maskNames.last().second = keep;
+      }
     } else if (id.isEmpty()) {
       id = arg;
     } else {
@@ -1142,11 +1153,14 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     return fail(interp, QString("%1: %2").arg(what, widgetName.isEmpty()
                                                         ? "no main window shown"
                                                         : error));
-  QList<QWidget *> masks;
-  for (const QString &name : maskNames) {
+  QList<GuiScreenshot::Mask> masks;
+  for (const auto &[name, keep] : maskNames) {
     QWidget *mask = findWidget(name, {}, &error);
     if (!mask) return fail(interp, QString("%1: mask %2").arg(what, error));
-    masks << mask;
+    if (keep && !qobject_cast<QTableView *>(mask) && !qobject_cast<QTreeView *>(mask))
+      return fail(interp, QString("%1: mask %2: -keep-columns needs a table or tree")
+                              .arg(what, name));
+    masks.append({mask, keep});
   }
 
   const QString goldenRoot =
