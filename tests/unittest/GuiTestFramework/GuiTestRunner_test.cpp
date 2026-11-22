@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QApplication>
 #include <QClipboard>
 #include <QDialog>
+#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
@@ -33,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMenu>
 #include <QPushButton>
 #include <QSignalSpy>
@@ -144,6 +146,60 @@ TEST(GuiTestCommands, ActionWaitsForHiddenWidget) {
   elapsed.start();
   EXPECT_EQ(Tcl_Eval(interp, "gui_click noSuchButton"), TCL_ERROR);
   EXPECT_LT(elapsed.elapsed(), 1000);
+  Tcl_DeleteInterp(interp);
+}
+
+// A dock behind another dock's tab is hidden to a user, though Qt keeps it
+// visible off screen. gui_click -tab brings it to the front, as a user does.
+TEST(GuiTestCommands, DockBehindTabIsHiddenUntilItsTabIsClicked) {
+  QMainWindow main;
+  main.setCentralWidget(new QWidget);
+  auto console = new QDockWidget("Console", &main);
+  console->setObjectName("consoleDock");
+  console->setWidget(new QLabel("console"));
+  main.addDockWidget(Qt::BottomDockWidgetArea, console);
+  auto reports = new QDockWidget("Reports", &main);
+  reports->setObjectName("reportsDock");
+  auto tree = new QTreeWidget;
+  tree->setObjectName("reportsTree");
+  new QTreeWidgetItem(tree, {"Synthesis report"});
+  reports->setWidget(tree);
+  main.addDockWidget(Qt::BottomDockWidgetArea, reports);
+  main.tabifyDockWidget(console, reports);
+  // A reopened project leaves the old dock alive, out of the layout.
+  auto stale = new QDockWidget("Reports", &main);
+  stale->setObjectName("reportsDock");
+  main.addDockWidget(Qt::BottomDockWidgetArea, stale);
+  main.removeDockWidget(stale);
+  console->raise();
+  main.resize(800, 600);
+  main.show();
+  QTest::qWait(50);
+  int opened = 0;
+  QObject::connect(tree, &QTreeWidget::itemDoubleClicked, [&]() { ++opened; });
+
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  auto eval = [&](const char *script) {
+    const int rc = Tcl_Eval(interp, script);
+    return std::make_pair(rc, std::string(Tcl_GetStringResult(interp)));
+  };
+  ASSERT_TRUE(tree->isVisible()) << "Qt keeps the dock behind the tab visible";
+  EXPECT_EQ(eval("gui_get reportsTree visible"), std::make_pair(TCL_OK, std::string("0")));
+
+  EXPECT_EQ(eval("gui_click reportsDock -tab").first, TCL_OK);
+  EXPECT_EQ(eval("gui_get reportsTree visible"), std::make_pair(TCL_OK, std::string("1")));
+  EXPECT_EQ(eval("gui_click reportsTree -item {Synthesis report} -double").first, TCL_OK)
+      << Tcl_GetStringResult(interp);
+  EXPECT_EQ(opened, 1);
+
+  EXPECT_EQ(eval("gui_click consoleDock -tab").first, TCL_OK);
+  EXPECT_EQ(eval("gui_get reportsTree visible"), std::make_pair(TCL_OK, std::string("0")));
+
+  EXPECT_EQ(eval("gui_click noSuchDock -tab"),
+            std::make_pair(TCL_ERROR,
+                           std::string("gui_click noSuchDock -tab: no dock named 'noSuchDock'")));
+  EXPECT_EQ(eval("gui_click reportsDock -tab -double").first, TCL_ERROR);
   Tcl_DeleteInterp(interp);
 }
 

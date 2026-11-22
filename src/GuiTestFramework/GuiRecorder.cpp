@@ -35,6 +35,7 @@ extern "C" {
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -627,6 +628,12 @@ void GuiRecorder::watch(QWidget *widget) {
       QWidget *named = tabs ? static_cast<QWidget *>(tabs) : bar;
       const QString text = plain(bar->tabText(index));
       if (named->objectName().isEmpty()) {
+        if (QDockWidget *dock = dockOfTab(bar, index);
+            dock && !dock->objectName().isEmpty()) {
+          offer(bar, {"gui_click " + tclWord(dock->objectName()) + " -tab"},
+                false);
+          return;
+        }
         offer(bar, {}, false, unrecordedText(named, text));
         return;
       }

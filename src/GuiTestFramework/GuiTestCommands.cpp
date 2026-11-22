@@ -35,6 +35,7 @@ extern "C" {
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QEventLoop>
@@ -45,6 +46,7 @@ extern "C" {
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMetaProperty>
@@ -164,6 +166,20 @@ QList<QAction *> allActions() {
   return actions.values();
 }
 
+// Qt keeps a dock behind another dock's tab visible but moves it off screen;
+// QDockWidget::visibilityChanged tests the same way.
+bool behindDockTab(const QWidget *w) {
+  for (; w; w = w->parentWidget()) {
+    auto dock = qobject_cast<const QDockWidget *>(w);
+    if (dock && !dock->isFloating() &&
+        (dock->geometry().right() < 0 || dock->geometry().bottom() < 0))
+      return true;
+  }
+  return false;
+}
+
+bool shown(const QWidget *w) { return w->isVisible() && !behindDockTab(w); }
+
 // Exactly one visible widget with this objectName (and class) must exist.
 QWidget *findWidget(const QString &name, const QString &className,
                     QString *error) {
@@ -173,7 +189,7 @@ QWidget *findWidget(const QString &name, const QString &className,
     if (w->objectName() != name) continue;
     if (!className.isEmpty() && !w->inherits(className.toUtf8().constData()))
       continue;
-    (w->isVisible() ? visible.append(w) : void(++hidden));
+    (shown(w) ? visible.append(w) : void(++hidden));
   }
   if (visible.size() == 1) return visible.first();
   if (visible.isEmpty()) {
@@ -214,7 +230,7 @@ QAction *findAction(const QString &name, QString *error) {
 QWidget *findHiddenWidget(const QString &name) {
   QWidget *found{nullptr};
   for (QWidget *w : QApplication::allWidgets()) {
-    if (w->objectName() != name || w->isVisible()) continue;
+    if (w->objectName() != name || shown(w)) continue;
     if (found) return nullptr;
     found = w;
   }
@@ -494,16 +510,85 @@ int guiFind(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   return succeed(interp, name);
 }
 
+// The visible tab of the main window's dock tab bars that shows `dock`.
+bool dockTab(QDockWidget *dock, QTabBar **bar, int *index) {
+  auto window = qobject_cast<QMainWindow *>(dock->parentWidget());
+  if (!window) return false;
+  for (QTabBar *b : window->findChildren<QTabBar *>(Qt::FindDirectChildrenOnly)) {
+    if (!b->isVisible()) continue;
+    for (int i = 0; i < b->count(); ++i) {
+      if (dockOfTab(b, i) == dock) {
+        *bar = b;
+        *index = i;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+int clickDockTab(Tcl_Interp *interp, const QString &name) {
+  const QString what = QString("gui_click %1 -tab").arg(name);
+  auto named = [&]() {
+    QList<QDockWidget *> docks;
+    for (QWidget *w : QApplication::allWidgets())
+      if (auto dock = qobject_cast<QDockWidget *>(w);
+          dock && w->objectName() == name)
+        docks << dock;
+    return docks;
+  };
+  if (named().isEmpty())
+    return fail(interp, QString("%1: no dock named '%2'").arg(what, name));
+  // A reopened project leaves the old docks alive but out of the layout, so
+  // only one dock of that name has a tab. A dock shown by the previous action
+  // gets its tab a few event-loop turns later, as findWidgetToAct waits.
+  QTabBar *bar{nullptr};
+  int index{-1};
+  int withTab{0};
+  auto found = [&]() {
+    withTab = 0;
+    for (QDockWidget *dock : named()) {
+      QTabBar *b{nullptr};
+      int i{-1};
+      if (dockTab(dock, &b, &i)) {
+        ++withTab;
+        bar = b;
+        index = i;
+      }
+    }
+    return withTab == 1;
+  };
+  if (!found())
+    waitUntil(found, kDefaultTimeoutMs, "waiting for the tab of '" + name + "'",
+              true);
+  if (withTab != 1)
+    return fail(interp,
+                withTab ? QString("%1: %2 docks named '%3' have a tab")
+                              .arg(what).arg(withTab).arg(name)
+                        : what + ": the dock has no tab (closed, floating, or "
+                                 "alone in its area)");
+  const GuiTestAction act{bar};
+  emit bar->tabBarClicked(index);  // a real click emits it; the recorder uses it
+  bar->setCurrentIndex(index);
+  return succeed(interp);
+}
+
 int guiClick(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   Options o;
   QString error;
-  if (!parseOptions(argc, argv, {"-button", "-item"}, {"-double"}, &o,
+  if (!parseOptions(argc, argv, {"-button", "-item"}, {"-double", "-tab"}, &o,
                     &error) ||
       o.positional.size() != 1)
     return fail(interp,
                 "usage: gui_click <objName> [-item <text>] [-button left|right] "
-                "[-double]");
+                "[-double] | gui_click <dock> -tab");
   const QString name = o.positional.first();
+  if (o.flags.contains("-tab")) {
+    if (o.values.size() || o.flags.size() > 1)
+      return fail(interp, QString("gui_click %1: -tab takes no other option")
+                              .arg(name));
+    return clickDockTab(interp, name);
+  }
   const QString button = o.values.value("-button", "left");
   if (button != "left" && button != "right")
     return fail(interp, QString("gui_click %1: -button must be left or right")
@@ -788,6 +873,8 @@ int guiGet(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
                               .arg(name, o->metaObject()->className()));
     return succeed(interp, text);
   }
+  if (what == "visible" && o->isWidgetType())
+    return succeed(interp, shown(static_cast<QWidget *>(o)) ? "1" : "0");
   const QVariant value = o->property(what.toUtf8().constData());
   if (!value.isValid())
     return fail(interp, QString("gui_get %1: %2 has no property '%3'")
@@ -1140,6 +1227,19 @@ int guiTestRun(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
 
 QString guiDisplayedText(QObject *object, bool *ok) {
   return displayedText(object, ok);
+}
+
+QDockWidget *dockOfTab(QTabBar *bar, int index) {
+  auto window = qobject_cast<QMainWindow *>(bar ? bar->parentWidget() : nullptr);
+  if (!window || index < 0 || index >= bar->count()) return nullptr;
+  QDockWidget *found{nullptr};
+  for (QDockWidget *dock :
+       window->findChildren<QDockWidget *>(Qt::FindDirectChildrenOnly)) {
+    if (dock->isHidden() || dock->windowTitle() != bar->tabText(index)) continue;
+    if (found) return nullptr;
+    found = dock;
+  }
+  return found;
 }
 
 bool waitForMilestone(const QString &name, const QString &arg, int timeoutMs,
