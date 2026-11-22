@@ -11,7 +11,6 @@
 #include "Compiler/Reports/TimingAnalysisReportManager.h"
 
 #include "Main/Tasks.h"
-#include "TextEditor/text_editor_form.h"
 
 #include "NewProject/ProjectManager/project.h"
 
@@ -58,13 +57,8 @@ void ReportsTreeWidget::onReportRequested(const QTreeWidgetItem *item,
                                           int col) {
   if (item->childCount()) return;  // only leaf items represent reports
   auto reportId = item->text(col);
-  auto tabWidget = TextEditorForm::Instance()->GetTabWidget();
-  for (auto i = 0; i < tabWidget->count(); ++i) {
-    if (tabWidget->tabText(i) == reportId) {
-      tabWidget->setCurrentIndex(i);
-      return;
-    }
-  }
+  // An open tab is reused by openReportView after the profile is chosen, as
+  // from the task menu; showing it here skipped the choice.
   auto taskId = item->data(col, Qt::UserRole).toUInt();
   auto reportsManager =
       m_taskManager.getReportManagerRegistry().getReportManager(taskId);
