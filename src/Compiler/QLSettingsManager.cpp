@@ -1530,11 +1530,13 @@ bool QLSettingsManager::saveJSONSettings() {
     // ask user to confirm the changes, before saving into JSON
 
       QDialog dialog;
+      dialog.setObjectName("settingsChangesDialog");
       dialog.setWindowTitle("Settings Changes!");
       QVBoxLayout* dialogLayout = new QVBoxLayout();
       dialog.setLayout(dialogLayout);
 
       QListWidget* listOfChangesWidget = new QListWidget();
+      listOfChangesWidget->setObjectName("settingsChangesList");
       listOfChangesWidget->setAlternatingRowColors(true);
 
       for(std::string change_item: settings_json_change_list) {
