@@ -3217,8 +3217,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
     return true;
   }
 
-  std::filesystem::path debug_json_path =
-      projectPath / (topModule + "_post_synth_debug.json");
+  std::filesystem::path debug_json_path = fp::postSynthDebugJson(projectPath, topModule);
   if (!FileUtils::FileExists(debug_json_path)) {
     return true;
   }
@@ -10360,6 +10359,7 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     const bool checked = fp::FloorplanChecker::check(
         std::filesystem::path(ProjManager()->projectPath()),
         ProjManager()->projectName(),
+        ProjManager()->DesignTopModule(),
         floor_planning_constraint_filepath,
         QLDeviceLayoutInfo::deviceLayoutJSONPath(),
         issues, checkError);

@@ -407,6 +407,11 @@ bool MainWindow::closeProject(bool force, bool skipWelcomePage) {
     }
 
     forceStopCompilation();
+    // The panel shows this project's floorplan; it must not survive into the next one.
+    if (m_floorPlanningWidget) {
+      floorPlanningAction->setChecked(false);
+      floorPlanningActionTriggered();
+    }
     Project::Instance()->InitProject();
     newProjdialog->Reset();
     CloseOpenedTabs();
@@ -2411,13 +2416,15 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // already there by the time this panel opens, on any project that has been synthesised.
   // Still optional rather than required: a device whose template carries no P2/P3 blocks
   // produces no validation.json even after a successful synthesis, and every instance then
-  // stays "unknown", rendering exactly as the tree did before this was wired up. Failure
-  // isn't checked for the same reason -- a stale verdict must not stop the user
-  // floorplanning.
+  // stays "unknown", rendering exactly as the tree did before this was wired up. A
+  // malformed file is reported but does not stop the user floorplanning.
   std::filesystem::path validationJsonPath =
       fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
                                 compiler->ProjManager()->projectName(), "validation.json");
-  rtlModel.mergeVerdicts(validationJsonPath);
+  if (!rtlModel.mergeVerdicts(validationJsonPath) &&
+      std::filesystem::exists(validationJsonPath)) {
+    compiler->Message("Floor Planning: " + rtlModel.error());
+  }
 
   // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
   // atoms belonging to it, straight from atomsets.json (floorplanning_atomsets.tcl,
@@ -2469,8 +2476,8 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   {
     fp::AtomTypeMap atomTypes;
     std::filesystem::path debugJsonPath =
-        std::filesystem::path(compiler->ProjManager()->projectPath()) /
-        (compiler->ProjManager()->DesignTopModule() + "_post_synth_debug.json");
+        fp::postSynthDebugJson(compiler->ProjManager()->projectPath(),
+                               compiler->ProjManager()->DesignTopModule());
     fp::DspTileMap dspTiles;
     fp::loadAtomTypes(debugJsonPath, atomTypes, dspTiles);
     m_floorPlanningWidget->setDspTiles(std::move(dspTiles));
@@ -2787,7 +2794,10 @@ void MainWindow::floorPlanningActionTriggered()
     }
 
     // create new floorplanning widget
-    m_floorPlanningWidget = new fp::FloorPlanningWidget(compiler->ProjManager()->getProjectName());
+    // Owned by the main window, but still a window of its own.
+    m_floorPlanningWidget =
+        new fp::FloorPlanningWidget(compiler->ProjManager()->getProjectName(), this);
+    m_floorPlanningWidget->setWindowFlag(Qt::Window);
 
     connect(m_floorPlanningWidget, &fp::FloorPlanningWidget::closed, this, [cleanFloorPlanningUI]{
       cleanFloorPlanningUI();

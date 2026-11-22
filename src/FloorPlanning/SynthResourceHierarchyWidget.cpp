@@ -61,6 +61,17 @@ static constexpr int kRtlPathRole = Qt::UserRole + 104;
 static constexpr int kExplanationRole = Qt::UserRole + 102;
 static constexpr int kExplanationTitleRole = Qt::UserRole + 103;
 
+// kElementRole: the row is a path build() was given. kArrayBaseRole: the row groups the
+// elements of an instance array ("u" over "u[0]", "u[1]").
+static constexpr int kElementRole = Qt::UserRole + 105;
+static constexpr int kArrayBaseRole = Qt::UserRole + 106;
+
+// A group row that is not itself an instance: no .qdc can name it, and it has no logic of its
+// own, so ticking it means ticking its elements.
+bool isArrayGroup(const QStandardItem* item) {
+    return item && item->data(kArrayBaseRole).toBool() && !item->data(kElementRole).toBool();
+}
+
 bool isVprDisplayRow(const QStandardItem* item) {
     return item && item->data(kVprDisplayRowRole).toBool();
 }
@@ -562,18 +573,22 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
     // RTL paths alone (a .qdc has no atom data), so clb/dsp/bram *RequiredCount()
     // reads back 0 until this runs -- exactly the gap that made re-checking a tree
     // item "fix" it: fillPartitionWithSelectedElements() does this same lookup,
-    // just only for whichever one partition is currently selected. Cheap and
-    // idempotent: an element that already carries the right vprNames just gets the
-    // same set back, and if m_atomNames is empty (no atomsets.json for this device
-    // yet) every element keeps whatever it already had.
+    // just only for whichever one partition is currently selected. Only elements still
+    // without atoms are looked up: this runs in both trees on every tick, and resolving
+    // every partition each time is what made ticking slow on a large design.
     for (const auto& [id, partition]: partitions) {
-        const HierarhyElements existing = partition->elements();
+        const HierarhyElements& current = partition->elements();
+        const bool unresolved =
+            std::any_of(current.begin(), current.end(),
+                        [](const HierarhyElement& element) { return element.vprNames.empty(); });
+        if (!unresolved) {
+            continue;
+        }
+        const HierarhyElements existing = current;
         partition->clearElemenets();
         for (const HierarhyElement& element: existing) {
-            std::set<std::string> names = atomNamesFor(element.path);
-            if (names.empty()) {
-                names = element.vprNames;
-            }
+            std::set<std::string> names =
+                element.vprNames.empty() ? atomNamesFor(element.path) : element.vprNames;
             partition->addElement(HierarhyElement{element.path, element.isLeaf, names});
         }
     }
@@ -772,37 +787,51 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
             if (st == Qt::Checked) {
                 partition->addElement(HierarhyElement{path, true, vprNames(path)});
             }
+        } else if (st == Qt::Checked && !isArrayGroup(item)) {
+            // Checked only by an explicit tick: ticking every child leaves the parent partly
+            // checked (see onItemChanged()), so its own logic is not constrained unasked.
+            partition->addElement(HierarhyElement{path, false, vprNames(path)});
         } else {
-            if (st == Qt::Checked) {
-                bool allChildrenChecked = true;
-                for (int row = 0; row < rows; ++row) {
-                    QStandardItem* child = item->child(row, Column::Netlist);
-                    if (child && !isVprDisplayRow(child) && child->isCheckable() && child->checkState() != Qt::Checked) {
-                        allChildrenChecked = false;
-                        break;
-                    }
-                }
-                if (allChildrenChecked) {
-                    partition->addElement(HierarhyElement{path, false, vprNames(path)});
-                } else {
-                    for (int row = 0; row < rows; ++row) {
-                        QStandardItem* child = item->child(row, Column::Netlist);
-                        if (!isVprDisplayRow(child))
-                            fillPartitionSelectedElementsRecursive(child, path, partition);
-                    }
-                }
-            } else {
-                for (int row = 0; row < rows; ++row) {
-                    QStandardItem* child = item->child(row, Column::Netlist);
-                    if (!isVprDisplayRow(child))
-                        fillPartitionSelectedElementsRecursive(child, path, partition);
-                }
+            for (int row = 0; row < rows; ++row) {
+                QStandardItem* child = item->child(row, Column::Netlist);
+                if (!isVprDisplayRow(child))
+                    fillPartitionSelectedElementsRecursive(child, path, partition);
             }
         }
     };
 
-    partition->clearElemenets();
+    // Elements that name no row -- legacy atom names, typos, a pattern matching nothing -- are
+    // not the tree's to drop. They are kept, and DeviceGrid reports them as not found.
+    std::set<std::string> rowPaths;
+    std::function<void(const QStandardItem*, const std::string&)> collectRowPaths =
+        [&](const QStandardItem* item, const std::string& prefix) {
+            for (int row = 0; row < item->rowCount(); ++row) {
+                const QStandardItem* child = item->child(row, Column::Netlist);
+                if (child && !isVprDisplayRow(child)) {
+                    const std::string path = buildChildPath(prefix, child);
+                    rowPaths.insert(path);
+                    collectRowPaths(child, path);
+                }
+            }
+        };
     QStandardItem* root = m_model->invisibleRootItem();
+    collectRowPaths(root, "");
+    std::vector<HierarhyElement> notInTree;
+    for (const HierarhyElement& element: partition->elements()) {
+        const bool named = isElementPattern(element.path)
+            ? std::any_of(rowPaths.begin(), rowPaths.end(), [&](const std::string& path) {
+                  return elementPatternCovers(element.path, path);
+              })
+            : rowPaths.count(element.path) != 0;
+        if (!named) {
+            notInTree.push_back(element);
+        }
+    }
+
+    partition->clearElemenets();
+    for (const HierarhyElement& element: notInTree) {
+        partition->addElement(element);
+    }
     for (int row = 0; row < root->rowCount(); ++row) {
         if (QStandardItem* child = root->child(row, Column::Netlist))
             fillPartitionSelectedElementsRecursive(child, "", partition);
@@ -900,9 +929,13 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
         parent->setData(walked, kRtlPathRole);
     }
 
-    if (lastIsBusBit) {
+    if (!lastIsBusBit) {
+        parent->setData(true, kElementRole);
+    } else {
+        parent->setData(true, kArrayBaseRole);
         QStandardItem* bitItem = findOrCreateChild(parent, busBit);
         bitItem->setData(true, kBusBitRole);
+        bitItem->setData(true, kElementRole);
         // A bus bit appends without a dot: "din" + "[0]" -> "din[0]".
         bitItem->setData(walked + busBit, kRtlPathRole);
         // Also register the bus parent path for filtering/completion
@@ -1198,7 +1231,12 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
     // rebuilds the header sections and loses their hidden flags.
     m_view->setColumnHidden(Column::AtomList, !visible);
     m_view->setColumnHidden(Column::Primitive, !visible);
-    m_view->setColumnHidden(Column::VprName, !visible);
+    // Empty unless some VPR name differs from its yosys name; once they are identical the
+    // column has nothing to say.
+    const bool anyVprNameDiffers =
+        std::any_of(m_vprAtomNames.begin(), m_vprAtomNames.end(),
+                    [](const auto& entry) { return entry.first != entry.second; });
+    m_view->setColumnHidden(Column::VprName, !visible || !anyVprNameDiffers);
 
     // A multi-atom leaf gets one child row per atom, and those rows carry nothing but the
     // atom name, type and primitive -- their first column only repeats the owner. Hiding only
@@ -1532,8 +1570,10 @@ void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool repor
             }
         }
 
+        // Every child ticked still leaves a parent's own logic out; only an array group,
+        // which has none, is then wholly checked.
         if (anyChildChecked && !anyChildUnchecked) {
-            return Qt::Checked;
+            return isArrayGroup(item) ? Qt::Checked : Qt::PartiallyChecked;
         }
         return Qt::Unchecked;
     };

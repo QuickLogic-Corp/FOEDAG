@@ -15,6 +15,26 @@ std::string parentOf(const std::string& path)
     return dot == std::string::npos ? std::string{} : path.substr(0, dot);
 }
 
+// object[key] when it holds a T, else fallback. A key present with another type is named in
+// `problem` (first one only): json::value() would throw it out of the Qt slot reading the file.
+template <typename T>
+T typedValue(const nlohmann::json& object, const std::string& owner, const char* key, T fallback,
+             std::string& problem)
+{
+    const auto it = object.find(key);
+    if (it == object.end() || it->is_null()) {
+        return fallback;
+    }
+    try {
+        return it->get<T>();
+    } catch (const nlohmann::json::exception&) {
+        if (problem.empty()) {
+            problem = "\"" + std::string{key} + "\" of " + owner + " has the wrong type";
+        }
+        return fallback;
+    }
+}
+
 }  // namespace
 
 bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
@@ -46,7 +66,8 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
         return false;
     }
 
-    m_top = doc.value("top", std::string{});
+    std::string problem;
+    m_top = typedValue(doc, "the file", "top", std::string{}, problem);
     // Present since P0b began emitting a root entry; null when it deliberately did not (see
     // isTop()). Absent entirely on an older file, which m_hasTopInstance distinguishes from
     // an explicit null -- the two must not be treated alike, since one means "ask the
@@ -61,9 +82,10 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
             continue;
         }
         RtlInstance instance;
-        instance.path = entry.value("path", std::string{});
-        instance.component = entry.value("component", std::string{});
-        instance.moduleRaw = entry.value("module_raw", std::string{});
+        instance.path = typedValue(entry, "an instance", "path", std::string{}, problem);
+        const std::string owner = "'" + instance.path + "'";
+        instance.component = typedValue(entry, owner, "component", std::string{}, problem);
+        instance.moduleRaw = typedValue(entry, owner, "module_raw", std::string{}, problem);
         // src may be JSON null when the elaborated netlist was written with -noattr; stage
         // P0b rejects that case, but tolerate it here rather than throwing.
         if (entry.contains("src") && entry["src"].is_string()) {
@@ -74,12 +96,18 @@ bool RtlInstanceModel::loadInstances(const std::filesystem::path& path)
         }
         // last_status is carried forward by P0b from the previous run, so the panel can show
         // a sensible state before validation has run again.
-        instance.status = entry.value("last_status", std::string{"unknown"});
+        instance.status =
+            typedValue(entry, owner, "last_status", std::string{"unknown"}, problem);
         // [aurora2#1725 stage P0b] The root entry holding the whole design. Flagged by
         // P0b rather than inferred here: "no dot in the path" is true of every top-level
         // instance too, so the shape of the path cannot tell them apart.
-        instance.isTop = entry.value("is_top", false);
+        instance.isTop = typedValue(entry, owner, "is_top", false, problem);
         m_instances.push_back(std::move(instance));
+    }
+    if (!problem.empty()) {
+        m_instances.clear();
+        m_error = "instance list is malformed (" + path.string() + "): " + problem;
+        return false;
     }
 
     if (m_instances.empty()) {
@@ -115,11 +143,13 @@ std::map<std::string, InstancePlacement> loadPlacementVerdicts(
 
     for (auto it = doc["instances"].begin(); it != doc["instances"].end(); ++it) {
         const auto& entry = it.value();
+        // A wrong-typed field reads as absent, like an unreadable file above.
+        std::string ignored;
         InstancePlacement placement;
-        placement.partition = entry.value("partition", std::string{});
-        placement.region = entry.value("region", std::string{});
-        placement.atomsTotal = entry.value("atoms_total", 0);
-        placement.inRegion = entry.value("in_region", 0);
+        placement.partition = typedValue(entry, it.key(), "partition", std::string{}, ignored);
+        placement.region = typedValue(entry, it.key(), "region", std::string{}, ignored);
+        placement.atomsTotal = typedValue(entry, it.key(), "atoms_total", 0, ignored);
+        placement.inRegion = typedValue(entry, it.key(), "in_region", 0, ignored);
 
         if (entry.contains("outside") && entry["outside"].is_array()) {
             for (const auto& atom : entry["outside"]) {
@@ -162,6 +192,7 @@ bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
         return false;
     }
 
+    std::string problem;
     for (auto it = doc["instances"].begin(); it != doc["instances"].end(); ++it) {
         const auto found = m_byPath.find(it.key());
         if (found == m_byPath.end()) {
@@ -171,8 +202,9 @@ bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
         }
         RtlInstance& instance = m_instances[found->second];
         const auto& verdict = it.value();
-        instance.status = verdict.value("verdict", std::string{"unknown"});
-        instance.atomCount = verdict.value("atom_count", -1);
+        const std::string owner = "'" + it.key() + "'";
+        instance.status = typedValue(verdict, owner, "verdict", std::string{"unknown"}, problem);
+        instance.atomCount = typedValue(verdict, owner, "atom_count", -1, problem);
         instance.notes.clear();
         if (verdict.contains("notes") && verdict["notes"].is_array()) {
             for (const auto& note : verdict["notes"]) {
@@ -186,6 +218,9 @@ bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
             // Surface the first real warning; a "... not run" note is bookkeeping
             // rather than something the user needs in a tooltip.
             for (const auto& warning : verdict["warnings"]) {
+                if (!warning.is_string()) {
+                    continue;
+                }
                 const std::string text = warning.get<std::string>();
                 if (text.find("not run") == std::string::npos) {
                     instance.statusReason = text;
@@ -193,6 +228,10 @@ bool RtlInstanceModel::mergeVerdicts(const std::filesystem::path& path)
                 }
             }
         }
+    }
+    if (!problem.empty()) {
+        m_error = "verdicts are malformed (" + path.string() + "): " + problem;
+        return false;
     }
     return true;
 }

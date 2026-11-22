@@ -5,6 +5,8 @@
 #include <FloorPlanning/RtlInstanceModel.h>
 #include <FloorPlanning/Partition.h>
 #include <FloorPlanning/PackOverflow.h>
+#include <FloorPlanning/FloorplanChecker.h>
+#include <FloorPlanning/FloorplanningPaths.h>
 #include <FloorPlanning/FloorPlanningWidget.h>
 #include <FloorPlanning/DeviceGridWidget.h>
 #include <FloorPlanning/PartitionsListWidget.h>
@@ -3140,6 +3142,11 @@ TEST(SynthResourceHierarchyTree, VprNameColumnShowsOnlyNamesThatDiffer)
     EXPECT_TRUE(view->isColumnHidden(kVprNameColumn));
     widget.setAtomListVisible(true);
     EXPECT_FALSE(view->isColumnHidden(kVprNameColumn));
+
+    // Once every VPR name equals its yosys name the column has nothing to show.
+    widget.setVprAtomNames({{"core.u_mem.bram", "core.u_mem.bram"}});
+    widget.setAtomListVisible(true);
+    EXPECT_TRUE(view->isColumnHidden(kVprNameColumn));
 }
 
 TEST(SynthResourceHierarchyTree, CopyTakesTheTextOfTheCellUnderTheMouse)
@@ -3263,4 +3270,164 @@ TEST(FloorplanRefresh, ARefusedSaveKeepsThePartitionAndSaysWhy)
     auto* table = list->findChild<QTableWidget*>();
     ASSERT_NE(table, nullptr);
     EXPECT_FALSE(table->findItems("p_invalid", Qt::MatchExactly).isEmpty());
+}
+
+namespace {
+
+struct ArrayTree {
+    fp::SynthResourceHierarchyWidget widget;
+    fp::PartitionPtr partition =
+        std::make_shared<fp::Partition>(std::make_shared<fp::FloorplanContext>(), "p");
+    QStandardItem* root = nullptr;
+
+    explicit ArrayTree(const std::vector<std::string>& initialElements = {})
+    {
+        widget.setTopInstance("top");
+        widget.build(fp::NaturalStringSet{"top", "u[0]", "u[1]", "core", "core.a", "core.b"});
+        for (const std::string& path: initialElements) {
+            partition->addElement(fp::HierarhyElement{path, false});
+        }
+        widget.onPartitionsChanged({{0, partition}});
+        widget.selectPartition(partition);
+        root = widget.findChild<QStandardItemModel*>()->invisibleRootItem();
+    }
+
+    std::set<std::string> paths() const
+    {
+        std::set<std::string> result;
+        for (const fp::HierarhyElement& element: partition->elements()) {
+            result.insert(element.path);
+        }
+        return result;
+    }
+};
+
+}  // namespace
+
+TEST(SynthResourceHierarchyTree, TickingEveryArrayElementWritesEachElement)
+{
+    ArrayTree tree;
+    itemWithPath(tree.root, "u[0]")->setCheckState(Qt::Checked);
+    itemWithPath(tree.root, "u[1]")->setCheckState(Qt::Checked);
+    EXPECT_EQ(tree.paths(), (std::set<std::string>{"u[0]", "u[1]"}));
+    EXPECT_EQ(itemWithPath(tree.root, "u")->checkState(), Qt::Checked);
+
+    itemWithPath(tree.root, "u")->setCheckState(Qt::Unchecked);
+    itemWithPath(tree.root, "u")->setCheckState(Qt::Checked);
+    EXPECT_EQ(tree.paths(), (std::set<std::string>{"u[0]", "u[1]"}))
+        << "the array group is not an instance; no .qdc may name it";
+}
+
+TEST(SynthResourceHierarchyTree, TickingEveryChildWritesTheChildrenNotTheParent)
+{
+    ArrayTree tree;
+    itemWithPath(tree.root, "core.a")->setCheckState(Qt::Checked);
+    itemWithPath(tree.root, "core.b")->setCheckState(Qt::Checked);
+    EXPECT_EQ(tree.paths(), (std::set<std::string>{"core.a", "core.b"}));
+    EXPECT_EQ(itemWithPath(tree.root, "core")->checkState(), Qt::PartiallyChecked);
+
+    itemWithPath(tree.root, "core")->setCheckState(Qt::Checked);
+    EXPECT_EQ(tree.paths(), (std::set<std::string>{"core"}));
+}
+
+TEST(SynthResourceHierarchyTree, ANameNotInTheTreeSurvivesTheNextTick)
+{
+    ArrayTree tree({"core.a", "dut.a.n0_$lut_Y", "gone[*].*"});
+    itemWithPath(tree.root, "core.b")->setCheckState(Qt::Checked);
+    EXPECT_EQ(tree.paths(),
+              (std::set<std::string>{"core.a", "core.b", "dut.a.n0_$lut_Y", "gone[*].*"}));
+
+    itemWithPath(tree.root, "core.a")->setCheckState(Qt::Unchecked);
+    EXPECT_EQ(tree.paths(), (std::set<std::string>{"core.b", "dut.a.n0_$lut_Y", "gone[*].*"}));
+}
+
+namespace {
+
+struct CheckerProject {
+    QTemporaryDir dir;
+    std::filesystem::path root{dir.path().toStdString()};
+    std::filesystem::path qdc = root / "proj.qdc";
+    std::filesystem::path layout = root / "device_layout.json";
+
+    CheckerProject()
+    {
+        std::ofstream(layout) << R"({"array_x": 30, "array_y": 30, "dsp_size": "1x3",
+            "bram_size": "1x6", "dsp_cols": "6,19", "bram_cols": "12,25"})";
+        std::ofstream(qdc) << "set_region $false clb(2,2):clb(4,4) p1\n";
+        std::ofstream(fp::floorplanningArtifact(root, "proj", "instances.json"))
+            << R"({"top": "top", "instances": [{"path": "top"}, {"path": "core"}]})";
+    }
+
+    fp::DeviceGrid::Issues check() const
+    {
+        fp::DeviceGrid::Issues issues;
+        std::string error;
+        EXPECT_TRUE(fp::FloorplanChecker::check(root, "proj", "top", qdc, layout, issues, error));
+        EXPECT_EQ(error, "");
+        return issues;
+    }
+};
+
+}  // namespace
+
+TEST(FloorplanIssues, TheBatchCheckerReadsThePanelsWarningsAsErrorsOption)
+{
+    CheckerProject project;
+    const fp::DeviceGrid::Issues advisory = project.check();
+    EXPECT_TRUE(advisory.errors.empty());
+    ASSERT_FALSE(advisory.warnings.empty()) << "a constant driver is a warning";
+
+    fp::FloorPlanningWidget panel(QStringLiteral("checker-test"));
+    prepare(panel, 1366);
+    panel.setQdcFilePath(project.qdc, /*load*/false);
+    QAction* option = nullptr;
+    for (QAction* action : panel.findChildren<QAction*>()) {
+        if (action->text() == "Treat warnings as errors") {
+            option = action;
+        }
+    }
+    ASSERT_NE(option, nullptr);
+    option->setChecked(true);
+    EXPECT_TRUE(fp::FloorplanChecker::treatWarningsAsErrors(project.qdc));
+
+    const fp::DeviceGrid::Issues promoted = project.check();
+    EXPECT_TRUE(promoted.warnings.empty());
+    EXPECT_EQ(promoted.errors, advisory.warnings);
+}
+
+TEST(RtlInstanceModel, WrongTypedVerdictFieldsGiveAMessageNotAnException)
+{
+    const auto instances = writeQdc("fp_rtl_types_instances",
+                                    R"({"top": "top", "instances": [{"path": "top"},
+                                        {"path": "core"}, {"path": "core.a"}]})");
+    const auto verdicts = writeQdc("fp_rtl_types_verdicts", R"({"instances": {
+        "core": {"verdict": 3, "atom_count": "many", "warnings": [7, "real warning"]},
+        "core.a": {"verdict": "complete", "atom_count": 4}}})");
+
+    fp::RtlInstanceModel model;
+    ASSERT_TRUE(model.loadInstances(instances));
+    bool merged = true;
+    EXPECT_NO_THROW(merged = model.mergeVerdicts(verdicts));
+    EXPECT_FALSE(merged);
+    EXPECT_NE(model.error().find("\"verdict\" of 'core'"), std::string::npos) << model.error();
+
+    const auto byPath = [&](const std::string& path) {
+        return *std::find_if(model.instances().begin(), model.instances().end(),
+                             [&](const fp::RtlInstance& i) { return i.path == path; });
+    };
+    EXPECT_EQ(byPath("core").status, "unknown");
+    EXPECT_EQ(byPath("core").statusReason, "real warning");
+    EXPECT_EQ(byPath("core.a").status, "complete") << "the well-typed entries still merge";
+}
+
+TEST(RtlInstanceModel, AWrongTypedInstanceFieldFailsTheLoadWithAMessage)
+{
+    const auto instances = writeQdc("fp_rtl_types_bad_instances",
+                                    R"({"top": "top", "instances": [{"path": "top"},
+                                        {"path": 5}]})");
+    fp::RtlInstanceModel model;
+    bool loaded = true;
+    EXPECT_NO_THROW(loaded = model.loadInstances(instances));
+    EXPECT_FALSE(loaded);
+    EXPECT_NE(model.error().find("\"path\""), std::string::npos) << model.error();
 }

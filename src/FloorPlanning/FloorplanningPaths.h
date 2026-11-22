@@ -53,4 +53,17 @@ inline std::filesystem::path floorplanningArtifactOrBare(const std::filesystem::
     return preferred;
 }
 
+// Named after the project's top module, as floorplanning_post_synth.tcl writes it. One helper
+// so the panel and the batch checker cannot read two different files.
+inline std::filesystem::path postSynthDebugJson(const std::filesystem::path& projectPath,
+                                                const std::string& topModule) {
+    return projectPath / (topModule + "_post_synth_debug.json");
+}
+
+// The floorplan's options, beside its .qdc. The panel writes it; the panel and the batch
+// checker both read it.
+inline std::filesystem::path floorplanningOptionsFile(const std::filesystem::path& qdcPath) {
+    return qdcPath.parent_path() / "floorplanning.cfg";
+}
+
 }  // namespace fp

@@ -1,6 +1,8 @@
 #include "FloorPlanningWidget.h"
 
 #include "AtomSets.h"
+#include "FloorplanChecker.h"
+#include "FloorplanningPaths.h"
 
 #include "SynthResourceHierarchyWidget.h"
 #include "DeviceGridWidget.h"
@@ -29,7 +31,7 @@ namespace {
 
 // [aurora2#1725] floorplanning.cfg keys. Grouped, so the file reads as a FloorPlanning
 // section rather than QSettings' anonymous "[General]".
-constexpr auto kCfgTreatWarningsAsErrors = "FloorPlanning/treat_warnings_as_errors";
+constexpr auto kCfgTreatWarningsAsErrors = FloorplanChecker::kTreatWarningsAsErrorsKey;
 constexpr auto kCfgShowAtomList = "FloorPlanning/show_atom_list_column";
 
 // [aurora2#1725] QToolBar's default icon size is the style's large one, noticeably bigger
@@ -387,7 +389,7 @@ void FloorPlanningWidget::setQdcFilePath(const std::filesystem::path& path, bool
     // artifact lives, and so is per project -- "treat warnings as errors" in particular is a
     // decision about one floorplan, not a global taste. This is also the first point at which
     // the directory is known, which is why the options load here rather than in the ctor.
-    m_optionsFilePath = path.parent_path() / "floorplanning.cfg";
+    m_optionsFilePath = floorplanningOptionsFile(path);
     loadOptions();
 
     if (load) {

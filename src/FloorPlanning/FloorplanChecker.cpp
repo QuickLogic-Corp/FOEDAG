@@ -7,12 +7,22 @@
 #include "QdcSerializer.h"
 #include "RtlInstanceModel.h"
 
+#include <QSettings>
+
 #include <filesystem>
 
 namespace fp {
 
+bool FloorplanChecker::treatWarningsAsErrors(const std::filesystem::path& qdcPath)
+{
+    const QSettings cfg(QString::fromStdString(floorplanningOptionsFile(qdcPath).string()),
+                        QSettings::IniFormat);
+    return cfg.value(kTreatWarningsAsErrorsKey, false).toBool();
+}
+
 bool FloorplanChecker::check(const std::filesystem::path& projectPath,
                              const std::string& projectName,
+                             const std::string& topModule,
                              const std::filesystem::path& qdcPath,
                              const std::filesystem::path& deviceLayoutFile,
                              DeviceGrid::Issues& issues,
@@ -54,10 +64,7 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // instance (core.u_mem.mem.0.0) is classified by name and counted as CLB logic.
     AtomTypeMap atomTypes;
     DspTileMap dspTiles;
-    if (haveInstances) {
-        loadAtomTypes(projectPath / (rtlModel.top() + "_post_synth_debug.json"), atomTypes,
-                      dspTiles);
-    }
+    loadAtomTypes(postSynthDebugJson(projectPath, topModule), atomTypes, dspTiles);
     context.atomTypes = std::move(atomTypes);
     context.dspTiles = std::move(dspTiles);
 
@@ -103,6 +110,7 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // does the same before it checks, for the same reason.
     device.refreshPartitions();
 
+    device.setTreatWarningsAsErrors(treatWarningsAsErrors(qdcPath));
     issues = *device.checkIssues();
     return true;
 }

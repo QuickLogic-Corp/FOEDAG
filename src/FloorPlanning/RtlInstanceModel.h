@@ -66,7 +66,8 @@ public:
     bool loadInstances(const std::filesystem::path& path);
 
     // Merges stage P4 verdicts. Optional -- the tree is usable without them, every instance
-    // simply stays "unknown".
+    // simply stays "unknown". A wrong-typed field leaves that field at its default, the rest
+    // merged, and returns false with error() naming it.
     bool mergeVerdicts(const std::filesystem::path& path);
 
     bool empty() const { return m_instances.empty(); }
