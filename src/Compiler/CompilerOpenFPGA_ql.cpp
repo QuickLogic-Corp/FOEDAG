@@ -94,7 +94,6 @@
 #include "FloorPlanning/FloorplanChecker.h"
 #include "FloorPlanning/PackOverflow.h"
 #include "FloorPlanning/FloorplanningPaths.h"
-#include "FloorPlanning/RtlInstanceModel.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -2731,358 +2730,6 @@ bool CompilerOpenFPGA_ql::Analyze() {
   return true;
 }
 
-std::string CompilerOpenFPGA_ql::BuildElaborationScript(const std::string& topModule) {
-  std::string script;
-
-  if (m_useVerific) {
-    for (auto msg_sev : MsgSeverityMap()) {
-      switch (msg_sev.second) {
-        case MsgSeverity::Ignore:
-          script += "verific -set-ignore " + msg_sev.first + "\n";
-          break;
-        case MsgSeverity::Info:
-          script += "verific -set-info " + msg_sev.first + "\n";
-          break;
-        case MsgSeverity::Warning:
-          script += "verific -set-warning " + msg_sev.first + "\n";
-          break;
-        case MsgSeverity::Error:
-          script += "verific -set-error " + msg_sev.first + "\n";
-          break;
-      }
-    }
-
-    // workaround for enabling usage of '-lib' option, suggested by yosyshq
-    script += std::string("verific -cfg veri_create_empty_box 1\n");
-
-    std::string includes;
-    for (auto path : ProjManager()->includePathList()) {
-      includes += FileUtils::AdjustPath(path) + " ";
-    }
-    if (!includes.empty()) {
-      script += "verific -vlog-incdir " + includes + "\n";
-    }
-
-    std::filesystem::path design_sources_dir_path =
-        ProjManager()->ProjectFilesPath(ProjManager()->projectPath(),
-                                        ProjManager()->projectName(),
-                                        ProjManager()->getDesignActiveFileSet().toStdString());
-    script += "verific -vlog-incdir " + design_sources_dir_path.string() + "\n";
-
-    std::filesystem::path tcl_script_dir_path = QLSettingsManager::getTCLScriptDirPath();
-    if (!tcl_script_dir_path.empty() && !copyFilesOnAdd()) {
-      script += "verific -vlog-incdir " + tcl_script_dir_path.string() + "\n";
-    }
-
-    std::string libraries;
-    for (auto path : ProjManager()->libraryPathList()) {
-      libraries += FileUtils::AdjustPath(path) + " ";
-    }
-    if (!libraries.empty()) {
-      script += "verific -vlog-libdir " + libraries + "\n";
-    }
-
-    for (auto ext : ProjManager()->libraryExtensionList()) {
-      script += "verific -vlog-libext " + ext + "\n";
-    }
-
-    std::string macros;
-    for (auto& macro_value : ProjManager()->macroList()) {
-      macros += macro_value.first + "=" + macro_value.second + " ";
-    }
-    if (!macros.empty()) {
-      script += "verific -vlog-define " + macros + "\n";
-    }
-
-    auto topModuleLib = ProjManager()->DesignTopModuleLib();
-    auto commandsLibs = ProjManager()->DesignLibraries();
-    std::string importLibs;
-    auto importDesignFilesLibs = false;
-
-    size_t filesIndex{0};
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string lang;
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-          lang = "-vhdl87";
-          break;
-        case Design::Language::VHDL_1993:
-          lang = "-vhdl93";
-          break;
-        case Design::Language::VHDL_2000:
-          lang = "-vhdl2k";
-          break;
-        case Design::Language::VHDL_2008:
-          lang = "-vhdl2008";
-          break;
-        case Design::Language::VHDL_2019:
-          lang = "-vhdl2019";
-          break;
-        case Design::Language::VERILOG_1995:
-          lang = "-vlog95";
-          break;
-        case Design::Language::VERILOG_2001:
-          lang = "-vlog2k";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2005:
-          lang = "-sv2005";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2009:
-          lang = "-sv2009";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2012:
-          lang = "-sv2012";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-sv";
-          importDesignFilesLibs = true;
-          break;
-        case Design::Language::VERILOG_NETLIST:
-          lang = "";
-          break;
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          ErrorMessage("Elaboration: unsupported file format: BLIF");
-          return {};
-        case Design::Language::OTHER:
-          continue;
-      }
-
-      std::string designLibraries;
-      if (filesIndex < commandsLibs.size()) {
-        const auto& filesCommandsLibs = commandsLibs[filesIndex];
-        for (size_t i = 0; i < filesCommandsLibs.first.size(); ++i) {
-          auto libName = filesCommandsLibs.second[i];
-          if (!libName.empty()) {
-            designLibraries += "-work " + libName + " ";
-            if (importDesignFilesLibs && libName != topModuleLib) {
-              importLibs += "-L " + libName + " ";
-            }
-          }
-        }
-      }
-      ++filesIndex;
-
-      if (designLibraries.empty()) {
-        script += "verific " + lang + " " + lang_file.second + "\n";
-      } else {
-        script += "verific " + designLibraries + lang + " " + lang_file.second + "\n";
-      }
-    }
-
-    std::string topModuleLibImport =
-        topModuleLib.empty() ? std::string{} : "-work " + topModuleLib + " ";
-    script += "verific " + topModuleLibImport + importLibs + "-import " + topModule + "\n";
-  } else {
-    // Default Yosys parser -- cannot read VHDL at all (floorplanning_elab_instances.py's docstring).
-    for (const auto& lang_file : ProjManager()->DesignFiles()) {
-      std::string lang;
-      switch (lang_file.first.language) {
-        case Design::Language::VHDL_1987:
-        case Design::Language::VHDL_1993:
-        case Design::Language::VHDL_2000:
-        case Design::Language::VHDL_2008:
-        case Design::Language::VHDL_2019:
-          // Not an error: the caller treats an empty script as "instance discovery is
-          // unavailable" and lets synthesis proceed. Reporting it as ERROR made a
-          // limitation look like a failure, on a path -- Synplify -- that reads VHDL
-          // perfectly well itself.
-          Message(
-              "Instance discovery needs Verific to elaborate VHDL sources; enable "
-              "'verific' in Settings to floorplan this design by RTL instance.");
-          return {};
-        case Design::Language::VERILOG_1995:
-        case Design::Language::VERILOG_2001:
-        case Design::Language::SYSTEMVERILOG_2005:
-          break;
-        case Design::Language::SYSTEMVERILOG_2009:
-        case Design::Language::SYSTEMVERILOG_2012:
-        case Design::Language::SYSTEMVERILOG_2017:
-          lang = "-sv";
-          break;
-        case Design::Language::VERILOG_NETLIST:
-        case Design::Language::BLIF:
-        case Design::Language::EBLIF:
-          ErrorMessage("Elaboration: unsupported file format");
-          return {};
-        case Design::Language::OTHER:
-          continue;
-      }
-      script += "read_verilog " + lang + " " + lang_file.second + "\n";
-    }
-  }
-
-  script += "hierarchy -top " + topModule + "\n";
-  // write_json below errors out on unprocessed always-blocks (only happens when not
-  // using Verific). proc fixes that, without flattening the design or touching the
-  // instance names floorplanning_elab_instances.py needs -- so this step is still just
-  // elaboration, not synthesis.
-  script += "proc\n";
-  script += "write_json " + topModule + "_elab.json\n";
-  return script;
-}
-
-bool CompilerOpenFPGA_ql::RunElaboration() {
-  // [aurora2#1725 stage P0] Runs a standalone Yosys process for instance
-  // discovery -- see BuildElaborationScript().
-  const std::string topModule = ProjManager()->DesignTopModule();
-
-  m_useVerific =
-      QLSettingsManager::getStringValue("general", "options", "verific") == "checked";
-#if(AURORA_USE_TABBYCAD == 1)
-  // [aurora2#1725 stage P0] The general "verific" setting only controls SYNTHESIS's own
-  // parser choice, and is off by default for a Synplify project since Synplify reads VHDL
-  // natively and never needed it. But stock Yosys cannot read VHDL at all, so without this,
-  // a Synplify + VHDL project could never elaborate and instances.json was never produced.
-  // Elaboration is independent of the synthesis tool (see above), so force Verific on here
-  // whenever the design has VHDL, regardless of that setting or which tool synthesizes it.
-  for (const auto& lang_file : ProjManager()->DesignFiles()) {
-    switch (lang_file.first.language) {
-      case Design::Language::VHDL_1987:
-      case Design::Language::VHDL_1993:
-      case Design::Language::VHDL_2000:
-      case Design::Language::VHDL_2008:
-      case Design::Language::VHDL_2019:
-        m_useVerific = true;
-        break;
-      default:
-        break;
-    }
-    if (m_useVerific) break;
-  }
-#endif // #if(AURORA_USE_TABBYCAD == 1)
-
-  std::string script = BuildElaborationScript(topModule);
-  if (script.empty()) {
-    return false;  // BuildElaborationScript() already reported the error
-  }
-
-  std::filesystem::path script_path =
-      std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.ys");
-  std::ofstream ofs(script_path);
-  ofs << script;
-  ofs.close();
-
-  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-#if(AURORA_USE_TABBYCAD == 1)
-  if (m_useVerific) {
-    yosys_executable_path = GetSession()->Context()->BinaryPath() /
-                            ".." /
-                            "tabby" /
-                            "bin" /
-                            "yosys_verific";
-  }
-#endif // #if(AURORA_USE_TABBYCAD == 1)
-
-  std::filesystem::path elab_log_path =
-      std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.log");
-  std::string command = yosys_executable_path.string() + " -s " + script_path.string() +
-                         " -l " + topModule + "_elab.log";
-  // [aurora2#1725 stage P0] quiet: logs from this stage are written to <top>_elab.log,
-  // only errors are logged to aurora.
-  int status = ExecuteAndMonitorSystemCommand(command, /*logFile*/ std::string{},
-                                              /*appendLog*/ false, /*quiet*/ true);
-  if (status) {
-    ErrorMessage("Design " + ProjManager()->projectName() + " elaboration failed, see " +
-                 elab_log_path.string());
-    return false;
-  }
-  return true;
-}
-
-bool CompilerOpenFPGA_ql::RunElabInstances() {
-  const std::string topModule = ProjManager()->DesignTopModule();
-  std::filesystem::path elab_json_path =
-      std::filesystem::path(ProjManager()->projectPath()) / (topModule + "_elab.json");
-  if (!FileUtils::FileExists(elab_json_path)) {
-    ErrorMessage("Elaboration did not produce " + elab_json_path.string());
-    return false;
-  }
-
-  FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_elab_instances.py", "Instance-tree derivation",
-      MissingPython::Fatal);
-  if (!tool.ready) return tool.result;
-  const std::filesystem::path& elab_instances_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
-
-  std::filesystem::path instances_json_path =
-      FloorplanningArtifact("instances.json");
-
-  std::vector<std::string> args;
-  args.push_back(elab_instances_script_path.string());
-  args.push_back(elab_json_path.string());
-  args.push_back("--top");
-  args.push_back(topModule);
-  args.push_back("-o");
-  args.push_back(instances_json_path.string());
-  if (FileUtils::FileExists(instances_json_path)) {
-    // last_status (stage P4 verdicts) survives re-elaboration until the next
-    // validation run overwrites it.
-    args.push_back("--prior");
-    args.push_back(instances_json_path.string());
-  }
-
-  int status = RunFloorplanningStage(python_exec.string(), args);
-  if (status != 0) {
-    ErrorMessage("Design " + ProjManager()->projectName() +
-                 " instance-tree derivation (floorplanning_elab_instances.py) failed, see " +
-                 FloorplanningStageLog().string());
-    return false;
-  }
-  return true;
-}
-
-bool CompilerOpenFPGA_ql::EnsureElaborated() {
-  const std::string topModule = ProjManager()->DesignTopModule();
-  std::filesystem::path instances_json_path =
-      FloorplanningArtifact("instances.json");
-
-  if (!m_designDirty && FileUtils::FileExists(instances_json_path)) {
-    return true;  // nothing changed since the last successful elaboration
-  }
-
-  if (topModule.empty() || ProjManager()->DesignFiles().empty()) {
-    // Design isn't complete yet (e.g. mid project setup). Leave m_designDirty set so
-    // this retries the next time EnsureElaborated() runs.
-    return true;
-  }
-
-  // [aurora2#1725] No progress message here on success: this step runs in the
-  // background to prepare data for floorplanning, not something the user asked to run.
-  // Its output goes to <top>_elab.log and <project>_floorplanning_instances.json; only
-  // a failure is reported to aurora.log.
-  ResetFloorplanningStageLog();
-
-  // [aurora2#1725 stage P0b] Best-effort: elaboration runs Yosys directly on the RTL,
-  // independent of the synthesis front end, so Yosys's parser limits apply even where
-  // synthesis itself would not hit them -- e.g. Synplify reads VHDL natively, but plain
-  // Yosys cannot, so a VHDL project without Verific available fails here even under
-  // Synplify (RunElaboration() forces Verific on for VHDL when TabbyCAD is built in, so
-  // this only bites a non-TabbyCAD build). Instance discovery only enables floorplanning,
-  // it is not required to compile, so a failure here just skips floorplanning-by-RTL-instance
-  // rather than the build.
-  if (!RunElaboration() || !RunElabInstances()) {
-    Message(
-        "Instance discovery is unavailable for this project, so floorplanning by RTL "
-        "instance will not be offered. Synthesis continues.");
-    // m_designDirty deliberately stays set, so this is retried rather than remembered as
-    // done: whatever blocked it may be fixed by the time the design is next compiled.
-    return true;
-  }
-  // [aurora2#1725 stage P7] The RTL just changed, so design_resources.json now describes a
-  // stale netlist. Removed, not regenerated -- resource figures are post-synthesis only, and
-  // "no figures yet" is the truthful state until synthesis produces atom sets.
-  std::error_code resources_ec;
-  std::filesystem::remove(FloorplanningArtifact("design_resources.json"), resources_ec);
-
-  m_designDirty = false;
-  return true;
-}
 std::string CompilerOpenFPGA_ql::FloorplanningPrefix() {
   return fp::floorplanningPrefix(ProjManager()->projectName());
 }
@@ -3124,12 +2771,10 @@ int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
   return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).realCode;
 }
 
-// [aurora2#1725] The prelude every floorplanning helper stage shared verbatim: resolve
-// the installed script, resolve python, and decide what an absent one means. Only the
-// last decision ever differed between the stages, so it is the single parameter.
+// [aurora2#1725] The prelude every floorplanning helper stage shares: resolve the
+// installed script and python.
 CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanningTool(
-    const std::string& scriptName, const std::string& label, MissingPython policy,
-    const std::string& skipPhrase) {
+    const std::string& scriptName, const std::string& label, const std::string& skipPhrase) {
   FloorplanningTool tool;
 
   tool.script = InstalledScript(std::filesystem::path(scriptName));
@@ -3146,16 +2791,9 @@ CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanning
 #endif // _WIN32
 
   if (!FileUtils::IsSystemCommandAvailable(tool.python.string())) {
-    if (policy == MissingPython::Fatal) {
-      ErrorMessage("System " + tool.python.string() + " is not found, Please install " +
-                   tool.python.string() +
-                   " and make sure it's in the PATH variable. " + label + " (" +
-                   scriptName + ") failed!");
-    } else {
-      ErrorMessage("System " + tool.python.string() + " is not found; skipping " +
-                   skipPhrase + " (" + scriptName + ").");
-      tool.result = true;
-    }
+    ErrorMessage("System " + tool.python.string() + " is not found; skipping " +
+                 skipPhrase + " (" + scriptName + ").");
+    tool.result = true;
     return tool;
   }
 
@@ -3163,100 +2801,52 @@ CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanning
   return tool;
 }
 
-// [aurora2#1725] Running the in-session tcl scripts under `tee -q` means a hard Yosys error
-// inside one goes only to that script's artifact log, so <top>_synth.log would just stop
-// after synth_ql with no reason given. Quiet on success is the point; quiet on failure is a
-// debugging trap. So on a synthesis failure, say what these logs blamed it on, if anything.
-void CompilerOpenFPGA_ql::ReportFloorplanningYosysErrors() {
-  for (const char* suffix : {"atomsets.log", "rehier.log"}) {
-    std::filesystem::path path = FloorplanningArtifact(suffix);
-    std::ifstream in(path);
-    if (!in.is_open()) continue;
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.rfind("ERROR", 0) == 0) {
-        ErrorMessage(path.filename().string() + ": " + line);
-      }
-    }
-  }
-}
-
 // [aurora2#1725 review F1] Once per compiler instance, not once per stage: all three
-// callers hit the same missing atomsets.json for the same reason (this device template
-// has no P2/P3 floorplanning hooks yet), so saying it three times would look like three
-// different problems.
+// callers hit the same missing owner table for the same reason, so saying it three times
+// would look like three different problems.
 void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
   if (m_floorplanningVerificationWarned) return;
   m_floorplanningVerificationWarned = true;
   WarningMessage(
-      "Floorplanning verification unavailable on this device: its template does not "
-      "carry the floorplanning atom-set hooks yet, so instance validation, resource "
-      "reporting and constraint-compliance checking are skipped. This does not affect "
-      "the build.");
+      "Floorplanning verification unavailable: synthesis wrote no owner table (a custom "
+      "Yosys script without the synthesis pass's -owner_table), so instance validation, "
+      "resource reporting and constraint-compliance checking are skipped. This does not "
+      "affect the build.");
 }
 
-// [aurora2#1725 stage P4] validation gate -- see scripts/floorplanning_validate_instances.py's
-// docstring and docs/specs/region-based-placement-synthesis-integration/pipeline.md
-// (A.P4). Called from Synthesize() after the Yosys tool has actually run (Synplify
-// falls through to it too -- pipeline.md: "Yosys still reads Synplify's top.vm, still
-// runs synth_ql"), so atomsets.json / <top>_post_synth_debug.json are as fresh as the
-// BLIF that was just written.
+// [aurora2#1725 stage P4] Notes, per RTL instance, how synthesis left it, from the owner
+// table synthesis just wrote -- see scripts/floorplanning_validate_instances.py. For the
+// panel only: nothing downstream gates on it.
 bool CompilerOpenFPGA_ql::RunValidateInstances() {
   const std::string topModule = ProjManager()->DesignTopModule();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
-  // Every early return below leaves no verdicts, which P5 must see as "not validated".
   std::filesystem::remove(FloorplanningArtifact("validation.json"));
 
-  // floorplanning_atomsets.tcl (invoked from the device template) writes this relative to the
-  // yosys process's cwd, which is the project directory. Not every device template has
-  // the P2/P3 blocks yet, so a missing file just means this stage isn't available for
-  // the current device -- skip quietly rather than treating it as a failure.
   std::filesystem::path atomsets_path = FloorplanningAtomsets();
   if (!FileUtils::FileExists(atomsets_path)) {
     WarnFloorplanningVerificationUnavailable();
     return true;
   }
 
-  std::filesystem::path debug_json_path = fp::postSynthDebugJson(projectPath, topModule);
-  if (!FileUtils::FileExists(debug_json_path)) {
-    return true;
-  }
-
   // Best-effort: synthesis has already succeeded by the time this runs.
   FloorplanningTool tool = ResolveFloorplanningTool(
       "floorplanning_validate_instances.py", "Instance validation",
-      MissingPython::Skip, "instance validation");
+      "instance validation");
   if (!tool.ready) return tool.result;
-  const std::filesystem::path& validate_instances_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
 
-  std::filesystem::path instances_json_path = FloorplanningArtifact("instances.json");
   std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
-  std::filesystem::path validation_json_path = FloorplanningArtifact("validation.json");
-
   std::vector<std::string> args;
-  args.push_back(validate_instances_script_path.string());
+  args.push_back(tool.script.string());
   args.push_back("--atomsets");
   args.push_back(atomsets_path.string());
-  args.push_back("--debug-json");
-  args.push_back(debug_json_path.string());
-  if (FileUtils::FileExists(instances_json_path)) {
-    // Needed to see instances synthesis deleted entirely -- they have no atoms, so
-    // atomsets.json alone would never mention them.
-    args.push_back("--instances");
-    args.push_back(instances_json_path.string());
-  }
   if (FileUtils::FileExists(synth_log_path)) {
     args.push_back("--synth-log");
     args.push_back(synth_log_path.string());
   }
   args.push_back("-o");
-  args.push_back(validation_json_path.string());
+  args.push_back(FloorplanningArtifact("validation.json").string());
 
-  int status = RunFloorplanningStage(python_exec.string(), args);
-  if (status != 0) {
-    // Best-effort: synthesis has already succeeded by the time this runs, so a
-    // validation failure is reported but must not fail the build over it.
+  if (RunFloorplanningStage(tool.python.string(), args) != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " instance validation (floorplanning_validate_instances.py) failed, see " +
                  FloorplanningStageLog().string());
@@ -3276,18 +2866,15 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
 
-  // [aurora2#1725] Both tiers are post-synthesis. atomsets.json only exists for devices
-  // whose template carries the P2/P3 blocks, so a device without them reports nothing at
-  // all rather than falling back to a pre-synthesis estimate -- there is no such tier.
+  // [aurora2#1725] Both tiers are post-synthesis, from the owner table; without one there
+  // is nothing to report.
   const bool useAtomsets = (maxTier >= 1) && FileUtils::FileExists(atomsets_path);
   const bool usePlacement = (maxTier >= 2) && useAtomsets &&
                             FileUtils::FileExists(net_path) &&
                             FileUtils::FileExists(place_path);
 
   if (!useAtomsets) {
-    // No atom sets on disk yet. Nothing to report, and nothing has gone wrong --
-    // unless maxTier is already >=1 (post-synthesis), in which case atomsets_path
-    // itself is what's missing: this device template has no P2/P3 hooks.
+    // Post-synthesis with no owner table: a script that did not write one.
     if (maxTier >= 1) {
       WarnFloorplanningVerificationUnavailable();
     }
@@ -3297,7 +2884,7 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
   // Best-effort: the compile stage itself has already succeeded.
   FloorplanningTool tool = ResolveFloorplanningTool(
       "floorplanning_design_resources.py", "Design-resource extraction",
-      MissingPython::Skip, "resource reporting");
+      "resource reporting");
   if (!tool.ready) return tool.result;
   const std::filesystem::path& design_resources_script_path = tool.script;
   const std::filesystem::path& python_exec = tool.python;
@@ -3336,81 +2923,61 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
 }
 
 // [aurora2#1725 stage P7] post-placement compliance -- see
-// scripts/floorplanning_constraint_compliance.py's docstring and
-// docs/specs/region-based-placement-synthesis-integration/pipeline.md (A.P7).
-//
-// Called with --mode warning: a soft constraint. Every region violation this finds is
-// written to <project>_floorplanning_constraint_compliance.rpt, but it must never fail a
-// compile that has already placed successfully -- that is the whole point of the
-// distinction from --mode error, which scripts/tests/floorplan_check.py's per-testcase
-// validators use instead, where the same violation SHOULD fail the run.
+// scripts/floorplanning_constraint_compliance.py. Every atom the constraints list must be
+// placed inside its partition's region; one that is not fails placement, with the atoms on
+// the console (REQ-006).
 bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   const std::string projectName = ProjManager()->projectName();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
 
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
-  std::filesystem::path atomsets_path = FloorplanningAtomsets();
+  std::filesystem::path manifest_path = FloorplanningArtifact("constraints.manifest.json");
+  std::filesystem::path constraints_xml_path = projectPath / (projectName + "_constraints.xml");
   if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path)) {
-    // Nothing placed yet -- not an error, see RunDesignResources() for the same reasoning.
-    return true;
+    return true;  // nothing placed yet
   }
-  if (!FileUtils::FileExists(atomsets_path)) {
-    // Placed successfully, but this device template has no P2/P3 hooks.
-    WarnFloorplanningVerificationUnavailable();
-    return true;
+  if (!FileUtils::FileExists(manifest_path) && !FileUtils::FileExists(constraints_xml_path)) {
+    return true;  // nothing constrained
   }
 
-  // Best-effort: placement has already succeeded.
   FloorplanningTool tool = ResolveFloorplanningTool(
       "floorplanning_constraint_compliance.py", "Constraint-compliance check",
-      MissingPython::Skip, "constraint compliance");
+      "constraint compliance");
   if (!tool.ready) return tool.result;
-  const std::filesystem::path& constraint_compliance_script_path = tool.script;
-  const std::filesystem::path& python_exec = tool.python;
 
-  std::filesystem::path manifest_path =
-      FloorplanningArtifact("constraints.manifest.json");
-  std::filesystem::path constraints_xml_path =
-      projectPath / (projectName + "_constraints.xml");
-  std::filesystem::path compliance_rpt_path =
-      FloorplanningArtifact("constraint_compliance.rpt");
-
-  // [aurora2#1725 stage P7] The same verdict, machine-readable, for the FloorPlanning
-  // panel: the .rpt names one example out-of-region atom because a human reading a log
-  // does not want 500, but the panel has to list every one to explain why an instance is
-  // only partially placed.
-  std::filesystem::path placement_json_path =
-      FloorplanningArtifact("placement.json");
-
+  std::filesystem::path compliance_rpt_path = FloorplanningArtifact("constraint_compliance.rpt");
   std::vector<std::string> args;
-  args.push_back(constraint_compliance_script_path.string());
+  args.push_back(tool.script.string());
   args.push_back("--place");
   args.push_back(place_path.string());
   args.push_back("--net");
   args.push_back(net_path.string());
-  args.push_back("--atomsets");
-  args.push_back(atomsets_path.string());
   if (FileUtils::FileExists(manifest_path)) {
     args.push_back("--manifest");
     args.push_back(manifest_path.string());
-  } else if (FileUtils::FileExists(constraints_xml_path)) {
+  } else {
     args.push_back("--constraints-xml");
     args.push_back(constraints_xml_path.string());
   }
-  args.push_back("--mode");
-  args.push_back("warning");
   args.push_back("-o");
   args.push_back(compliance_rpt_path.string());
+  // Every out-of-region atom, per instance, for the FloorPlanning panel.
   args.push_back("--json");
-  args.push_back(placement_json_path.string());
+  args.push_back(FloorplanningArtifact("placement.json").string());
 
-  // Soft constraint: the exit code is intentionally not checked. --mode warning already
-  // returns 0 unconditionally: any FAIL/STALE verdict is in compliance_rpt_path -- the
-  // report a human reads -- and in placement_json_path, which the FloorPlanning panel
-  // reads, not in this function's return value.
-  RunFloorplanningStage(python_exec.string(), args);
-  return true;
+  if (RunFloorplanningStage(tool.python.string(), args) == 0) {
+    return true;
+  }
+  std::ifstream report(compliance_rpt_path);
+  for (std::string line; std::getline(report, line);) {
+    if (line.find("FAIL") != std::string::npos || line.rfind("PARTITION", 0) == 0) {
+      ErrorMessage("Floor plan compliance: " + line);
+    }
+  }
+  ErrorMessage("Design " + projectName + " placement does not honour its region constraints, "
+               "see " + compliance_rpt_path.string());
+  return false;
 }
 
 bool CompilerOpenFPGA_ql::Synthesize() {
@@ -3457,12 +3024,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
-  // [aurora2#1725] Start this compile's stage log from empty. EnsureElaborated() does the
-  // same, but only when it actually elaborates -- an unchanged design skips it, and the
-  // stages after it would then append to the previous run's file.
+  // [aurora2#1725] Start this compile's stage log from empty.
   ResetFloorplanningStageLog();
-
-  if (!EnsureElaborated()) return false;
 
   const std::unordered_map<int, CommandWrapperPtr> commandsMap = getSynthesisCommands();
 
@@ -3481,7 +3044,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       if (status) {
         ErrorMessage("Design " + ProjManager()->projectName() +
                     " synthesis failed");
-        ReportFloorplanningYosysErrors();
         return false;
       } else {
         if (faultAfterTool("synth")) return false;
@@ -3502,9 +3064,8 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   if (!DesignChanged(yosysScript, script_path, output_path)) {
     Message("Design didn't change: " + ProjManager()->projectName() +
             ", skipping synthesis.");
-    // [aurora2#1725 stage P4] re-run even on a skip: instances.json may have changed
-    // (see EnsureElaborated() above) since the last time this ran, and validation.json
-    // should reflect it. Best-effort, like every stage this feature adds.
+    // [aurora2#1725 stage P4] re-run even on a skip, so the notes match the owner table on
+    // disk. Best-effort, like every stage this feature adds.
     RunValidateInstances();
     RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
     return true;
@@ -3544,7 +3105,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::filesystem::remove(
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
-  // [aurora2#1725] A script without the floorplanning hooks writes no atom set, so the
+  // [aurora2#1725] A custom script without -owner_table writes no owner table, so the
   // previous run's would otherwise describe a netlist that no longer exists.
   std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) / "atomsets.json");
   std::filesystem::remove(FloorplanningArtifact("atomsets.json"));
@@ -3555,7 +3116,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   if (status) {
     ErrorMessage("Design " + ProjManager()->projectName() +
     " synthesis failed");
-    ReportFloorplanningYosysErrors();
     return false;
   } else {
     if (faultAfterTool("synth")) return false;
@@ -3570,30 +3130,6 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     RunDesignResources(1);
     return true;
   }
-}
-
-// [aurora2#1725] Device templates synced from silicon drop the floorplanning hooks, and
-// without them synthesis writes no atom-set file. Insert each missing hook around the
-// synthesis line; a template with no such line is returned unchanged.
-static std::string withFloorplanningHooks(const std::string& script) {
-  const std::string pre = "${FLOORPLANNING_PRE_SYNTH}";
-  const std::string post = "${FLOORPLANNING_POST_SYNTH}";
-  const std::string synth = "${QL_SYNTH_PASS_NAME}";
-  size_t start = 0;
-  while (start < script.size()) {
-    size_t end = script.find('\n', start);
-    if (end == std::string::npos) end = script.size();
-    const size_t first = script.find_first_not_of(" \t", start);
-    if (first < end && script.compare(first, synth.size(), synth) == 0) {
-      std::string result = script.substr(0, start);
-      if (script.find(pre) == std::string::npos) result += pre + "\n";
-      result += script.substr(start, end - start);
-      if (script.find(post) == std::string::npos) result += "\n" + post;
-      return result + script.substr(end);
-    }
-    start = end + 1;
-  }
-  return script;
 }
 
 std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
@@ -3630,8 +3166,6 @@ std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
       Message("Using Internal Yosys Template Script.");
       scriptTemplate = qlYosysScript;
     }
-    // A user's own script is left as written: the Floor Planning panel reports it there.
-    scriptTemplate = withFloorplanningHooks(scriptTemplate);
   } else {
     scriptTemplate = m_customYosysScript;
   }
@@ -6392,8 +5926,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     // [aurora2#1725 stage P7] tier 3 -- the .net/.place this path just found up-to-date
     // are exactly what tier 3 reads, so regenerate even though VPR did not re-run.
     RunDesignResources(2);
-    RunConstraintCompliance();
-    return true;
+    return RunConstraintCompliance();
   }
 
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
@@ -6535,7 +6068,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("##################################################");
     m_state = State::Placed;
     RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning as above
-    RunConstraintCompliance();
+    if (!RunConstraintCompliance()) {
+      return false;
+    }
     if (m_engineSelected) {
       QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
     }
@@ -6603,9 +6138,11 @@ bool CompilerOpenFPGA_ql::Placement() {
   // FloorPlanning UI can compare its estimates against. Runs before the place2pcf.py
   // block below, which returns early when no pin table is found.
   RunDesignResources(2);
-  // [aurora2#1725 stage P7] post-placement compliance -- soft constraint, see
-  // RunConstraintCompliance()'s own comment for why this never fails the build.
-  RunConstraintCompliance();
+  // [aurora2#1725 stage P7] post-placement compliance: an atom outside its region fails
+  // placement.
+  if (!RunConstraintCompliance()) {
+    return false;
+  }
 
   // RPM-authoring project: (re)package the IP from this fresh placement.
   if (RpmAuthorProjectActive() && !PackageRpmAuthorProject()) {
@@ -10164,34 +9701,6 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
 
   std::filesystem::path floor_planning_constraint_filepath = QLSettingsManager::getInstance()->getQDCFilePath();
 
-  // [aurora2#1725 stage P5] instances.json (P0b) is the only trustworthy answer to
-  // "is this .qdc token an RTL instance?" -- "i_mul_24" without a "." + "*" suffix is a
-  // whole instance and must not reach VPR as a literal (see the set_region loop below).
-  // Net names are not accepted; the floorplan checker rejects them.
-  // NOT best-effort where set_region is concerned. instances.json is what tells an
-  // instance path apart from an exact atom name, and without it every instance silently
-  // stays literal -- a name_pattern that matches nothing, because a bare instance path is
-  // never itself a VPR atom name. Silently emitting a constraint that asks VPR for nothing
-  // is the exact defect this feature exists to remove, so the set_region loop below
-  // refuses rather than degrades. A project with no set_region never consults the model,
-  // so it is unaffected.
-  fp::RtlInstanceModel rtlModel;
-  const std::filesystem::path instancesJsonPath =
-      FloorplanningArtifact("instances.json");
-  const bool instancesLoaded = rtlModel.loadInstances(instancesJsonPath);
-
-  // loadInstances() reports an EMPTY list as a failure, and that is a different thing from
-  // being unable to read one. A flat design -- mult_16_signed, spram_9x4096 -- elaborates
-  // fine and legitimately has "instances": [], so its instance set IS known: there is
-  // nothing to expand, and every set_region token in such a .qdc is necessarily a literal
-  // atom name ("out[0]", "$false", "$undef") that reaches VPR correctly as itself.
-  //
-  // Refusing those would break designs that were never at risk. What the guard below is
-  // for is the case where the set could not be determined at all, so a real instance name
-  // would silently pass through as a literal matching nothing.
-  const bool haveInstanceModel =
-      instancesLoaded || FileUtils::FileExists(instancesJsonPath);
-
   std::string region_groups_str = "";
   if (fs::exists(floor_planning_constraint_filepath)) {
     std::unordered_set<std::string> leftSet, rightSet, topSet, bottomSet;
@@ -10202,23 +9711,22 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       {"bottom", &bottomSet}
     };
 
-    std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
-    // .qdc order, so the emitted partitions do not depend on hash order.
-    std::vector<std::string> partitionOrder;
-    // Counts every set_region line, as the Floor Planning panel numbers its partitions.
-    int setRegionIndex = 0;
+    // [aurora2#1725] Partitions in .qdc order. Lines naming one partition are one partition,
+    // as the panel and the batch checker read them; an unnamed line is a partition of its
+    // own, which generate_floorplanning.py names region<i>_partition.
+    struct RegionGroup {
+      std::string name;
+      std::vector<std::string> regions;
+      std::vector<std::string> elements;
+    };
+    std::vector<RegionGroup> regionGroups;
 
     std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
     for (std::string line: lines) {
       // [aurora2#1725] readCommands() returns comments as well as commands, so that saving
-      // the .qdc cannot destroy them. They are not commands: parsing one here would take
-      // its first word as a command name and fail the compile with "Invalid QDC command
-      // '#...'" on any .qdc carrying a header -- which is every floorplanning testcase.
-      if (auto hash = line.find('#'); hash != std::string::npos) {
-        line = line.substr(0, hash);
-      }
+      // the .qdc cannot destroy them. They are not commands.
       line = StringUtils::trim(line);
-      if (line.empty()) {
+      if (line.empty() || line[0] == '#') {
         continue;
       }
 
@@ -10233,9 +9741,10 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       }
 
       if (token == "set_io_side") {
-        iss >> signalName;
+        std::istringstream io(line.substr(0, line.find('#')));
+        io >> token >> signalName;
         std::string side;
-        while (iss >> side) {
+        while (io >> side) {
           StringUtils::toLower(side); 
           auto it = sideMap.find(side);
           if (it != sideMap.end()) {
@@ -10244,78 +9753,34 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
         }
         signalName.clear();
       } else if (token == "set_region") {
-        // The RTL instance names must be known whatever the synthesis tool. Without them
-        // the expansion below cannot happen and the constraint would reach VPR matching
-        // nothing -- so refuse here, where the cause is still visible, rather than let the
-        // design place as though it had never been constrained.
-        if (!haveInstanceModel) {
-          ErrorMessage(
-              "Cannot expand set_region without instances.json: RTL instance names are "
-              "unknown, so a region would reach VPR matching nothing. Enable 'verific' in "
-              "Settings so the design can be elaborated for instance discovery, or remove "
-              "the set_region constraints from the .qdc.");
+        // [aurora2#1725] Read by the parser the panel and the batch checker use. Names go
+        // through as written: generate_floorplanning.py resolves them against the owner
+        // table, and refuses one that names nothing.
+        const std::optional<fp::SetRegionCommand> command = fp::QdcSerializer::parseSetRegion(line);
+        if (!command) {
+          ErrorMessage("Invalid set_region command: '" + line + "'. Expected set_region "
+                       "<instances> <regions> [<partition name>].");
           return false;
         }
-        iss >> signalName;
-        std::vector<std::string> elements;
-        std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
-        for (const std::string& pattern: patterns) {
-          // [aurora2#1725 stage P5] Mode A (wildcard) is mandatory for a whole RTL
-          // instance: mode B (enumerating atom names) is not implementable here --
-          // Yosys cell names and VPR atom names are different, non-overlapping
-          // namespaces. A bare instance path is never itself a VPR atom name -- real atoms
-          // are always "<path>.<signal>" -- so without the "." + "*" suffix this would
-          // reach VPR as a literal name_pattern and silently match nothing (see
-          // generate_floorplanning.py's add_atom_pattern). But not every token here is
-          // an instance: the constant drivers synthesis adds ("$false"/"$undef") must stay
-          // literal. instances.json is what tells the two apart.
-          //
-          // isInstanceOrAncestor(), not find(): a SystemVerilog generate-block label
-          // like "cluster[0]" is never itself a recorded instance -- only
-          // "cluster[0].clb", the module instantiated inside it, is -- but a bare
-          // "cluster[0]" is still a real whole-subtree RTL selection and still needs
-          // the wildcard suffix.
-          const bool alreadyGlob = pattern.find('*') != std::string::npos;
-          if (!alreadyGlob && rtlModel.isTop(pattern)) {
-            // The top module is the one instance whose atoms carry NO prefix naming it.
-            // flatten writes an instance path into every atom it pulls up, but the top is
-            // what everything was pulled up INTO -- "i_mul_24.foo" never becomes
-            // "fpu_single.i_mul_24.foo" -- so "<top>.*" would match nothing at all, which
-            // is the silent-no-match failure this whole expansion exists to prevent.
-            // Constraining the top means constraining the design, and that is "*".
-            elements.push_back("*");
-            continue;
-          }
-          const bool isWholeInstance = !alreadyGlob && rtlModel.isInstanceOrAncestor(pattern);
-          elements.push_back(isWholeInstance ? pattern + ".*" : pattern);
+        auto group = std::find_if(regionGroups.begin(), regionGroups.end(),
+                                  [&command](const RegionGroup& g) {
+                                    return !command->partitionName.empty() &&
+                                           g.name == command->partitionName;
+                                  });
+        if (group == regionGroups.end()) {
+          group = regionGroups.insert(regionGroups.end(), RegionGroup{command->partitionName, {}, {}});
         }
-
-        std::string partition;
-        iss >> partition;
-        bool hasPartition = !iss.fail();
-
-        std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
-        iss >> partitionName;
-        bool hasPartitionName = !iss.fail();
-        const int partitionIndex = setRegionIndex++;
-
-        if (hasPartition) {
-          StringUtils::toLower(partition);
-          // An unnamed partition gets the name the panel shows for it.
-          if (!hasPartitionName) {
-            partitionName = "partition" + std::to_string(partitionIndex);
-          }
-          const std::string partitionKey = partitionName + "|" + partition;
-          if (partitionMap.find(partitionKey) == partitionMap.end()) {
-            partitionMap[partitionKey] = {};
-            partitionOrder.push_back(partitionKey);
-          }
-          for (const std::string& element: elements) {
-            partitionMap[partitionKey].insert(element);
+        for (std::string region : command->regions) {
+          StringUtils::toLower(region);
+          if (std::find(group->regions.begin(), group->regions.end(), region) == group->regions.end()) {
+            group->regions.push_back(region);
           }
         }
-
-        signalName.clear();
+        for (const std::string& element : command->elements) {
+          if (std::find(group->elements.begin(), group->elements.end(), element) == group->elements.end()) {
+            group->elements.push_back(element);
+          }
+        }
       }
     }
 
@@ -10325,8 +9790,10 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     std::string bottomStr = StringUtils::toString(bottomSet);
 
     std::string partitionStr;
-    for (const std::string& partition: partitionOrder) {
-      partitionStr += "partition:" + partition + "|" + StringUtils::toString(partitionMap[partition]) + ";";
+    for (const RegionGroup& group : regionGroups) {
+      partitionStr += "partition:" + (group.name.empty() ? "" : group.name + "|") +
+                      StringUtils::join(group.regions, ",") + "|" +
+                      StringUtils::join(group.elements, ",") + ";";
     }
 
     // Output results
@@ -10365,7 +9832,9 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
         issues, checkError);
 
     if (!checkError.empty()) {
-      Message("Floor plan check skipped: " + checkError);
+      // No usable owner table or device description: nothing can be sized (F4).
+      ErrorMessage("Floor plan check failed: " + checkError);
+      return false;
     } else if (checked) {
       for (const auto& [where, what] : issues.errors) {
         ErrorMessage("Floor plan: " + where + ": " + what);
@@ -10814,11 +10283,11 @@ bool CompilerOpenFPGA_ql::RpmAuthorProjectActive() {
 
 int CompilerOpenFPGA_ql::ExecuteAndMonitorSystemCommand(const std::string& command,
                                                         const std::string logFile,
-                                                        bool appendLog, bool quiet) {
+                                                        bool appendLog) {
   if (RefuseDumpingCommand(command)) {
     return -1;
   }
-  return Compiler::ExecuteAndMonitorSystemCommand(command, logFile, appendLog, quiet);
+  return Compiler::ExecuteAndMonitorSystemCommand(command, logFile, appendLog);
 }
 
 bool CompilerOpenFPGA_ql::RefuseDumpingCommand(const std::string& command) {
@@ -13704,117 +13173,38 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   // ---------------------------------------------------------------- synth_sdc_file --
 
   // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
-  // [aurora2#1725] Two generic insertion points around the synth_ql call -- one before it,
-  // one after -- instead of one named placeholder per stage. The Yosys commands themselves
-  // live in scripts/floorplanning_{pre,post}_synth.tcl, so changing what runs around
-  // synthesis is a script edit, not a FOEDAG rebuild and a submodule pin bump.
-  //
-  // Both hooks resolve to a single `tcl <path>` line, matching ${CALL_TCL_IMPORT_SCRIPT}
-  // above. Parameters reach the post-synth payload through a generated env.tcl rather than
-  // positional argv: yosys' `tcl` sets argc/argv as globals in one process-wide interpreter
-  // (kernel/yosys.cc TclPass), so the nested `tcl` calls that payload makes would clobber
-  // its own arguments.
-  auto resolveFloorplanningScript =
-      [this](const std::string& name, const std::string& what) -> std::filesystem::path {
-    std::filesystem::path resolved = InstalledScript(std::filesystem::path(name));
-    if (resolved.empty()) {
-      ErrorMessage("Cannot locate scripts/" + name + " in the installation; " + what +
-                   " will fail.");
-      // Keep a non-empty path: this is interpolated as `tcl <path>` below, and a bare
-      // `tcl` would be a yosys syntax error rather than a missing-file one.
-      resolved = PathUtils::instance().installDir() / "scripts" / name;
-    }
-    return resolved;
-  };
-
-  const std::filesystem::path aurora_rehier_script_path =
-      resolveFloorplanningScript("aurora_rehier.tcl",
-                                 "floorplanning rehierarchisation");
-  const std::filesystem::path aurora_atomsets_script_path =
-      resolveFloorplanningScript("floorplanning_atomsets.tcl",
-                                 "floorplanning atom-set extraction");
-  const std::filesystem::path floorplanning_pre_synth_script_path =
-      resolveFloorplanningScript("floorplanning_pre_synth.tcl",
-                                 "floorplanning scope tagging");
-  const std::filesystem::path floorplanning_post_synth_script_path =
-      resolveFloorplanningScript("floorplanning_post_synth.tcl",
-                                 "floorplanning scope tagging and atom-set extraction");
-
-  yosysScript->addFile(aurora_rehier_script_path);
-  yosysScript->addFile(aurora_atomsets_script_path);
-  yosysScript->addFile(floorplanning_pre_synth_script_path);
-  yosysScript->addFile(floorplanning_post_synth_script_path);
-
+  // [aurora2#1725] synth_ql -owner_table writes the owner table itself (yosys_options
+  // below), so these template hooks run nothing by default. With
+  // AURORA_FLOORPLANNING_DEBUG set, the post-synthesis hook dumps the netlist as JSON, for
+  // inspection and for the panel's DSP-V4 tile grouping.
   const std::string top_module_name = ProjManager()->DesignTopModule();
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
-
-  // [aurora2#1725 stage P3] Hand P3 the instance list stage P0b elaborated instead of
-  // letting it rediscover one from cell names. Discovery reads an instance path as
-  // "everything before the last dot" of a cell name, so it cannot see a scope that owns no
-  // cells directly; hierarchy_closure() reconstructs the ancestors of what it did find, but
-  // it cannot invent an instance synthesis deleted outright.
-  //
-  // The top instance is deliberately NOT in this list. floorplanning_atomsets.tcl gives it
-  // an entry of its own from --top -- every atom in the netlist, which is what a
-  // whole-design region needs -- but only when the top is not already an instance key
-  // (see its --top handling). Listing it here would create that key with the near-zero
-  // atoms `c:<top>.*` matches, suppress the whole-design entry, and reintroduce the very
-  // failure the --top flag exists to prevent.
-  std::string fp_instances;
-  {
-    std::ifstream in(FloorplanningArtifact("instances.json"));
-    if (in.is_open()) {
-      try {
-        json doc = json::parse(in);
-        std::string top = doc.value("top_instance", std::string{});
-        if (top.empty()) top = doc.value("top", std::string{});
-        for (const auto& entry : doc.value("instances", json::array())) {
-          const std::string path = entry.value("path", std::string{});
-          // Braced as one Tcl list below, so anything that would break that quoting is
-          // dropped rather than emitted -- an instance path never legitimately has it.
-          if (path.empty() || path == top ||
-              path.find_first_of("{}\\ \t\n\"") != std::string::npos) {
-            continue;
-          }
-          if (!fp_instances.empty()) fp_instances += " ";
-          fp_instances += path;
-        }
-      } catch (const json::exception&) {
-        // A malformed instances.json is stage P0b's to report; leave the list empty and
-        // let P3 fall back to discovery rather than failing synthesis over it.
-        fp_instances.clear();
-      }
+  std::string floorplanning_post_synth;
+  if (std::getenv("AURORA_FLOORPLANNING_DEBUG") != nullptr) {
+    const std::filesystem::path script = InstalledScript("floorplanning_post_synth.tcl");
+    if (script.empty()) {
+      ErrorMessage("Cannot locate scripts/floorplanning_post_synth.tcl in the installation; "
+                   "the floorplanning debug dump is skipped.");
+    } else {
+      // A generated env.tcl rather than argv: yosys' `tcl` sets argc/argv as globals in one
+      // process-wide interpreter. Braced so a Windows path's backslashes stay literal.
+      const std::filesystem::path env_path = FloorplanningArtifact("env.tcl");
+      std::ofstream env(env_path);
+      env << "# Generated by FOEDAG for " << ProjManager()->projectName()
+          << " -- floorplanning parameters (aurora2#1725). Do not edit.\n"
+          << "set ::fp_top {" << top_module_name << "}\n";
+      floorplanning_post_synth = "tcl " + script.string() + " " + env_path.string();
+      yosysScript->addFile(script);
     }
   }
-
-  // Parameters for the payloads: data, not program text. Braced values so a Windows path's
-  // backslashes are not read as Tcl escapes.
-  const std::filesystem::path floorplanning_env_path = FloorplanningArtifact("env.tcl");
-  {
-    std::ofstream env(floorplanning_env_path);
-    env << "# Generated by FOEDAG for " << ProjManager()->projectName()
-        << " -- floorplanning parameters (aurora2#1725). Do not edit.\n"
-        << "set ::fp_top {" << top_module_name << "}\n"
-        << "set ::fp_prefix {" << FloorplanningPrefix() << "}\n"
-        << "set ::fp_blif {" << output_blif_filepath.string() << "}\n"
-        << "set ::fp_atomsets_script {" << aurora_atomsets_script_path.string() << "}\n"
-        << "set ::fp_rehier_script {" << aurora_rehier_script_path.string() << "}\n"
-        << "set ::fp_instances {" << fp_instances << "}\n";
-  }
-
-  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}",
-                     "tcl " + floorplanning_pre_synth_script_path.string());
-
-  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}",
-                     "tcl " + floorplanning_post_synth_script_path.string() + " " +
-                         floorplanning_env_path.string());
+  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}", std::string(""));
+  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}", floorplanning_post_synth);
   // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
 
   // -- floorplanning_prefix ---------------------------------------------------------
   // [aurora2#1725] Every artifact the floorplanning flow generates is named
   // "<project>_floorplanning_<artifact>", so it is obvious in a project directory which
-  // files this feature owns. The device template needs the stem to name the atom-set
-  // output it writes, since that one file is produced by yosys rather than by the C++.
+  // files this feature owns. A device template may name its own outputs after it too.
   yosysScript->apply("${FLOORPLANNING_PREFIX}", FloorplanningPrefix());
   // -- floorplanning_prefix ---------------------------------------------------------
 
@@ -13955,6 +13345,13 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   for (const auto& rel_ip_blif : m_relIpBlifs) {
     yosys_options += " -rel_ip_blif " + rel_ip_blif.string();
     yosysScript->addFile(rel_ip_blif);
+  }
+
+  // [aurora2#1725] The owner table: which RTL instance owns each atom of the BLIF. The
+  // panel, the constraint writer and the checks all read it.
+  yosys_options += " -owner_table " + FloorplanningPrefix() + "_atomsets.json";
+  if (m_useVerific && m_projManager->synthesisTool() != Synplify) {
+    yosys_options += " -owner_front_end verific";
   }
 
   // TODO: trim yosys_options at the front

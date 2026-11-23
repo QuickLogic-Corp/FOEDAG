@@ -37,22 +37,23 @@ public:
     // [aurora2#1725] Root both trees at the top module. Must precede loadNetList().
     void setTopInstance(const std::string& path);
 
-    // [aurora2#1725 stage P3] Feeds the "Atom List"/"Type" columns: RTL path -> the
-    // atom names it covers, from atomsets.json.
+    // [aurora2#1725] Feeds the "Atom List"/"Type" columns: RTL path -> the atom names it
+    // covers, from the owner table.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
+
+    // [aurora2#1725] Atoms each instance owns directly, not through a sub-instance. DeviceGrid
+    // warns when a partition takes an instance's sub-instances and leaves this logic free.
+    void setOwnAtomCounts(std::map<std::string, int> ownAtomCounts);
 
     // [aurora2#1725] Per-instance cell-type counts, for the Atoms tab of "Selected RTL
     // Resources". Only the netlist tree has that table, so only it is told.
     void setAtomResources(AtomResourceMap atomResources);
 
     // [aurora2#2377] Feeds the "Type" column ground truth: each atom's real Yosys cell
-    // type, from <top>_post_synth_debug.json. Both trees show the Type column, so both
-    // are told, same as setAtomNames().
+    // type, from the owner table. Both trees show the Type column, so both are told.
     void setAtomTypes(AtomTypeMap atomTypes);
     void setDspTiles(DspTileMap dspTiles);
 
-    // [aurora2#1725] The "VPR Name" column of both trees, from the constraints manifest.
-    void setVprAtomNames(VprAtomNameMap vprNames);
 
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into
     // one tile, so a partition's required clb can be reported in the same unit as what its

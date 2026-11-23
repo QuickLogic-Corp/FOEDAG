@@ -2392,32 +2392,28 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   }
   CompilerOpenFPGA_ql* compiler = static_cast<CompilerOpenFPGA_ql*>(m_compiler);
 
-  // [aurora2#1725 stage P0] instances.json is produced by RunElabInstances() during the
-  // SYNTHESIS task, and floorPlanningActionTriggered() will not open this panel until that
-  // task has produced a netlist -- so the file is already on disk and there is nothing to
-  // (re)derive here. The on-demand EnsureElaborated() call this replaces existed only to
-  // support opening the panel before synthesis, which is no longer allowed.
-
-  // [aurora2#1725 stage P1] instances.json (RtlInstanceModel) is the sole source of the
-  // tree below, pre- or post-synthesis alike -- a real Yosys/Verific elaboration,
-  // language-agnostic unlike the RTL-source text scrapers this replaced (which only
-  // understood Verilog and found nothing at all for a VHDL design like fpu_single).
-  std::filesystem::path instancesJsonPath =
-      fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
-                                compiler->ProjManager()->projectName(), "instances.json");
-  fp::RtlInstanceModel rtlModel;
-  if (!rtlModel.loadInstances(instancesJsonPath)) {
-    error = QString::fromStdString(rtlModel.error());
-    return false;
+  // [aurora2#1725] The owner table synthesis wrote: the instance tree, the atoms each
+  // instance owns and their cell types. Required: without it the tree and every resource
+  // figure would be empty, so the panel refuses to open instead. Read the same way as the
+  // batch checker reads it (REQ-004). Set before loadNetList()/build() below, which use it.
+  fp::OwnerTable table;
+  {
+    std::string tableError;
+    if (!fp::loadOwnerTable(
+            fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
+                                            compiler->ProjManager()->projectName(),
+                                            "atomsets.json"),
+            table, tableError)) {
+      error = tr("Cannot load floorplanning data: %1.").arg(QString::fromStdString(tableError));
+      return false;
+    }
   }
+  fp::RtlInstanceModel rtlModel;
+  rtlModel.load(table);
 
-  // [aurora2#1725 stage P4] Merge the verdicts. Written by RunValidateInstances() at the
-  // end of the SYNTHESIS task -- including its "skipped, not required" paths -- so it is
-  // already there by the time this panel opens, on any project that has been synthesised.
-  // Still optional rather than required: a device whose template carries no P2/P3 blocks
-  // produces no validation.json even after a successful synthesis, and every instance then
-  // stays "unknown", rendering exactly as the tree did before this was wired up. A
-  // malformed file is reported but does not stop the user floorplanning.
+  // [aurora2#1725 stage P4] Merge the verdicts, written by RunValidateInstances() after
+  // synthesis. Optional: without them every instance stays "unknown". A malformed file is
+  // reported but does not stop the user floorplanning.
   std::filesystem::path validationJsonPath =
       fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
                                 compiler->ProjManager()->projectName(), "validation.json");
@@ -2426,84 +2422,29 @@ bool MainWindow::loadFloorPlanningData(QString& error)
     compiler->Message("Floor Planning: " + rtlModel.error());
   }
 
-  // [aurora2#1725 stage P3] "Atom List"/"Type" columns: RTL instance -> the exact
-  // atoms belonging to it, straight from atomsets.json (floorplanning_atomsets.tcl,
-  // in-session, stage P3). Required: without it the Atoms and Tiles tabs silently report
-  // zero, so the panel refuses to open instead. Must run before loadNetList()/build()
-  // below: build() calls populateAtomColumns() itself, so the atom-name map has to
-  // already be set.
-  std::filesystem::path atomsetsJsonPath =
-      fp::floorplanningArtifactOrBare(compiler->ProjManager()->projectPath(),
-                                compiler->ProjManager()->projectName(), "atomsets.json");
-  if (!std::filesystem::exists(atomsetsJsonPath)) {
-    error = tr("Cannot load floorplanning data: synthesis did not produce %1. The device's "
-               "aurora_template_script.ys probably lacks the ${FLOORPLANNING_PRE_SYNTH} / "
-               "${FLOORPLANNING_POST_SYNTH} hooks.")
-                .arg(QString::fromStdString(atomsetsJsonPath.filename().string()));
-    return false;
-  }
-  {
-    // Shared with the batch checker (REQ-004), so the panel and a headless run read the
-    // same file the same way -- including atoms_per_tile, which is the divisor behind every
-    // required-clb figure. Two readers of that would mean the two paths could report
-    // different tile counts for the same .qdc.
-    fp::AtomNameMap atomNames;
-    fp::AtomResourceMap atomResources;
-    int atomsPerTile = fp::FloorplanContext::kDefaultAtomsPerTile;  // unless the file says
-    std::string netlistSha256;
-    if (!fp::loadAtomSets(atomsetsJsonPath, atomNames, atomResources, atomsPerTile,
-                          netlistSha256)) {
-      error = tr("Cannot load floorplanning data: %1 is unreadable or malformed.")
-                  .arg(QString::fromStdString(atomsetsJsonPath.string()));
-      return false;
-    }
-    m_floorPlanningWidget->setAtomsPerTile(atomsPerTile);
-    m_floorPlanningWidget->context().netlistSha256 = std::move(netlistSha256);
-    m_floorPlanningWidget->setAtomNames(std::move(atomNames));
-    // The same file's "resources" map: the cell types behind those atoms, which the
-    // Atoms tab of "Selected RTL Resources" reports.
-    m_floorPlanningWidget->setAtomResources(std::move(atomResources));
-  }
+  m_floorPlanningWidget->setAtomsPerTile(fp::FloorplanContext::kDefaultAtomsPerTile);
+  m_floorPlanningWidget->context().netlistSha256 = table.netlistSha256;
+  m_floorPlanningWidget->setOwnAtomCounts(table.ownAtomCounts);
+  m_floorPlanningWidget->setAtomNames(table.atomNames);
+  m_floorPlanningWidget->setAtomResources(table.atomResources);
+  m_floorPlanningWidget->setAtomTypes(table.atomTypes);
 
-  // [aurora2#2377] Each atom's real Yosys cell type, from the write_json dump
-  // floorplanning_post_synth.tcl produces alongside atomsets.json. Ground truth for the
-  // Type column and Partition's clb/dsp/bram counts, instead of classifyAtomType()'s
-  // name-substring guess, which misclassifies a hard macro that keeps its RTL instance
-  // name (a BRAM, say) as CLB.
-  //
-  // Called unconditionally, empty map and all, so types loaded earlier into the panel are
-  // not kept for a project with no debug json.
+  // [aurora2#2377] DSP-V4 leaves grouped into tiles, from the debug netlist dump when there
+  // is one; set even when absent, so an earlier project's grouping does not linger.
   {
-    fp::AtomTypeMap atomTypes;
-    std::filesystem::path debugJsonPath =
-        fp::postSynthDebugJson(compiler->ProjManager()->projectPath(),
-                               compiler->ProjManager()->DesignTopModule());
     fp::DspTileMap dspTiles;
-    fp::loadAtomTypes(debugJsonPath, atomTypes, dspTiles);
+    fp::loadDspTiles(fp::postSynthDebugJson(compiler->ProjManager()->projectPath(),
+                                            compiler->ProjManager()->DesignTopModule()),
+                     dspTiles);
     m_floorPlanningWidget->setDspTiles(std::move(dspTiles));
-    m_floorPlanningWidget->setAtomTypes(std::move(atomTypes));
-  }
-
-  // [aurora2#1725] VPR atom names that differ from the Yosys ones, written by
-  // generate_floorplanning.py into the constraints manifest. Set even when absent, so a
-  // previous project's names do not linger.
-  {
-    fp::VprAtomNameMap vprNames;
-    fp::loadVprAtomNames(
-        fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
-                                  compiler->ProjManager()->projectName(),
-                                  "constraints.manifest.json"),
-        vprNames);
-    m_floorPlanningWidget->setVprAtomNames(std::move(vprNames));
   }
 
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
   // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
   // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be
   // set before loadNetList() below, which builds the trees and populates every partition:
-  // Partition::addElement() reads it as it goes. Absent for a project that has never been
-  // compiled, and for devices whose template has no P2/P3 blocks -- both leave the panel
-  // exactly as it was before this stage existed, so a missing file is not an error.
+  // Partition::addElement() reads it as it goes. A missing file leaves the figures at tier
+  // 0 -- not an error.
   //
   // Cleared up front rather than only on success, so a missing or unreadable
   // design_resources.json does not keep the figures loaded earlier into this panel.
@@ -2578,12 +2519,9 @@ bool MainWindow::loadFloorPlanningData(QString& error)
       fp::floorplanningArtifact(compiler->ProjManager()->projectPath(),
                                 compiler->ProjManager()->projectName(), "placement.json")));
 
-  // [aurora2#1725 stage P1] instances.json -> flat path set for the tree. Every instance,
-  // deleted ones included: they are shown greyed out and unselectable rather than dropped,
-  // because whether an instance survives synthesis depends on generics and constant
-  // folding, and an instance that silently vanishes from the tree is indistinguishable
-  // from a mistyped hierarchy path (A.P4). toHierarhyElements() is the element set a
-  // PARTITION may hold, and it still excludes them -- there are no atoms to constrain.
+  // [aurora2#1725] Every instance of the tree, deleted ones included: they are shown greyed
+  // out and unselectable rather than dropped, because an instance that silently vanishes
+  // from the tree is indistinguishable from a mistyped hierarchy path.
   fp::NaturalStringSet paths;
   for (const fp::RtlInstance& instance : rtlModel.instances()) {
     paths.insert(instance.path);
@@ -2591,8 +2529,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   // [aurora2#1725 stage P1] Root the tree at the top module. Before loadNetList(), which is
   // what builds it. Without this the top is just another top-level row sitting BESIDE
   // "dut"/"core" -- the same design drawn one way on a flat design (where the top is the
-  // only row, so it reads as the root) and another way on a hierarchical one. Empty on an
-  // instances.json with no top entry, which leaves the tree exactly as it was.
+  // only row, so it reads as the root) and another way on a hierarchical one.
   m_floorPlanningWidget->setTopInstance(rtlModel.topInstance());
   m_floorPlanningWidget->loadNetList(paths);
 

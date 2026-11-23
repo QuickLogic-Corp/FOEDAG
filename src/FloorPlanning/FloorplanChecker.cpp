@@ -54,55 +54,40 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     }
 
     // The .qdc carries RTL names only (REQ-002), so the elements arrive without atoms and
-    // every required count would be zero -- nothing could ever look under-provisioned.
-    // Attach them the same way the panel does, through the shared lookup.
-    RtlInstanceModel rtlModel;
-    const bool haveInstances = rtlModel.loadInstances(
-        floorplanningArtifact(projectPath, projectName, "instances.json"));
-
-    // Real cell types, as the panel loads them: without them a BRAM named after its RTL
-    // instance (core.u_mem.mem.0.0) is classified by name and counted as CLB logic.
-    AtomTypeMap atomTypes;
-    DspTileMap dspTiles;
-    loadAtomTypes(postSynthDebugJson(projectPath, topModule), atomTypes, dspTiles);
-    context.atomTypes = std::move(atomTypes);
-    context.dspTiles = std::move(dspTiles);
-
-    AtomNameMap atomNames;
-    int atomsPerTile = context.atomsPerTile;
-    const bool haveAtoms =
-        loadAtomSets(floorplanningArtifactOrBare(projectPath, projectName, "atomsets.json"),
-                     atomNames, atomsPerTile);
-    if (haveAtoms) {
-        context.setAtomsPerTile(atomsPerTile);
-        device.setOwnAtomCounts(ownAtomCounts(atomNames));
-
-        for (const auto& [id, partition] : device.partitions()) {
-            const HierarhyElements elements = partition->elements();
-            partition->clearElemenets();
-            for (const HierarhyElement& element : elements) {
-                partition->addElement(HierarhyElement{element.path, element.isLeaf,
-                                                      atomNamesFor(atomNames, element.path)});
-            }
+    // every required count would be zero. Attach them from the owner table, as the panel
+    // does; without one nothing can be sized, which is an error, not "no issues" (F4).
+    OwnerTable table;
+    if (!loadOwnerTable(floorplanningArtifactOrBare(projectPath, projectName, "atomsets.json"),
+                        table, error)) {
+        return false;
+    }
+    context.atomTypes = table.atomTypes;
+    loadDspTiles(postSynthDebugJson(projectPath, topModule), context.dspTiles);
+    device.setOwnAtomCounts(table.ownAtomCounts);
+    for (const auto& [id, partition] : device.partitions()) {
+        const HierarhyElements elements = partition->elements();
+        partition->clearElemenets();
+        for (const HierarhyElement& element : elements) {
+            partition->addElement(HierarhyElement{element.path, element.isLeaf,
+                                                  atomNamesFor(table.atomNames, element.path)});
         }
     }
 
     // Instances synthesis deleted entirely: a .qdc may still name one, and such a constraint
     // matches no atom.
-    if (haveInstances) {
-        rtlModel.mergeVerdicts(
-            floorplanningArtifact(projectPath, projectName, "validation.json"));
-        std::unordered_set<std::string> deleted;
-        std::set<std::string> paths;
-        for (const RtlInstance& instance : rtlModel.instances()) {
-            paths.insert(instance.path);
-            if (instance.status == "deleted") {
-                deleted.insert(instance.path);
-            }
+    RtlInstanceModel rtlModel;
+    rtlModel.load(table);
+    rtlModel.mergeVerdicts(floorplanningArtifact(projectPath, projectName, "validation.json"));
+    std::unordered_set<std::string> deleted;
+    std::set<std::string> paths;
+    for (const RtlInstance& instance : rtlModel.instances()) {
+        paths.insert(instance.path);
+        if (instance.status == "deleted") {
+            deleted.insert(instance.path);
         }
-        device.setDeletedInstances(std::move(deleted));
-        device.setRtlInstances(std::move(paths));
     }
+    device.setDeletedInstances(std::move(deleted));
+    device.setRtlInstances(std::move(paths));
 
     // A region's tiles are computed lazily against its rect, and QdcSerializer restores
     // geometry but never tiles. Without this every partition reports zero available and the

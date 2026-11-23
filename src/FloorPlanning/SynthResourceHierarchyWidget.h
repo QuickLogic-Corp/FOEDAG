@@ -31,17 +31,15 @@ class SynthResourceHierarchyWidget : public QWidget {
     enum Column {
       Netlist = 0,
       AtomList = 1,
-      // The atom's VPR name where it differs from the Yosys name in Atom List.
-      VprName = 2,
-      AtomType = 3,
-      Partitions = 4,
+      AtomType = 2,
+      Partitions = 3,
       // [aurora2#1725 stage P7] Clickable "?" for rows that have something to explain --
       // a partial placement or an instance synthesis optimised out. Moved next to the name
       // visually in build().
-      Why = 5,
+      Why = 4,
       // An atom's Yosys cell type ("TDP_ECC36K_...", "QL_DSP4_MULT"), shown with the atom
       // list; moved next to Type visually in build().
-      Primitive = 6
+      Primitive = 5
     };
 public:
     enum Flag {
@@ -69,13 +67,12 @@ public:
     void build(const NaturalStringSet& elements);
 
     // [aurora2#1725] The top module's path, which build() makes the root of the tree. Must
-    // be set BEFORE build(): addPath() reads it as it creates each item. Empty means "no
-    // top entry" -- an older instances.json -- and the tree keeps its previous flat-roots
-    // shape rather than inventing a root.
+    // be set BEFORE build(): addPath() reads it as it creates each item. Empty means no
+    // top, and the tree keeps a flat-roots shape rather than inventing a root.
     void setTopInstance(const std::string& path) { m_topInstance = path; }
 
     // [aurora2#1725 stage P3] Populates the "Atom List" and "Type" columns: RTL path ->
-    // the atom names it covers, from atomsets.json.
+    // the atom names it covers, from the owner table.
     void setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames);
 
     // [aurora2#1725] Cell-type counts per instance, for the Atoms tab of the selected-
@@ -83,15 +80,9 @@ public:
     // leaves that tab empty and everything else working.
     void setAtomResources(AtomResourceMap atomResources);
 
-    // [aurora2#2377] Each atom's real Yosys cell type, from <top>_post_synth_debug.json
-    // (AtomSets::loadAtomTypes()). Independent of the two setters above: a project with no
-    // debug json falls back to classifyAtomType()'s name-substring guess, same as before
-    // this existed.
+    // [aurora2#2377] Each atom's real Yosys cell type, from the owner table. An atom it does
+    // not name falls back to classifyAtomType()'s name-substring guess.
     void setAtomTypes(AtomTypeMap atomTypes);
-
-    // [aurora2#1725] Yosys cell name -> VPR atom name, for the "VPR Name" column. Only
-    // the names that differ; an atom with no entry keeps its Yosys name in VPR.
-    void setVprAtomNames(VprAtomNameMap vprNames);
 
     // [aurora2#1725] "Show Atom List and Primitive columns" from the Options menu. Off by
     // default: the atom names are long and mostly of interest when debugging a mapping.
@@ -174,7 +165,6 @@ private:
     AtomResourceMap m_atomResources;
     AtomTypeMap m_atomTypes;
     FloorplanContextPtr m_context = std::make_shared<FloorplanContext>();
-    VprAtomNameMap m_vprAtomNames;
 
     std::map<std::string, InstanceVerdict> m_verdicts;
     std::map<std::string, InstancePlacement> m_placements;

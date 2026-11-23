@@ -72,6 +72,7 @@ public:
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
     const IssuesPtr& checkIssues();
+    std::map<int, std::set<std::string>> atomsByDeepestElement() const;
     bool hasErrors() const { return !m_issues->errors.empty(); }
 
     // [aurora2#1725] RTL path -> how many atoms belong to that instance DIRECTLY, i.e. sit
@@ -88,7 +89,7 @@ public:
         m_deletedInstances = std::move(deletedInstances);
     }
 
-    // Every RTL instance path, from instances.json. checkIssues() flags a partition element
+    // Every RTL instance path, from the owner table. checkIssues() flags a partition element
     // that is neither one of them nor a parent of one. Empty skips that check.
     void setRtlInstances(std::set<std::string> rtlInstances) {
         m_rtlInstances = std::move(rtlInstances);

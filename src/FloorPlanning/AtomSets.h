@@ -10,34 +10,36 @@
 
 namespace fp {
 
-// [aurora2#1725] atomsets.json as the panel and the batch checker both need it: RTL instance
-// path -> the netlist atoms belonging to that instance.
+// [aurora2#1725] RTL instance path -> the netlist atoms its subtree owns.
 //
 // Lives here rather than in a widget because REQ-004 needs the same answers with no UI at
-// all. A second implementation for batch mode would be a second set of rules to keep in
-// step, and the whole point of the requirement is that a rule added to one path is present
-// in the other.
+// all: the panel and the batch checker read the owner table the same way.
 using AtomNameMap = std::map<std::string, std::vector<std::string>, NaturalLess>;
 
-// [aurora2#1725] The other half of an atomsets.json entry: RTL instance path -> the raw
-// synthesized cell types it holds and how many of each ("$lut", "sdffre", "adder_carry",
-// "TDP_ECC36K_BRAM_...", ...). Names are the netlist's own, not friendlier labels: they are
-// what the Atom List column shows and what a user greps the .blif for.
-//
-// Subtree-inclusive exactly like the atom lists, and consistent with them: a parent's
-// counts equal the sum over its children.
+// RTL instance path -> the cell types its subtree holds and how many of each ("$lut",
+// "sdffre", "QL_DSP4_MULT", ...), named as the netlist names them.
 using AtomResourceMap = std::map<std::string, std::map<std::string, int>, NaturalLess>;
 
-// Reads atomsets.json. Returns false if the file is missing or unreadable; atomsPerTile is
-// left untouched unless the file states it.
-bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
-                  int& atomsPerTile);
+// Atom name -> its Yosys cell type ("sdffre", "$lut", "TDP36K", ...). Ground truth for the
+// Type column and Partition's clb/dsp/bram counts, instead of classifyAtomType()'s name guess.
+using AtomTypeMap = std::map<std::string, std::string>;
 
-// As above, and also the per-instance cell-type counts and the hash of the netlist the table
-// describes ("" when absent). A separate overload rather than a wider AtomNameMap: the batch
-// checker (REQ-004) sizes regions and has no use for them.
-bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
-                  AtomResourceMap& atomResources, int& atomsPerTile, std::string& netlistSha256);
+// [aurora2#1725] The owner table synthesis writes (<project>_floorplanning_atomsets.json,
+// schema version 2): every atom of the netlist, named as VPR names it, and the RTL instance
+// that owns it, plus the instance tree before flatten.
+struct OwnerTable {
+    std::string top;
+    std::string netlistSha256;
+    std::vector<std::string> instances;          // dotted RTL instance paths
+    AtomNameMap atomNames;                       // the top holds every atom
+    AtomResourceMap atomResources;               // subtree-inclusive, like atomNames
+    AtomTypeMap atomTypes;
+    std::map<std::string, int> ownAtomCounts;    // atoms an instance owns directly
+};
+
+// Reads the owner table. False, with `error` saying why, when the file is missing, is not
+// JSON, or is not schema version 2 with a netlist hash.
+bool loadOwnerTable(const std::filesystem::path& path, OwnerTable& table, std::string& error);
 
 // The table's netlist_sha256, or "" when the file is missing, unreadable or has none.
 std::string readNetlistSha256(const std::filesystem::path& path);
@@ -47,40 +49,19 @@ std::string readNetlistSha256(const std::filesystem::path& path);
 bool floorplanReloadNeeded(int loadedTier, const std::string& loadedSha256, int diskTier,
                            const std::string& diskSha256);
 
-// [aurora2#2377] Atom name -> its real Yosys cell type ("sdffre", "$lut",
-// "TDP_ECC36K_FIFO_ASYNC_...", ...), read from <top>_post_synth_debug.json -- the full
-// write_json netlist dump floorplanning_post_synth.tcl produces alongside atomsets.json.
-//
-// classifyAtomType() otherwise has only the atom's own auto-generated NAME to go on, and
-// that is not always the atom's own type: a hard macro instance (a BRAM, say) keeps its
-// original RTL instance name through synthesis rather than getting a name Yosys derives
-// from its type, so name-substring matching silently misclassifies it as CLB. This map is
-// ground truth instead of a guess, verified byte-for-byte against real atomsets.json atom
-// names.
-using AtomTypeMap = std::map<std::string, std::string>;
-
-// Reads <top>_post_synth_debug.json's modules.*.cells map. Returns false if the file is
-// missing or unreadable -- not a failure a caller need report, since it only means the type
-// column falls back to the atom-name heuristic, same as an atomsets.json with no
-// "resources" field today.
-bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes);
-
 // DSP-V4 leaf atom (QL_DSP4_*) -> an id shared by every leaf of the same physical tile.
 // Flattening names each leaf after a net, so one tile's leaves can sit under different
 // instances, and only one of them is the QL_DSP4_MULT that countsAsDspTile() counts.
 using DspTileMap = std::map<std::string, std::string>;
 
-// As above, and groups the netlist's DSP-V4 leaves into tiles by the nets inside a tile.
-bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes,
-                   DspTileMap& outDspTiles);
+// Groups the netlist's DSP-V4 leaves into tiles by the nets inside a tile, from
+// <top>_post_synth_debug.json. False when the file is missing or unreadable: the debug
+// dump is optional, and without it each QL_DSP4_MULT counts as one tile.
+bool loadDspTiles(const std::filesystem::path& debugJsonPath, DspTileMap& outDspTiles);
 
 // Every atom belonging to `path`, its sub-instances included.
 //
-// An instance with no entry of its own does NOT mean no atoms: floorplanning_atomsets.tcl derives
-// an instance path as everything before a cell name's last dot, so a scope holding only
-// sub-instances gets no entry. The top instance is always such a scope -- on fft256 "dut"
-// had no entry while its children held 19089 atoms between them. Entries are
-// subtree-inclusive, so the union over descendants is the full set.
+// A path with no entry of its own (a generate label) is the union of the entries under it.
 std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::string& path);
 
 // A .qdc element with a "*" in it ("cluster[*].*", "clust*[0].*"): a pattern the flow turns
@@ -88,11 +69,6 @@ std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::stri
 bool isElementPattern(const std::string& element);
 // True when `path` is an instance the pattern selects, or lies inside one.
 bool elementPatternCovers(const std::string& pattern, const std::string& path);
-
-// RTL path -> atoms belonging to that instance DIRECTLY, i.e. sitting in it rather than in
-// one of its sub-instances. DeviceGrid warns when a partition takes an instance's
-// sub-instances and leaves this logic unconstrained.
-std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames);
 
 // [aurora2#1725] What a set of atoms costs in tiles.
 //
@@ -131,15 +107,8 @@ ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPe
 // reason, and the same answer the atom-set union gives, arrived at without materialising
 // tens of thousands of atom names.
 //
-// A path with no entry of its own is not empty: floorplanning_atomsets.tcl gives no entry to
-// a scope that holds only sub-instances, so its descendants' entries are what count.
+// A path with no entry of its own (a generate label) counts the entries under it.
 std::map<std::string, int> tallyAtomResources(const AtomResourceMap& atomResources,
                                               const std::set<std::string>& paths);
-
-// [aurora2#1725] Yosys cell name -> VPR atom name, for the cells whose names differ. Read
-// from the constraints manifest's "vpr_atom_names", which generate_floorplanning.py writes.
-// Returns false, with the map cleared, when the file or the map is missing.
-using VprAtomNameMap = std::map<std::string, std::string>;
-bool loadVprAtomNames(const std::filesystem::path& manifestPath, VprAtomNameMap& outNames);
 
 }  // namespace fp

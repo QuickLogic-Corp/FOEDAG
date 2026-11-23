@@ -30,7 +30,8 @@ public:
 
     // projectPath holds the flow's artifacts; qdcPath is the file the flow is
     // about to consume. Returns false when there is nothing to check (no .qdc, or no device
-    // description), leaving `issues` empty -- that is not a failure.
+    // description), leaving `issues` empty -- that is not a failure. Also false, with
+    // `error` set, when the .qdc has regions and there is no usable owner table.
     static bool check(const std::filesystem::path& projectPath,
                       // Names the flow's artifacts: they are "<projectName>_floorplanning_*",
                       // not bare files in projectPath.

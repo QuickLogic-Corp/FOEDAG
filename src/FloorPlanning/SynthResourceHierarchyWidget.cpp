@@ -484,16 +484,13 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     // Both variants carry all seven columns so Column::Why means the same index in each;
     // the partition tree hides Partitions instead of omitting it.
     if (!isPartitionsColumnHidden()) {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "VPR Name" << "Type" << "Partitions" << "" << "Primitive");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "RTL Names" << "Atom List" << "Type" << "Partitions" << "" << "Primitive");
     } else {
-        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "VPR Name" << "Type" << "" << "" << "Primitive");
+        m_model->setHorizontalHeaderLabels(QList<QString>() << "Partition RTL Names" << "Atom List" << "Type" << "" << "" << "Primitive");
         m_view->header()->setVisible(false);
     }
     m_model->horizontalHeaderItem(Column::AtomList)->setToolTip(
-        tr("Yosys cell names from the synthesized netlist (atomsets.json)"));
-    m_model->horizontalHeaderItem(Column::VprName)->setToolTip(
-        tr("The name VPR gives the atom, shown only where it differs from the Yosys name.\n"
-           "Known once the floorplanning constraints have been generated."));
+        tr("Atom names from the synthesized netlist, as VPR names them"));
 
     QHeaderView* header = m_view->header();
     // Interactive so the user can drag the borders; fitColumns() gives the first widths.
@@ -514,8 +511,8 @@ void SynthResourceHierarchyWidget::build(const NaturalStringSet& elements)
     // A root the element set does not actually contain would be a phantom row: a name in
     // the tree that no instance backs, that nothing can be checked under, and that no
     // partition could ever name. Better to fall back to the flat-roots shape than to invent
-    // one. Normally present -- P0b puts the top in instances.json and loadNetList() passes
-    // the whole set -- so this only bites a caller that built a subset.
+    // one. Normally present -- the tree from the owner table holds the top -- so this only
+    // bites a caller that built a subset.
     if (!m_topInstance.empty() && elements.find(m_topInstance) == elements.end()) {
         m_topInstance.clear();
     }
@@ -875,9 +872,7 @@ void SynthResourceHierarchyWidget::addPath(const std::string& dottedPath)
         whyItem->setTextAlignment(Qt::AlignCenter);
         QStandardItem* primitiveItem = new QStandardItem("");
         primitiveItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-        QStandardItem* vprNameItem = new QStandardItem("");
-        vprNameItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-        parent->appendRow({item, atomListItem, vprNameItem, atomTypeItem, partitionItem,
+        parent->appendRow({item, atomListItem, atomTypeItem, partitionItem,
                            whyItem, primitiveItem});
         return item;
     };
@@ -963,11 +958,6 @@ void SynthResourceHierarchyWidget::setAtomResources(AtomResourceMap atomResource
 void SynthResourceHierarchyWidget::setAtomTypes(AtomTypeMap atomTypes)
 {
     m_atomTypes = std::move(atomTypes);
-}
-
-void SynthResourceHierarchyWidget::setVprAtomNames(VprAtomNameMap vprNames)
-{
-    m_vprAtomNames = std::move(vprNames);
 }
 
 // [aurora2#1725] Tally the selected rows into the "Selected RTL Resources" table.
@@ -1158,11 +1148,10 @@ void SynthResourceHierarchyWidget::setInstanceVerdicts(std::map<std::string, Ins
 bool SynthResourceHierarchyWidget::rowNamesAtom(int row, const QModelIndex& parent,
                                                 const QString& text) const
 {
-    for (const int column : {Column::AtomList, Column::VprName}) {
-        if (m_model->index(row, column, parent).data().toString().contains(text, Qt::CaseInsensitive))
-            return true;
-    }
-    return false;
+    return m_model->index(row, Column::AtomList, parent)
+        .data()
+        .toString()
+        .contains(text, Qt::CaseInsensitive);
 }
 
 void SynthResourceHierarchyWidget::findAtom(const QString& text)
@@ -1231,12 +1220,6 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
     // rebuilds the header sections and loses their hidden flags.
     m_view->setColumnHidden(Column::AtomList, !visible);
     m_view->setColumnHidden(Column::Primitive, !visible);
-    // Empty unless some VPR name differs from its yosys name; once they are identical the
-    // column has nothing to say.
-    const bool anyVprNameDiffers =
-        std::any_of(m_vprAtomNames.begin(), m_vprAtomNames.end(),
-                    [](const auto& entry) { return entry.first != entry.second; });
-    m_view->setColumnHidden(Column::VprName, !visible || !anyVprNameDiffers);
 
     // A multi-atom leaf gets one child row per atom, and those rows carry nothing but the
     // atom name, type and primitive -- their first column only repeats the owner. Hiding only
@@ -1270,7 +1253,7 @@ void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
 void SynthResourceHierarchyWidget::fitColumns()
 {
     QScopedValueRollback<bool> guard(m_fittingColumns, true);
-    for (const int column : {Column::Netlist, Column::AtomType, Column::Primitive, Column::VprName}) {
+    for (const int column : {Column::Netlist, Column::AtomType, Column::Primitive}) {
         if (!m_view->isColumnHidden(column)) {
             m_view->resizeColumnToContents(column);
         }
@@ -1409,11 +1392,6 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
         return primitive;
     };
 
-    const auto vprName = [this](const std::string& name) {
-        const auto it = m_vprAtomNames.find(name);
-        return (it != m_vprAtomNames.end()) ? QString::fromStdString(it->second) : QString();
-    };
-
     // A row's Type cell: the distinct tile types of `atoms`.
     auto setTypes = [&atomTile](QStandardItem* typeItem, const std::vector<std::string>& atoms) {
         if (!typeItem) return;
@@ -1425,7 +1403,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     // One child row per atom, so each can be selected and copied. Its RTL Names cell names
     // the owner: a parent's own atoms follow its children, and would otherwise read as the
     // last child's.
-    auto appendAtomRows = [&atomTile, &atomPrimitive, &vprName](QStandardItem* parent,
+    auto appendAtomRows = [&atomTile, &atomPrimitive](QStandardItem* parent,
                                                       const std::string& ownerPath,
                                                       const std::vector<std::string>& atoms,
                                                       const std::map<std::string, int>& resourceTypes) {
@@ -1444,14 +1422,12 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
             typeCell->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
             auto* primitiveCell = new QStandardItem(atomPrimitive(n, resourceTypes));
             primitiveCell->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-            auto* vprCell = new QStandardItem(vprName(n));
-            vprCell->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
-            parent->appendRow({col0, col1, vprCell, typeCell, new QStandardItem(), new QStandardItem(), primitiveCell});
+            parent->appendRow({col0, col1, typeCell, new QStandardItem(), new QStandardItem(), primitiveCell});
         }
     };
 
     std::function<void(QStandardItem*, const std::string&)> populateRecursive =
-        [&populateRecursive, this, &atomTile, &atomPrimitive, &vprName, &appendAtomRows, &setTypes](QStandardItem* item,
+        [&populateRecursive, this, &atomTile, &atomPrimitive, &appendAtomRows, &setTypes](QStandardItem* item,
                                                                                const std::string& prefix)
     {
         if (!item) return;
@@ -1500,8 +1476,6 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
                             typeItem->setText(atomTile(name));
                         if (QStandardItem* primItem = item->child(row, Column::Primitive))
                             primItem->setText(atomPrimitive(name, resourceTypes));
-                        if (QStandardItem* vprItem = item->child(row, Column::VprName))
-                            vprItem->setText(vprName(name));
                     } else {
                         // The leaf row names its distinct element types, so they show
                         // while the per-atom rows below are hidden.

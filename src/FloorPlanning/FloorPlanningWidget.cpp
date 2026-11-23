@@ -549,14 +549,13 @@ void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
 
 void FloorPlanningWidget::setAtomNames(std::map<std::string, std::vector<std::string>, NaturalLess> atomNames)
 {
-    // [aurora2#1725] Atoms belonging to an instance DIRECTLY, i.e. not to one of its
-    // sub-instances. DeviceGrid warns when a partition takes an instance's sub-instances
-    // and leaves this logic unconstrained. Shared with the batch checker (REQ-004): the
-    // rule for what counts as "own" is one decision, so it lives in one place.
-    m_deviceWidget->setOwnAtomCounts(fp::ownAtomCounts(atomNames));
-
     m_synthResourcesWidget->setAtomNames(atomNames);
     m_partitionResourcesWidget->setAtomNames(std::move(atomNames));
+}
+
+void FloorPlanningWidget::setOwnAtomCounts(std::map<std::string, int> ownAtomCounts)
+{
+    m_deviceWidget->setOwnAtomCounts(std::move(ownAtomCounts));
 }
 
 void FloorPlanningWidget::setAtomResources(AtomResourceMap atomResources)
@@ -574,12 +573,6 @@ void FloorPlanningWidget::setAtomTypes(AtomTypeMap atomTypes)
 void FloorPlanningWidget::setDspTiles(DspTileMap dspTiles)
 {
     m_deviceWidget->context()->dspTiles = std::move(dspTiles);
-}
-
-void FloorPlanningWidget::setVprAtomNames(VprAtomNameMap vprNames)
-{
-    m_synthResourcesWidget->setVprAtomNames(vprNames);
-    m_partitionResourcesWidget->setVprAtomNames(std::move(vprNames));
 }
 
 void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)

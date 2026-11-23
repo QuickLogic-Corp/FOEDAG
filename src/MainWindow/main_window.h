@@ -88,7 +88,7 @@ class MainWindow : public QMainWindow, public TopLevelInterface {
   void floorPlanningActionTriggered();
 
   // [aurora2#1725 stage P7] Populate an ALREADY-CREATED FloorPlanning panel from the files
-  // on disk: instances.json, validation.json, atomsets.json, design_resources.json and the
+  // on disk: the owner table, validation.json, design_resources.json and the
   // .qdc. Shared by the open path and the post-compile refresh so the two cannot drift.
   // Returns false and fills `error` when the panel cannot be populated at all.
   bool loadFloorPlanningData(QString& error);

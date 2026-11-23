@@ -584,24 +584,36 @@ std::filesystem::path writeTempJson(const std::filesystem::path& dir,
     return path;
 }
 
-const char* kInstancesJson = R"JSON({
+// The owner table synthesis writes (schema version 2): the tree before flatten, and the
+// atoms each instance owns. i_serial_mul was deleted by synthesis, so it owns nothing.
+const char* kOwnerTableJson = R"JSON({
+  "schema_version": 2,
+  "netlist_sha256": "abc123",
+  "front_end": "yosys",
   "top": "fpu_single",
-  "top_instance": "fpu_single",
   "instances": [
-    { "path": "fpu_single", "component": "fpu_single", "module_raw": "fpu_single_default(rtl)",
-      "src": "fpu_single.vhd:1.1-1.11", "component_src": "fpu_single.vhd:1.1-1.11",
-      "parameters": {}, "last_status": "unknown", "is_top": true },
-    { "path": "i_mul_24", "component": "mul_24", "module_raw": "mul_24_default(rtl)",
-      "src": "fpu_single.vhd:225.2-225.10", "component_src": "mul_24.vhd:52.8-52.14",
-      "parameters": {}, "last_status": "unknown" },
-    { "path": "i_serial_mul", "component": "serial_mul", "module_raw": "serial_mul_default(rtl)",
-      "src": "fpu_single.vhd:237.2-237.14", "component_src": "serial_mul.vhd:1.1-1.2",
-      "parameters": {}, "last_status": "unknown" },
-    { "path": "i_mul_24.i_inner", "component": "inner", "module_raw": "inner_default(rtl)",
-      "src": "mul_24.vhd:70.2-70.9", "component_src": "inner.vhd:3.1-3.6",
-      "parameters": {}, "last_status": "unknown" }
+    {"path": ["i_mul_24"], "module": "mul_24"},
+    {"path": ["i_serial_mul"], "module": "serial_mul"},
+    {"path": ["i_mul_24", "i_inner"], "module": "inner"}
+  ],
+  "atoms": [
+    {"name": "$false", "type": "$const", "owners": [[]], "rule": "top"},
+    {"name": "glue_$lut_Y", "type": "$lut", "owners": [[]], "rule": "top"},
+    {"name": "i_mul_24.p_sdffre_Q", "type": "sdffre", "owners": [["i_mul_24"]], "rule": "recorded"},
+    {"name": "out_net", "type": "$lut", "owners": [["i_mul_24"]], "rule": "inferred_fanout"},
+    {"name": "i_mul_24.i_inner.m", "type": "QL_DSP4_MULT", "owners": [["i_mul_24", "i_inner"]], "rule": "recorded"}
   ]
 })JSON";
+
+fp::OwnerTable loadTable(const std::string& dirName, const std::string& content)
+{
+    const auto path = writeTempJson(std::filesystem::temp_directory_path() / dirName,
+                                    "atomsets.json", content);
+    fp::OwnerTable table;
+    std::string error;
+    EXPECT_TRUE(fp::loadOwnerTable(path, table, error)) << error;
+    return table;
+}
 
 const char* kValidationJson = R"JSON({
   "netlist_sha256": "abc123",
@@ -618,119 +630,72 @@ const char* kValidationJson = R"JSON({
 
 }  // namespace
 
-TEST(RtlInstanceModel, MissingFileFailsWithAnActionableMessage)
+TEST(OwnerTable, AMissingOrForeignTableFailsWithAMessage)
 {
-    // The panel must say "run synthesis" rather than showing an empty tree or a VPR error.
-    fp::RtlInstanceModel model;
-    EXPECT_FALSE(model.loadInstances("definitely/not/here/instances.json"));
-    EXPECT_NE(model.error().find("SYNTHESIS"), std::string::npos);
-    EXPECT_TRUE(model.empty());
+    const auto dir = std::filesystem::temp_directory_path() / "fp_owner_table_bad";
+    fp::OwnerTable table;
+    std::string error;
+    EXPECT_FALSE(fp::loadOwnerTable(dir / "absent.json", table, error));
+    EXPECT_NE(error.find("run synthesis"), std::string::npos) << error;
+
+    const auto v1 = writeTempJson(dir, "v1.json", R"({"atomsets": {}})");
+    EXPECT_FALSE(fp::loadOwnerTable(v1, table, error));
+    EXPECT_NE(error.find("schema version 2"), std::string::npos) << error;
+
+    const auto noHash = writeTempJson(dir, "nohash.json", R"({"schema_version": 2})");
+    EXPECT_FALSE(fp::loadOwnerTable(noHash, table, error));
+    EXPECT_NE(error.find("netlist_sha256"), std::string::npos) << error;
+
+    const auto bad = writeTempJson(dir, "bad.json", "{ this is not json ");
+    EXPECT_FALSE(fp::loadOwnerTable(bad, table, error));
+    EXPECT_NE(error.find("valid JSON"), std::string::npos) << error;
 }
 
-TEST(RtlInstanceModel, MalformedJsonIsRejectedNotSilentlyEmpty)
+TEST(OwnerTable, AtomsAreListedForTheirOwnerAndEveryAncestor)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_bad";
-    const auto path = writeTempJson(dir, "instances.json", "{ this is not json ");
-    fp::RtlInstanceModel model;
-    EXPECT_FALSE(model.loadInstances(path));
-    EXPECT_NE(model.error().find("valid JSON"), std::string::npos);
+    const fp::OwnerTable table = loadTable("fp_owner_table_ok", kOwnerTableJson);
+    EXPECT_EQ(table.top, "fpu_single");
+    EXPECT_EQ(table.netlistSha256, "abc123");
+    EXPECT_EQ(table.instances,
+              (std::vector<std::string>{"i_mul_24", "i_mul_24.i_inner", "i_serial_mul"}));
+
+    EXPECT_EQ(table.atomNames.at("i_mul_24").size(), 3u);
+    EXPECT_EQ(table.atomNames.at("i_mul_24.i_inner"),
+              (std::vector<std::string>{"i_mul_24.i_inner.m"}));
+    EXPECT_EQ(table.atomNames.at("fpu_single").size(), 4u) << "the top holds every atom";
+    EXPECT_EQ(table.atomNames.count("i_serial_mul"), 0u);
+
+    EXPECT_EQ(table.atomResources.at("i_mul_24").at("$lut"), 1);
+    EXPECT_EQ(table.atomTypes.at("i_mul_24.i_inner.m"), "QL_DSP4_MULT");
+    EXPECT_EQ(table.atomTypes.count("$false"), 0u) << "constants are not resources";
+
+    EXPECT_EQ(table.ownAtomCounts.at("i_mul_24"), 2);
+    EXPECT_EQ(table.ownAtomCounts.at("i_mul_24.i_inner"), 1);
 }
 
-TEST(RtlInstanceModel, LoadsInstancesAndNestsThemByDottedPath)
+TEST(RtlInstanceModel, TheTreeIsTheTopWithTheInstancesNestedByDottedPath)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_ok";
-    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
-
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
+    model.load(loadTable("fp_rtlmodel_ok", kOwnerTableJson));
     EXPECT_EQ(model.top(), "fpu_single");
+    EXPECT_EQ(model.topInstance(), "fpu_single");
     EXPECT_EQ(model.size(), 4u);
 
-    // i_mul_24.i_inner is a child of i_mul_24, so the parent is not a leaf.
     const fp::RtlInstance* parent = model.find("i_mul_24");
     ASSERT_NE(parent, nullptr);
     EXPECT_FALSE(parent->isLeaf);
-    ASSERT_EQ(parent->children.size(), 1u);
-    EXPECT_EQ(parent->children.front(), "i_mul_24.i_inner");
-    EXPECT_EQ(parent->component, "mul_24");
-    EXPECT_EQ(parent->src, "fpu_single.vhd:225.2-225.10");
-
-    // The top module and the two top-level instances are roots; the nested one is not.
-    // The top is a dot-less SIBLING rather than their tree parent -- child paths carry no
-    // top prefix, because they have to keep matching the netlist atom names.
-    const std::vector<std::string> roots = model.roots();
-    ASSERT_EQ(roots.size(), 3u);
-    EXPECT_EQ(roots[0], "fpu_single");
-    EXPECT_EQ(roots[1], "i_mul_24");
-    EXPECT_EQ(roots[2], "i_serial_mul");
+    EXPECT_EQ(parent->children, (std::vector<std::string>{"i_mul_24.i_inner"}));
+    ASSERT_NE(model.find("i_serial_mul"), nullptr) << "a deleted instance stays in the tree";
 }
 
-TEST(RtlInstanceModel, TheTopModuleIsAnInstanceAndIsRecognisedAsTheTop)
+TEST(RtlInstanceModel, ASingleModuleDesignIsTheTopAlone)
 {
-    // [aurora2#1725 stage P0b/P5] Stage P5 has to expand a region on the top to "*": no
-    // atom name carries a "<top>." prefix for "<top>.*" to match, so getting this wrong
-    // emits a constraint matching nothing at all.
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_top";
-    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
-
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
-
-    const fp::RtlInstance* top = model.find("fpu_single");
-    ASSERT_NE(top, nullptr);
-    EXPECT_TRUE(top->isTop);
-    EXPECT_TRUE(model.isTop("fpu_single"));
-
-    // An ordinary instance is not the top, however shallow it is.
-    EXPECT_FALSE(model.find("i_mul_24")->isTop);
-    EXPECT_FALSE(model.isTop("i_mul_24"));
-    EXPECT_FALSE(model.isTop("i_mul_24.i_inner"));
-    EXPECT_FALSE(model.isTop("not_an_instance_at_all"));
-}
-
-TEST(RtlInstanceModel, SingleModuleDesignLoadsWithTheTopAsItsOnlyInstance)
-{
-    // The regression: a design whose top instantiates nothing produced "instances": [],
-    // which loadInstances() grades a hard failure, so the FloorPlanning panel refused to
-    // open at all. The top entry is the whole design and the only thing to constrain.
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_flat";
-    const auto path = writeTempJson(dir, "instances.json", R"JSON({
-      "top": "counter",
-      "top_instance": "counter",
-      "instances": [
-        { "path": "counter", "component": "counter", "module_raw": "counter",
-          "src": "counter.v:1.1-9.10", "component_src": "counter.v:1.1-9.10",
-          "parameters": {}, "last_status": "unknown", "is_top": true }
-      ]
-    })JSON");
-
-    fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
-    EXPECT_FALSE(model.empty());
+    model.load(loadTable("fp_rtlmodel_flat", R"({"schema_version": 2, "netlist_sha256": "a",
+        "top": "counter", "instances": [],
+        "atoms": [{"name": "q", "type": "sdffre", "owners": [[]], "rule": "top"}]})"));
     EXPECT_EQ(model.size(), 1u);
-    EXPECT_TRUE(model.isTop("counter"));
-    ASSERT_EQ(model.roots().size(), 1u);
-    EXPECT_EQ(model.roots().front(), "counter");
-    // isInstanceOrAncestor() must agree, or stage P5 falls through to the literal branch.
-    EXPECT_TRUE(model.isInstanceOrAncestor("counter"));
-}
-
-TEST(RtlInstanceModel, TopIsRecognisedInAFileWrittenBeforeTopInstanceExisted)
-{
-    // An instances.json with neither "top_instance" nor is_top must still be read
-    // correctly, rather than silently expanding a whole-design region to "<top>.*".
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_legacytop";
-    const auto path = writeTempJson(dir, "instances.json", R"JSON({
-      "top": "counter",
-      "instances": [
-        { "path": "counter", "component": "counter", "src": "counter.v:1.1-9.10" }
-      ]
-    })JSON");
-
-    fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
-    EXPECT_FALSE(model.find("counter")->isTop);   // the flag really is absent
-    EXPECT_TRUE(model.isTop("counter"));          // and the "top" field still answers
+    EXPECT_EQ(model.topInstance(), "counter");
 }
 
 // [aurora2#1725 stage P1] The tree's SHAPE, which must not follow from its PATHS.
@@ -1100,8 +1065,8 @@ TEST(SynthResourceHierarchyTree, FlatDesignShowsTheTopAsItsOnlyRow)
 
 TEST(SynthResourceHierarchyTree, NoTopInstanceLeavesTheTreeUnrooted)
 {
-    // An older instances.json has no top entry. Inventing a root for it would put a name in
-    // the tree that no instance backs, so the previous flat-roots shape is kept instead.
+    // No top given. Inventing a root would put a name in the tree that no instance backs,
+    // so the flat-roots shape is kept instead.
     fp::SynthResourceHierarchyWidget widget;
     widget.setTopInstance("");
     widget.build(fp::NaturalStringSet{"dut", "dut.memSys"});
@@ -1125,67 +1090,12 @@ TEST(SynthResourceHierarchyTree, ATopNotInTheElementSetDoesNotBecomeAPhantomRow)
     EXPECT_EQ(model->invisibleRootItem()->child(0, 0)->text(), QString("dut"));
 }
 
-TEST(RtlInstanceModel, TopInstanceNamesTheRootThePanelRootsItsTreeAt)
-{
-    // The panel roots the hierarchy tree at this entry, so that a hierarchical design does
-    // not show the top BESIDE "dut"/"core" as just another top-level row.
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_topinst";
-    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
-
-    fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
-    EXPECT_EQ(model.topInstance(), "fpu_single");
-}
-
-TEST(RtlInstanceModel, TopInstanceIsEmptyWhenThereIsNoTopEntry)
-{
-    // "top_instance": null means P0b decided there is no whole-design entry. The panel must
-    // read that as "no root to hang the tree from" and leave the shape alone, rather than
-    // rooting it at an ordinary instance that merely shares the top module's name.
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_notopinst";
-    const auto path = writeTempJson(dir, "instances.json", R"JSON({
-      "top": "counter",
-      "top_instance": null,
-      "instances": [
-        { "path": "counter", "component": "sub", "src": "wrapper.v:8.3-8.12" }
-      ]
-    })JSON");
-
-    fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
-    EXPECT_TRUE(model.topInstance().empty());
-}
-
-TEST(RtlInstanceModel, AnInstanceNamedAfterTheTopModuleIsNotTreatedAsTheTop)
-{
-    // Instance names and module names are separate namespaces, so a top-level cell can be
-    // named after the top module. P0b omits the whole-design entry in that case and says so
-    // with "top_instance": null. Reading "top" instead would expand THIS instance's region
-    // to "*" -- the entire design, silently, instead of the subtree the user drew.
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_topclash";
-    const auto path = writeTempJson(dir, "instances.json", R"JSON({
-      "top": "counter",
-      "top_instance": null,
-      "instances": [
-        { "path": "counter", "component": "sub", "src": "wrapper.v:8.3-8.12" }
-      ]
-    })JSON");
-
-    fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path)) << model.error();
-    EXPECT_EQ(model.top(), "counter");
-    EXPECT_FALSE(model.isTop("counter"));
-    // It is still an ordinary instance, so P5 expands it to "counter.*" as usual.
-    EXPECT_TRUE(model.isInstanceOrAncestor("counter"));
-}
-
 TEST(RtlInstanceModel, StatusIsUnknownUntilVerdictsAreMerged)
 {
     // Absence of a verdict must never read as usable.
     const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_nostatus";
-    const auto path = writeTempJson(dir, "instances.json", kInstancesJson);
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(path));
+    model.load(loadTable("fp_rtlmodel_nostatus_table", kOwnerTableJson));
     for (const fp::RtlInstance& instance : model.instances()) {
         EXPECT_EQ(instance.status, "unknown");
         EXPECT_FALSE(instance.constrainable());
@@ -1195,11 +1105,10 @@ TEST(RtlInstanceModel, StatusIsUnknownUntilVerdictsAreMerged)
 TEST(RtlInstanceModel, MergedVerdictsDriveWhatThePanelCanShow)
 {
     const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_verdicts";
-    const auto instances = writeTempJson(dir, "instances.json", kInstancesJson);
     const auto verdicts = writeTempJson(dir, "validation.json", kValidationJson);
 
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(instances)) << model.error();
+    model.load(loadTable("fp_rtlmodel_verdicts_table", kOwnerTableJson));
     ASSERT_TRUE(model.mergeVerdicts(verdicts)) << model.error();
 
     const fp::RtlInstance* complete = model.find("i_mul_24");
@@ -1228,42 +1137,32 @@ TEST(RtlInstanceModel, MergedVerdictsDriveWhatThePanelCanShow)
     EXPECT_EQ(complete->notes, (std::vector<std::string>{"1 cell named under i_other is placed here, as Yosys's scope record (scopename) says"}));
 }
 
-TEST(RtlInstanceModel, DeletedInstancesAreNotOfferedAsConstraintTargets)
+TEST(RtlInstanceModel, TheInferredShareOfAnInstanceIsANote)
 {
-    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_elements";
-    const auto instances = writeTempJson(dir, "instances.json", kInstancesJson);
-    const auto verdicts = writeTempJson(dir, "validation.json", kValidationJson);
-
+    // REQ-008: how much of an instance the owner rule inferred rather than recorded.
+    const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_inferred";
+    const auto verdicts = writeTempJson(dir, "validation.json", R"({"instances": {
+        "i_mul_24": {"verdict": "complete", "atom_count": 3, "recorded": 2, "inferred": 1},
+        "i_mul_24.i_inner": {"verdict": "complete", "atom_count": 1, "recorded": 1, "inferred": 0}}})");
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(instances));
-    ASSERT_TRUE(model.mergeVerdicts(verdicts));
-
-    const fp::HierarhyElements elements = model.toHierarhyElements();
-    // The top is offered like any other surviving instance -- constraining it is how a
-    // user asks for the whole design, and on a flat design it is the only option there is.
-    EXPECT_TRUE(elements.contains("fpu_single"));
-    EXPECT_TRUE(elements.contains("i_mul_24"));
-    EXPECT_TRUE(elements.contains("i_mul_24.i_inner"));
-    EXPECT_FALSE(elements.contains("i_serial_mul"))
-        << "an instance with no atoms cannot be constrained";
-
-    // And no element carries post-synthesis names (REQ-002).
-    for (const fp::HierarhyElement& element : elements) {
-        EXPECT_TRUE(element.vprNames.empty());
-    }
+    model.load(loadTable("fp_rtlmodel_inferred_table", kOwnerTableJson));
+    ASSERT_TRUE(model.mergeVerdicts(verdicts)) << model.error();
+    EXPECT_EQ(model.find("i_mul_24")->notes,
+              (std::vector<std::string>{
+                  "1 of 3 atoms owned by connectivity rather than recorded by synthesis"}));
+    EXPECT_TRUE(model.find("i_mul_24.i_inner")->notes.empty());
 }
 
 TEST(RtlInstanceModel, VerdictsForUnknownInstancesAreIgnoredNotFatal)
 {
     // Two files from different elaborations should not crash the panel.
     const auto dir = std::filesystem::temp_directory_path() / "fp_rtlmodel_mismatch";
-    const auto instances = writeTempJson(dir, "instances.json", kInstancesJson);
     const auto verdicts = writeTempJson(
         dir, "validation.json",
         R"({"instances": {"i_does_not_exist": {"verdict": "complete", "atom_count": 1}}})");
 
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(instances));
+    model.load(loadTable("fp_rtlmodel_mismatch_table", kOwnerTableJson));
     EXPECT_TRUE(model.mergeVerdicts(verdicts));
     EXPECT_EQ(model.find("i_mul_24")->status, "unknown");
 }
@@ -1392,7 +1291,11 @@ const std::string kAluB = "core.u_mul1.alu";
 const std::string kAccB = "core.u_mul1.p_QL_DSP4_ACC_DFFRE_64_Q";
 
 struct TwoDspTiles {
-    fp::AtomTypeMap types;
+    // As the owner table types them.
+    fp::AtomTypeMap types{{kMulA, "QL_DSP4_MULT"}, {kAluA, "QL_DSP4_ALU_ADD"},
+                          {kAccA, "QL_DSP4_ACC_DFFRE_64"}, {kMulB, "QL_DSP4_MULT"},
+                          {kAluB, "QL_DSP4_ALU_ADD"}, {kAccB, "QL_DSP4_ACC_DFFRE_64"},
+                          {"core.n0_$lut", "$lut"}};
     fp::DspTileMap tiles;
     bool loaded = false;
 
@@ -1402,7 +1305,7 @@ struct TwoDspTiles {
         const std::filesystem::path path =
             std::filesystem::path(dir.path().toStdString()) / "top_post_synth_debug.json";
         std::ofstream(path) << kTwoDspTilesNetlist;
-        loaded = fp::loadAtomTypes(path, types, tiles);
+        loaded = fp::loadDspTiles(path, tiles);
     }
 };
 
@@ -1695,12 +1598,10 @@ bool mentions(const std::unordered_map<std::string, std::string>& issues,
 
 }  // namespace
 
-TEST(FloorplanIssues, AClbShortfallIsAnErrorNotAWarning)
+TEST(FloorplanIssues, AClbShortfallIsAWarningNamingThePartition)
 {
-    // A region that cannot hold what its partition constrains has no reading under which the
-    // flow works, so it must stop the user rather than let them run it and find out. It was
-    // a warning until the clb estimate proved to run optimistic -- short by the estimate is
-    // short in the direction that fails.
+    // The clb figure is an estimate (atoms over an atoms-per-tile hint), so by decision D4 a
+    // shortfall is a warning that names the partition; VPR's packer is the hard check.
 
     fp::DeviceGrid device(genTestDescriptor());
     // clb(2,2):clb(2,4) is 3 clb tiles; 100 atoms at 14 per tile needs 8.
@@ -1709,8 +1610,8 @@ TEST(FloorplanIssues, AClbShortfallIsAnErrorNotAWarning)
     ASSERT_EQ(partition->clbRequiredCount(), 8);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
-    EXPECT_TRUE(mentions(issues->errors, "needs 8 clb tiles but only 3 available"));
-    EXPECT_FALSE(mentions(issues->warnings, "clb tiles but only"));
+    EXPECT_TRUE(mentions(issues->warnings, "needs 8 clb tiles but only 3 available"));
+    EXPECT_FALSE(mentions(issues->errors, "clb tiles but only"));
 }
 
 TEST(FloorplanIssues, ADspShortfallIsAnErrorToo)
@@ -1732,13 +1633,11 @@ TEST(FloorplanIssues, ADspShortfallIsAnErrorToo)
     EXPECT_FALSE(mentions(issues->warnings, "dsp tiles but only"));
 }
 
-TEST(FloorplanIssues, EnoughClbTilesButNoPackingSlackIsAnErrorToo)
+TEST(FloorplanIssues, EnoughClbTilesButNoPackingSlackIsAWarningToo)
 {
     // A region that MEETS the clb estimate with nothing to spare is where packing actually
     // breaks, because the estimate runs optimistic: on fft256, dut.instPerm20009 estimated
-    // 20 clb and filled all 22 tiles it was given. It was a warning while "not short by the
-    // estimate" was read as "not short"; it is an error now, so the panel will not save it
-    // and a batch compile will not run it.
+    // 20 clb and filled all 22 tiles it was given. A warning, like the shortfall (D4).
 
     fp::DeviceGrid device(genTestDescriptor());
     // 3 clb tiles for 29 atoms -> 3 required, exactly met, nothing spare.
@@ -1747,8 +1646,8 @@ TEST(FloorplanIssues, EnoughClbTilesButNoPackingSlackIsAnErrorToo)
     ASSERT_EQ(partition->clbRequiredCount(), 3);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
-    EXPECT_TRUE(mentions(issues->errors, "little packing slack"));
-    EXPECT_TRUE(issues->warnings.empty());
+    EXPECT_TRUE(mentions(issues->warnings, "little packing slack"));
+    EXPECT_TRUE(issues->errors.empty());
 }
 
 TEST(FloorplanIssues, ARegionWithRoomToSpareIsNoIssueAtAll)
@@ -2373,7 +2272,7 @@ TEST(SelectedResources, CountingBramAndDspRowByRowMatchesTheRootSelection)
                 if (child.isEmpty()) continue;
                 for (const auto& atom : atoms.at(child.toStdString())) own.erase(atom);
             }
-            const QString types = parent->child(row, 3)->text();
+            const QString types = parent->child(row, 2)->text();
             for (const QString type : {QString("bram"), QString("dsp")}) {
                 if (!types.contains(type)) continue;
                 for (const auto& atom : own) byRows[type] += fp::classifyAtomType(atom) == type;
@@ -2413,7 +2312,7 @@ TEST(SynthResourceHierarchy, ParentTypeListsTheWholeSubtree)
             QStandardItem* item = parent->child(row, 0);
             if (item->data(kAtomRowRoleForTest).toBool()) continue;
             typeOf[item->data(kRtlPathRoleForTest).toString().toStdString()] =
-                parent->child(row, 3)->text();  // Type
+                parent->child(row, 2)->text();  // Type
             collect(item);
         }
     };
@@ -2493,57 +2392,6 @@ TEST(SelectedResources, TheAtomsTabNamesCellsAsSynthesisNamedThem)
 
     view->selectionModel()->clearSelection();
     EXPECT_TRUE(atomRows(widget).empty()) << "clearing the selection empties the tab";
-}
-
-TEST(SelectedResources, ALoadedAtomsetsFileCarriesBothHalves)
-{
-    // atomsets.json's "resources" was read and thrown away until the Atoms tab needed it.
-    // This pins that the loader keeps it, and keeps it beside the atom list it belongs to.
-    const auto path = writeQdc("fp_atomsets_resources", R"({
-      "top": "dut",
-      "atoms_per_tile": 14,
-      "atomsets": {
-        "dut.a": {
-          "count": 3,
-          "resources": {"$lut": 2, "sdffre": 1},
-          "atoms": ["dut.a.n0_$lut_Y", "dut.a.n1_$lut_Y", "dut.a.n2_sdffre_Q"]
-        },
-        "dut.b": {"count": 0, "atoms": []}
-      }
-    })");
-
-    fp::AtomNameMap names;
-    fp::AtomResourceMap resources;
-    int atomsPerTile = 1;
-    std::string netlistSha256 = "stale";
-    ASSERT_TRUE(fp::loadAtomSets(path, names, resources, atomsPerTile, netlistSha256));
-    EXPECT_EQ(netlistSha256, "") << "a table with no hash must not keep the previous one";
-
-    EXPECT_EQ(atomsPerTile, 14);
-    EXPECT_EQ(names["dut.a"].size(), 3u);
-    EXPECT_EQ(resources["dut.a"]["$lut"], 2);
-    EXPECT_EQ(resources["dut.a"]["sdffre"], 1);
-    // An entry with no "resources" is not a failure -- it costs the Atoms tab its numbers
-    // for that instance and nothing else.
-    EXPECT_EQ(resources.count("dut.b"), 0u);
-    EXPECT_EQ(names.count("dut.b"), 1u);
-}
-
-TEST(SelectedResources, TypedAtomsAreLoadedByName)
-{
-    // REQ-001 "Typed": each atom maps to its cell type.
-    const auto path = writeQdc("fp_atomsets_typed", R"({
-      "atomsets": {
-        "dut.a": {"atoms": {"dut.a.n0_$lut_Y": "$lut", "dut.a.n2_sdffre_Q": "sdffre"}}
-      }
-    })");
-
-    fp::AtomNameMap names;
-    int atomsPerTile = 1;
-    ASSERT_TRUE(fp::loadAtomSets(path, names, atomsPerTile));
-
-    EXPECT_EQ(names["dut.a"],
-              (std::vector<std::string>{"dut.a.n0_$lut_Y", "dut.a.n2_sdffre_Q"}));
 }
 
 TEST(SelectedResources, ThePartitionTreeDoesNotGetTheTable)
@@ -2846,7 +2694,7 @@ namespace {
 
 constexpr int kExplanationRoleForTest = Qt::UserRole + 102;
 // Mirrors the widget's private Column::Why.
-constexpr int kWhyColumnForTest = 5;
+constexpr int kWhyColumnForTest = 4;
 
 QStandardItem* whyCellOf(QStandardItemModel* model, const QString& name)
 {
@@ -3066,95 +2914,12 @@ TEST(FloorPlanningLayout, AddRegionSitsBeforeRemoveRegionAndStartsOff)
 }
 
 
-TEST(VprAtomNames, ReadFromTheConstraintsManifest)
-{
-    QTemporaryDir dir;
-    const std::filesystem::path path =
-        std::filesystem::path(dir.path().toStdString()) / "manifest.json";
-    std::ofstream(path) << R"({"version": 1, "partitions": [],
-        "vpr_atom_names": {"core.u_mem.bram": "core.mem_dout[0]"}})";
-    fp::VprAtomNameMap names;
-    ASSERT_TRUE(fp::loadVprAtomNames(path, names));
-    EXPECT_EQ(names, (fp::VprAtomNameMap{{"core.u_mem.bram", "core.mem_dout[0]"}}));
-}
-
-TEST(VprAtomNames, NoneWithoutAManifestOrItsMap)
-{
-    QTemporaryDir dir;
-    const std::filesystem::path path =
-        std::filesystem::path(dir.path().toStdString()) / "manifest.json";
-    fp::VprAtomNameMap names{{"stale", "entry"}};
-    EXPECT_FALSE(fp::loadVprAtomNames(path, names));
-    EXPECT_TRUE(names.empty());
-
-    std::ofstream(path) << R"({"version": 1, "partitions": []})";
-    names = {{"stale", "entry"}};
-    EXPECT_FALSE(fp::loadVprAtomNames(path, names));
-    EXPECT_TRUE(names.empty());
-}
-
-TEST(SynthResourceHierarchyTree, VprNameColumnShowsOnlyNamesThatDiffer)
-{
-    constexpr int kAtomListColumn = 1;
-    constexpr int kVprNameColumn = 2;
-    fp::SynthResourceHierarchyWidget widget;
-    widget.setTopInstance("top");
-    widget.setAtomNames({
-        {"core", {"core.u_mem.bram", "core.u_mem.ff", "core.u_reg.q"}},
-        {"core.u_mem", {"core.u_mem.bram", "core.u_mem.ff"}},
-        {"core.u_reg", {"core.u_reg.q"}},
-    });
-    widget.setVprAtomNames({{"core.u_mem.bram", "core.mem_dout[0]"},
-                            {"core.u_reg.q", "core.q_out"}});
-    widget.build(fp::NaturalStringSet{"top", "core", "core.u_mem", "core.u_reg"});
-
-    auto* model = widget.findChild<QStandardItemModel*>();
-    ASSERT_NE(model, nullptr);
-    ASSERT_GT(model->columnCount(), kVprNameColumn);
-    EXPECT_EQ(model->horizontalHeaderItem(kVprNameColumn)->text(), QString("VPR Name"));
-    EXPECT_TRUE(model->horizontalHeaderItem(kAtomListColumn)->toolTip().contains("Yosys"));
-    EXPECT_TRUE(model->horizontalHeaderItem(kVprNameColumn)->toolTip().contains("VPR"));
-
-    QStandardItem* coreItem = childNamed(model->invisibleRootItem()->child(0, 0), "core");
-    ASSERT_NE(coreItem, nullptr);
-
-    // A multi-atom leaf: one row per atom.
-    QStandardItem* memItem = childNamed(coreItem, "u_mem");
-    ASSERT_NE(memItem, nullptr);
-    std::map<QString, QString> vprByAtom;
-    for (int row = 0; row < memItem->rowCount(); ++row) {
-        QStandardItem* vpr = memItem->child(row, kVprNameColumn);
-        vprByAtom[memItem->child(row, kAtomListColumn)->text()] = vpr ? vpr->text() : "<none>";
-    }
-    EXPECT_EQ(vprByAtom, (std::map<QString, QString>{{"core.u_mem.bram", "core.mem_dout[0]"},
-                                                      {"core.u_mem.ff", ""}}));
-
-    // A single-atom leaf shows its atom in its own row.
-    QStandardItem* regItem = childNamed(coreItem, "u_reg");
-    ASSERT_NE(regItem, nullptr);
-    QStandardItem* regVpr = coreItem->child(regItem->row(), kVprNameColumn);
-    ASSERT_NE(regVpr, nullptr);
-    EXPECT_EQ(regVpr->text(), QString("core.q_out"));
-
-    // Shown with the Atom List, hidden by default.
-    auto* view = widget.findChild<QTreeView*>();
-    ASSERT_NE(view, nullptr);
-    EXPECT_TRUE(view->isColumnHidden(kVprNameColumn));
-    widget.setAtomListVisible(true);
-    EXPECT_FALSE(view->isColumnHidden(kVprNameColumn));
-
-    // Once every VPR name equals its yosys name the column has nothing to show.
-    widget.setVprAtomNames({{"core.u_mem.bram", "core.u_mem.bram"}});
-    widget.setAtomListVisible(true);
-    EXPECT_TRUE(view->isColumnHidden(kVprNameColumn));
-}
-
 TEST(SynthResourceHierarchyTree, CopyTakesTheTextOfTheCellUnderTheMouse)
 {
     fp::SynthResourceHierarchyWidget widget;
     widget.setTopInstance("top");
     widget.setAtomNames({{"core", {"core.bram"}}});
-    widget.setVprAtomNames({{"core.bram", "core.mem_dout[0]"}});
+    widget.setAtomTypes({{"core.bram", "TDP36K"}});
     widget.build(fp::NaturalStringSet{"top", "core"});
 
     auto* model = widget.findChild<QStandardItemModel*>();
@@ -3164,40 +2929,8 @@ TEST(SynthResourceHierarchyTree, CopyTakesTheTextOfTheCellUnderTheMouse)
     const QModelIndex name = coreItem->index();
     EXPECT_EQ(widget.copyText(name), QString("core"));
     EXPECT_EQ(widget.copyText(name.siblingAtColumn(1)), QString("core.bram"));
-    EXPECT_EQ(widget.copyText(name.siblingAtColumn(2)), QString("core.mem_dout[0]"));
+    EXPECT_EQ(widget.copyText(name.siblingAtColumn(2)), QString("bram"));
     EXPECT_EQ(widget.copyText(QModelIndex()), QString());
-}
-
-TEST(SynthResourceHierarchyTree, FindAtomMatchesAVprName)
-{
-    fp::SynthResourceHierarchyWidget widget;
-    widget.setTopInstance("top");
-    widget.setAtomNames({
-        {"top", {"din_QL_DSP4_MULT_I0", "core.sel"}},
-        {"core", {"core.sel"}},
-    });
-    widget.setVprAtomNames({{"din_QL_DSP4_MULT_I0", "din_QL_DSP4_MULT_I0_U[50]"}});
-    widget.build(fp::NaturalStringSet{"top", "core"});
-    widget.setAtomListVisible(true);
-    auto* find = widget.findChild<QLineEdit*>("findAtom");
-    auto* view = widget.findChild<QTreeView*>();
-    ASSERT_NE(find, nullptr);
-    ASSERT_NE(view, nullptr);
-
-    find->setText("_U[50]");
-    emit find->returnPressed();
-    EXPECT_EQ(view->currentIndex().siblingAtColumn(0).data(kRtlPathRoleForTest).toString(),
-              QString("top"));
-    QStringList selected;
-    for (const QModelIndex& row : view->selectionModel()->selectedRows(1)) {
-        selected << row.data().toString();
-    }
-    EXPECT_TRUE(selected.contains("din_QL_DSP4_MULT_I0"));
-
-    auto* model = widget.findChild<QStandardItemModel*>();
-    QStandardItem* core = itemWithPath(model->invisibleRootItem(), "core");
-    ASSERT_NE(core, nullptr);
-    EXPECT_TRUE(view->isRowHidden(core->row(), core->parent()->index()));
 }
 
 // Review U1: the batch checker builds its own DeviceGrid in the same process as an open panel.
@@ -3223,15 +2956,14 @@ TEST(FloorplanContext, AnotherGridLeavesThePanelsStateAlone)
 
 TEST(FloorplanRefresh, ATableForAnotherNetlistIsReloadedWhateverTheTier)
 {
-    const std::string table = R"({"atoms_per_tile": 14, "atomsets": {"dut.a": {"atoms": []}}, )";
+    const std::string table = R"({"schema_version": 2, "top": "top", "atoms": [], )";
     const auto before = writeQdc("fp_refresh_before", table + R"("netlist_sha256": "aaa"})");
     const auto after = writeQdc("fp_refresh_after", table + R"("netlist_sha256": "bbb"})");
 
-    fp::AtomNameMap names;
-    fp::AtomResourceMap resources;
-    int atomsPerTile = 1;
-    std::string loadedSha256;
-    ASSERT_TRUE(fp::loadAtomSets(before, names, resources, atomsPerTile, loadedSha256));
+    fp::OwnerTable loaded;
+    std::string error;
+    ASSERT_TRUE(fp::loadOwnerTable(before, loaded, error)) << error;
+    const std::string loadedSha256 = loaded.netlistSha256;
     EXPECT_EQ(loadedSha256, "aaa");
     const std::string diskSha256 = fp::readNetlistSha256(after);
     EXPECT_EQ(diskSha256, "bbb");
@@ -3354,8 +3086,13 @@ struct CheckerProject {
         std::ofstream(layout) << R"({"array_x": 30, "array_y": 30, "dsp_size": "1x3",
             "bram_size": "1x6", "dsp_cols": "6,19", "bram_cols": "12,25"})";
         std::ofstream(qdc) << "set_region $false clb(2,2):clb(4,4) p1\n";
-        std::ofstream(fp::floorplanningArtifact(root, "proj", "instances.json"))
-            << R"({"top": "top", "instances": [{"path": "top"}, {"path": "core"}]})";
+        writeTable(R"({"schema_version": 2, "netlist_sha256": "a", "top": "top",
+            "instances": [{"path": ["core"], "module": "core"}], "atoms": []})");
+    }
+
+    void writeTable(const std::string& content) const
+    {
+        std::ofstream(fp::floorplanningArtifact(root, "proj", "atomsets.json")) << content;
     }
 
     fp::DeviceGrid::Issues check() const
@@ -3395,17 +3132,55 @@ TEST(FloorplanIssues, TheBatchCheckerReadsThePanelsWarningsAsErrorsOption)
     EXPECT_EQ(promoted.errors, advisory.warnings);
 }
 
+TEST(FloorplanIssues, WithoutAnOwnerTableTheCheckIsAnErrorNotNoIssues)
+{
+    CheckerProject project;
+    std::filesystem::remove(fp::floorplanningArtifact(project.root, "proj", "atomsets.json"));
+    fp::DeviceGrid::Issues issues;
+    std::string error;
+    EXPECT_FALSE(fp::FloorplanChecker::check(project.root, "proj", "top", project.qdc,
+                                             project.layout, issues, error));
+    EXPECT_NE(error.find("owner table"), std::string::npos) << error;
+}
+
+TEST(FloorplanIssues, AParentPaysOnlyForWhatNoConstrainedChildTakesAndClbIsAnEstimate)
+{
+    // core owns 20 luts itself; core.big owns 60 more. core.big has its own partition, so
+    // p_core needs 2 clb tiles, not 6 -- and a clb shortfall is a warning (D4), a dsp one an
+    // error.
+    CheckerProject project;
+    std::string atoms;
+    for (int i = 0; i < 80; ++i) {
+        atoms += std::string(atoms.empty() ? "" : ",") + R"({"name": "a)" + std::to_string(i) +
+                 R"(", "type": "$lut", "owners": [)" +
+                 (i < 20 ? R"(["core"])" : R"(["core", "big"])") + R"(], "rule": "recorded"})";
+    }
+    atoms += R"(,{"name": "m", "type": "QL_DSP4_MULT", "owners": [["core", "big"]], "rule": "recorded"})";
+    project.writeTable(R"({"schema_version": 2, "netlist_sha256": "a", "top": "top",
+        "instances": [{"path": ["core"]}, {"path": ["core", "big"]}], "atoms": [)" + atoms + "]}");
+    std::ofstream(project.qdc) << "set_region core clb(2,2):clb(3,2) p_core\n"
+                               << "set_region core.big clb(2,5):clb(3,5) p_big\n";
+
+    const fp::DeviceGrid::Issues issues = project.check();
+    auto mentions = [](const auto& bucket, const std::string& text) {
+        return std::any_of(bucket.begin(), bucket.end(),
+                           [&](const auto& issue) { return issue.first.find(text) != std::string::npos; });
+    };
+    EXPECT_FALSE(mentions(issues.errors, "'p_core' needs")) << "p_core holds 2 tiles' worth";
+    EXPECT_FALSE(mentions(issues.warnings, "'p_core' needs"));
+    EXPECT_TRUE(mentions(issues.warnings, "'p_big' needs 5 clb tiles")) << "clb is a warning";
+    EXPECT_TRUE(mentions(issues.errors, "'p_big' needs 1 dsp tiles")) << "dsp is an error";
+}
+
 TEST(RtlInstanceModel, WrongTypedVerdictFieldsGiveAMessageNotAnException)
 {
-    const auto instances = writeQdc("fp_rtl_types_instances",
-                                    R"({"top": "top", "instances": [{"path": "top"},
-                                        {"path": "core"}, {"path": "core.a"}]})");
     const auto verdicts = writeQdc("fp_rtl_types_verdicts", R"({"instances": {
         "core": {"verdict": 3, "atom_count": "many", "warnings": [7, "real warning"]},
         "core.a": {"verdict": "complete", "atom_count": 4}}})");
 
     fp::RtlInstanceModel model;
-    ASSERT_TRUE(model.loadInstances(instances));
+    model.load(loadTable("fp_rtl_types_table", R"({"schema_version": 2, "netlist_sha256": "a",
+        "top": "top", "instances": [{"path": ["core"]}, {"path": ["core", "a"]}], "atoms": []})"));
     bool merged = true;
     EXPECT_NO_THROW(merged = model.mergeVerdicts(verdicts));
     EXPECT_FALSE(merged);
@@ -3420,14 +3195,18 @@ TEST(RtlInstanceModel, WrongTypedVerdictFieldsGiveAMessageNotAnException)
     EXPECT_EQ(byPath("core.a").status, "complete") << "the well-typed entries still merge";
 }
 
-TEST(RtlInstanceModel, AWrongTypedInstanceFieldFailsTheLoadWithAMessage)
+TEST(OwnerTable, WrongTypedEntriesAreSkippedNotAnException)
 {
-    const auto instances = writeQdc("fp_rtl_types_bad_instances",
-                                    R"({"top": "top", "instances": [{"path": "top"},
-                                        {"path": 5}]})");
-    fp::RtlInstanceModel model;
-    bool loaded = true;
-    EXPECT_NO_THROW(loaded = model.loadInstances(instances));
-    EXPECT_FALSE(loaded);
-    EXPECT_NE(model.error().find("\"path\""), std::string::npos) << model.error();
+    const auto path = writeTempJson(std::filesystem::temp_directory_path() / "fp_owner_types",
+                                    "atomsets.json", R"({"schema_version": 2, "netlist_sha256": "a",
+        "top": "top", "instances": [{"path": 5}, {"path": ["core"]}],
+        "atoms": [{"name": 7}, {"name": "x", "type": "$lut", "owners": "core"},
+                  {"name": "y", "type": "$lut", "owners": [["core"]]}]})");
+    fp::OwnerTable table;
+    std::string error;
+    bool loaded = false;
+    EXPECT_NO_THROW(loaded = fp::loadOwnerTable(path, table, error));
+    ASSERT_TRUE(loaded) << error;
+    EXPECT_EQ(table.instances, (std::vector<std::string>{"core"}));
+    EXPECT_EQ(table.atomNames.at("core"), (std::vector<std::string>{"y"}));
 }

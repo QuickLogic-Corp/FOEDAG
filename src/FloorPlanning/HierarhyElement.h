@@ -19,10 +19,9 @@ namespace fp {
 // [aurora2#2377] realType, when known, is checked instead of atomName: a hard macro
 // instance (a BRAM, say) keeps its original RTL instance name through synthesis rather
 // than getting a name Yosys derives from its type, so the name-substring check below
-// silently misclassifies it as CLB. realType is the atom's actual Yosys cell type (see
-// AtomSets::loadAtomTypes()) and is never wrong the way a name guess can be; omit it
-// (or pass "") for a caller with no <top>_post_synth_debug.json to read it from, and the
-// name-substring guess is exactly what ran before this parameter existed.
+// silently misclassifies it as CLB. realType is the atom's actual Yosys cell type, from the
+// owner table (OwnerTable::atomTypes), and is never wrong the way a name guess can be; pass
+// "" when it is unknown and the name-substring guess runs instead.
 //
 // Shared between the Atom List column (SynthResourceHierarchyWidget) and Partition's
 // running clb/dsp/bram counts, so the two can never disagree on what an atom is.

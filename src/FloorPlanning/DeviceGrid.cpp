@@ -275,11 +275,37 @@ bool DeviceGrid::isRtlInstanceOrParent(const std::string& path) const
     return (next != m_rtlInstances.end()) && (next->compare(0, prefix.size(), prefix) == 0);
 }
 
+// [aurora2#1725 F5] An element lists every atom of its subtree, so a partition on a parent
+// would also count the atoms of a child another partition constrains. Each atom belongs to
+// the deepest element that lists it -- the one listing the fewest atoms, since a nested
+// element lists a subset of its ancestor's -- as generate_floorplanning.py assigns it.
+std::map<int, std::set<std::string>> DeviceGrid::atomsByDeepestElement() const
+{
+    std::map<std::string, std::pair<std::size_t, int>> owner;  // atom -> (listed by, id)
+    for (const auto& [id, partition] : m_partitions) {
+        for (const HierarhyElement& element : partition->elements()) {
+            const std::size_t size = element.vprNames.size();
+            for (const std::string& atom : element.vprNames) {
+                const auto [it, inserted] = owner.emplace(atom, std::make_pair(size, id));
+                if (!inserted && size < it->second.first) {
+                    it->second = {size, id};
+                }
+            }
+        }
+    }
+    std::map<int, std::set<std::string>> atoms;
+    for (const auto& [atom, by] : owner) {
+        atoms[by.second].insert(atom);
+    }
+    return atoms;
+}
+
 const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
 {
     m_issues->clear();
     m_overlappedConflictingIndexes.clear();
     m_overlappedNonConflictingIndexes.clear();
+    std::map<int, std::set<std::string>> ownedAtoms = atomsByDeepestElement();
 
     // [aurora2#1725] Every path any partition constrains, so the ancestor check below can
     // tell "this instance is assigned somewhere" from "nobody constrains it".
@@ -313,62 +339,51 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                 m_issues->errors.insert({"Partition '" + partition->name() + "' has region with no any tiles", ""});
             }
         }
-        // [aurora2#1725] required vs. available resources. ERRORS, like the presence checks
-        // above: a region too small to hold what its partition constrains leaves the packer
-        // nowhere to put the surplus, so this blocks saving the .qdc in the panel and is
-        // reported as an error by the batch check rather than left for the flow to discover.
-        //
-        // The clb figure is an ESTIMATE and it is not a safe minimum. It divides the atom
-        // count by atomsets.json's atoms_per_tile hint, but real packing density varies with
-        // the logic: carry chains want consecutive slots, and the packer caps cluster
-        // input-pin use, so a small pin-heavy instance packs far less densely than a whole
-        // design's average. The tip still says the number is approximate -- but short by an
-        // estimate that runs optimistic is short in the direction that fails, and the remedy
-        // does not depend on the exact figure: a bigger region, or fewer elements. dsp/bram
-        // carry no such uncertainty -- one atom occupies one whole tile.
+        // [aurora2#1725] required vs. available resources. dsp and bram are exact -- one atom
+        // occupies one whole tile -- so a shortfall is an error. The clb figure divides the
+        // atom count by an atoms-per-tile hint, and real packing density varies with the
+        // logic, so by decision D4 it is a warning naming the partition; VPR's packer is the
+        // hard check, and its own message names only the region box.
         auto checkResource = [&](const std::string& label, int required, int available) {
             if (required <= available) {
                 return;
             }
-            const std::string tip = (label == "clb")
+            const bool estimate = (label == "clb");
+            const std::string tip = estimate
                 ? "Estimated from this partition's clb atoms at "
                   + std::to_string(m_context->atomsPerTile)
                   + " atoms per tile. Real density varies with the logic, so the shortfall is "
-                    "approximate -- but the region has to cover more clb tiles, or some "
+                    "approximate -- but the region likely has to cover more clb tiles, or some "
                     "elements belong in another partition."
                 : "One " + label + " atom occupies one " + label + " tile, so the region has to "
                   "cover more of them, or some elements belong in another partition.";
-            m_issues->errors.insert({"Partition '" + partition->name() + "' needs " +
-                                     std::to_string(required) + " " + label + " tiles but only " +
-                                     std::to_string(available) + " available", tip});
+            (estimate ? m_issues->warnings : m_issues->errors)
+                .insert({"Partition '" + partition->name() + "' needs " +
+                         std::to_string(required) + " " + label + " tiles but only " +
+                         std::to_string(available) + " available", tip});
         };
-        checkResource("clb", partition->clbRequiredCount(), partition->clbAvailableCount());
-        checkResource("dsp", partition->dspRequiredCount(), partition->dspAvailableCount());
-        checkResource("bram", partition->bramRequiredCount(), partition->bramAvailableCount());
+        const ResourceTally need = tallyResources(ownedAtoms[partitionId], m_context->atomsPerTile,
+                                                  m_context->atomTypes, m_context->dspTiles);
+        checkResource("clb", need.clbTiles, partition->clbAvailableCount());
+        checkResource("dsp", need.dsp, partition->dspAvailableCount());
+        checkResource("bram", need.bram, partition->bramAvailableCount());
 
         // [aurora2#1725] Enough clb tiles by the estimate, but only just -- which is where
-        // packing actually breaks, precisely because the estimate can sit below what the
-        // packer needs, and a region filled to the last tile leaves it no room to be wrong.
-        //
-        // An ERROR, like the outright shortfall above. It was a warning on the grounds that
-        // the region is not actually short and only the packer could settle it; but the
-        // estimate it is measured against runs optimistic, so "not short by the estimate"
-        // does not mean "not short", and letting a region this tight through only moves the
-        // failure to VPR, where it arrives without the partition's name or these numbers.
-        // clb only: dsp/bram are exact, one atom to one tile, and need no packing slack.
-        const int clbRequired = partition->clbRequiredCount();
+        // packing breaks, because the estimate can sit below what the packer needs. A warning,
+        // like the clb shortfall above (D4). clb only: dsp/bram need no packing slack.
+        const int clbRequired = need.clbTiles;
         const int clbAvailable = partition->clbAvailableCount();
         if ((clbRequired > 0) && (clbAvailable >= clbRequired)
             && (clbAvailable < clbRequired + (clbRequired * kClbHeadroomPercent + 99) / 100)) {
-            m_issues->errors.insert({"Partition '" + partition->name() + "' has " +
-                                     std::to_string(clbAvailable) +
-                                     " clb tiles for an estimated " +
-                                     std::to_string(clbRequired) + " -- little packing slack",
-                                     "The estimate can be lower than what the packer needs, so a "
-                                     "region this tight may fail to pack even though it looks "
-                                     "big enough. Allow roughly "
-                                     + std::to_string(kClbHeadroomPercent)
-                                     + "% more clb tiles than the estimate."});
+            m_issues->warnings.insert({"Partition '" + partition->name() + "' has " +
+                                       std::to_string(clbAvailable) +
+                                       " clb tiles for an estimated " +
+                                       std::to_string(clbRequired) + " -- little packing slack",
+                                       "The estimate can be lower than what the packer needs, so "
+                                       "a region this tight may fail to pack even though it "
+                                       "looks big enough. Allow roughly "
+                                       + std::to_string(kClbHeadroomPercent)
+                                       + "% more clb tiles than the estimate."});
         }
 
         // [aurora2#1725 stage P4] Elements the .qdc names that synthesis deleted. Loading such

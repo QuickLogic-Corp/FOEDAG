@@ -21,71 +21,92 @@ std::string netlistSha256Of(const nlohmann::json& doc)
 
 }  // namespace
 
-bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames, int& atomsPerTile)
+bool loadOwnerTable(const std::filesystem::path& path, OwnerTable& table, std::string& error)
 {
-    AtomResourceMap ignoredResources;
-    std::string ignoredSha256;
-    return loadAtomSets(path, atomNames, ignoredResources, atomsPerTile, ignoredSha256);
-}
-
-bool loadAtomSets(const std::filesystem::path& path, AtomNameMap& atomNames,
-                  AtomResourceMap& atomResources, int& atomsPerTile, std::string& netlistSha256)
-{
+    table = OwnerTable{};
     std::ifstream stream(path);
     if (!stream) {
+        error = "there is no owner table " + path.string() + " -- run synthesis first";
         return false;
     }
     nlohmann::json doc;
     try {
         stream >> doc;
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        error = "the owner table " + path.string() + " is not valid JSON: " + e.what();
         return false;
     }
+    const auto version = doc.find("schema_version");
+    if (!doc.is_object() || version == doc.end() || *version != 2) {
+        error = "the owner table " + path.string() +
+                " is not schema version 2 -- re-run synthesis with the matching Yosys plugin";
+        return false;
+    }
+    table.netlistSha256 = netlistSha256Of(doc);
+    if (table.netlistSha256.empty()) {
+        error = "the owner table " + path.string() + " has no netlist_sha256";
+        return false;
+    }
+    const auto top = doc.find("top");
+    table.top = (top != doc.end() && top->is_string()) ? top->get<std::string>() : "";
 
-    // Packing density (A.13.3). Absent or garbage leaves the caller's default alone.
-    if (doc.contains("atoms_per_tile") && doc["atoms_per_tile"].is_number_integer()) {
-        const int value = doc["atoms_per_tile"].get<int>();
-        if (value > 0) {
-            atomsPerTile = value;
+    auto dotted = [](const nlohmann::json& segments, std::size_t count) {
+        std::string path;
+        for (std::size_t i = 0; i < count; ++i) {
+            if (segments[i].is_string()) {
+                path += (path.empty() ? "" : ".") + segments[i].get<std::string>();
+            }
+        }
+        return path;
+    };
+
+    std::set<std::string> instances;
+    if (const auto list = doc.find("instances"); list != doc.end() && list->is_array()) {
+        for (const auto& entry : *list) {
+            const auto segments = entry.find("path");
+            if (entry.is_object() && segments != entry.end() && segments->is_array()) {
+                instances.insert(dotted(*segments, segments->size()));
+            }
         }
     }
-
-    if (!doc.contains("atomsets") || !doc["atomsets"].is_object()) {
-        return false;
-    }
-    netlistSha256 = netlistSha256Of(doc);
-    for (auto it = doc["atomsets"].begin(); it != doc["atomsets"].end(); ++it) {
-        std::vector<std::string> atoms;
-        if (it.value().contains("atoms")) {
-            // An object maps each atom to its cell type; older files list bare names.
-            const auto& list = it.value()["atoms"];
-            if (list.is_object()) {
-                for (auto atom = list.begin(); atom != list.end(); ++atom) {
-                    atoms.push_back(atom.key());
-                }
-            } else if (list.is_array()) {
-                for (const auto& atom : list) {
-                    if (atom.is_string()) {
-                        atoms.push_back(atom.get<std::string>());
+    if (const auto atoms = doc.find("atoms"); atoms != doc.end() && atoms->is_array()) {
+        for (const auto& atom : *atoms) {
+            if (!atom.is_object() || !atom.contains("name") || !atom["name"].is_string()) {
+                continue;
+            }
+            const std::string name = atom["name"].get<std::string>();
+            const std::string type = atom.value("type", "");
+            if (type == "$const") {
+                continue;
+            }
+            table.atomTypes[name] = type;
+            std::set<std::string> scopes;
+            if (const auto owners = atom.find("owners"); owners != atom.end() && owners->is_array()) {
+                for (const auto& owner : *owners) {
+                    if (!owner.is_array()) {
+                        continue;
+                    }
+                    for (std::size_t n = 1; n <= owner.size(); ++n) {
+                        scopes.insert(dotted(owner, n));
+                    }
+                    if (!owner.empty()) {
+                        ++table.ownAtomCounts[dotted(owner, owner.size())];
                     }
                 }
             }
-        }
-        atomNames[it.key()] = std::move(atoms);
-
-        // "resources": the cell types behind those atoms. Older files may not have it, and a
-        // missing map is not a failure -- it costs the Atoms tab its numbers, nothing else.
-        if (it.value().contains("resources") && it.value()["resources"].is_object()) {
-            std::map<std::string, int> resources;
-            for (auto res = it.value()["resources"].begin();
-                 res != it.value()["resources"].end(); ++res) {
-                if (res.value().is_number_integer()) {
-                    resources[res.key()] = res.value().get<int>();
-                }
+            if (!table.top.empty()) {
+                scopes.insert(table.top);
             }
-            atomResources[it.key()] = std::move(resources);
+            for (const std::string& scope : scopes) {
+                table.atomNames[scope].push_back(name);
+                ++table.atomResources[scope][type];
+                instances.insert(scope);
+            }
         }
     }
+    instances.erase(table.top);
+    instances.erase("");
+    table.instances.assign(instances.begin(), instances.end());
     return true;
 }
 
@@ -192,25 +213,6 @@ bool elementPatternCovers(const std::string& pattern, const std::string& path)
         }
         candidate.resize(dot);
     }
-}
-
-std::map<std::string, int> ownAtomCounts(const AtomNameMap& atomNames)
-{
-    // An entry's atom list is subtree-inclusive, so an atom is the instance's own exactly
-    // when what follows "<path>." holds no further dot -- "dut.i.n0_$lut_Y" as opposed to
-    // "dut.i.sub.n0_$lut_Y".
-    std::map<std::string, int> counts;
-    for (const auto& [path, atoms] : atomNames) {
-        const std::size_t tail = path.size() + 1;
-        int own = 0;
-        for (const std::string& atom : atoms) {
-            if ((atom.size() > tail) && (atom.find('.', tail) == std::string::npos)) {
-                ++own;
-            }
-        }
-        counts[path] = own;
-    }
-    return counts;
 }
 
 ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
@@ -367,14 +369,7 @@ void groupDspTiles(const nlohmann::json& cells, DspTileMap& outDspTiles)
 
 }  // namespace
 
-bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes)
-{
-    DspTileMap ignored;
-    return loadAtomTypes(debugJsonPath, outTypes, ignored);
-}
-
-bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outTypes,
-                   DspTileMap& outDspTiles)
+bool loadDspTiles(const std::filesystem::path& debugJsonPath, DspTileMap& outDspTiles)
 {
     std::ifstream stream(debugJsonPath);
     if (!stream) {
@@ -386,46 +381,12 @@ bool loadAtomTypes(const std::filesystem::path& debugJsonPath, AtomTypeMap& outT
     } catch (const std::exception&) {
         return false;
     }
-
     if (!doc.contains("modules") || !doc["modules"].is_object()) {
         return false;
     }
-    // write_json emits one top-level module per invocation here (floorplanning_post_synth.tcl
-    // passes -selected, restricting it to the flattened design), but iterate rather than
-    // assume a single key: a differently-configured write_json is still just more cells.
     for (const auto& module : doc["modules"]) {
-        if (!module.contains("cells") || !module["cells"].is_object()) {
-            continue;
-        }
-        for (auto cell = module["cells"].begin(); cell != module["cells"].end(); ++cell) {
-            if (cell.value().contains("type") && cell.value()["type"].is_string()) {
-                outTypes[cell.key()] = cell.value()["type"].get<std::string>();
-            }
-        }
-        groupDspTiles(module["cells"], outDspTiles);
-    }
-    return true;
-}
-
-bool loadVprAtomNames(const std::filesystem::path& manifestPath, VprAtomNameMap& outNames)
-{
-    outNames.clear();
-    std::ifstream stream(manifestPath);
-    if (!stream) {
-        return false;
-    }
-    nlohmann::json doc;
-    try {
-        stream >> doc;
-    } catch (const std::exception&) {
-        return false;
-    }
-    if (!doc.contains("vpr_atom_names") || !doc["vpr_atom_names"].is_object()) {
-        return false;
-    }
-    for (auto it = doc["vpr_atom_names"].begin(); it != doc["vpr_atom_names"].end(); ++it) {
-        if (it.value().is_string()) {
-            outNames[it.key()] = it.value().get<std::string>();
+        if (module.contains("cells") && module["cells"].is_object()) {
+            groupDspTiles(module["cells"], outDspTiles);
         }
     }
     return true;
