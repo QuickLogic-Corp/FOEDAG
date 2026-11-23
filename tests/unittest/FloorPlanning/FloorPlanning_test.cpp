@@ -1688,17 +1688,32 @@ fp::PartitionPtr constrainNames(fp::DeviceGrid& device, const std::vector<std::s
 
 }  // namespace
 
-TEST(FloorplanIssues, ANameOutsideTheRtlHierarchyIsAnError)
+TEST(FloorplanIssues, ANameOutsideTheTableIsAWarning)
 {
-    // A hand-edited .qdc with a typo: VPR skips the name ("was not found, skipping atom"),
-    // so the constraint does nothing.
+    // It may be a net or an input pad, which only the constraint writer can resolve; the
+    // writer stops on a name that is neither.
 
     fp::DeviceGrid device(genTestDescriptor());
     device.setRtlInstances({"top", "dut", "dut.i_a"});
     constrainNames(device, {"dut.i_typo"});
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
-    EXPECT_TRUE(mentions(issues->errors, "names 'dut.i_typo', which is not in the RTL hierarchy"));
+    EXPECT_TRUE(mentions(issues->warnings, "names 'dut.i_typo', which is neither"));
+    EXPECT_FALSE(mentions(issues->errors, "dut.i_typo"));
+}
+
+TEST(FloorplanIssues, AnAtomOfTheTableIsAKnownName)
+{
+    // A hard block instantiated in the top module is an atom, not an RTL instance.
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top"});
+    device.context()->atomTypes = {{"spram_x36_inst", "TDP_ECC36K_BRAM_A_X9_B_X36_nonsplit"}};
+    constrainNames(device, {"spram_x36_inst"});
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_FALSE(mentions(issues->errors, "spram_x36_inst"));
+    EXPECT_FALSE(mentions(issues->warnings, "spram_x36_inst"));
 }
 
 TEST(FloorplanIssues, AConstantDriverIsAWarningNotAnError)
@@ -1708,6 +1723,7 @@ TEST(FloorplanIssues, AConstantDriverIsAWarningNotAnError)
 
     fp::DeviceGrid device(genTestDescriptor());
     device.setRtlInstances({"top", "dut", "dut.i_a"});
+    device.context()->atomTypes = {{"$false", "$const"}};
     constrainNames(device, {"$false"});
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();

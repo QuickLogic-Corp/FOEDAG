@@ -409,27 +409,31 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                                        "drops them."});
         }
 
-        // set_region takes RTL instance names. The constant drivers synthesis adds are the only
-        // other names allowed.
+        // The constraint writer also takes an atom of the owner table, a net (for the atom
+        // driving it) or an input pad, and stops on any other name. Nets and pads are not in
+        // the table, so a name outside it is only a warning here.
         if (!m_rtlInstances.empty()) {
             for (const HierarhyElement& element: partition->elements()) {
                 const std::string& path = element.path;
                 if ((path.find('*') != std::string::npos) || isRtlInstanceOrParent(path)) {
                     continue;
                 }
-                if ((path == "$false") || (path == "$true") || (path == "$undef")) {
+                const auto atom = m_context->atomTypes.find(path);
+                if (atom == m_context->atomTypes.end()) {
+                    m_issues->warnings.insert({"Partition '" + partition->name() + "' names '" +
+                                               path + "', which is neither an RTL instance nor "
+                                               "an atom",
+                                               "Constraint generation reads it as a net, "
+                                               "constraining the atom that drives it, or as an "
+                                               "input pad, and stops if it is neither. Use the "
+                                               "name of the RTL instance that holds this logic, "
+                                               "or check the spelling."});
+                } else if (atom->second == "$const") {
                     m_issues->warnings.insert({"Partition '" + partition->name() + "' names '" +
                                                path + "', a constant driver, not an RTL instance",
                                                "Synthesis adds this atom to drive a constant "
                                                "value. VPR places it, but it is not in the RTL "
                                                "hierarchy, so the panel shows no atoms for it."});
-                } else {
-                    m_issues->errors.insert({"Partition '" + partition->name() + "' names '" +
-                                             path + "', which is not in the RTL hierarchy",
-                                             "set_region accepts RTL instance names only; net "
-                                             "and atom names are no longer accepted. Use the "
-                                             "name of the RTL instance that holds this logic, "
-                                             "or check the spelling."});
                 }
             }
         }
