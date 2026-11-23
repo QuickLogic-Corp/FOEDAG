@@ -594,7 +594,8 @@ void GuiRecorder::watch(QWidget *widget) {
       // Return and then the loss of focus both finish the same edit; a dialog
       // accepted from its button would otherwise record it a second time.
       const char *recorded = "guiRecorderText";
-      if (edit->property(recorded).toString() == edit->text()) return;
+      const QVariant last = edit->property(recorded);
+      if (last.isValid() && last.toString() == edit->text()) return;
       edit->setProperty(recorded, edit->text());
       QWidget *owner = namedOwner(edit);
       if (owner->objectName().isEmpty()) {

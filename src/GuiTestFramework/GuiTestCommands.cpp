@@ -705,9 +705,12 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     return succeed(interp);
   };
   if (w->inherits("QConsole")) {
-    // The console reads a command typed at its prompt and run on Return.
+    // The console reads a command typed at its prompt and run on Return. A
+    // multiline command, as the recorder writes it, has a Return per line.
     for (const QChar c : text) {
-      QKeyEvent key{QEvent::KeyPress, 0, Qt::NoModifier, QString{c}};
+      QKeyEvent key = c == '\n'
+                          ? QKeyEvent{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier}
+                          : QKeyEvent{QEvent::KeyPress, 0, Qt::NoModifier, QString{c}};
       QCoreApplication::sendEvent(w, &key);
     }
     QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};

@@ -436,6 +436,18 @@ TEST_F(GuiRecorderTest, TextFinishedByAClickIsWrittenBeforeIt) {
   EXPECT_EQ(lines(), join({"gui_set_text depth 1", "gui_click generate"}));
 }
 
+// The wizard's name field starts filled; clearing it is an edit to record.
+TEST_F(GuiRecorderTest, ClearedFieldIsRecorded) {
+  auto edit = add(new QLineEdit("project_1"), "nameEdit");
+  window.show();
+  record();
+
+  QTest::keyClick(edit, Qt::Key_A, Qt::ControlModifier);
+  QTest::keyClick(edit, Qt::Key_Delete);
+  QTest::keyClick(edit, Qt::Key_Return);
+  EXPECT_EQ(lines(), join({"gui_set_text nameEdit {}"}));
+}
+
 // A field that finishes invalid text on losing focus, and warns in a modal
 // box when it does, as the IP Configurator's fields do.
 class WarningField : public QLineEdit {
