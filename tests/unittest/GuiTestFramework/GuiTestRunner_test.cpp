@@ -468,6 +468,23 @@ TEST(GuiTestCommands, WarnLogsAFalseCheckAndDoesNotFail) {
   Tcl_DeleteInterp(interp);
 }
 
+// With GUI_TEST_FRAMEWORK_STRICT_WARN=1 a false gui_warn is logged as FAIL, and
+// the script still goes on, so one run lists every issue still open.
+TEST(GuiTestCommands, StrictWarnLogsAFalseCheckAsFail) {
+  qputenv("GUI_TEST_FRAMEWORK_STRICT_WARN", "1");
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  std::ostringstream out;
+  std::streambuf *saved = std::cout.rdbuf(out.rdbuf());
+  const int code = Tcl_Eval(interp, "gui_warn {1 == 2} \"known issue\"");
+  std::cout.rdbuf(saved);
+  qunsetenv("GUI_TEST_FRAMEWORK_STRICT_WARN");
+  EXPECT_EQ(code, TCL_OK) << Tcl_GetStringResult(interp);
+  EXPECT_EQ(out.str(),
+            "FAIL: gui_warn {1 == 2}: false: known issue (evaluated: 1 == 2)\n");
+  Tcl_DeleteInterp(interp);
+}
+
 TEST(GuiTestScriptView, ShowsProgressByCommand) {
   const QVector<GuiTestScriptView::Span> commands{
       {2, 1}, {4, 2}, {6, 1}, {7, 1}};
