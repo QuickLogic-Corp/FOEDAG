@@ -263,6 +263,13 @@ QWidget* QLDeviceManager::createDeviceSelectionWidget(bool newProjectMode) {
   m_combobox_p_v_t_corner = new QComboBox();
   m_combobox_layout = new QComboBox();
   m_device_resources_label = new QLabel();
+  m_combobox_family->setObjectName("deviceFamily");
+  m_combobox_foundry_node->setObjectName("deviceFoundryNode");
+  m_combobox_devicename->setObjectName("deviceName");
+  m_combobox_voltage_threshold->setObjectName("deviceVoltageThreshold");
+  m_combobox_p_v_t_corner->setObjectName("deviceCorner");
+  m_combobox_layout->setObjectName("deviceLayout");
+  m_device_resources_label->setObjectName("deviceResources");
   m_combobox_family->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   m_combobox_foundry_node->setSizeAdjustPolicy(QComboBox::AdjustToContents);
   m_combobox_devicename->setSizeAdjustPolicy(QComboBox::AdjustToContents);

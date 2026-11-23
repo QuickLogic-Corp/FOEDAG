@@ -96,6 +96,7 @@ sourceGrid::sourceGrid(QWidget *parent) : QWidget(parent) {
   hbox->setSpacing(1);
 
   m_tableViewSrc = new QTableView(this);
+  m_tableViewSrc->setObjectName("sourceGridView");
 
   // Set properties
   m_tableViewSrc->verticalHeader()->hide();
