@@ -996,6 +996,7 @@ void QLSettingsManager::populateSettingsWidget() {
     dlg_buttonslayout = new QHBoxLayout();
     // make the buttons for the actions in the settings dialog
     button_reset = new QPushButton("Reset");
+    button_reset->setObjectName("taskSettingsReset");
     button_reset->setToolTip("Discard any modifications, reload from current settings JSON");
     button_reset->setDisabled(true);
     QObject::connect(button_reset, &QPushButton::released, this, &QLSettingsManager::handleResetButtonClicked);

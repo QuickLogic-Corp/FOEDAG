@@ -1090,6 +1090,7 @@ void MainWindow::createActions() {
   exitAction->setToolTip(tr("Exit the application"));
 
   startAction = new QAction(tr("Start"), this);
+  startAction->setObjectName("actionStart");
   startAction->setIcon(QIcon(":/images/play.png"));
   startAction->setToolTip(tr("Start compilation tasks"));
 
@@ -1192,6 +1193,7 @@ void MainWindow::createActions() {
           &MainWindow::onShowStopMessage);
 
   bitstreamAction = new QAction(tr("Enable/Disable bitstream"), this);
+  bitstreamAction->setObjectName("actionEnableBitstream");
   bitstreamAction->setCheckable(true);
   connect(bitstreamAction, &QAction::toggled, this,
           &MainWindow::bitstreamEnable);

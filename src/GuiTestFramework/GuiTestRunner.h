@@ -96,7 +96,8 @@ class GuiTestRunner : public QObject {
   // Ends the run from anywhere, including inside a nested event loop that
   // can no longer unwind.
   [[noreturn]] void fail(const QString &message);
-  // A gui_warn that did not hold: logged with its line; the run goes on.
+  // A gui_warn that did not hold: logged with its line; the run goes on. With
+  // GUI_TEST_FRAMEWORK_STRICT_WARN=1 it is logged as FAIL and fails the run.
   void warn(const QString &message);
 
  protected:
@@ -133,6 +134,7 @@ class GuiTestRunner : public QObject {
   int m_announced{-1};               // last index the gate was told of
   QPointer<GuiTestScriptView> m_view;  // debug mode only
   bool m_finished{false};
+  bool m_warnFailed{false};
 };
 
 }  // namespace FOEDAG

@@ -14,6 +14,8 @@
 # A scenario with "# expect: <text>" lines is a negative script: it passes only
 # if <binary> exits non-zero and its FAIL line contains every expected text.
 # GUI_TEST_FRAMEWORK_RUN_TIMEOUT: seconds before a run is taken as hung (3600).
+# GUI_TEST_FRAMEWORK_STRICT_WARN=1: a false gui_warn is a FAIL line and fails the
+# run, which still goes on to its end, to list the known issues still open.
 # GUI_TEST_FRAMEWORK_GOLDEN_DIR turns the screenshot gate on; without it,
 # screenshots are only saved. Negative scripts always use golden/ here, whose
 # goldens fail on any machine. GUI_TEST_FRAMEWORK_GOLDEN=update (gen-goldens mode)

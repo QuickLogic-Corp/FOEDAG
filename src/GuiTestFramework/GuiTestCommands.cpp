@@ -705,9 +705,12 @@ int guiSetText(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
     return succeed(interp);
   };
   if (w->inherits("QConsole")) {
-    // The console reads a command typed at its prompt and run on Return.
+    // The console reads a command typed at its prompt and run on Return. A
+    // multiline command, as the recorder writes it, has a Return per line.
     for (const QChar c : text) {
-      QKeyEvent key{QEvent::KeyPress, 0, Qt::NoModifier, QString{c}};
+      QKeyEvent key = c == '\n'
+                          ? QKeyEvent{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier}
+                          : QKeyEvent{QEvent::KeyPress, 0, Qt::NoModifier, QString{c}};
       QCoreApplication::sendEvent(w, &key);
     }
     QKeyEvent enter{QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier};
@@ -1113,14 +1116,17 @@ bool writeImage(const QImage &image, const QString &path) {
 
 int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   const char *usage =
-      "usage: gui_screenshot <scenario>/<step> [-widget objName] "
+      "usage: gui_screenshot <scenario>/<step> [-widget objName | -dialog] "
       "[-mask objName [-keep-columns n] ...]";
   QString id;
   QString widgetName;
+  bool dialog{false};
   QList<std::pair<QString, int>> maskNames;
   for (int i = 1; i < argc; ++i) {
     const QString arg = QString::fromUtf8(argv[i]);
-    if (arg == "-widget" || arg == "-mask" || arg == "-keep-columns") {
+    if (arg == "-dialog") {
+      dialog = true;
+    } else if (arg == "-widget" || arg == "-mask" || arg == "-keep-columns") {
       if (i + 1 >= argc) return fail(interp, usage);
       const QString value = QString::fromUtf8(argv[++i]);
       if (arg == "-widget") {
@@ -1142,13 +1148,16 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   }
   const QStringList parts = id.split('/');
   if (parts.size() != 2 || parts[0].isEmpty() || parts[1].isEmpty() ||
-      id.contains(".."))
+      id.contains("..") || (dialog && !widgetName.isEmpty()))
     return fail(interp, usage);
   const QString what = "gui_screenshot " + id;
 
   QString error;
-  QWidget *target = widgetName.isEmpty() ? mainWindow()
-                                         : findWidget(widgetName, {}, &error);
+  // A message box from a static QMessageBox call has no objectName to give -widget.
+  QWidget *target = dialog                ? QApplication::activeModalWidget()
+                    : widgetName.isEmpty() ? mainWindow()
+                                           : findWidget(widgetName, {}, &error);
+  if (dialog && !target) return fail(interp, what + ": no modal dialog shown");
   if (!target)
     return fail(interp, QString("%1: %2").arg(what, widgetName.isEmpty()
                                                         ? "no main window shown"

@@ -304,7 +304,12 @@ void GuiTestRunner::fail(const QString &message) {
 }
 
 void GuiTestRunner::warn(const QString &message) {
-  std::cout << "WARN: " << message.toStdString() << std::endl;
+  // Strict mode lists every known issue still open in one run.
+  const bool strict =
+      qEnvironmentVariableIntValue("GUI_TEST_FRAMEWORK_STRICT_WARN") == 1;
+  if (strict) m_warnFailed = true;
+  std::cout << (strict ? "FAIL: " : "WARN: ") << message.toStdString()
+            << std::endl;
   if (!m_running.isEmpty()) {
     const Command &command = m_commands.at(m_running.last().index);
     std::cout << "  at " << m_file.toStdString() << ":" << command.line
@@ -314,6 +319,7 @@ void GuiTestRunner::warn(const QString &message) {
 
 void GuiTestRunner::finish(int code) {
   if (GuiRecorder::isActive()) GuiRecorder::instance()->flush();
+  if (code == 0 && m_warnFailed) code = 1;
   if (code == 0) std::cout << "PASS: " << m_file.toStdString() << std::endl;
   for (int type : {TCL_STDOUT, TCL_STDERR})
     if (Tcl_Channel channel = Tcl_GetStdChannel(type)) Tcl_Flush(channel);

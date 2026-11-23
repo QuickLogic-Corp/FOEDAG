@@ -29,6 +29,7 @@ extern "C" {
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
+#include <QMessageBox>
 #include <QHeaderView>
 #include <QPainter>
 #include <QTableWidget>
@@ -282,6 +283,35 @@ TEST(GuiScreenshot, RepeatableBytes) {
   EXPECT_EQ(writes[0], writes[1]);
   for (const char *chunk : {"tIME", "tEXt", "zTXt", "iTXt"})
     EXPECT_FALSE(writes[0].contains(chunk)) << chunk;
+
+  qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN");
+  qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR");
+  qunsetenv("GUI_TEST_FRAMEWORK_ARTIFACT_DIR");
+  Tcl_DeleteInterp(interp);
+}
+
+// -dialog shoots the whole modal dialog, which a static QMessageBox leaves unnamed.
+TEST(GuiScreenshot, ModalDialog) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  qputenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR", (dir.path() + "/golden").toUtf8());
+  qputenv("GUI_TEST_FRAMEWORK_ARTIFACT_DIR", (dir.path() + "/out").toUtf8());
+  qputenv("GUI_TEST_FRAMEWORK_GOLDEN", "update");
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  EXPECT_EQ(Tcl_Eval(interp, "gui_screenshot s/x -dialog"), TCL_ERROR);
+  EXPECT_STREQ(Tcl_GetStringResult(interp), "gui_screenshot s/x: no modal dialog shown");
+
+  QMessageBox box{QMessageBox::Information, "Information", "Please specify a project name",
+                  QMessageBox::Ok};
+  box.setWindowModality(Qt::ApplicationModal);
+  box.show();
+  ASSERT_TRUE(QTest::qWaitForWindowExposed(&box));
+  EXPECT_EQ(Tcl_Eval(interp, "gui_screenshot s/x -dialog -widget other"), TCL_ERROR);
+  ASSERT_EQ(Tcl_Eval(interp, "gui_screenshot s/x -dialog"), TCL_OK)
+      << Tcl_GetStringResult(interp);
+  const QImage shot{dir.path() + "/golden/" + platformDir() + "/s/x.png"};
+  EXPECT_EQ(shot.size(), box.size() * box.devicePixelRatioF());
 
   qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN");
   qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR");
