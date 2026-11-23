@@ -75,7 +75,8 @@ the recorder writes them: one command per line, Tcl list quoting, and
 
 ## Screenshots
 
-`gui_screenshot <scenario>/<step> [-widget <objName>] [-mask <objName> ...]`
+`gui_screenshot <scenario>/<step> [-widget <objName> | -dialog] [-mask <objName> ...]`
+captures the widget, the open modal dialog with `-dialog`, or the main window. It
 waits until the widget stops repainting, saves the capture under
 `<run dir>/screenshots/` (or `GUI_TEST_FRAMEWORK_ARTIFACT_DIR`), and compares it
 with `golden/<platform>/<scenario>/<step>.png`. Masked widgets are blanked in
