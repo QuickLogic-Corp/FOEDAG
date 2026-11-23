@@ -1536,6 +1536,100 @@ void MainWindow::showEULADialog() {
   ////////////////////////// openfpga -- //////////////////////////
 
 
+  ////////////////////////// or-tools ++ //////////////////////////
+  QWidget* licenseWidgetORTools = new QWidget();
+  QVBoxLayout* licenseWidgetORToolsLayout = new QVBoxLayout();
+  licenseWidgetORTools->setLayout(licenseWidgetORToolsLayout);
+  QLabel* licenseWidgetORTools_title = new QLabel();
+  licenseWidgetORToolsLayout->addWidget(licenseWidgetORTools_title);
+  licenseWidgetORTools_title->setTextFormat(Qt::RichText);
+  licenseWidgetORTools_title->setText(QString("<h2> OR-Tools </h2>"));
+  QLabel* licenseWidgetORTools_description = new QLabel();
+  licenseWidgetORToolsLayout->addWidget(licenseWidgetORTools_description);
+  licenseWidgetORTools_description->setTextFormat(Qt::RichText);
+  licenseWidgetORTools_description->setText(QString("<h3> <a href=\"https://github.com/google/or-tools\">https://github.com/google/or-tools</a> </h3>"));
+  licenseWidgetORTools_description->setTextInteractionFlags(Qt::TextBrowserInteraction);
+  licenseWidgetORTools_description->setOpenExternalLinks(true);
+  QTextBrowser* licenseWidgetORTools_content = new QTextBrowser();
+  licenseWidgetORToolsLayout->addWidget(licenseWidgetORTools_content);
+  {
+    std::filesystem::path licenseORToolsFilePath =
+      GlobalSession->Context()->DataPath() /
+      ".." /
+      "share" /
+      "aurora" /
+      "etc" /
+      "license_ortools.txt";
+    QFile licenseORToolsFile = QFile(QString::fromStdString(licenseORToolsFilePath.string()));
+    QString fileContent;
+    if (licenseORToolsFile.open(QIODevice::ReadOnly)) {
+      QString fileContent = QTextStream(&licenseORToolsFile).readAll();
+      licenseWidgetORTools_content->setText(fileContent);
+      licenseAcceptedFileContent += "\n\n----------------------------------------\n";
+      licenseAcceptedFileContent += "OR-Tools";
+      licenseAcceptedFileContent += "\n";
+      licenseAcceptedFileContent += "https://github.com/google/or-tools";
+      licenseAcceptedFileContent += "\n----------------------------------------\n\n";
+      licenseAcceptedFileContent += fileContent;
+      licenseAcceptedFileContent += "\n----------------------------------------\n\n";
+  }
+  licenseORToolsFile.close();
+  }
+  QLabel* licenseWidgetORTools_cue = new QLabel();
+  licenseWidgetORToolsLayout->addWidget(licenseWidgetORTools_cue);
+  licenseWidgetORTools_cue->setTextFormat(Qt::RichText);
+  licenseWidgetORTools_cue->setText(QString("<b> Please press 'Next' to continue to next license... </b>"));
+  licensesStackedWidget->addWidget(licenseWidgetORTools);
+  ////////////////////////// or-tools -- //////////////////////////
+
+
+  ////////////////////////// tomli ++ //////////////////////////
+  QWidget* licenseWidgetTomli = new QWidget();
+  QVBoxLayout* licenseWidgetTomliLayout = new QVBoxLayout();
+  licenseWidgetTomli->setLayout(licenseWidgetTomliLayout);
+  QLabel* licenseWidgetTomli_title = new QLabel();
+  licenseWidgetTomliLayout->addWidget(licenseWidgetTomli_title);
+  licenseWidgetTomli_title->setTextFormat(Qt::RichText);
+  licenseWidgetTomli_title->setText(QString("<h2> tomli </h2>"));
+  QLabel* licenseWidgetTomli_description = new QLabel();
+  licenseWidgetTomliLayout->addWidget(licenseWidgetTomli_description);
+  licenseWidgetTomli_description->setTextFormat(Qt::RichText);
+  licenseWidgetTomli_description->setText(QString("<h3> <a href=\"https://github.com/hukkin/tomli\">https://github.com/hukkin/tomli</a> </h3>"));
+  licenseWidgetTomli_description->setTextInteractionFlags(Qt::TextBrowserInteraction);
+  licenseWidgetTomli_description->setOpenExternalLinks(true);
+  QTextBrowser* licenseWidgetTomli_content = new QTextBrowser();
+  licenseWidgetTomliLayout->addWidget(licenseWidgetTomli_content);
+  {
+    std::filesystem::path licenseTomliFilePath =
+      GlobalSession->Context()->DataPath() /
+      ".." /
+      "share" /
+      "aurora" /
+      "etc" /
+      "license_tomli.txt";
+    QFile licenseTomliFile = QFile(QString::fromStdString(licenseTomliFilePath.string()));
+    QString fileContent;
+    if (licenseTomliFile.open(QIODevice::ReadOnly)) {
+      QString fileContent = QTextStream(&licenseTomliFile).readAll();
+      licenseWidgetTomli_content->setText(fileContent);
+      licenseAcceptedFileContent += "\n\n----------------------------------------\n";
+      licenseAcceptedFileContent += "tomli";
+      licenseAcceptedFileContent += "\n";
+      licenseAcceptedFileContent += "https://github.com/hukkin/tomli";
+      licenseAcceptedFileContent += "\n----------------------------------------\n\n";
+      licenseAcceptedFileContent += fileContent;
+      licenseAcceptedFileContent += "\n----------------------------------------\n\n";
+  }
+  licenseTomliFile.close();
+  }
+  QLabel* licenseWidgetTomli_cue = new QLabel();
+  licenseWidgetTomliLayout->addWidget(licenseWidgetTomli_cue);
+  licenseWidgetTomli_cue->setTextFormat(Qt::RichText);
+  licenseWidgetTomli_cue->setText(QString("<b> Please press 'Next' to continue to next license... </b>"));
+  licensesStackedWidget->addWidget(licenseWidgetTomli);
+  ////////////////////////// tomli -- //////////////////////////
+
+
   ////////////////////////// aurora ++ //////////////////////////
   QWidget* licenseWidgetAurora = new QWidget();
   QVBoxLayout* licenseWidgetAuroraLayout = new QVBoxLayout();
