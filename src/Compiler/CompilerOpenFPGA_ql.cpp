@@ -898,6 +898,12 @@ bool CompilerOpenFPGA_ql::RunOtp(bool clean, bool production) {
     ErrorMessage("otp: open a project first (create_design <name>)");
     return false;
   }
+  // The run-wide lock, as every stage takes it (OTP design section 6.8, C-43); -clean too.
+  bool held = false;
+  if (!BeginRun(held)) return false;
+  auto endRun = sg::make_scope_guard([this, held] {
+    if (held) EndRun();
+  });
   QLDeviceManager* devices = QLDeviceManager::getInstance();
   const QLDeviceTarget target = devices->getCurrentDeviceTarget();
   if (!devices->isDeviceTargetValid(target)) {
@@ -13363,6 +13369,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   yosys_options += " -owner_table " + FloorplanningPrefix() + "_atomsets.json";
   if (m_useVerific && m_projManager->synthesisTool() != Synplify) {
     yosys_options += " -owner_front_end verific";
+  }
+
+  // synth_options from Tcl: no template has ${OPTIMIZATION}, so this is their only way into synth_ql.
+  if (!SynthMoreOpt().empty()) {
+    yosys_options += " " + SynthMoreOpt();
   }
 
   // TODO: trim yosys_options at the front
