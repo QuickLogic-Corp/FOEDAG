@@ -12965,6 +12965,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosysScript->addFile(rel_ip_blif);
   }
 
+  // synth_options from Tcl: no template has ${OPTIMIZATION}, so this is their only way into synth_ql.
+  if (!SynthMoreOpt().empty()) {
+    yosys_options += " " + SynthMoreOpt();
+  }
+
   // TODO: trim yosys_options at the front
   yosysScript->apply("${YOSYS_OPTIONS}", yosys_options);
 
