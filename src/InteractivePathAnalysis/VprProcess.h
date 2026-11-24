@@ -83,6 +83,10 @@ class Process : public QProcess {
   void restart();
   void checkEvent();
   void stopAndWaitProcess();
+
+  // Kills the processes still running when the app calls C exit(), which
+  // destroys no widget, so ~Process() never runs for them.
+  static void killAllAtExit();
 };
 
 }  // namespace FOEDAG
