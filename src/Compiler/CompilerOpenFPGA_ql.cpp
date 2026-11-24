@@ -6201,6 +6201,71 @@ QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staP
   return QLDeviceTarget();
 }
 
+void CompilerOpenFPGA_ql::restoreStateFromVprFiles() {
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + net_file_path.string());
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + net_file_path.string());
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + place_file_path.string());
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + place_file_path.string());
+      m_state = State::Placed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      Message("Attempting to read the route file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        Message("Found the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+        m_state = State::Routed;
+      } else {
+        ErrorMessage("Could not find the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      }
+  } else { 
+    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.route");
+    Message("Attempting to read the route file from: " + route_file_path.string());
+    if (fs::exists(route_file_path)) {
+      Message("Found the route file in: " + route_file_path.string());
+      m_state = State::Routed;
+    }
+  }
+}
+
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
 bool CompilerOpenFPGA_ql::TimingAnalysis() {
   if (!ProjManager()->HasDesign()) {
@@ -6651,6 +6716,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 // hence, we can also be at Placed state here.
   // state check: requires "Placed"/"Routed" to be completed.
   // we should be *atleast* at "Placed"/"Routed" or later state.
+  // As on Linux: a status check may have dropped the state although the VPR
+  // files are there, such as for a project whose task records a batch run made.
+  restoreStateFromVprFiles();
   if( (m_state == State::Placed) ||
       (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
@@ -6666,68 +6734,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
-  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-      Message("Attempting to read the net file from: " + 
-        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
-      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        Message("Found the net file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
-        m_state = State::Packed;
-      } else {
-        ErrorMessage("Could not find the net file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
-      }
-  } else { 
-    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.net");
-    Message("Attempting to read the net file from: " + std::string(net_file_path));
-    if (fs::exists(net_file_path)) {
-      Message("Found the net file in: " + std::string(net_file_path));
-      m_state = State::Packed;
-    }
-  }
-
-  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-      Message("Attempting to read the place file from: " + 
-        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
-      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        Message("Found the place file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
-        m_state = State::Placed;
-      } else {
-        ErrorMessage("Could not find the place file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
-      }
-  } else { 
-    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.place");
-    Message("Attempting to read the place file from: " + std::string(place_file_path));
-    if (fs::exists(place_file_path)) {
-      Message("Found the place file in: " + std::string(place_file_path));
-      m_state = State::Placed;
-    }
-  }
-
-  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-      Message("Attempting to read the route file from: " + 
-        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
-      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        Message("Found the route file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
-        m_state = State::Routed;
-      } else {
-        ErrorMessage("Could not find the route file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
-      }
-  } else { 
-    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.route");
-    Message("Attempting to read the route file from: " + route_file_path.string());
-    if (fs::exists(route_file_path)) {
-      Message("Found the route file in: " + route_file_path.string());
-      m_state = State::Routed;
-    }
-  }
+  restoreStateFromVprFiles();
   if( (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
       (m_state == State::PowerAnalyzed) ||
