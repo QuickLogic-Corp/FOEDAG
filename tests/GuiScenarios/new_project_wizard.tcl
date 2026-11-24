@@ -19,7 +19,9 @@ gui_set_text lineEditTopModule counter_16bit
 # The Location column shows the file's directory, so it must be the same on
 # every run; the run directory is not.
 # Rewrite only on a change: another user's copy in /tmp is read-only to us.
-set design_dir /tmp/gui_new_project_wizard
+# Normalized, because on Windows /tmp has no drive, and the file dialog then
+# reads it as relative to its own directory.
+set design_dir [file normalize /tmp/gui_new_project_wizard]
 set design "module counter_16bit (input clk, output reg \[15:0\] count);\nendmodule\n"
 set design_file $design_dir/counter_16bit.v
 set old ""
@@ -32,7 +34,7 @@ if {$old ne $design} {
 }
 gui_click sourceGridAddFile
 gui_wait_event dialog.shown
-gui_set_text fileNameEdit /tmp/gui_new_project_wizard/counter_16bit.v
+gui_set_text fileNameEdit $design_file
 gui_dialog accept
 gui_wait_event dialog.closed
 gui_screenshot new_project_wizard/03_design_files -widget newProjectDialog
