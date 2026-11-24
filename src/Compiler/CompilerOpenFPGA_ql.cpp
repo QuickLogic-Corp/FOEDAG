@@ -894,6 +894,12 @@ bool CompilerOpenFPGA_ql::RunOtp(bool clean, bool production) {
     ErrorMessage("otp: open a project first (create_design <name>)");
     return false;
   }
+  // The run-wide lock, as every stage takes it (OTP design section 6.8, C-43); -clean too.
+  bool held = false;
+  if (!BeginRun(held)) return false;
+  auto endRun = sg::make_scope_guard([this, held] {
+    if (held) EndRun();
+  });
   QLDeviceManager* devices = QLDeviceManager::getInstance();
   const QLDeviceTarget target = devices->getCurrentDeviceTarget();
   if (!devices->isDeviceTargetValid(target)) {
