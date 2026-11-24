@@ -1078,13 +1078,35 @@ int guiMenu(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   if (!found->isEnabled())
     return fail(interp, QString("%1: item is disabled").arg(what));
 
+  // On a real display the menu gets its final size a moment after it opens,
+  // and a click outside it only closes it.
+  QPointer<QMenu> shown = menu;
+  if (!waitUntil(
+          [&]() {
+            if (!shown) return true;
+            return shown->rect().contains(
+                shown->actionGeometry(found).center());
+          },
+          timeoutMs, what, false) ||
+      !shown)
+    return fail(interp,
+                QString("%1: the menu did not take its size within %2 ms")
+                    .arg(what)
+                    .arg(timeoutMs));
+
   // A click, so the menu closes and triggers the item in Qt's own order.
+  bool triggered{false};
+  const QMetaObject::Connection seen = QObject::connect(
+      found, &QAction::triggered, [&triggered]() { triggered = true; });
   const GuiTestAction act{menu};
   const QPoint pos = menu->actionGeometry(found).center();
   sendMouse(menu, QEvent::MouseButtonPress, pos, Qt::LeftButton,
             Qt::LeftButton);
   sendMouse(menu, QEvent::MouseButtonRelease, pos, Qt::LeftButton,
             Qt::NoButton);
+  QObject::disconnect(seen);
+  if (!triggered)
+    return fail(interp, what + ": the click did not trigger the item");
   return succeed(interp);
 }
 
