@@ -3188,6 +3188,32 @@ TEST(FloorplanIssues, AParentPaysOnlyForWhatNoConstrainedChildTakesAndClbIsAnEst
     EXPECT_TRUE(mentions(issues.errors, "'p_big' needs 1 dsp tiles")) << "dsp is an error";
 }
 
+TEST(FloorplanIssues, AWrapperAndItsOnlyChildGiveTheAtomsToTheChild)
+{
+    // u_wrap holds nothing but u_core, so both list the same atoms. The deeper path takes them,
+    // as the constraint writer does: p_core is sized for them and p_wrap is left with none.
+    CheckerProject project;
+    std::string atoms;
+    for (int i = 0; i < 40; ++i) {
+        atoms += std::string(atoms.empty() ? "" : ",") + R"({"name": "a)" + std::to_string(i) +
+                 R"(", "type": "$lut", "owners": [["u_wrap", "u_core"]], "rule": "recorded"})";
+    }
+    project.writeTable(R"({"schema_version": 2, "netlist_sha256": "a", "top": "top",
+        "instances": [{"path": ["u_wrap"]}, {"path": ["u_wrap", "u_core"]}], "atoms": [)" +
+                       atoms + "]}");
+    std::ofstream(project.qdc) << "set_region u_wrap clb(2,2):clb(3,9) p_wrap\n"
+                               << "set_region u_wrap.u_core clb(2,5):clb(2,5) p_core\n";
+
+    const fp::DeviceGrid::Issues issues = project.check();
+    auto mentions = [](const auto& bucket, const std::string& text) {
+        return std::any_of(bucket.begin(), bucket.end(),
+                           [&](const auto& issue) { return issue.first.find(text) != std::string::npos; });
+    };
+    EXPECT_TRUE(mentions(issues.warnings, "'p_core' needs 3 clb tiles"));
+    EXPECT_TRUE(mentions(issues.errors, "'p_wrap' is left with no atom"));
+    EXPECT_FALSE(mentions(issues.warnings, "'p_wrap' needs"));
+}
+
 TEST(RtlInstanceModel, WrongTypedVerdictFieldsGiveAMessageNotAnException)
 {
     const auto verdicts = writeQdc("fp_rtl_types_verdicts", R"({"instances": {

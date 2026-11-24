@@ -2966,16 +2966,21 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   args.push_back("--json");
   args.push_back(FloorplanningArtifact("placement.json").string());
 
-  if (RunFloorplanningStage(tool.python.string(), args) == 0) {
+  const int status = RunFloorplanningStage(tool.python.string(), args);
+  if (status == 0) {
     return true;
   }
+  // Exit 3: the .place was made from another .net, and the report says only that.
+  const bool stale = status == 3;
   std::ifstream report(compliance_rpt_path);
   for (std::string line; std::getline(report, line);) {
-    if (line.find("FAIL") != std::string::npos || line.rfind("PARTITION", 0) == 0) {
+    if (stale || line.find("FAIL") != std::string::npos || line.rfind("PARTITION", 0) == 0) {
       ErrorMessage("Floor plan compliance: " + line);
     }
   }
-  ErrorMessage("Design " + projectName + " placement does not honour its region constraints, "
+  ErrorMessage("Design " + projectName +
+               (stale ? " placement is not of the current packed netlist; re-run placement, "
+                      : " placement does not honour its region constraints, ") +
                "see " + compliance_rpt_path.string());
   return false;
 }
@@ -9935,6 +9940,12 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   args.push_back(deviceLayoutFile.string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
+  // VPR absorbs buffer LUTs unless the setting turns it off; the writer must not list them.
+  args.push_back("--absorb_buffer_luts");
+  args.push_back(QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") ==
+                         "unchecked"
+                     ? "off"
+                     : "on");
 
   if(fs::exists(pinTableFile)) {
     args.push_back("--pin_table_file");

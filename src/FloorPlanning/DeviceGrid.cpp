@@ -3,6 +3,9 @@
 
 #include <QDebug>
 
+#include <algorithm>
+#include <limits>
+
 namespace fp {
 
 namespace {
@@ -277,18 +280,21 @@ bool DeviceGrid::isRtlInstanceOrParent(const std::string& path) const
 
 // [aurora2#1725 F5] An element lists every atom of its subtree, so a partition on a parent
 // would also count the atoms of a child another partition constrains. Each atom belongs to
-// the deepest element that lists it -- the one listing the fewest atoms, since a nested
-// element lists a subset of its ancestor's -- as generate_floorplanning.py assigns it.
+// the deepest element that lists it -- a nested path is longer than its ancestor's -- and an
+// atom named outright beats any instance, as generate_floorplanning.py assigns it.
 std::map<int, std::set<std::string>> DeviceGrid::atomsByDeepestElement() const
 {
-    std::map<std::string, std::pair<std::size_t, int>> owner;  // atom -> (listed by, id)
+    std::map<std::string, std::pair<std::size_t, int>> owner;  // atom -> (depth, id)
     for (const auto& [id, partition] : m_partitions) {
         for (const HierarhyElement& element : partition->elements()) {
-            const std::size_t size = element.vprNames.size();
+            const bool namedAtom = !isRtlInstanceOrParent(element.path) &&
+                                   m_context->atomTypes.count(element.path) != 0;
+            const std::size_t depth =
+                namedAtom ? std::numeric_limits<std::size_t>::max() : element.path.size();
             for (const std::string& atom : element.vprNames) {
-                const auto [it, inserted] = owner.emplace(atom, std::make_pair(size, id));
-                if (!inserted && size < it->second.first) {
-                    it->second = {size, id};
+                const auto [it, inserted] = owner.emplace(atom, std::make_pair(depth, id));
+                if (!inserted && depth > it->second.first) {
+                    it->second = {depth, id};
                 }
             }
         }
@@ -328,6 +334,14 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         // element presence
         if (partition->elements().empty()) {
             m_issues->errors.insert({"Partition '" + partition->name() + "' has no elements assigned to it", ""});
+        } else if (ownedAtoms[partitionId].empty() &&
+                   std::any_of(partition->elements().begin(), partition->elements().end(),
+                               [](const HierarhyElement& e) { return !e.vprNames.empty(); })) {
+            m_issues->errors.insert({"Partition '" + partition->name() + "' is left with no atom",
+                                     "Each atom goes to the deepest constrained instance that holds "
+                                     "it, and other partitions constrain instances inside this "
+                                     "partition's elements that take all their atoms. Drop this "
+                                     "partition, or constrain the inner instances here."});
         }
         // region presence
         if (partition->regions().empty()) {
