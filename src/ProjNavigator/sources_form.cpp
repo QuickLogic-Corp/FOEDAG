@@ -65,8 +65,7 @@ ProjectManager *SourcesForm::ProjManager() { return m_projManager; }
 void SourcesForm::CreateConstraint() { showAddFileDialog(GT_CONSTRAINTS); }
 
 void SourcesForm::SetCurrentFileItem(const QString &strFileName) {
-  QString filename = strFileName.right(strFileName.size() -
-                                       (strFileName.lastIndexOf("/") + 1));
+  QString filename = QFileInfo(strFileName).fileName();
   QList<QTreeWidgetItem *> listItem = m_treeSrcHierachy->findItems(
       filename, Qt::MatchContains | Qt::MatchRecursive);
   foreach (auto item, listItem) {
@@ -617,8 +616,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     QTreeWidgetItem *parentItem{topitemDS};
     for (auto &strfile : listDesFile) {
       if (parentItem) {
-        QString filename =
-            strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+        QString filename = QFileInfo(strfile).fileName();
         QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
         itemf->setText(0, filename);
         itemf->setData(0, Qt::UserRole, strfile);
@@ -666,8 +664,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     QString strTarget = m_projManager->getConstrTargetFile(str);
     for (auto &strfile : listConstrFile) {
       if (parentItem) {
-        QString filename =
-            strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+        QString filename = QFileInfo(strfile).fileName();
         QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
         if (filename == strTarget) {
           itemf->setText(0, filename + SRC_TREE_FLG_TARGET);
@@ -690,8 +687,7 @@ void SourcesForm::CreateFolderHierachyTree() {
 
   for (auto &strfile : listConstrFile) {
     if (parentItem) {
-      QString filename =
-          strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+      QString filename = QFileInfo(strfile).fileName();
       QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
       if (filename == strTarget) {
         itemf->setText(0, filename + SRC_TREE_FLG_TARGET);
@@ -720,8 +716,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     QTreeWidgetItem *parentItem{topitemSS};
     for (auto &strfile : listSimFile) {
       if (parentItem) {
-        QString filename =
-            strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+        QString filename = QFileInfo(strfile).fileName();
         QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
         itemf->setText(0, filename);
         itemf->setData(0, Qt::UserRole, strfile);
@@ -777,8 +772,7 @@ void SourcesForm::CreateFolderHierachyTree() {
   QTreeWidgetItem *parentItemConfS{topitemConfS};
   for (auto &strfile : listConfFile) {
     if (parentItemConfS) {
-      QString filename =
-          strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+      QString filename = QFileInfo(strfile).fileName();
       QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItemConfS);
       itemf->setText(0, filename);
       itemf->setData(0, Qt::UserRole, strfile);
