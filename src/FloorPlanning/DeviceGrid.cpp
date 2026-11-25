@@ -280,17 +280,24 @@ bool DeviceGrid::isRtlInstanceOrParent(const std::string& path) const
 
 // [aurora2#1725 F5] An element lists every atom of its subtree, so a partition on a parent
 // would also count the atoms of a child another partition constrains. Each atom belongs to
-// the deepest element that lists it -- a nested path is longer than its ancestor's -- and an
-// atom named outright beats any instance, as generate_floorplanning.py assigns it.
+// the deepest element that lists it -- a nested path is longer than its ancestor's, and the
+// whole design ("*", <top>, <top>.*) is shallower than any instance, though "<top>" is not
+// a prefix of the instance paths -- and an atom named outright beats any instance, as
+// generate_floorplanning.py assigns it.
 std::map<int, std::set<std::string>> DeviceGrid::atomsByDeepestElement() const
 {
+    const std::string& top = m_context->top;
     std::map<std::string, std::pair<std::size_t, int>> owner;  // atom -> (depth, id)
     for (const auto& [id, partition] : m_partitions) {
         for (const HierarhyElement& element : partition->elements()) {
             const bool namedAtom = !isRtlInstanceOrParent(element.path) &&
                                    m_context->atomTypes.count(element.path) != 0;
-            const std::size_t depth =
-                namedAtom ? std::numeric_limits<std::size_t>::max() : element.path.size();
+            const bool wholeDesign =
+                element.path == "*" ||
+                (!top.empty() && (element.path == top || element.path == top + ".*"));
+            const std::size_t depth = namedAtom     ? std::numeric_limits<std::size_t>::max()
+                                      : wholeDesign ? 0
+                                                    : element.path.size();
             for (const std::string& atom : element.vprNames) {
                 const auto [it, inserted] = owner.emplace(atom, std::make_pair(depth, id));
                 if (!inserted && depth > it->second.first) {
@@ -337,11 +344,14 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
         } else if (ownedAtoms[partitionId].empty() &&
                    std::any_of(partition->elements().begin(), partition->elements().end(),
                                [](const HierarhyElement& e) { return !e.vprNames.empty(); })) {
-            m_issues->errors.insert({"Partition '" + partition->name() + "' is left with no atom",
-                                     "Each atom goes to the deepest constrained instance that holds "
-                                     "it, and other partitions constrain instances inside this "
-                                     "partition's elements that take all their atoms. Drop this "
-                                     "partition, or constrain the inner instances here."});
+            // A warning, not an error: the constraint writer skips such a partition and the
+            // compile goes on (design.md §5).
+            m_issues->warnings.insert({"Partition '" + partition->name() +
+                                           "' is left with no atom and is skipped",
+                                       "Each atom goes to the deepest constrained instance that "
+                                       "holds it, and other partitions constrain instances inside "
+                                       "this partition's elements that take all their atoms. Drop "
+                                       "this partition, or constrain the inner instances here."});
         }
         // region presence
         if (partition->regions().empty()) {

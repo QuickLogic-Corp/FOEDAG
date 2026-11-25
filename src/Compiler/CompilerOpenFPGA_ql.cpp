@@ -10027,6 +10027,9 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       job.removeBeforeRun.push_back(std::filesystem::path(ProjManager()->projectPath()) / stale);
     }
   } else {
+    // A run the writer skips must not leave VPR the previous .qdc's partitions.
+    job.removeBeforeRun.push_back(std::filesystem::path(ProjManager()->projectPath()) /
+                                  (ProjManager()->projectName() + "_constraints.xml"));
     job.removeBeforeRun.push_back(repack_constraints_out);
     job.removeBeforeRun.push_back(storedRepackConstraintsPath(ProjManager()->projectPath(),
                                                               ProjManager()->projectName()));

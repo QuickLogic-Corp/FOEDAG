@@ -19,6 +19,7 @@ struct FloorplanContext {
     int atomsPerTile = kDefaultAtomsPerTile;
     DesignResources designResources;
     std::string netlistSha256;
+    std::string top;  // the owner table's top: its atoms are the whole design
     AtomTypeMap atomTypes;
     DspTileMap dspTiles;
 

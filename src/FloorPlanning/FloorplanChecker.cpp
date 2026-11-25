@@ -62,6 +62,7 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
         return false;
     }
     context.atomTypes = table.atomTypes;
+    context.top = table.top;
     loadDspTiles(postSynthDebugJson(projectPath, topModule), context.dspTiles);
     device.setOwnAtomCounts(table.ownAtomCounts);
     for (const auto& [id, partition] : device.partitions()) {
