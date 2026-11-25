@@ -146,10 +146,6 @@ public:
     int dspRequiredCount() const { return m_dspRequiredCount; }
     int bramRequiredCount() const { return m_bramRequiredCount; }
 
-    // Raw atom count behind clbRequiredCount(), for anything reporting atoms rather than
-    // the tiles they pack into.
-    int clbAtomCount() const { return m_clbAtomCount; }
-
     // [aurora2#1725] Tile counts by type across every region of this partition --
     // what's physically available, as opposed to *Required*Count() above. Computed
     // on demand rather than cached: a region's tiles can change after addRegion()
