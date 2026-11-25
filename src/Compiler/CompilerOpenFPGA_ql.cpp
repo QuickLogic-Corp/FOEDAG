@@ -3396,6 +3396,15 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     vpr_options += std::string(" ") + vpr_custom_options_string;
   }
 
+  // options set with the Tcl command 'pnr_options', for *all* stages, like the
+  // custom options above. VPR rejects an option given twice, so an option set
+  // both here and in the settings JSON makes the stage fail.
+  std::string pnr_options_string = PnROpt();
+  StringUtils::trim(pnr_options_string);
+  if (!pnr_options_string.empty()) {
+    vpr_options += std::string(" ") + pnr_options_string;
+  }
+
   std::string netlistFile;
   switch (GetNetlistType()) {
     case NetlistType::Verilog:
@@ -3419,11 +3428,6 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     netlistFile =
         FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
-#if UPSTREAM_UNUSED
-  std::string pnrOptions;
-  if (!PnROpt().empty()) pnrOptions += " " + PnROpt();
-  if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
-#endif // #if UPSTREAM_UNUSED
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
