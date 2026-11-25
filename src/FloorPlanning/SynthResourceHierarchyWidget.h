@@ -19,6 +19,7 @@
 class QLineEdit;
 class QCheckBox;
 class QSplitter;
+class QHBoxLayout;
 
 namespace fp {
 
@@ -89,6 +90,9 @@ public:
     // The Type column is always shown.
     void setAtomListVisible(bool visible);
 
+    // Appends `widget` at the right end of the row above the tree.
+    void addHeaderWidget(QWidget* widget);
+
     // [aurora2#1725] What build() found while matching RTL leaves to atoms: the leaves with
     // no atoms at all, split by whether stage P4 accounts for them. Reported by
     // FloorPlanningWidget rather than logged from here, because it owns two of these trees
@@ -148,6 +152,7 @@ private:
     int m_findAtomHit = -1;
     QString m_viewLabelTemplate;
     QLabel* m_lbView{nullptr};
+    QHBoxLayout* m_toolbarLayout{nullptr};
     QTreeView* m_view{nullptr};
     QStandardItemModel* m_model{nullptr};
 

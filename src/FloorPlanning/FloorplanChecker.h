@@ -22,12 +22,6 @@ namespace fp {
 // whose own logic no partition takes) are reported and the flow proceeds.
 class FloorplanChecker {
 public:
-    static constexpr const char* kTreatWarningsAsErrorsKey =
-        "FloorPlanning/treat_warnings_as_errors";
-
-    // The floorplan's "Treat warnings as errors" option, from floorplanningOptionsFile().
-    static bool treatWarningsAsErrors(const std::filesystem::path& qdcPath);
-
     // projectPath holds the flow's artifacts; qdcPath is the file the flow is
     // about to consume. Returns false when there is nothing to check (no .qdc, or no device
     // description), leaving `issues` empty -- that is not a failure. Also false, with

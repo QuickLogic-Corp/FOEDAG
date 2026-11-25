@@ -7,18 +7,9 @@
 #include "QdcSerializer.h"
 #include "RtlInstanceModel.h"
 
-#include <QSettings>
-
 #include <filesystem>
 
 namespace fp {
-
-bool FloorplanChecker::treatWarningsAsErrors(const std::filesystem::path& qdcPath)
-{
-    const QSettings cfg(QString::fromStdString(floorplanningOptionsFile(qdcPath).string()),
-                        QSettings::IniFormat);
-    return cfg.value(kTreatWarningsAsErrorsKey, false).toBool();
-}
 
 bool FloorplanChecker::check(const std::filesystem::path& projectPath,
                              const std::string& projectName,
@@ -96,7 +87,6 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     // does the same before it checks, for the same reason.
     device.refreshPartitions();
 
-    device.setTreatWarningsAsErrors(treatWarningsAsErrors(qdcPath));
     issues = *device.checkIssues();
     return true;
 }

@@ -95,14 +95,6 @@ public:
         m_rtlInstances = std::move(rtlInstances);
     }
 
-    // [aurora2#1725] "Treat warnings as errors" from the Options menu. Every advisory then
-    // counts as an error, which is what makes it block saving the .qdc -- hasErrors() is the
-    // gate. Off by default: the advisories are estimates and the packer is the authority.
-    void setTreatWarningsAsErrors(bool treatWarningsAsErrors) {
-        m_treatWarningsAsErrors = treatWarningsAsErrors;
-    }
-    bool treatWarningsAsErrors() const { return m_treatWarningsAsErrors; }
-
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
 
@@ -123,7 +115,6 @@ private:
     std::unordered_set<std::string> m_deletedInstances;
     std::set<std::string> m_rtlInstances;
     bool isRtlInstanceOrParent(const std::string& path) const;
-    bool m_treatWarningsAsErrors = false;
 
     std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;
     std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;

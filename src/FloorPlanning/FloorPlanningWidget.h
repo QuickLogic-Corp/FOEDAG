@@ -139,9 +139,8 @@ private:
     void applyInitialSplitterSizes();
 
     // [aurora2#1725] Options menu state, persisted in floorplanning.cfg beside the .qdc.
-    // The actions are the single source of truth for the values -- they are what the user
-    // sets and what saveOptions() reads back.
-    QAction* m_actTreatWarningsAsErrors{nullptr};
+    // The action is the single source of truth for the value -- it is what the user sets
+    // and what saveOptions() reads back.
     QAction* m_actShowAtomList{nullptr};
     std::filesystem::path m_optionsFilePath;
 

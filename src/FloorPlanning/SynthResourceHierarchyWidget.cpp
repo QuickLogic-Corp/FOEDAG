@@ -309,6 +309,7 @@ SynthResourceHierarchyWidget::SynthResourceHierarchyWidget(int flags, QWidget* p
     }
 
     QHBoxLayout* toolbarLayout = new QHBoxLayout;
+    m_toolbarLayout = toolbarLayout;
     toolbarLayout->setContentsMargins(m,m,m,m);
     toolbarLayout->setSpacing(m);
     layout->addLayout(toolbarLayout);
@@ -1209,6 +1210,11 @@ void SynthResourceHierarchyWidget::showItemsWithAtom(const QString& text)
         return any;
     };
     filter(QModelIndex());
+}
+
+void SynthResourceHierarchyWidget::addHeaderWidget(QWidget* widget)
+{
+    m_toolbarLayout->addWidget(widget);
 }
 
 void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)

@@ -19,6 +19,8 @@
 #include <QLineEdit>
 #include <QSplitter>
 #include <QToolBar>
+#include <QToolButton>
+#include <QMenu>
 #include <QTabWidget>
 #include <QTreeView>
 #include <QWidgetAction>
@@ -3123,29 +3125,33 @@ struct CheckerProject {
 
 }  // namespace
 
-TEST(FloorplanIssues, TheBatchCheckerReadsThePanelsWarningsAsErrorsOption)
+TEST(FloorPlanningLayout, OptionsSitsInTheRtlTreeWithOnlyTheAtomListAction)
 {
-    CheckerProject project;
-    const fp::DeviceGrid::Issues advisory = project.check();
-    EXPECT_TRUE(advisory.errors.empty());
-    ASSERT_FALSE(advisory.warnings.empty()) << "a constant driver is a warning";
-
-    fp::FloorPlanningWidget panel(QStringLiteral("checker-test"));
+    fp::FloorPlanningWidget panel(QStringLiteral("layout-test"));
     prepare(panel, 1366);
-    panel.setQdcFilePath(project.qdc, /*load*/false);
-    QAction* option = nullptr;
-    for (QAction* action : panel.findChildren<QAction*>()) {
-        if (action->text() == "Treat warnings as errors") {
-            option = action;
-        }
-    }
-    ASSERT_NE(option, nullptr);
-    option->setChecked(true);
-    EXPECT_TRUE(fp::FloorplanChecker::treatWarningsAsErrors(project.qdc));
 
-    const fp::DeviceGrid::Issues promoted = project.check();
-    EXPECT_TRUE(promoted.warnings.empty());
-    EXPECT_EQ(promoted.errors, advisory.warnings);
+    const auto buttons = panel.findChildren<QToolButton*>("floorplanOptions");
+    ASSERT_EQ(buttons.size(), 1);
+    QToolButton* options = buttons.front();
+
+    QWidget* owner = options->parentWidget();
+    while (owner && !qobject_cast<fp::SynthResourceHierarchyWidget*>(owner)) {
+        owner = owner->parentWidget();
+    }
+    EXPECT_NE(owner, nullptr) << "Options belongs to the RTL hierarchy tree";
+
+    auto* toolBar = panel.findChild<QToolBar*>();
+    ASSERT_NE(toolBar, nullptr);
+    for (QAction* action : toolBar->actions()) {
+        EXPECT_NE(action->text(), "Options") << "Options left the panel toolbar";
+    }
+
+    EXPECT_EQ(options->popupMode(), QToolButton::InstantPopup);
+    ASSERT_NE(options->menu(), nullptr);
+    const QList<QAction*> actions = options->menu()->actions();
+    ASSERT_EQ(actions.size(), 1);
+    EXPECT_EQ(actions.front()->text(), "Show Atom List and Primitive columns");
+    EXPECT_TRUE(actions.front()->isCheckable());
 }
 
 TEST(FloorplanIssues, WithoutAnOwnerTableTheCheckIsAnErrorNotNoIssues)
