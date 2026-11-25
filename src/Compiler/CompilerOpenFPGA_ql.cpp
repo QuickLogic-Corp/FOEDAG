@@ -12877,6 +12877,10 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosys_options += " -no_dsp";
   }
 
+  if( QLSettingsManager::getStringValue("yosys", "general", "pcin17_enabled") == "unchecked" ) {
+    yosys_options += " -no_pcin17";
+  }
+
   if( QLSettingsManager::getStringValue("yosys", "general", "no_bram") == "checked" ) {
 
     yosys_options += " -no_bram";
@@ -12915,6 +12919,12 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
                    QLSettingsManager::getStringValue("yosys", "general", "mince_num");
   }
   
+  if( !QLSettingsManager::getStringValue("yosys", "general", "cascade_chain_max").empty() ) {
+    yosys_options += std::string(" -chain_max") +
+                   std::string(" ") +
+                   QLSettingsManager::getStringValue("yosys", "general", "cascade_chain_max");
+  }
+
   // Promote boundary registers into the IO tile flip-flops. Reset-carrying
   // registers become io_sdffr/io_sdffnr, which only exist on a GPIO v3.0
   // architecture, so this stays opt-in.
