@@ -2816,8 +2816,9 @@ void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
   WarningMessage(
       "Floorplanning verification unavailable: synthesis wrote no owner table (a custom "
       "Yosys script without the synthesis pass's -owner_table), so instance validation, "
-      "resource reporting and constraint-compliance checking are skipped. This does not "
-      "affect the build.");
+      "resource reporting and constraint-compliance checking are skipped. A .qdc whose "
+      "set_region names anything but ports cannot be applied without the table: "
+      "constraint generation stops and asks to re-run synthesis.");
 }
 
 // [aurora2#1725 stage P4] Notes, per RTL instance, how synthesis left it, from the owner
