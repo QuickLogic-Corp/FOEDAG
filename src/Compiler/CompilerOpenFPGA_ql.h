@@ -267,6 +267,27 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_privateRepackGeneratedIn;
   std::mutex m_privateRepackMutex;
 
+  // The "longest DSP chain" lines of a synthesis log: how many, and the length on the last.
+  struct LongestDspChain {
+    int line_count = 0;
+    std::optional<int> length;
+  };
+  static LongestDspChain findLongestDspChain(std::istream& synth_log);
+  static bool scriptHasMaxChainLengthOption(std::istream& add_layout_script);
+  static bool deviceHasDspV4(const json& device_config);
+  // What packing prints about the longest DSP chain, and what it adds to the add_layout.py command.
+  struct MaxChainLengthDecision {
+    std::string repeated_lines_message;
+    std::string message;
+    bool message_is_warning = false;
+    std::string option;
+  };
+  static MaxChainLengthDecision decideMaxChainLength(const LongestDspChain& longest_chain,
+                                                     bool device_has_dsp_v4,
+                                                     bool auto_layout_mode,
+                                                     bool script_has_option,
+                                                     const std::string& synth_log_name);
+
   std::string ToUpper(std::string str);
   std::string ToLower(std::string str);
   

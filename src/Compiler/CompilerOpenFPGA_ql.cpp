@@ -4475,6 +4475,105 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
 }
 
 
+// Only the plugin's full prefix matches: the older 'ql_dspv4: cascade: ... longest L'
+// line leaves some links out, so it must never be read as the chain length.
+CompilerOpenFPGA_ql::LongestDspChain CompilerOpenFPGA_ql::findLongestDspChain(std::istream& synth_log) {
+  static const std::string chain_length_prefix = "ql_dsp4_chain_report: longest DSP chain ";
+  LongestDspChain longest_chain;
+  std::string line;
+  while(std::getline(synth_log, line)) {
+    if(line.rfind(chain_length_prefix, 0) != 0) {
+      continue;
+    }
+    const std::size_t digits_end = line.find_first_not_of("0123456789", chain_length_prefix.size());
+    const std::string digits = line.substr(chain_length_prefix.size(), digits_end - chain_length_prefix.size());
+    // bounded so the conversion below cannot overflow.
+    if(digits.empty() || digits.size() > 9) {
+      continue;
+    }
+    longest_chain.line_count++;
+    longest_chain.length = std::stoi(digits);
+  }
+  return longest_chain;
+}
+
+
+// An older add_layout.py stops on an option it does not know.
+bool CompilerOpenFPGA_ql::scriptHasMaxChainLengthOption(std::istream& add_layout_script) {
+  std::string line;
+  while(std::getline(add_layout_script, line)) {
+    if(line.find("--max_chain_length") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
+// The DSP generation is selected by DSP_VERSION ("v4.0"), which replaces the
+// older DSP_TYPE ("DSPV4"). Both are in the field during the migration and
+// neither is universal -- some devices carry only the new key, the fixed
+// TURNKEY parts still carry only the old one -- so read DSP_VERSION first
+// and fall back to DSP_TYPE. Both are optional: a device with neither has no
+// DSP generation to select, so a missing key means "not V4" rather than a
+// configuration error.
+bool CompilerOpenFPGA_ql::deviceHasDspV4(const json& device_config) {
+  bool dsp_v4 = false;
+  if (device_config.contains("DSP_VERSION")) {
+    std::string dsp_version =
+        device_config["DSP_VERSION"].get<std::string>();
+    // Match the major version so v4.1 and later keep working, not the
+    // exact string.
+    dsp_v4 = dsp_version.size() >= 2 &&
+             (dsp_version[0] == 'v' || dsp_version[0] == 'V') &&
+             dsp_version[1] == '4';
+  }
+  else if (device_config.contains("DSP_TYPE")) {
+    dsp_v4 =
+        device_config["DSP_TYPE"].get<std::string>() == "DSPV4";
+  }
+  return dsp_v4;
+}
+
+
+CompilerOpenFPGA_ql::MaxChainLengthDecision CompilerOpenFPGA_ql::decideMaxChainLength(
+    const LongestDspChain& longest_chain,
+    bool device_has_dsp_v4,
+    bool auto_layout_mode,
+    bool script_has_option,
+    const std::string& synth_log_name) {
+  MaxChainLengthDecision decision;
+  if(!longest_chain.length) {
+    // Only DSP-V4 synthesis prints the line, so elsewhere its absence says nothing.
+    if(device_has_dsp_v4) {
+      decision.message = "No \"longest DSP chain\" line in " + synth_log_name + ": --max_chain_length not passed.";
+    }
+    return decision;
+  }
+  if(longest_chain.line_count > 1) {
+    decision.repeated_lines_message = "Found " + std::to_string(longest_chain.line_count) +
+                                      " \"longest DSP chain\" lines in " + synth_log_name + ". Using the last.";
+  }
+  const std::string length = std::to_string(*longest_chain.length);
+  const std::string length_read = "Longest DSP chain: " + length + ". ";
+  if(*longest_chain.length < 2) {
+    decision.message = length_read + "Below 2: --max_chain_length not passed.";
+  }
+  else if(!auto_layout_mode) {
+    decision.message = length_read + "Layout mode is not AUTO: --max_chain_length not passed.";
+  }
+  else if(!script_has_option) {
+    decision.message = length_read + "This device package's add_layout.py has no --max_chain_length: it cannot size for a chain of " + length + ".";
+    decision.message_is_warning = true;
+  }
+  else {
+    decision.message = length_read + "Passing --max_chain_length " + length + " to add_layout.py.";
+    decision.option = " --max_chain_length " + length;
+  }
+  return decision;
+}
+
+
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
@@ -4883,6 +4982,31 @@ bool CompilerOpenFPGA_ql::Packing() {
   }
   // LAYOUT GENERATION MODE RESOLUTION --
 
+  // Read here, where both modes are final and every kind of device passes.
+  MaxChainLengthDecision max_chain_length_decision;
+  {
+    const std::string synth_log_name = ProjManager()->projectName() + "_synth.log";
+    std::ifstream synth_log(std::filesystem::path(ProjManager()->projectPath()) / synth_log_name);
+    std::ifstream add_layout_script(QLDeviceManager::getInstance()->deviceTypeDirPath(current_device_target) /
+                                    "aurora" / "add_layout.py");
+    json device_config;
+    QLDeviceManager::getInstance()->loadDeviceConfigJSON(current_device_target, device_config);
+    max_chain_length_decision = decideMaxChainLength(findLongestDspChain(synth_log),
+                                                     deviceHasDspV4(device_config),
+                                                     m_autoLayoutGenerationMode,
+                                                     scriptHasMaxChainLengthOption(add_layout_script),
+                                                     synth_log_name);
+  }
+  if(!max_chain_length_decision.repeated_lines_message.empty()) {
+    Message(max_chain_length_decision.repeated_lines_message);
+  }
+  if(max_chain_length_decision.message_is_warning) {
+    WarningMessage(max_chain_length_decision.message);
+  }
+  else if(!max_chain_length_decision.message.empty()) {
+    Message(max_chain_length_decision.message);
+  }
+
   int status = 0;
   if(m_customLayoutGenerationMode == true) 
   {
@@ -5092,6 +5216,7 @@ bool CompilerOpenFPGA_ql::Packing() {
         command_auto_device +=
           std::string(" --vpr_stdout_log ") + vpr_stdout_log_filepath.string();
       }
+      command_auto_device += max_chain_length_decision.option;
       if(!add_layout_device_config_path.empty()) {
         // The whole configuration - device type, layout mode, geometry, margin -
         // comes from this one file. Left to itself the script looks for a
@@ -12201,28 +12326,7 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
         ErrorMessage("BRAM_TYPE specified is not TDP, TDP_ECC, SDP, or SDP_ECC.");
       }
 
-      // The DSP generation is selected by DSP_VERSION ("v4.0"), which replaces the
-      // older DSP_TYPE ("DSPV4"). Both are in the field during the migration and
-      // neither is universal -- some devices carry only the new key, the fixed
-      // TURNKEY parts still carry only the old one -- so read DSP_VERSION first
-      // and fall back to DSP_TYPE. Both are optional, unlike BRAM_TYPE above: a
-      // device with neither has no DSP generation to select, so a missing key
-      // means "not V4" rather than a configuration error.
-      bool dsp_v4 = false;
-      if (device_target_config_json.contains("DSP_VERSION")) {
-        std::string dsp_version =
-            device_target_config_json["DSP_VERSION"].get<std::string>();
-        // Match the major version so v4.1 and later keep working, not the
-        // exact string.
-        dsp_v4 = dsp_version.size() >= 2 &&
-                 (dsp_version[0] == 'v' || dsp_version[0] == 'V') &&
-                 dsp_version[1] == '4';
-      }
-      else if (device_target_config_json.contains("DSP_TYPE")) {
-        dsp_v4 =
-            device_target_config_json["DSP_TYPE"].get<std::string>() == "DSPV4";
-      }
-      synplifyScript->apply("${DSP4_VALUE}", dsp_v4 ? "1" : "0");
+      synplifyScript->apply("${DSP4_VALUE}", deviceHasDspV4(device_target_config_json) ? "1" : "0");
       designFiles += filesScript + "\n";
     }
 #ifdef _WIN32
