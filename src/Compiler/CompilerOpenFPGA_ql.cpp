@@ -2783,9 +2783,9 @@ CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanning
     const std::string& scriptName, const std::string& label, const std::string& skipPhrase) {
   FloorplanningTool tool;
 
-  tool.script = InstalledScript(std::filesystem::path(scriptName));
+  tool.script = InstalledScript(std::filesystem::path("floorplanning") / scriptName);
   if (tool.script.empty()) {
-    ErrorMessage("Cannot locate scripts/" + scriptName + " in the installation. " +
+    ErrorMessage("Cannot locate scripts/floorplanning/" + scriptName + " in the installation. " +
                  label + " failed!");
     return tool;  // ready=false, result=false: a broken installation is an error
   }
@@ -2822,7 +2822,7 @@ void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
 }
 
 // [aurora2#1725 stage P4] Notes, per RTL instance, how synthesis left it, from the owner
-// table synthesis just wrote -- see scripts/floorplanning_validate_instances.py. For the
+// table synthesis just wrote -- see scripts/floorplanning/validate_instances.py. For the
 // panel only: nothing downstream gates on it.
 bool CompilerOpenFPGA_ql::RunValidateInstances() {
   const std::string topModule = ProjManager()->DesignTopModule();
@@ -2837,7 +2837,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
 
   // Best-effort: synthesis has already succeeded by the time this runs.
   FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_validate_instances.py", "Instance validation",
+      "validate_instances.py", "Instance validation",
       "instance validation");
   if (!tool.ready) return tool.result;
 
@@ -2855,7 +2855,7 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
 
   if (RunFloorplanningStage(tool.python.string(), args) != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " instance validation (floorplanning_validate_instances.py) failed, see " +
+                 " instance validation (floorplanning/validate_instances.py) failed, see " +
                  FloorplanningStageLog().string());
   }
   return true;
@@ -2890,7 +2890,7 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
 
   // Best-effort: the compile stage itself has already succeeded.
   FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_design_resources.py", "Design-resource extraction",
+      "design_resources.py", "Design-resource extraction",
       "resource reporting");
   if (!tool.ready) return tool.result;
   const std::filesystem::path& design_resources_script_path = tool.script;
@@ -2923,14 +2923,14 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
     // Best-effort, as above: report it, but a resource-report failure must not fail a
     // compile stage that has already succeeded.
     ErrorMessage("Design " + ProjManager()->projectName() +
-                 " resource reporting (floorplanning_design_resources.py) failed, see " +
+                 " resource reporting (floorplanning/design_resources.py) failed, see " +
                  FloorplanningStageLog().string());
   }
   return true;
 }
 
 // [aurora2#1725 stage P7] post-placement compliance -- see
-// scripts/floorplanning_constraint_compliance.py. Every atom the constraints list must be
+// scripts/floorplanning/constraint_compliance.py. Every atom the constraints list must be
 // placed inside its partition's region; one that is not fails placement, with the atoms on
 // the console (REQ-006).
 bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
@@ -2949,7 +2949,7 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   }
 
   FloorplanningTool tool = ResolveFloorplanningTool(
-      "floorplanning_constraint_compliance.py", "Constraint-compliance check",
+      "constraint_compliance.py", "Constraint-compliance check",
       "constraint compliance");
   if (!tool.ready) return tool.result;
 
@@ -13202,9 +13202,9 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
   std::string floorplanning_post_synth;
   if (std::getenv("AURORA_FLOORPLANNING_DEBUG") != nullptr) {
-    const std::filesystem::path script = InstalledScript("floorplanning_post_synth.tcl");
+    const std::filesystem::path script = InstalledScript(std::filesystem::path("floorplanning") / "post_synth.tcl");
     if (script.empty()) {
-      ErrorMessage("Cannot locate scripts/floorplanning_post_synth.tcl in the installation; "
+      ErrorMessage("Cannot locate scripts/floorplanning/post_synth.tcl in the installation; "
                    "the floorplanning debug dump is skipped.");
     } else {
       // A generated env.tcl rather than argv: yosys' `tcl` sets argc/argv as globals in one

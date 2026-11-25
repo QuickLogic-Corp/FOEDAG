@@ -2441,7 +2441,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   }
 
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
-  // schema whatever point the flow has reached (floorplanning_design_resources.py, A.13.5).
+  // schema whatever point the flow has reached (floorplanning/design_resources.py, A.13.5).
   // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be
   // set before loadNetList() below, which builds the trees and populates every partition:
   // Partition::addElement() reads it as it goes. A missing file leaves the figures at tier

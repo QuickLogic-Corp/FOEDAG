@@ -53,7 +53,7 @@ inline std::filesystem::path floorplanningArtifactOrBare(const std::filesystem::
     return preferred;
 }
 
-// Named after the project's top module, as floorplanning_post_synth.tcl writes it. One helper
+// Named after the project's top module, as floorplanning/post_synth.tcl writes it. One helper
 // so the panel and the batch checker cannot read two different files.
 inline std::filesystem::path postSynthDebugJson(const std::filesystem::path& projectPath,
                                                 const std::string& topModule) {

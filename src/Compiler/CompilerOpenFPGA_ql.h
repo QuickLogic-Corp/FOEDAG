@@ -632,7 +632,7 @@ private:
   std::atomic<bool> m_runLockWarned{false};
 
   // [aurora2#1725 stage P4] Notes how synthesis left each RTL instance (validation.json,
-  // via scripts/floorplanning_validate_instances.py), for the panel. Best-effort: without
+  // via scripts/floorplanning/validate_instances.py), for the panel. Best-effort: without
   // an owner table it is skipped, and synthesis has already succeeded.
   bool RunValidateInstances();
 
@@ -678,7 +678,7 @@ private:
     bool result = false;
   };
 
-  // Locate one floorplanning helper script and the interpreter to run it with.
+  // Locate one script under scripts/floorplanning/ and the interpreter to run it with.
   // `label` names the stage in the error text ("Instance validation"); `skipPhrase` is
   // the wording used when python is absent and the stage is skipped ("instance
   // validation").
@@ -693,7 +693,7 @@ private:
 
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
-  // scripts/floorplanning_design_resources.py. Best-effort like RunValidateInstances()
+  // scripts/floorplanning/design_resources.py. Best-effort like RunValidateInstances()
   // above: a missing input skips the stage rather than failing an already-succeeded compile.
   //
   // maxTier caps what a given call may produce -- synthesis passes 1, placement 2 -- and
