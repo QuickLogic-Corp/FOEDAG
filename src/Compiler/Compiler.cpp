@@ -2734,6 +2734,8 @@ void Compiler::SetEnvironmentVariable(const std::string variable,
 
 std::string Compiler::getQtPlatformPluginFor(bool gui) {
   if (!gui) return "offscreen";
+  // A GUI test runs aurora offscreen, often with no X server: the VPR viewer follows it.
+  if (qgetenv("QT_QPA_PLATFORM") == "offscreen") return "offscreen";
 #ifdef __linux__
   // Avoid Wayland: the GUI needs X11 on Ubuntu 22.04+ Wayland sessions.
   return "xcb";

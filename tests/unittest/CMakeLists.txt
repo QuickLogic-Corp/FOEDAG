@@ -65,6 +65,7 @@ set (CPP_LIST
     Compiler/DumpOptionsGuard_test.cpp
     Compiler/EncryptedCopy_test.cpp
     Compiler/ClockBinding_test.cpp
+    Compiler/QtPlatformPlugin_test.cpp
     Main/EventLoopProbe_test.cpp
     Main/ReportView_gui_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
