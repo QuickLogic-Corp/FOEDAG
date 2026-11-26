@@ -42,6 +42,7 @@ struct Sidecar {
   int tolerance{0};      // per channel
   int maxDiffPixels{0};  // differing pixels allowed
   QList<QRect> masks;    // in the captured widget's coordinates
+  bool reportOnly{false};  // a mismatch is printed, not failed
 };
 // A missing file gives the defaults; a broken one sets error.
 Sidecar readSidecar(const QString &path, QString *error);

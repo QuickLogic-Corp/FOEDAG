@@ -255,6 +255,57 @@ TEST(GuiScreenshot, DisplayModeReportsOnly) {
   Tcl_DeleteInterp(interp);
 }
 
+// U-023: a report-only step prints its mismatch, writes the triptych and does
+// not fail; when it matches it is still printed (REQ-046).
+TEST(GuiScreenshot, ReportOnly) {
+  QTemporaryDir dir;
+  ASSERT_TRUE(dir.isValid());
+  QLabel label{"Gui 123"};
+  label.setObjectName("u023Label");
+  label.setFixedSize(120, 30);
+  label.show();
+  const QImage image = capture(&label, {}, {});
+  QImage golden = image;
+  golden.setPixel(0, 0, golden.pixel(0, 0) ^ 0x00ffffff);
+  const QString goldenPath =
+      dir.path() + "/golden/" + platformDir() + "/u023/step.png";
+  QDir().mkpath(QFileInfo(goldenPath).absolutePath());
+  ASSERT_TRUE(golden.save(goldenPath));
+  QFile sidecar{goldenPath.chopped(4) + ".json"};
+  ASSERT_TRUE(sidecar.open(QIODevice::WriteOnly));
+  sidecar.write(R"({"report_only": true})");
+  sidecar.close();
+
+  qputenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR", (dir.path() + "/golden").toUtf8());
+  qputenv("GUI_TEST_FRAMEWORK_ARTIFACT_DIR", (dir.path() + "/out").toUtf8());
+  Tcl_Interp *interp = Tcl_CreateInterp();
+  registerGuiTestCommands(interp);
+  auto run = [&](std::string *printed) {
+    std::ostringstream out;
+    std::streambuf *old = std::cout.rdbuf(out.rdbuf());
+    const int code =
+        Tcl_Eval(interp, "gui_screenshot u023/step -widget u023Label");
+    std::cout.rdbuf(old);
+    *printed = out.str();
+    return code;
+  };
+  std::string printed;
+  EXPECT_EQ(run(&printed), TCL_OK) << Tcl_GetStringResult(interp);
+  EXPECT_NE(printed.find("REPORT-ONLY MISMATCH u023/step (1 px)"),
+            std::string::npos)
+      << printed;
+  EXPECT_TRUE(QFile::exists(dir.path() + "/out/u023/step.diff.png"));
+
+  ASSERT_TRUE(image.save(goldenPath));
+  EXPECT_EQ(run(&printed), TCL_OK) << Tcl_GetStringResult(interp);
+  EXPECT_NE(printed.find("REPORT-ONLY MATCH u023/step"), std::string::npos)
+      << printed;
+
+  qunsetenv("GUI_TEST_FRAMEWORK_GOLDEN_DIR");
+  qunsetenv("GUI_TEST_FRAMEWORK_ARTIFACT_DIR");
+  Tcl_DeleteInterp(interp);
+}
+
 // U-021: a golden written twice has the same bytes, with no time or text
 // chunk (REQ-041).
 TEST(GuiScreenshot, RepeatableBytes) {

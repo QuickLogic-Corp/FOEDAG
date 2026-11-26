@@ -119,6 +119,7 @@ run() {
 passed=0
 failed=0
 skipped=0
+report_only=""
 for scenario in "$@"; do
   scenario=$(cd "$(dirname "$scenario")" && pwd)/$(basename "$scenario")
   name=$(basename "$scenario" .tcl)
@@ -190,7 +191,15 @@ for scenario in "$@"; do
     grep -A1 '^FAIL: ' "$dir/replay.log" | sed 's/^/    /'
     grep -A1 '^WARN: ' "$dir/replay.log" | sed 's/^/    /'
   fi
+  steps=$(grep '^REPORT-ONLY ' "$dir/replay.log" 2>/dev/null)
+  if [ -n "$steps" ]; then
+    sed 's/^/    /' <<< "$steps"
+    report_only+=$(sed 's/^REPORT-ONLY /  /' <<< "$steps")$'\n'
+  fi
 done
+
+# Report-only steps no longer guard their screen, so the list stays in sight.
+[ -z "$report_only" ] || printf 'Report-only steps:\n%s' "$report_only"
 
 echo "GUI scenarios: $passed passed, $failed failed, $skipped skipped"
 [ $failed -eq 0 ]

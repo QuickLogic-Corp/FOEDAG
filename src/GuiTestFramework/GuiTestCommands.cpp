@@ -1249,8 +1249,12 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
   }
   const int differing =
       GuiScreenshot::countDifferences(reference, image, sidecar.tolerance);
-  if (differing >= 0 && differing <= sidecar.maxDiffPixels)
-    return display ? report("MATCH " + id) : succeed(interp);
+  // A report-only step is listed on every run, so it is never forgotten.
+  if (differing >= 0 && differing <= sidecar.maxDiffPixels) {
+    if (display) return report("MATCH " + id);
+    return sidecar.reportOnly ? report("REPORT-ONLY MATCH " + id)
+                              : succeed(interp);
+  }
 
   writeImage(GuiScreenshot::triptych(reference, image), diff);
   const QString detail =
@@ -1262,6 +1266,8 @@ int guiScreenshot(void *, Tcl_Interp *interp, int argc, const char *argv[]) {
                 .arg(image.height())
           : QString("%1 px").arg(differing);
   if (display) return report(QString("MISMATCH %1 (%2)").arg(id, detail));
+  if (sidecar.reportOnly)
+    return report(QString("REPORT-ONLY MISMATCH %1 (%2)").arg(id, detail));
   return fail(interp, QString("%1: mismatch: %2, %3 allowed; triptych %4")
                           .arg(what, detail)
                           .arg(sidecar.maxDiffPixels)

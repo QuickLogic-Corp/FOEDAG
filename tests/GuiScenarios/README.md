@@ -83,7 +83,10 @@ with `golden/<platform>/<scenario>/<step>.png`. Masked widgets are blanked in
 both images. An optional `<step>.json` next to the golden sets
 `{"tol": 0, "max_diff_pixels": 0, "masks": [[x, y, w, h]]}`. A mismatch fails
 the run and writes `<step>.diff.png`: golden, capture and difference side by
-side.
+side. With `"report_only": true` the step is still compared and its triptych
+written, but a mismatch is printed as `REPORT-ONLY MISMATCH <scenario>/<step>
+(<n> px)` and does not fail the run; `run_scenarios.sh` lists every
+report-only step at the end.
 
 The comparison is exact, so goldens only match on the machine image that made
 them. It is off unless `GUI_TEST_FRAMEWORK_GOLDEN_DIR` is set: captures are

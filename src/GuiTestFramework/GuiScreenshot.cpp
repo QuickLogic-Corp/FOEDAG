@@ -68,6 +68,7 @@ Sidecar readSidecar(const QString &path, QString *error) {
   const QJsonObject json = doc.object();
   sidecar.tolerance = json.value("tol").toInt(0);
   sidecar.maxDiffPixels = json.value("max_diff_pixels").toInt(0);
+  sidecar.reportOnly = json.value("report_only").toBool(false);
   for (const QJsonValue &mask : json.value("masks").toArray()) {
     const QJsonArray r = mask.toArray();
     if (r.size() != 4) {
