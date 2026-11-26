@@ -901,6 +901,10 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     instance->Generated(generated);
     if (!generator->AddIPInstance(instance, !generated)) {
       ok = false;
+      auto kept = generator->IPInstances();
+      if (std::find(kept.begin(), kept.end(), instance) == kept.end() &&
+          instance != generator->PreviewInstance())
+        delete instance;
     }
     return ok ? TCL_OK : TCL_ERROR;
   };
@@ -958,15 +962,35 @@ bool IPGenerator::AddIPInstance(IPInstance* instance, bool preview) {
   bool status = true;
   const IPDefinition* def = instance->Definition();
 
-  // Remove old IP Instance if an instance with the same ModuleName is passed
-  auto isMatch = [instance](IPInstance* targetInstance) {
-    return (targetInstance->ModuleName() == instance->ModuleName()) &&
-           (targetInstance->Version() == instance->Version());
+  // The GUI passes -version v1_0 and scripts pass V1_0.
+  auto sameVersion = [instance](IPInstance* other) {
+    return StringUtils::toLower(other->Version()) ==
+           StringUtils::toLower(instance->Version());
   };
-  auto it = std::find_if(m_instances.begin(), m_instances.end(), isMatch);
-  if (!preview && it != m_instances.end()) {
-    m_instances.erase(it);
+
+  // The module name names the wrapper and its <name>_core, so two versions
+  // cannot share it: ipgenerate would silently build whichever came first.
+  for (IPInstance* other : m_instances) {
+    if (other != instance && instance->Generated() && other->Generated() &&
+        other->ModuleName() == instance->ModuleName() && !sameVersion(other)) {
+      GetCompiler()->ErrorMessage(
+          "Module name '" + instance->ModuleName() + "' is already used by " +
+          other->IPName() + " (" + other->Version() +
+          "). Choose another -mod_name for " + instance->IPName() + ".");
+      return false;
+    }
   }
+
+  // Same name and version is a reconfigure. A GUI preview (-template) of
+  // another version gives way too, but a preview never displaces a real one.
+  auto isReplaced = [instance, &sameVersion](IPInstance* other) {
+    return other->ModuleName() == instance->ModuleName() &&
+           (sameVersion(other) || !other->Generated());
+  };
+  if (!preview)
+    m_instances.erase(
+        std::remove_if(m_instances.begin(), m_instances.end(), isReplaced),
+        m_instances.end());
 
   // Check parameters
   std::set<std::string> legalParams;
@@ -1033,11 +1057,16 @@ bool IPGenerator::AddIPInstance(IPInstance* instance, bool preview) {
 
 IPInstance* IPGenerator::GetIPInstance(const std::string& moduleName) {
   IPInstance* retVal{};
-  // Search instances based off moduleName
+  // A real instance wins over a GUI preview that shares its name.
   auto isMatch = [moduleName](IPInstance* instance) {
     return instance->ModuleName() == moduleName;
   };
-  auto it = std::find_if(m_instances.begin(), m_instances.end(), isMatch);
+  auto it = std::find_if(m_instances.begin(), m_instances.end(),
+                         [&isMatch](IPInstance* instance) {
+                           return isMatch(instance) && instance->Generated();
+                         });
+  if (it == m_instances.end())
+    it = std::find_if(m_instances.begin(), m_instances.end(), isMatch);
 
   // return result
   if (it != m_instances.end()) {

@@ -676,6 +676,10 @@ bool IPDialogBox::Generate(bool addToProject, const QString& outputPath) {
         GlobalSession->TclInterp()->evalCmd(cmd.toStdString(), &returnVal);
     if (returnVal != TCL_OK) {
       qWarning() << "Error: " << QString::fromStdString(resultStr);
+      // Previews run on every edit, so only the Generate click pops up.
+      if (addToProject)
+        QMessageBox::warning(this, "Generate IP",
+                             QString::fromStdString(resultStr));
       return false;
     }
 

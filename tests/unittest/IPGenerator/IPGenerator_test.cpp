@@ -31,6 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "IPGenerate/IPCatalogBuilder.h"
 #include "NewProject/ProjectManager/project_manager.h"
 #include "ProjNavigator/tcl_command_integration.h"
+#include "Tcl/TclInterpreter.h"
 #include "Utils/PathUtils.h"
 #include "gtest/gtest.h"
 
@@ -87,19 +88,89 @@ TEST(IPGenerate, IpInstanceDupes) {
   EXPECT_EQ(ipGen->IPInstances().size(), 1)
       << "Ensure the IPInstances count is still 1";
 
-  // Add IP with different values, but same module name
+  // Add IP with different values, but same module name. These are previews
+  // (not generated), so the newer one replaces the older.
   IPInstance* instance3 = new IPInstance("newName", "newVersion", def2, params2,
                                          "module_name", "newPath");
   ipGen->AddIPInstance(instance3);
-  EXPECT_EQ(ipGen->IPInstances().size(), 2)
-      << "Ensure the IPInstances count is 2 bacause different versions";
+  EXPECT_EQ(ipGen->IPInstances().size(), 1)
+      << "A preview of another version replaces the old preview";
 
   // Add IP same values, but diff module name
   IPInstance* instance4 = new IPInstance("duplicateName", "version_num", def,
                                          params, "NEW_MODULE_NAME", "out_file");
   ipGen->AddIPInstance(instance4);
-  EXPECT_EQ(ipGen->IPInstances().size(), 3)
-      << "Ensure the IPInstances count is now 3";
+  EXPECT_EQ(ipGen->IPInstances().size(), 2)
+      << "Ensure the IPInstances count is now 2";
+}
+
+// One module name, two versions of an IP: fpu_addsub_generator_v1_0 and _v2_0
+// both default to the name fpu_addsub_generator.
+class IpInstanceVersionClash : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    compiler = new Compiler();
+    compiler->SetInterpreter(&interp);
+    ipGen = new IPGenerator(PathUtils::instance().installDir(), new IPCatalog(),
+                            compiler);
+    v1 = new IPDefinition(IPDefinition::IPType::Other, "ip_v1_0", "ip_wrapper",
+                          "path_to_nowhere", {}, {});
+    v2 = new IPDefinition(IPDefinition::IPType::Other, "ip_v2_0", "ip_wrapper",
+                          "path_to_nowhere", {}, {});
+  }
+  IPInstance* Make(IPDefinition* def, const std::string& version,
+                   bool generated) {
+    std::vector<SParameter> params;
+    auto* inst = new IPInstance(def->Name(), version, def, params, "shared",
+                                "out");
+    inst->Generated(generated);
+    return inst;
+  }
+  TclInterpreter interp;
+  Compiler* compiler{};
+  IPGenerator* ipGen{};
+  IPDefinition* v1{};
+  IPDefinition* v2{};
+};
+
+TEST_F(IpInstanceVersionClash, RealInstanceOfAnotherVersionIsRejected) {
+  IPInstance* real1 = Make(v1, "v1_0", true);
+  ASSERT_TRUE(ipGen->AddIPInstance(real1));
+  IPInstance* real2 = Make(v2, "v2_0", true);
+  EXPECT_FALSE(ipGen->AddIPInstance(real2));
+  EXPECT_EQ(ipGen->IPInstances().size(), 1);
+  EXPECT_EQ(ipGen->GetIPInstance("shared"), real1);
+  const std::string result = Tcl_GetStringResult(interp.getInterp());
+  EXPECT_NE(result.find("'shared' is already used by ip_v1_0 (v1_0)"),
+            std::string::npos)
+      << result;
+  delete real2;
+}
+
+TEST_F(IpInstanceVersionClash, RealInstanceReplacesPreviewOfAnotherVersion) {
+  // The accum case: opening the v1_0 dialog must not capture the name.
+  ASSERT_TRUE(ipGen->AddIPInstance(Make(v1, "v1_0", false)));
+  IPInstance* real2 = Make(v2, "v2_0", true);
+  EXPECT_TRUE(ipGen->AddIPInstance(real2));
+  EXPECT_EQ(ipGen->IPInstances().size(), 1);
+  EXPECT_EQ(ipGen->GetIPInstance("shared"), real2);
+}
+
+TEST_F(IpInstanceVersionClash, PreviewDoesNotDisplaceRealInstance) {
+  IPInstance* real1 = Make(v1, "v1_0", true);
+  ASSERT_TRUE(ipGen->AddIPInstance(real1));
+  EXPECT_TRUE(ipGen->AddIPInstance(Make(v2, "v2_0", false)));
+  EXPECT_EQ(ipGen->IPInstances().size(), 2);
+  EXPECT_EQ(ipGen->GetIPInstance("shared"), real1);
+}
+
+TEST_F(IpInstanceVersionClash, VersionCaseIsIgnored) {
+  // The GUI passes v1_0 and scripts pass V1_0: that is a reconfigure.
+  ASSERT_TRUE(ipGen->AddIPInstance(Make(v1, "v1_0", true)));
+  IPInstance* again = Make(v1, "V1_0", true);
+  EXPECT_TRUE(ipGen->AddIPInstance(again));
+  EXPECT_EQ(ipGen->IPInstances().size(), 1);
+  EXPECT_EQ(ipGen->GetIPInstance("shared"), again);
 }
 
 // The Configure IP dialog's preview (configure_ip -template) must not add an

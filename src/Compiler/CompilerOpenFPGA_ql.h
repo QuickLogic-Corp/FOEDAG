@@ -278,6 +278,10 @@ class CompilerOpenFPGA_ql : public Compiler {
 
   virtual std::tuple<std::string, std::string> BaseVprCommandLEGACY(QLDeviceTarget device_target = QLDeviceTarget());
   CommandWrapperPtr BaseVprCommand(QLDeviceTarget device_target = QLDeviceTarget(), const VprStageCfg& cfg = VprStageCfg());
+  // Appends the pnr_options to a finished VPR command. VPR rejects an option
+  // given twice, so an option the command already has is replaced, with a warning.
+  void applyPnrOptions(CommandWrapper& command);
+  void applyPnrOptions(std::string& command, bool warn = true);
 
   // CRR rr_graph origin offsets for this device, one "--flag value" per entry,
   // empty when none are needed. An offset already present in 'existing_options'
