@@ -476,7 +476,7 @@ TEST_F(GuiRecorderTest, PressTakenByAFocusOutWarningIsRecorded) {
   int clicked = 0;
   QObject::connect(button, &QPushButton::clicked, [&]() { ++clicked; });
   window.show();
-  QApplication::setActiveWindow(&window);
+  window.activateWindow();
   ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
   record();
 
@@ -509,7 +509,7 @@ TEST_F(GuiRecorderTest, PressThatMovesFocusIsRecordedOnce) {
   int clicked = 0;
   QObject::connect(button, &QPushButton::clicked, [&]() { ++clicked; });
   window.show();
-  QApplication::setActiveWindow(&window);
+  window.activateWindow();
   ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
   record();
 

@@ -346,7 +346,7 @@ TEST(GuiTestCommands, ClickMovesFocusAndADialogOnFocusOutTakesIt) {
   WarnOnFocusOut field;
   edit->installEventFilter(&field);
   window.show();
-  QApplication::setActiveWindow(&window);
+  window.activateWindow();
   ASSERT_TRUE(QTest::qWaitForWindowActive(&window));
 
   Tcl_Interp *interp = Tcl_CreateInterp();
