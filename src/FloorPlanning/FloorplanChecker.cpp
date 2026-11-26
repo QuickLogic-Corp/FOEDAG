@@ -8,8 +8,44 @@
 #include "RtlInstanceModel.h"
 
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace fp {
+
+namespace {
+
+// The top model's .inputs and .outputs: the first .model of a BLIF is the top.
+void readBlifPorts(const std::filesystem::path& blif, std::set<std::string>& inputs,
+                   std::set<std::string>& outputs)
+{
+    std::ifstream in(blif);
+    std::string line;
+    int models = 0;
+    while (std::getline(in, line)) {
+        while (!line.empty() && line.back() == '\\') {
+            line.pop_back();
+            std::string next;
+            if (!std::getline(in, next)) {
+                break;
+            }
+            line += " " + next;
+        }
+        std::istringstream words(line);
+        std::string command;
+        words >> command;
+        if (command == ".model" && ++models > 1) {
+            return;
+        }
+        std::set<std::string>* ports =
+            command == ".inputs" ? &inputs : command == ".outputs" ? &outputs : nullptr;
+        for (std::string port; ports && words >> port;) {
+            ports->insert(port);
+        }
+    }
+}
+
+}  // namespace
 
 bool FloorplanChecker::check(const std::filesystem::path& projectPath,
                              const std::string& projectName,
@@ -80,6 +116,10 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     }
     device.setDeletedInstances(std::move(deleted));
     device.setRtlInstances(std::move(paths));
+    std::set<std::string> inputs;
+    std::set<std::string> outputs;
+    readBlifPorts(projectPath / (projectName + "_post_synth.blif"), inputs, outputs);
+    device.setPorts(std::move(inputs), std::move(outputs));
 
     // A region's tiles are computed lazily against its rect, and QdcSerializer restores
     // geometry but never tiles. Without this every partition reports zero available and the

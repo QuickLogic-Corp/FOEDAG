@@ -1746,6 +1746,41 @@ TEST(FloorplanIssues, InstancesTheirParentsAndGlobsAreKnownNames)
     EXPECT_FALSE(mentions(issues->warnings, "RTL hierarchy"));
 }
 
+TEST(FloorplanIssues, APadInAPartitionIsAnError)
+{
+    // A region holds only clb, bram and dsp tiles; a pad needs an IO tile.
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "core"});
+    device.setPorts({"enable", "din[0]", "din[1]"}, {"dout"});
+    constrainNames(device, {"enable", "out:dout", "din*"});
+
+    const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
+    EXPECT_TRUE(mentions(issues->errors, "names pads: 'din*', 'enable', 'out:dout'"));
+    EXPECT_FALSE(mentions(issues->warnings, "which is neither"));
+}
+
+TEST(FloorplanIssues, ABareOutputNameOrAnInstanceGlobIsNotAPad)
+{
+    // A bare output name stands for the block driving it; c* matches the instance core
+    // first, as the constraint writer reads it.
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "core"});
+    device.setPorts({"clk"}, {"dout"});
+    constrainNames(device, {"dout", "c*"});
+
+    EXPECT_FALSE(mentions(device.checkIssues()->errors, "names pads"));
+}
+
+TEST(FloorplanIssues, AnOutPadIsAnErrorWithoutAPortList)
+{
+    fp::DeviceGrid device(genTestDescriptor());
+    constrainNames(device, {"out:dout"});
+
+    EXPECT_TRUE(mentions(device.checkIssues()->errors, "names pads: 'out:dout'"));
+}
+
 TEST(FloorplanIssues, WithoutAnInstanceListNoNameIsChecked)
 {
     fp::DeviceGrid device(genTestDescriptor());
@@ -3152,6 +3187,20 @@ TEST(FloorPlanningLayout, OptionsSitsInTheRtlTreeWithOnlyTheAtomListAction)
     ASSERT_EQ(actions.size(), 1);
     EXPECT_EQ(actions.front()->text(), "Show Atom List and Primitive columns");
     EXPECT_TRUE(actions.front()->isCheckable());
+}
+
+TEST(FloorplanIssues, TheCheckerReadsThePortsFromThePostSynthesisBlif)
+{
+    CheckerProject project;
+    std::ofstream(project.root / "proj_post_synth.blif")
+        << ".model top\n.inputs clk \\\n enable\n.outputs dout\n.end\n"
+           ".model sub\n.inputs other\n.end\n";
+    std::ofstream(project.qdc) << "set_region enable clb(2,2):clb(4,4) p1\n"
+                                  "set_region other clb(6,6):clb(8,8) p2\n";
+
+    const fp::DeviceGrid::Issues issues = project.check();
+    EXPECT_TRUE(mentions(issues.errors, "'p1' names pads: 'enable'"));
+    EXPECT_FALSE(mentions(issues.errors, "'p2' names pads")) << "only the top model's ports";
 }
 
 TEST(FloorplanIssues, WithoutAnOwnerTableTheCheckIsAnErrorNotNoIssues)

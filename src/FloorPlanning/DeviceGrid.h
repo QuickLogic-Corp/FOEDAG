@@ -95,6 +95,14 @@ public:
         m_rtlInstances = std::move(rtlInstances);
     }
 
+    // The top module's ports, from the post-synthesis BLIF. checkIssues() refuses a partition
+    // element that is a pad: an input port, an out: pad, or a glob that matches only ports.
+    // Empty still catches out: pads, which need no list.
+    void setPorts(std::set<std::string> inputs, std::set<std::string> outputs) {
+        m_inputPorts = std::move(inputs);
+        m_outputPorts = std::move(outputs);
+    }
+
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
 
@@ -114,6 +122,9 @@ private:
     std::map<std::string, int> m_ownAtomCounts;
     std::unordered_set<std::string> m_deletedInstances;
     std::set<std::string> m_rtlInstances;
+    std::set<std::string> m_inputPorts;
+    std::set<std::string> m_outputPorts;
+    bool isPad(const std::string& name) const;
     bool isRtlInstanceOrParent(const std::string& path) const;
 
     std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;

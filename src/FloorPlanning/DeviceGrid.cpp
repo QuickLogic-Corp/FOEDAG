@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <regex>
 
 namespace fp {
 
@@ -266,6 +267,65 @@ const TilePtr& DeviceGrid::tile(const Tile::Index& index) const
     return m_nullPtrTile;
 }
 
+namespace {
+
+// A .qdc glob as generate_floorplanning.py reads it: "*" spans dots, "?" is one character,
+// "[*]" is any index, and everything else is literal.
+std::regex globRegex(const std::string& glob)
+{
+    std::string re;
+    for (std::size_t i = 0; i < glob.size(); ++i) {
+        if (glob.compare(i, 3, "[*]") == 0) {
+            re += "\\[\\d+\\]";
+            i += 2;
+        } else if (glob[i] == '*') {
+            re += ".*";
+        } else if (glob[i] == '?') {
+            re += ".";
+        } else if (std::string("\\^$.|+()[]{}").find(glob[i]) != std::string::npos) {
+            re += std::string("\\") + glob[i];
+        } else {
+            re += glob[i];
+        }
+    }
+    return std::regex(re);
+}
+
+}  // namespace
+
+// [aurora2#1725] A pad sits on an IO tile, and a region holds only clb, bram and dsp tiles,
+// so a pad in a partition can never be placed. A bare output name is not a pad: it stands for
+// the block driving that net.
+bool DeviceGrid::isPad(const std::string& name) const
+{
+    if (name.compare(0, 4, "out:") == 0 || m_inputPorts.count(name) != 0) {
+        return true;
+    }
+    if (name.find_first_of("*?") == std::string::npos || name == "*") {
+        return false;
+    }
+    // Like the constraint writer, a glob that matches an instance is about instances.
+    const std::string scope = (name.size() > 2 && name.compare(name.size() - 2, 2, ".*") == 0)
+                                  ? name.substr(0, name.size() - 2)
+                                  : name;
+    const std::regex re = globRegex(scope);
+    for (const std::string& path : m_rtlInstances) {
+        for (std::size_t dot = path.find('.'); ; dot = path.find('.', dot + 1)) {
+            if (std::regex_match(path.substr(0, dot), re)) {
+                return false;
+            }
+            if (dot == std::string::npos) {
+                break;
+            }
+        }
+    }
+    const auto matches = [&](const std::set<std::string>& ports) {
+        return std::any_of(ports.begin(), ports.end(),
+                           [&](const std::string& port) { return std::regex_match(port, re); });
+    };
+    return matches(m_inputPorts) || matches(m_outputPorts);
+}
+
 bool DeviceGrid::isRtlInstanceOrParent(const std::string& path) const
 {
     if (m_rtlInstances.count(path) != 0) {
@@ -433,13 +493,28 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                                        "drops them."});
         }
 
+        std::string pads;
+        for (const HierarhyElement& element: partition->elements()) {
+            if (isPad(element.path)) {
+                pads += (pads.empty() ? "'" : ", '") + element.path + "'";
+            }
+        }
+        if (!pads.empty()) {
+            m_issues->errors.insert({"Partition '" + partition->name() + "' names pads: " + pads,
+                                     "A pad sits on an IO tile, and a region holds only clb, "
+                                     "bram and dsp tiles, so the pad can never be placed there. "
+                                     "Place pads with set_io_side in the .qdc, or pin them in "
+                                     "the .pcf."});
+        }
+
         // The constraint writer also takes an atom of the owner table, a net (for the atom
         // driving it) or an input pad, and stops on any other name. Nets and pads are not in
         // the table, so a name outside it is only a warning here.
         if (!m_rtlInstances.empty()) {
             for (const HierarhyElement& element: partition->elements()) {
                 const std::string& path = element.path;
-                if ((path.find('*') != std::string::npos) || isRtlInstanceOrParent(path)) {
+                if ((path.find('*') != std::string::npos) || isRtlInstanceOrParent(path) ||
+                    isPad(path)) {
                     continue;
                 }
                 const auto atom = m_context->atomTypes.find(path);
