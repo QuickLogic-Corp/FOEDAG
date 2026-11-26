@@ -304,12 +304,16 @@ bool DeviceGrid::isPad(const std::string& name) const
     if (name.find_first_of("*?") == std::string::npos || name == "*") {
         return false;
     }
-    // Like the constraint writer, a glob that matches an instance is about instances.
+    // Like the constraint writer, a glob that matches an instance is about instances. The top
+    // is not one: it is named outright, as "*" or its own name.
     const std::string scope = (name.size() > 2 && name.compare(name.size() - 2, 2, ".*") == 0)
                                   ? name.substr(0, name.size() - 2)
                                   : name;
     const std::regex re = globRegex(scope);
     for (const std::string& path : m_rtlInstances) {
+        if (path == m_context->top) {
+            continue;
+        }
         for (std::size_t dot = path.find('.'); ; dot = path.find('.', dot + 1)) {
             if (std::regex_match(path.substr(0, dot), re)) {
                 return false;

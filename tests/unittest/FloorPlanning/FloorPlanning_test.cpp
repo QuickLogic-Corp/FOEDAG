@@ -1773,6 +1773,19 @@ TEST(FloorplanIssues, ABareOutputNameOrAnInstanceGlobIsNotAPad)
     EXPECT_FALSE(mentions(device.checkIssues()->errors, "names pads"));
 }
 
+TEST(FloorplanIssues, AGlobThatMatchesOnlyTheTopsNameIsAPortGlob)
+{
+    // counter_16bit has ports count[*]: count* is about them, not about the top.
+
+    fp::DeviceGrid device(genTestDescriptor());
+    device.context()->top = "counter_16bit";
+    device.setRtlInstances({"counter_16bit"});
+    device.setPorts({"enable"}, {"count[0]", "count[1]"});
+    constrainNames(device, {"count*"});
+
+    EXPECT_TRUE(mentions(device.checkIssues()->errors, "names pads: 'count*'"));
+}
+
 TEST(FloorplanIssues, AnOutPadIsAnErrorWithoutAPortList)
 {
     fp::DeviceGrid device(genTestDescriptor());
