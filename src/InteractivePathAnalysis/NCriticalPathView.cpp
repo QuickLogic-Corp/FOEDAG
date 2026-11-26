@@ -142,6 +142,10 @@ void NCriticalPathView::mousePressEvent(QMouseEvent* event) {
   QModelIndex index = indexAt(eventPos);
   if (index.isValid()) {
     if (event->button() == Qt::RightButton) {
+      // A left press schedules a scroll to its row, run ~0.5 s later if that
+      // row is still current. This press skips the base handler that would
+      // cancel it, so without this the view jumps away after the expand.
+      selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
       if (isExpanded(index)) {
         collapse(index);
       } else {
