@@ -1042,7 +1042,9 @@ TEST(IPWrapperStamp, WrapperNameMatchesTheGeneratorConvention) {
 }
 
 // A project keeps building after its IP left every catalog: configure_ip falls
-// back to the copy ipgenerate wrote earlier.
+// back to the copy ipgenerate wrote earlier (FindGeneratedCopy).
+// GeneratedCopyMatches is also what decides whether ipgenerate reuses the copy
+// of an IP that is in a catalog.
 class IpProjectCopy : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -1053,11 +1055,12 @@ class IpProjectCopy : public ::testing::Test {
   void TearDown() override { std::filesystem::remove_all(root); }
 
   // What ipgenerate leaves under `base` for IP ip_v1_0 and module `module`:
-  // the cache file, holding `parameters` ahead of the keys Generate() adds,
-  // and one source file. Returns the <version> directory.
+  // the cache file, holding `recordedLines` (JSON text, one "key": value line
+  // each) ahead of the keys Generate() adds, and one source file. Returns the
+  // <version> directory.
   std::filesystem::path MakeCopy(const std::filesystem::path& base,
                                  const std::string& module,
-                                 const std::string& parameters = "") {
+                                 const std::string& recordedLines = "") {
     const auto versionDir = base / "vendor" / "library" / "ip" / "v1_0";
     const auto copy = versionDir / module;
     std::filesystem::create_directories(copy / "src");
@@ -1065,7 +1068,7 @@ class IpProjectCopy : public ::testing::Test {
         << "module " << module << "();\nendmodule\n";
     std::ofstream(copy / ("ip_v1_0_" + module + ".json"))
         << "{\n"
-        << parameters << "   \"build_dir\": \"" << base.generic_string()
+        << recordedLines << "   \"build_dir\": \"" << base.generic_string()
         << "\",\n   \"build_name\": \"" << module
         << "\",\n   \"build\": true,\n   \"json\": \"ip_v1_0_" << module
         << ".json\",\n   \"netlists_fingerprint\": \"a.eblif:1:2;\",\n"
@@ -1080,6 +1083,8 @@ class IpProjectCopy : public ::testing::Test {
     return params;
   }
 
+  // No target device selected: the device of a copy is not compared.
+  const std::string kNoDevice;
   const std::string kRecorded =
       "   \"width\": 8,\n   \"mode\": \"fast\",\n   \"sync\": true,\n"
       "   \"ratio\": 1.5,\n";
@@ -1090,17 +1095,18 @@ class IpProjectCopy : public ::testing::Test {
 TEST_F(IpProjectCopy, FindsTheCopyOfTheModule) {
   const auto versionDir = MakeCopy(root, "fpu0");
   EXPECT_EQ(
-      IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {}, &whyNot),
+      IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {}, kNoDevice,
+                                     &whyNot),
       versionDir);
   EXPECT_TRUE(whyNot.empty()) << whyNot;
 }
 
 TEST_F(IpProjectCopy, NoCopyIsReportedWithoutAReason) {
   EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
-                                             &whyNot)
+                                             kNoDevice, &whyNot)
                   .empty());
   EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root / "missing", "ip_v1_0",
-                                             "fpu0", {}, &whyNot)
+                                             "fpu0", {}, kNoDevice, &whyNot)
                   .empty());
   MakeCopy(root, "fpu0");
   // Another module, another IP, and the degenerate names.
@@ -1109,8 +1115,9 @@ TEST_F(IpProjectCopy, NoCopyIsReportedWithoutAReason) {
                                                         {"ip_v2_0", "fpu0"},
                                                         {"ip_v1_0", ""},
                                                         {"", "fpu0"}}) {
-    EXPECT_TRUE(
-        IPGenerator::FindGeneratedCopy(root, ip, module, {}, &whyNot).empty())
+    EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, ip, module, {}, kNoDevice,
+                                               &whyNot)
+                    .empty())
         << ip << " " << module;
   }
   EXPECT_TRUE(whyNot.empty()) << whyNot;
@@ -1125,7 +1132,7 @@ TEST_F(IpProjectCopy, AcceptsTheParametersItWasGeneratedWith) {
                         {"mode", "fast"},
                         {"sync", "true"},
                         {"ratio", "1.50"}}),
-                &whyNot),
+                kNoDevice, &whyNot),
             versionDir)
       << whyNot;
 }
@@ -1147,11 +1154,12 @@ TEST_F(IpProjectCopy, RefusesOtherParameters) {
       // a key Generate() writes is not a parameter
       Params({{"width", "8"}, {"mode", "fast"}, {"sync", "true"},
               {"build", "true"}}),
+      // none at all
       {}};
   for (const auto& params : others) {
     whyNot.clear();
     EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", params,
-                                               &whyNot)
+                                               kNoDevice, &whyNot)
                     .empty());
     EXPECT_NE(whyNot.find("other parameters"), std::string::npos) << whyNot;
     EXPECT_NE(whyNot.find((root / "vendor" / "library" / "ip" / "v1_0" / "fpu0")
@@ -1165,7 +1173,7 @@ TEST_F(IpProjectCopy, RefusesACopyItCannotUse) {
   const auto copy = MakeCopy(root, "fpu0") / "fpu0";
   std::filesystem::remove(copy / "src" / "fpu0.v");
   EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
-                                             &whyNot)
+                                             kNoDevice, &whyNot)
                   .empty());
   EXPECT_NE(whyNot.find("no source files"), std::string::npos) << whyNot;
 
@@ -1173,7 +1181,7 @@ TEST_F(IpProjectCopy, RefusesACopyItCannotUse) {
   std::ofstream(copy / "ip_v1_0_fpu0.json") << "{ not json";
   whyNot.clear();
   EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
-                                             &whyNot)
+                                             kNoDevice, &whyNot)
                   .empty());
   EXPECT_NE(whyNot.find("cannot be read"), std::string::npos) << whyNot;
 }
@@ -1183,64 +1191,64 @@ TEST_F(IpProjectCopy, IgnoresThePreviewAndSimulationTrees) {
   MakeCopy(root / ".tmp", "fpu0");
   MakeCopy(root / "simulation", "fpu0");
   EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
-                                             &whyNot)
+                                             kNoDevice, &whyNot)
                   .empty());
   EXPECT_TRUE(whyNot.empty()) << whyNot;
 }
 
-TEST_F(IpProjectCopy, ACopyIsJudgedOnItsParametersAlone) {
+TEST_F(IpProjectCopy, BuildDirAndFingerprintAreNotCompared) {
   // The fixture's cache file carries another build directory and a
   // netlists_fingerprint from an earlier version: neither is looked at.
   const auto copy = MakeCopy(root, "fpu0", kRecorded) / "fpu0";
   const auto params = Params(
       {{"width", "8"}, {"mode", "fast"}, {"sync", "true"}, {"ratio", "1.5"}});
-  EXPECT_TRUE(
-      IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", params, &whyNot))
+  EXPECT_TRUE(IPGenerator::GeneratedCopyMatches(copy, "ip_v1_0", "fpu0", params,
+                                                kNoDevice, &whyNot))
       << whyNot;
 
-  EXPECT_FALSE(IPGenerator::IsGeneratedCopy(
-      copy, "ip_v1_0", "fpu0", Params({{"width", "16"}}), &whyNot));
+  EXPECT_FALSE(IPGenerator::GeneratedCopyMatches(
+      copy, "ip_v1_0", "fpu0", Params({{"width", "16"}}), kNoDevice, &whyNot));
   EXPECT_NE(whyNot.find("other parameters"), std::string::npos) << whyNot;
 
   // Nothing generated for that module: not a copy, and no reason to give.
   whyNot.clear();
-  EXPECT_FALSE(IPGenerator::IsGeneratedCopy(copy.parent_path() / "other",
-                                            "ip_v1_0", "other", params,
-                                            &whyNot));
+  EXPECT_FALSE(IPGenerator::GeneratedCopyMatches(
+      copy.parent_path() / "other", "ip_v1_0", "other", params, kNoDevice,
+      &whyNot));
   EXPECT_TRUE(whyNot.empty()) << whyNot;
 }
 
 TEST_F(IpProjectCopy, ACopyBelongsToTheDeviceItWasGeneratedFor) {
   const std::string device = "   \"target_device\": \"fam/fdy/12nm/dev_a\",\n";
   const auto copy = MakeCopy(root, "fpu0", device) / "fpu0";
-  EXPECT_TRUE(IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", {},
-                                           &whyNot, "fam/fdy/12nm/dev_a"))
+  EXPECT_TRUE(IPGenerator::GeneratedCopyMatches(copy, "ip_v1_0", "fpu0", {},
+                                                "fam/fdy/12nm/dev_a", &whyNot))
       << whyNot;
-  // No target device selected: nothing to compare with.
-  EXPECT_TRUE(
-      IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", {}, &whyNot))
+  EXPECT_TRUE(IPGenerator::GeneratedCopyMatches(copy, "ip_v1_0", "fpu0", {},
+                                                kNoDevice, &whyNot))
       << whyNot;
 
-  EXPECT_FALSE(IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", {},
-                                            &whyNot, "fam/fdy/12nm/dev_b"));
+  EXPECT_FALSE(IPGenerator::GeneratedCopyMatches(
+      copy, "ip_v1_0", "fpu0", {}, "fam/fdy/12nm/dev_b", &whyNot));
   EXPECT_NE(whyNot.find("fam/fdy/12nm/dev_a"), std::string::npos) << whyNot;
   EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
-                                             &whyNot, "fam/fdy/12nm/dev_b")
+                                             "fam/fdy/12nm/dev_b", &whyNot)
                   .empty());
 
-  // A copy from before the device was recorded is taken for any device.
+  // A copy that records no device, as one from before the device was
+  // recorded, is taken for any device.
   const auto older = MakeCopy(root, "older") / "older";
-  EXPECT_TRUE(IPGenerator::IsGeneratedCopy(older, "ip_v1_0", "older", {},
-                                           &whyNot, "fam/fdy/12nm/dev_b"))
+  EXPECT_TRUE(IPGenerator::GeneratedCopyMatches(
+      older, "ip_v1_0", "older", {}, "fam/fdy/12nm/dev_b", &whyNot))
       << whyNot;
 }
 
 TEST_F(IpProjectCopy, AnInstanceOnTheStandInResolvesToTheCopy) {
   const auto versionDir = MakeCopy(root, "fpu0", "   \"width\": 8,\n");
   auto params = Params({{"width", "8"}});
-  ASSERT_EQ(
-      IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", params, &whyNot),
-      versionDir);
+  ASSERT_EQ(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", params,
+                                           kNoDevice, &whyNot),
+            versionDir);
 
   Compiler* compiler = new Compiler();
   IPGenerator* ipGen = new IPGenerator(PathUtils::instance().installDir(),
@@ -1248,6 +1256,8 @@ TEST_F(IpProjectCopy, AnInstanceOnTheStandInResolvesToTheCopy) {
   IPDefinition* standIn =
       new IPDefinition(IPDefinition::IPType::ProjectCopy, "ip_v1_0", "fpu0",
                        versionDir, {}, {});
+  // No project here: the output location is what tells GetBuildDir() where
+  // the IPs root is.
   ipGen->setIpOutputLocation("fpu0", "V1_0", root);
   IPInstance* instance =
       new IPInstance("ip_v1_0", "V1_0", standIn, params, "fpu0", root);

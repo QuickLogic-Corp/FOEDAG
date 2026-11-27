@@ -56,7 +56,9 @@ if { [string first "IP Generate, reusing IP" $log] < 0 } {
     fail "ipgenerate did not say it reused the copy"
 }
 
-# Other parameters are a new request and are generated from the catalog.
+# Other parameters are a new request and are generated from the catalog. There
+# is one copy per module: it then records the second request, so the first
+# one is generated again as well.
 configure_ip axis_converter_V1_0 -mod_name kept -version V1_0 -Pcore_in_width=64 -Pcore_out_width=64 -Pcore_user_width=0 -Pcore_reverse=0
 ipgenerate
 if { [regexp -all {IP Generate, generating IP} [read_log]] != 2 } {
@@ -68,8 +70,9 @@ if { [regexp -all {IP Generate, generating IP} [read_log]] != 3 } {
     fail "ipgenerate did not generate the IP for the first parameters again"
 }
 
-# Taking the catalog's IP again with the same parameters: remove the IP, then
-# instantiate it again.
+# To take the catalog's current IP when the parameters have not changed,
+# delete the instance and configure it again: delete_ip removes the copy, so
+# ipgenerate has to run the generator.
 delete_ip kept
 if { [file exists $copy] } {
     fail "delete_ip left the copy in $copy"

@@ -800,31 +800,40 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       }
     }
     IPDefinition* def = generator->Catalog()->Definition(ip_name);
-    // Set when the IP is in no catalog and the project's own copy is used.
-    std::filesystem::path projectCopy;
+    // <vendor>/<library>/<name>/<version> directory above the project's
+    // generated copy. Empty unless the IP is in no catalog and that copy is
+    // used.
+    std::filesystem::path copyVersionDir;
     if (def == nullptr) {
       // A project that generated this IP earlier still holds everything a
       // build reads. Keep it building after the IP left the catalogs, e.g.
       // when a device data update dropped it.
       std::string whyNot;
-      projectCopy = IPGenerator::FindGeneratedCopy(
+      copyVersionDir = IPGenerator::FindGeneratedCopy(
           out_location.empty() ? generator->GetProjectIPsPath() : out_location,
-          ip_name, mod_name, parameters, &whyNot,
-          generator->TargetDeviceName());
-      if (projectCopy.empty()) {
-        compiler->ErrorMessage("Unknown IP: " + ip_name + whyNot);
+          ip_name, mod_name, parameters, generator->TargetDeviceKey(),
+          &whyNot);
+      if (copyVersionDir.empty()) {
+        compiler->ErrorMessage(
+            "Unknown IP: " + ip_name +
+            (whyNot.empty() ? std::string() : ". " + whyNot));
         ok = false;
         return TCL_ERROR;
       }
-      generator->m_projectCopies.push_back(std::make_unique<IPDefinition>(
-          IPDefinition::IPType::ProjectCopy, ip_name, mod_name, projectCopy,
-          std::vector<Connector*>{}, std::vector<Value*>{}));
-      def = generator->m_projectCopies.back().get();
+      generator->m_projectCopyDefinitions.push_back(
+          std::make_unique<IPDefinition>(
+              IPDefinition::IPType::ProjectCopy, ip_name, mod_name,
+              copyVersionDir, std::vector<Connector*>{},
+              std::vector<Value*>{}));
+      def = generator->m_projectCopyDefinitions.back().get();
     }
     // Enforce the device gate here too: hiding an IP from the ip_catalog
     // listing only affects what is shown. A script can still call configure_ip
     // with a hard-coded name without ever listing the catalog, so generation
     // must be blocked at this point, not just in the listing.
+    // A stand-in definition has no manifest and always passes; a project copy
+    // is tied to its device by the target_device in its cache file
+    // (GeneratedCopyMatches).
     const IPGenerator::IPStatus status =
         IPGenerator::EvaluateAvailability(def, generator->Catalog());
     if (!status.available) {
@@ -867,10 +876,12 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     for (const auto& sp : parameters) {
       paramValues[sp.Name()] = sp.GetSValue();
     }
-    for (const auto& sparam : parameters) {
-      // No definition to validate against; FindGeneratedCopy already matched
-      // these with the parameters the copy was generated with.
-      if (!projectCopy.empty()) break;
+    // A stand-in definition lists no parameters, and FindGeneratedCopy()
+    // already matched these with the ones the copy records, so a project copy
+    // has nothing to validate.
+    const std::vector<SParameter> toValidate =
+        copyVersionDir.empty() ? parameters : std::vector<SParameter>{};
+    for (const auto& sparam : toValidate) {
       FOEDAG::Value* catVal = nullptr;
       for (auto* p : defParams) {
         if (p->Name() == sparam.Name()) {
@@ -913,11 +924,11 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     if (status.unverified)
       advise(IPGenerator::UnverifiedRequirementNotice(def));
     if (status.preview) advise(IPGenerator::PreviewNotice(def));
-    if (!projectCopy.empty())
+    if (!copyVersionDir.empty())
       advise("IP '" + ip_name +
              "' is not in any IP catalog. Using the copy this project "
              "generated earlier in " +
-             (projectCopy / mod_name).string() +
+             (copyVersionDir / mod_name).string() +
              "; it cannot be reconfigured or regenerated.");
 
     IPInstance* instance =
@@ -981,7 +992,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   return true;
 }
 
-std::string IPGenerator::TargetDeviceName() const {
+std::string IPGenerator::TargetDeviceKey() const {
   // As dumpDeviceInfo() does: the settings manager has to exist first.
   QLSettingsManager::getInstance();
   QLDeviceManager* devices = QLDeviceManager::getInstance();
@@ -992,22 +1003,21 @@ std::string IPGenerator::TargetDeviceName() const {
                               variant.node + "/" + variant.devicename);
 }
 
-// Why a copy found in the project is not used; appended to "Unknown IP".
+// Why a copy found in the project is not used, as one sentence.
 static std::string CopyRefusal(const std::filesystem::path& copy,
                                const std::string& reason) {
-  return ". The copy this project generated in " + copy.string() +
+  return "The copy this project generated in " + copy.string() +
          " cannot be used: " + reason;
 }
 
-bool IPGenerator::IsGeneratedCopy(const std::filesystem::path& copy,
-                                  const std::string& ipName,
-                                  const std::string& moduleName,
-                                  const std::vector<SParameter>& parameters,
-                                  std::string* whyNot,
-                                  const std::string& targetDevice) {
+bool IPGenerator::GeneratedCopyMatches(
+    const std::filesystem::path& copy, const std::string& ipName,
+    const std::string& moduleName, const std::vector<SParameter>& parameters,
+    const std::string& targetDevice, std::string* whyNot) {
   namespace fs = std::filesystem;
-  // Keys Generate() writes into the cache file besides the parameters.
-  // netlists_fingerprint comes from earlier versions and is ignored.
+  // Every key Generate() writes into the cache file that is not a parameter;
+  // the two have to be kept in step. netlists_fingerprint comes from earlier
+  // versions and is ignored.
   static const std::set<std::string> reserved{
       "build_dir",     "build_name",           "build",        "json",
       "json_template", "netlists_fingerprint", "target_device"};
@@ -1028,6 +1038,8 @@ bool IPGenerator::IsGeneratedCopy(const std::filesystem::path& copy,
   if (!cache.is_object()) {
     return refuse(cacheFile.filename().string() + " cannot be read.");
   }
+  // The copy has to record exactly the parameters asked for: as many of
+  // them, and each with the same value.
   size_t recorded = 0;
   for (const auto& item : cache.items()) {
     if (reserved.count(item.key()) == 0) ++recorded;
@@ -1041,8 +1053,8 @@ bool IPGenerator::IsGeneratedCopy(const std::filesystem::path& copy,
     } else if (value->is_string()) {
       same = value->get<std::string>() == param.GetSValue();
     } else {
-      // Numbers and booleans were written as given: compare as JSON so
-      // that 1.50 still matches a recorded 1.5.
+      // Numbers and booleans are stored unquoted. Compare the values, not
+      // the text, so that 1.50 matches a recorded 1.5.
       const nlohmann::json given =
           nlohmann::json::parse(param.GetSValue(), nullptr, false);
       same = given == *value;
@@ -1053,7 +1065,12 @@ bool IPGenerator::IsGeneratedCopy(const std::filesystem::path& copy,
         "it was generated with other parameters, and an IP that is in no "
         "catalog cannot be generated again.");
   }
-  // A copy from before the device was recorded is taken for any device.
+  // A copy that records no device, because it is from before the device was
+  // recorded or was generated with none selected, is taken for any device.
+  // A project generated by an earlier version therefore keeps its copy even
+  // after it is retargeted: an update must not replace what existing projects
+  // were built with, and nothing in such a copy says which device it was
+  // generated for.
   const auto device = cache.find("target_device");
   if (!targetDevice.empty() && device != cache.end() && device->is_string() &&
       device->get<std::string>() != targetDevice) {
@@ -1068,13 +1085,17 @@ bool IPGenerator::IsGeneratedCopy(const std::filesystem::path& copy,
 std::filesystem::path IPGenerator::FindGeneratedCopy(
     const std::filesystem::path& ipsRoot, const std::string& ipName,
     const std::string& moduleName, const std::vector<SParameter>& parameters,
-    std::string* whyNot, const std::string& targetDevice) {
+    const std::string& targetDevice, std::string* whyNot) {
   namespace fs = std::filesystem;
   if (ipName.empty() || moduleName.empty()) return {};
 
-  // Every <vendor>/<library>/<name>/<version> directory under the root. The
-  // .tmp and simulation trees beside them repeat the layout one level deeper,
-  // so they never line up with it.
+  // Without a definition the vendor, library and version are not known, so
+  // collect every directory four levels below the root
+  // (<vendor>/<library>/<name>/<version>) and try each. The root also holds
+  // .tmp/ and simulation/, which have the same layout one level further
+  // down. Four levels into those is a <name> directory with no
+  // <moduleName>/<ipName>_<moduleName>.json in it, so they drop out below
+  // without being named here.
   std::vector<fs::path> versionDirs{ipsRoot};
   for (int level = 0; level < 4; ++level) {
     std::vector<fs::path> children;
@@ -1087,12 +1108,14 @@ std::filesystem::path IPGenerator::FindGeneratedCopy(
     }
     versionDirs = std::move(children);
   }
+  // Sorted, so that the copy chosen does not depend on the order the file
+  // system lists directories in.
   std::sort(versionDirs.begin(), versionDirs.end());
 
   for (const fs::path& versionDir : versionDirs) {
     const fs::path copy = versionDir / moduleName;
-    if (!IsGeneratedCopy(copy, ipName, moduleName, parameters, whyNot,
-                         targetDevice)) {
+    if (!GeneratedCopyMatches(copy, ipName, moduleName, parameters,
+                              targetDevice, whyNot)) {
       continue;
     }
     // Nothing can be generated here, so the sources have to be there.
@@ -1192,7 +1215,7 @@ bool IPGenerator::AddIPInstance(IPInstance* instance) {
   }
 
   for (const SParameter& param : instance->Parameters()) {
-    // A project copy has no definition that lists its parameters.
+    // The stand-in definition of a project copy lists no parameters.
     if (def->Type() != IPDefinition::IPType::ProjectCopy &&
         legalParams.find(param.Name()) == legalParams.end()) {
       GetCompiler()->ErrorMessage("Unknown parameter: " + param.Name());
@@ -1363,13 +1386,15 @@ bool IPGenerator::Generate() {
       case IPDefinition::IPType::LiteXGenerator: {
         const std::filesystem::path executable = def->FilePath();
         std::filesystem::path jsonFile = GetCachePath(inst);
-        // Once generated, an IP is used from the project: the copy is taken
-        // as it is for the same parameters and target device, whatever the
-        // catalog holds by now.
-        const std::string targetDevice = TargetDeviceName();
-        if (IsGeneratedCopy(jsonFile.parent_path(), def->Name(),
-                            inst->ModuleName(), inst->Parameters(), nullptr,
-                            targetDevice)) {
+        // Once generated, an IP is used from the project: for the same
+        // parameters and target device the copy is taken as it is, even if
+        // the catalog's IP changed since. A catalog update or reinstall must
+        // not replace what a project was built with. delete_ip, then
+        // configure_ip and ipgenerate, generates from the catalog again.
+        const std::string targetDevice = TargetDeviceKey();
+        if (GeneratedCopyMatches(GetBuildDir(inst), def->Name(),
+                                 inst->ModuleName(), inst->Parameters(),
+                                 targetDevice)) {
           m_compiler->Message("IP Generate, reusing IP " +
                               GetBuildDir(inst).string());
           continue;
@@ -1418,6 +1443,8 @@ bool IPGenerator::Generate() {
           jsonF << "   \"" << param.Name() << "\": " << value << ","
                 << std::endl;
         }
+        // Every key written from here on that is not a parameter has to be
+        // in `reserved` in GeneratedCopyMatches(), or no copy is ever reused.
         jsonF << "   \"build_dir\": \"" << FileUtils::resolvePathStr(inst->OutputLocation().string()) << "\","
               << std::endl;
         jsonF << "   \"build_name\": \"" << inst->ModuleName() << "\","
