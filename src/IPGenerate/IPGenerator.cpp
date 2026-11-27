@@ -809,7 +809,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       std::string whyNot;
       projectCopy = IPGenerator::FindGeneratedCopy(
           out_location.empty() ? generator->GetProjectIPsPath() : out_location,
-          ip_name, mod_name, parameters, &whyNot);
+          ip_name, mod_name, parameters, &whyNot,
+          generator->TargetDeviceName());
       if (projectCopy.empty()) {
         compiler->ErrorMessage("Unknown IP: " + ip_name + whyNot);
         ok = false;
@@ -980,10 +981,94 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   return true;
 }
 
+std::string IPGenerator::TargetDeviceName() const {
+  // As dumpDeviceInfo() does: the settings manager has to exist first.
+  QLSettingsManager::getInstance();
+  QLDeviceManager* devices = QLDeviceManager::getInstance();
+  const auto target = devices->getCurrentDeviceTarget();
+  if (!devices->isDeviceTargetValid(target)) return {};
+  const auto& variant = target.device_variant;
+  return StringUtils::toLower(variant.family + "/" + variant.foundry + "/" +
+                              variant.node + "/" + variant.devicename);
+}
+
+// Why a copy found in the project is not used; appended to "Unknown IP".
+static std::string CopyRefusal(const std::filesystem::path& copy,
+                               const std::string& reason) {
+  return ". The copy this project generated in " + copy.string() +
+         " cannot be used: " + reason;
+}
+
+bool IPGenerator::IsGeneratedCopy(const std::filesystem::path& copy,
+                                  const std::string& ipName,
+                                  const std::string& moduleName,
+                                  const std::vector<SParameter>& parameters,
+                                  std::string* whyNot,
+                                  const std::string& targetDevice) {
+  namespace fs = std::filesystem;
+  // Keys Generate() writes into the cache file besides the parameters.
+  // netlists_fingerprint comes from earlier versions and is ignored.
+  static const std::set<std::string> reserved{
+      "build_dir",     "build_name",           "build",        "json",
+      "json_template", "netlists_fingerprint", "target_device"};
+
+  const fs::path cacheFile = copy / (ipName + "_" + moduleName + ".json");
+  std::error_code ec;
+  // The cache file is what says this directory was generated from this IP.
+  if (ipName.empty() || moduleName.empty() ||
+      !fs::is_regular_file(cacheFile, ec)) {
+    return false;
+  }
+  auto refuse = [whyNot, &copy](const std::string& reason) {
+    if (whyNot) *whyNot = CopyRefusal(copy, reason);
+    return false;
+  };
+  std::ifstream in(cacheFile);
+  const nlohmann::json cache = nlohmann::json::parse(in, nullptr, false);
+  if (!cache.is_object()) {
+    return refuse(cacheFile.filename().string() + " cannot be read.");
+  }
+  size_t recorded = 0;
+  for (const auto& item : cache.items()) {
+    if (reserved.count(item.key()) == 0) ++recorded;
+  }
+  bool same = recorded == parameters.size();
+  for (const SParameter& param : parameters) {
+    if (!same) break;
+    const auto value = cache.find(param.Name());
+    if (value == cache.end() || reserved.count(param.Name()) != 0) {
+      same = false;
+    } else if (value->is_string()) {
+      same = value->get<std::string>() == param.GetSValue();
+    } else {
+      // Numbers and booleans were written as given: compare as JSON so
+      // that 1.50 still matches a recorded 1.5.
+      const nlohmann::json given =
+          nlohmann::json::parse(param.GetSValue(), nullptr, false);
+      same = given == *value;
+    }
+  }
+  if (!same) {
+    return refuse(
+        "it was generated with other parameters, and an IP that is in no "
+        "catalog cannot be generated again.");
+  }
+  // A copy from before the device was recorded is taken for any device.
+  const auto device = cache.find("target_device");
+  if (!targetDevice.empty() && device != cache.end() && device->is_string() &&
+      device->get<std::string>() != targetDevice) {
+    return refuse("it was generated for the device " +
+                  device->get<std::string>() +
+                  ", and an IP that is in no catalog cannot be generated "
+                  "again.");
+  }
+  return true;
+}
+
 std::filesystem::path IPGenerator::FindGeneratedCopy(
     const std::filesystem::path& ipsRoot, const std::string& ipName,
     const std::string& moduleName, const std::vector<SParameter>& parameters,
-    std::string* whyNot) {
+    std::string* whyNot, const std::string& targetDevice) {
   namespace fs = std::filesystem;
   if (ipName.empty() || moduleName.empty()) return {};
 
@@ -1004,58 +1089,17 @@ std::filesystem::path IPGenerator::FindGeneratedCopy(
   }
   std::sort(versionDirs.begin(), versionDirs.end());
 
-  // Keys Generate() writes into the cache file besides the parameters.
-  static const std::set<std::string> reserved{
-      "build_dir", "build_name",    "build",
-      "json",      "json_template", "netlists_fingerprint"};
-
   for (const fs::path& versionDir : versionDirs) {
     const fs::path copy = versionDir / moduleName;
-    const fs::path cacheFile = copy / (ipName + "_" + moduleName + ".json");
+    if (!IsGeneratedCopy(copy, ipName, moduleName, parameters, whyNot,
+                         targetDevice)) {
+      continue;
+    }
+    // Nothing can be generated here, so the sources have to be there.
     std::error_code ec;
-    // The cache file is what says this directory was generated from this IP.
-    if (!fs::is_regular_file(cacheFile, ec)) continue;
-
-    auto refuse = [whyNot, &copy](const std::string& reason) {
-      if (whyNot)
-        *whyNot = ". The copy this project generated in " + copy.string() +
-                  " cannot be used: " + reason;
-    };
     const fs::path sources = copy / "src";
     if (!fs::is_directory(sources, ec) || fs::is_empty(sources, ec)) {
-      refuse("it has no source files.");
-      continue;
-    }
-    std::ifstream in(cacheFile);
-    const nlohmann::json cache = nlohmann::json::parse(in, nullptr, false);
-    if (!cache.is_object()) {
-      refuse(cacheFile.filename().string() + " cannot be read.");
-      continue;
-    }
-    size_t recorded = 0;
-    for (const auto& item : cache.items()) {
-      if (reserved.count(item.key()) == 0) ++recorded;
-    }
-    bool same = recorded == parameters.size();
-    for (const SParameter& param : parameters) {
-      if (!same) break;
-      const auto value = cache.find(param.Name());
-      if (value == cache.end() || reserved.count(param.Name()) != 0) {
-        same = false;
-      } else if (value->is_string()) {
-        same = value->get<std::string>() == param.GetSValue();
-      } else {
-        // Numbers and booleans were written as given: compare as JSON so
-        // that 1.50 still matches a recorded 1.5.
-        const nlohmann::json given =
-            nlohmann::json::parse(param.GetSValue(), nullptr, false);
-        same = given == *value;
-      }
-    }
-    if (!same) {
-      refuse(
-          "it was generated with other parameters, and an IP that is in no "
-          "catalog cannot be generated again.");
+      if (whyNot) *whyNot = CopyRefusal(copy, "it has no source files.");
       continue;
     }
     if (whyNot) whyNot->clear();
@@ -1252,56 +1296,6 @@ void IPGenerator::DeleteIPInstance(const std::string& moduleName) {
   DeleteIPInstance(GetIPInstance(moduleName));
 }
 
-// Fingerprint of an RPM IP's shipped artifacts (the netlists/ dir beside its
-// generator): relative path, size and mtime of every file, sorted. Embedded
-// in the parameter-cache JSON so the byte-identity reuse check below also
-// catches a re-authored netlist/stub — otherwise re-packaging an IP (an
-// -rpm_ip authoring project's place stage does this automatically) would
-// silently keep serving the stale generated copy. Deliberately scoped to netlists/ (empty string for IPs without one):
-// fingerprinting every IP's whole version dir would force a spurious
-// regenerate of all configured IPs after each tool reinstall, since the
-// install re-copies the catalog and refreshes its mtimes.
-static std::string NetlistArtifactsFingerprint(
-    const std::filesystem::path& netlistsDir) {
-  std::error_code ec;
-  if (!std::filesystem::is_directory(netlistsDir, ec)) return {};
-  std::vector<std::string> entries;
-  // error_code throughout: a fingerprinting hiccup must degrade to "changed
-  // -> regenerate once", never abort generation.
-  for (auto it = std::filesystem::recursive_directory_iterator(netlistsDir, ec);
-       !ec && it != std::filesystem::recursive_directory_iterator();
-       it.increment(ec)) {
-    if (!it->is_regular_file(ec)) continue;
-    // Skip the driver's transient write-if-changed temp files: a crash
-    // between write and rename must not force a spurious regenerate.
-    if (it->path().extension() == ".tmp") continue;
-    const auto mtime = it->last_write_time(ec).time_since_epoch().count();
-    const auto size = it->file_size(ec);
-    entries.push_back(
-        std::filesystem::relative(it->path(), netlistsDir, ec)
-            .generic_string() +
-        // static_cast avoids an Apple libc++ overload-resolution ambiguity:
-        // file_time_type::rep is convertible to multiple std::to_string
-        // overloads with equal rank on that standard library.
-        ":" + std::to_string(size) + ":" +
-        std::to_string(static_cast<long long>(mtime)));
-  }
-  std::sort(entries.begin(), entries.end());
-  std::string fingerprint;
-  for (const auto& e : entries) {
-    fingerprint += e + ";";
-  }
-  // The fingerprint is embedded in a JSON string literal: escape the two
-  // characters that could break it (filenames with quotes/backslashes).
-  std::string escaped;
-  escaped.reserve(fingerprint.size());
-  for (const char c : fingerprint) {
-    if (c == '"' || c == '\\') escaped += '\\';
-    escaped += c;
-  }
-  return escaped;
-}
-
 bool IPGenerator::Generate() {
   shareContext();
 
@@ -1369,12 +1363,23 @@ bool IPGenerator::Generate() {
       case IPDefinition::IPType::LiteXGenerator: {
         const std::filesystem::path executable = def->FilePath();
         std::filesystem::path jsonFile = GetCachePath(inst);
-        std::stringstream previousbuffer;
-        if (FileUtils::FileExists(jsonFile)) {
-          std::ifstream previous(jsonFile);
-          std::stringstream buffer;
-          previousbuffer << previous.rdbuf();
+        // Once generated, an IP is used from the project: the copy is taken
+        // as it is for the same parameters and target device, whatever the
+        // catalog holds by now.
+        const std::string targetDevice = TargetDeviceName();
+        if (IsGeneratedCopy(jsonFile.parent_path(), def->Name(),
+                            inst->ModuleName(), inst->Parameters(), nullptr,
+                            targetDevice)) {
+          m_compiler->Message("IP Generate, reusing IP " +
+                              GetBuildDir(inst).string());
+          continue;
         }
+        // A cache file left behind by a failed generation would pass for a
+        // generated copy on the next run.
+        auto dropCache = [&jsonFile]() {
+          std::error_code ec;
+          std::filesystem::remove(jsonFile, ec);
+        };
 
         // Create directory path if it doesn't exist otherwise the following
         // ofstream command will fail
@@ -1420,28 +1425,16 @@ bool IPGenerator::Generate() {
         jsonF << "   \"build\": true," << std::endl;
         jsonF << "   \"json\": \"" << jsonFile.filename().string() << "\","
               << std::endl;
-        // RPM IPs only (empty otherwise); the generators read the cache with
-        // json.load + cfg.get, so the extra key is invisible to them.
-        const std::string netlistsFingerprint = NetlistArtifactsFingerprint(
-            def->FilePath().parent_path() / "netlists");
-        if (!netlistsFingerprint.empty()) {
-          jsonF << "   \"netlists_fingerprint\": \"" << netlistsFingerprint
-                << "\"," << std::endl;
+        // The device the copy is generated for. The generators read the
+        // cache with json.load + cfg.get, so the extra key is invisible to
+        // them.
+        if (!targetDevice.empty()) {
+          jsonF << "   \"target_device\": "
+                << nlohmann::json(targetDevice).dump() << "," << std::endl;
         }
         jsonF << "   \"json_template\": false" << std::endl;
         jsonF << "}" << std::endl;
         jsonF.close();
-        std::stringstream newbuffer;
-        if (FileUtils::FileExists(jsonFile)) {
-          std::ifstream newfile(jsonFile);
-          std::stringstream buffer;
-          newbuffer << newfile.rdbuf();
-        }
-        if (newbuffer.str() == previousbuffer.str()) {
-          m_compiler->Message("IP Generate, reusing IP " +
-                              GetBuildDir(inst).string());
-          continue;
-        }
 
         // Find path to litex enabled python interpreter
         std::filesystem::path pythonPath = IPCatalog::getPythonPath(m_compiler->GetIPGenerator()->EnvsPath());
@@ -1452,6 +1445,7 @@ bool IPGenerator::Generate() {
             m_compiler->ErrorMessage(
                 "IP Generate, unable to find python interpreter in local "
                 "environment.\n");
+            dropCache();
             return false;
           } else {
             pythonPath = python3Path;
@@ -1472,6 +1466,7 @@ bool IPGenerator::Generate() {
         if (FileUtils::ExecuteSystemCommand(pythonPath.string(), args, &help, environment())
                 .code) {
           m_compiler->ErrorMessage("IP Generate, " + help.str());
+          dropCache();
           return false;
         }
 

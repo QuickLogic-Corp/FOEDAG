@@ -105,19 +105,34 @@ class IPGenerator {
                                   const std::string& baseName,
                                   const std::string& line);
 
-  // Looks under `ipsRoot` for the copy of `ipName` that ipgenerate wrote
-  // earlier for module `moduleName`, so that a project keeps building after
-  // the IP left every catalog. A copy is a directory
-  // <ipsRoot>/<vendor>/<library>/<name>/<version>/<moduleName>/ holding the
-  // instance cache file <ipName>_<moduleName>.json and a non-empty src/. It is
-  // usable only with the parameters it was generated with, which that file
-  // records. Returns the <version> directory, or an empty path; `whyNot` is
-  // set when a copy exists but was refused. Touches nothing but the file
-  // system, so a test can run it on a temporary tree.
+  // True when `copy` (a <vendor>/<library>/<name>/<version>/<moduleName>/
+  // directory) is what ipgenerate wrote for `ipName`: it holds the instance
+  // cache file <ipName>_<moduleName>.json, and that file records the same
+  // `parameters` and, when both sides name one, the same `targetDevice`.
+  // Once generated, an IP is used from the project, so this is the whole
+  // reuse test: nothing in a catalog is looked at. `whyNot` is set when a
+  // copy is there but was generated for something else. Touches nothing but
+  // the file system, so a test can run it on a temporary tree.
+  static bool IsGeneratedCopy(const std::filesystem::path& copy,
+                              const std::string& ipName,
+                              const std::string& moduleName,
+                              const std::vector<SParameter>& parameters,
+                              std::string* whyNot = nullptr,
+                              const std::string& targetDevice = {});
+
+  // Looks under `ipsRoot` for a copy of `ipName` and module `moduleName`
+  // that IsGeneratedCopy() accepts and that has a non-empty src/, so that a
+  // project keeps building after the IP left every catalog. Returns its
+  // <version> directory, or an empty path; `whyNot` is set when a copy
+  // exists but was refused.
   static std::filesystem::path FindGeneratedCopy(
       const std::filesystem::path& ipsRoot, const std::string& ipName,
       const std::string& moduleName, const std::vector<SParameter>& parameters,
-      std::string* whyNot = nullptr);
+      std::string* whyNot = nullptr, const std::string& targetDevice = {});
+
+  // <family>/<foundry>/<node>/<device> of the target device in lower case,
+  // empty when none is selected. Recorded with every generated copy.
+  std::string TargetDeviceName() const;
 
   IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
