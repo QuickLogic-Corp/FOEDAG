@@ -514,9 +514,9 @@ void FloorPlanningWidget::loadNetList(const NaturalStringSet& elements)
         }
     }
 
-    // [aurora2#2377] Same one-report-not-two reasoning as above: atoms neither
-    // <top>_post_synth_debug.json nor the enclosing scope's atomsets.json resource tally
-    // could name a type for, so the Type column shows the bare tile-type fallback for them
+    // [aurora2#2377] Same one-report-not-two reasoning as above: atoms neither the owner
+    // table's types nor the enclosing scope's atomsets.json resource tally could name a
+    // type for, so the Type column shows the bare tile-type fallback for them
     // with no way to tell from the UI alone that it is a fallback.
     const auto& untyped = m_synthResourcesWidget->untypedAtoms();
     if (!untyped.empty()) {
@@ -560,10 +560,6 @@ void FloorPlanningWidget::setAtomTypes(AtomTypeMap atomTypes)
     m_deviceWidget->context()->atomTypes = std::move(atomTypes);
 }
 
-void FloorPlanningWidget::setDspTiles(DspTileMap dspTiles)
-{
-    m_deviceWidget->context()->dspTiles = std::move(dspTiles);
-}
 
 void FloorPlanningWidget::setInstanceVerdicts(std::map<std::string, InstanceVerdict> verdicts)
 {

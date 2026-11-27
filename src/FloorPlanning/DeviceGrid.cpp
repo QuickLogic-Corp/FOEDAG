@@ -542,8 +542,7 @@ std::map<int, ResourceTally> DeviceGrid::requiredResources() const
     std::map<int, std::set<std::string>> owned = atomsByDeepestElement();
     std::map<int, ResourceTally> required;
     for (const auto& [id, partition] : m_partitions) {
-        required[id] = tallyResources(owned[id], m_context->atomsPerTile, m_context->atomTypes,
-                                      m_context->dspTiles);
+        required[id] = tallyResources(owned[id], m_context->atomsPerTile, m_context->atomTypes);
     }
     return required;
 }
@@ -622,7 +621,7 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
                          std::to_string(available) + " available", tip});
         };
         const ResourceTally need = tallyResources(ownedAtoms[partitionId], m_context->atomsPerTile,
-                                                  m_context->atomTypes, m_context->dspTiles);
+                                                  m_context->atomTypes);
         checkResource("clb", need.clbTiles, partition->clbAvailableCount());
         checkResource("dsp", need.dsp, partition->dspAvailableCount());
         checkResource("bram", need.bram, partition->bramAvailableCount());

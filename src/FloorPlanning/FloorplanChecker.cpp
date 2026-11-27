@@ -91,7 +91,6 @@ bool FloorplanChecker::check(const std::filesystem::path& projectPath,
     context.atomTypes = table.atomTypes;
     context.top = table.top;
     context.mergedAtomOwners = table.mergedAtomOwners;
-    loadDspTiles(postSynthDebugJson(projectPath, topModule), context.dspTiles);
     device.setOwnAtomCounts(table.ownAtomCounts);
     for (const auto& [id, partition] : device.partitions()) {
         const HierarhyElements elements = partition->elements();

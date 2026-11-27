@@ -52,7 +52,6 @@ public:
     // [aurora2#2377] Feeds the "Type" column ground truth: each atom's real Yosys cell
     // type, from the owner table. Both trees show the Type column, so both are told.
     void setAtomTypes(AtomTypeMap atomTypes);
-    void setDspTiles(DspTileMap dspTiles);
 
 
     // [aurora2#1725 stage P3] atomsets.json's atoms_per_tile: how many clb atoms pack into

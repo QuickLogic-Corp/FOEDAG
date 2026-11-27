@@ -51,16 +51,6 @@ std::string readNetlistSha256(const std::filesystem::path& path);
 bool floorplanReloadNeeded(int loadedTier, const std::string& loadedSha256, int diskTier,
                            const std::string& diskSha256);
 
-// DSP-V4 leaf atom (QL_DSP4_*) -> an id shared by every leaf of the same physical tile.
-// Flattening names each leaf after a net, so one tile's leaves can sit under different
-// instances, and only one of them is the QL_DSP4_MULT that countsAsDspTile() counts.
-using DspTileMap = std::map<std::string, std::string>;
-
-// Groups the netlist's DSP-V4 leaves into tiles by the nets inside a tile, from
-// <top>_post_synth_debug.json. False when the file is missing or unreadable: the debug
-// dump is optional, and without it each QL_DSP4_MULT counts as one tile.
-bool loadDspTiles(const std::filesystem::path& debugJsonPath, DspTileMap& outDspTiles);
-
 // Every atom belonging to `path`, its sub-instances included.
 //
 // A path with no entry of its own (a generate label) is the union of the entries under it.
@@ -100,8 +90,7 @@ struct ResourceTally {
 // what an atom is, so the caller passes FloorplanContext::atomTypes rather than this defaulting
 // to some second, independent source of the same map.
 ResourceTally tallyResources(const std::set<std::string>& atomNames, int atomsPerTile,
-                             const AtomTypeMap& atomTypes = {},
-                             const DspTileMap& dspTiles = {});
+                             const AtomTypeMap& atomTypes = {});
 
 // [aurora2#1725] Cell type -> count over everything `paths` covers.
 //

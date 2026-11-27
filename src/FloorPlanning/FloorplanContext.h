@@ -22,7 +22,6 @@ struct FloorplanContext {
     std::string top;  // the owner table's top: its atoms are the whole design
     AtomTypeMap atomTypes;
     std::map<std::string, std::vector<std::string>> mergedAtomOwners;  // OwnerTable's
-    DspTileMap dspTiles;
 
     void setAtomsPerTile(int value) { atomsPerTile = (value > 0) ? value : 1; }
     void resetIds() { nextPartitionId = nextRegionId = 0; }

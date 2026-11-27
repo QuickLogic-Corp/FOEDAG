@@ -1357,104 +1357,6 @@ TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
 
 }
 
-namespace {
-
-// Two DSP-V4 tiles as flattening names them: each leaf lands in whichever scope its net
-// name came from, so tile A's multiplier sits in "core", not "core.u_mul0". Tile A's
-// accumulator feeds tile B's multiplier, which must not merge the two.
-const char* kTwoDspTilesNetlist = R"({"modules": {"top": {"cells": {
-  "core.acc_QL_DSP4_MULT_I0": {"type": "QL_DSP4_MULT",
-    "port_directions": {"I0": "input", "U": "output", "V": "output"},
-    "connections": {"I0": [2], "U": [10], "V": [11]}},
-  "core.u_mul0.alu": {"type": "QL_DSP4_ALU_ADD",
-    "port_directions": {"X": "input", "Y": "input", "ALU_OUT": "output"},
-    "connections": {"X": [10], "Y": [11], "ALU_OUT": [12]}},
-  "core.u_mul0.p_QL_DSP4_ACC_DFFRE_64_Q": {"type": "QL_DSP4_ACC_DFFRE_64",
-    "port_directions": {"D": "input", "E": "input", "Q": "output"},
-    "connections": {"D": [12], "E": ["1"], "Q": [13]}},
-  "din_QL_DSP4_MULT_I0": {"type": "QL_DSP4_MULT",
-    "port_directions": {"I0": "input", "U": "output", "V": "output"},
-    "connections": {"I0": [13], "U": [20], "V": [21]}},
-  "core.u_mul1.alu": {"type": "QL_DSP4_ALU_ADD",
-    "port_directions": {"X": "input", "Y": "input", "Z": "input", "ALU_OUT": "output"},
-    "connections": {"X": [20], "Y": [21], "Z": [23], "ALU_OUT": [22]}},
-  "core.u_mul1.p_QL_DSP4_ACC_DFFRE_64_Q": {"type": "QL_DSP4_ACC_DFFRE_64",
-    "port_directions": {"D": "input", "Q": "output"},
-    "connections": {"D": [22], "Q": [23]}},
-  "core.n0_$lut": {"type": "$lut",
-    "port_directions": {"A": "input", "Y": "output"},
-    "connections": {"A": [23], "Y": [30]}}
-}}}})";
-
-const std::string kMulA = "core.acc_QL_DSP4_MULT_I0";
-const std::string kAluA = "core.u_mul0.alu";
-const std::string kAccA = "core.u_mul0.p_QL_DSP4_ACC_DFFRE_64_Q";
-const std::string kMulB = "din_QL_DSP4_MULT_I0";
-const std::string kAluB = "core.u_mul1.alu";
-const std::string kAccB = "core.u_mul1.p_QL_DSP4_ACC_DFFRE_64_Q";
-
-struct TwoDspTiles {
-    // As the owner table types them.
-    fp::AtomTypeMap types{{kMulA, "QL_DSP4_MULT"}, {kAluA, "QL_DSP4_ALU_ADD"},
-                          {kAccA, "QL_DSP4_ACC_DFFRE_64"}, {kMulB, "QL_DSP4_MULT"},
-                          {kAluB, "QL_DSP4_ALU_ADD"}, {kAccB, "QL_DSP4_ACC_DFFRE_64"},
-                          {"core.n0_$lut", "$lut"}};
-    fp::DspTileMap tiles;
-    bool loaded = false;
-
-    TwoDspTiles()
-    {
-        QTemporaryDir dir;
-        const std::filesystem::path path =
-            std::filesystem::path(dir.path().toStdString()) / "top_post_synth_debug.json";
-        std::ofstream(path) << kTwoDspTilesNetlist;
-        loaded = fp::loadDspTiles(path, tiles);
-    }
-};
-
-}  // namespace
-
-TEST(DspTiles, LeafCellsAreGroupedIntoTheTileTheyShare)
-{
-    const TwoDspTiles netlist;
-    ASSERT_TRUE(netlist.loaded);
-    const auto& tiles = netlist.tiles;
-    ASSERT_EQ(tiles.size(), 6u);
-    EXPECT_EQ(tiles.at(kMulA), tiles.at(kAluA));
-    EXPECT_EQ(tiles.at(kMulA), tiles.at(kAccA));
-    EXPECT_EQ(tiles.at(kMulB), tiles.at(kAluB));
-    EXPECT_EQ(tiles.at(kMulB), tiles.at(kAccB));
-    EXPECT_NE(tiles.at(kMulA), tiles.at(kMulB));
-}
-
-TEST(DspTiles, ASelectionWithoutTheMultiplierStillCountsItsTile)
-{
-    const TwoDspTiles netlist;
-    ASSERT_TRUE(netlist.loaded);
-
-    EXPECT_EQ(fp::tallyResources({kAccA}, 14, netlist.types, netlist.tiles).dsp, 1);
-    EXPECT_EQ(fp::tallyResources({kAccA, kAluB}, 14, netlist.types, netlist.tiles).dsp, 2);
-    EXPECT_EQ(fp::tallyResources({kMulA, kAluA, kAccA, kMulB, kAluB, kAccB}, 14,
-                                 netlist.types, netlist.tiles).dsp,
-              2);
-}
-
-TEST(DspTiles, APartitionCountsEachTileOnceAcrossItsElements)
-{
-    fp::DeviceGrid device(genTestDescriptor());
-    const auto ctx = device.context();
-    const TwoDspTiles netlist;
-    ASSERT_TRUE(netlist.loaded);
-    ctx->atomTypes = netlist.types;
-    ctx->dspTiles = netlist.tiles;
-
-    EXPECT_EQ(requiredFor(device, {{"core.u_mul0", true, {kAccA}},
-                                   {"core", true, {kMulA, kAluA}},
-                                   {"core.u_mul1", true, {kAccB}}})
-                  .dsp,
-              2);
-}
-
 TEST(PartitionResources, DesignResourceEntriesNeverFeedThePerPartitionTally)
 {
     fp::DeviceGrid device(genTestDescriptor());
@@ -2347,7 +2249,7 @@ TEST(SelectedResources, ASimpleDualPortBramCountsAsBram)
         {"dut.memSys.ram0", "SDP_ECC36K_BRAM_A1_X18_B1_X18_A2_X18_B2_X18_split"},
         {"dut.memSys.ram1", "TDP_ECC36K_BRAM_A_X36_B_X36_nonsplit"}};
     const fp::ResourceTally tally =
-        fp::tallyResources({"dut.memSys.ram0", "dut.memSys.ram1"}, 14, types, {});
+        fp::tallyResources({"dut.memSys.ram0", "dut.memSys.ram1"}, 14, types);
     EXPECT_EQ(tally.bram, 2);
     EXPECT_EQ(tally.clbAtoms, 0);
 }

@@ -45,8 +45,9 @@ inline QString classifyAtomType(const std::string& atomName, const std::string& 
 }
 
 // A DSP-V4 tile holds many QL_DSP4_* leaf cells but exactly one QL_DSP4_MULT
-// (dsp4_logical_map.v), so only that leaf counts as a tile. Without the real type
-// every DSP atom counts as one.
+// (dsp4_logical_map.v), so only that leaf counts as a tile. Its leaves share one owner, so
+// an RTL selection holds the multiplier with them; an atom picked on its own may not.
+// Without the real type every DSP atom counts as one.
 inline bool countsAsDspTile(const std::string& realType) {
     return realType.rfind("QL_DSP4_", 0) != 0 || realType == "QL_DSP4_MULT";
 }

@@ -2435,16 +2435,6 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   m_floorPlanningWidget->setAtomResources(table.atomResources);
   m_floorPlanningWidget->setAtomTypes(table.atomTypes);
 
-  // [aurora2#2377] DSP-V4 leaves grouped into tiles, from the debug netlist dump when there
-  // is one; set even when absent, so an earlier project's grouping does not linger.
-  {
-    fp::DspTileMap dspTiles;
-    fp::loadDspTiles(fp::postSynthDebugJson(compiler->ProjManager()->projectPath(),
-                                            compiler->ProjManager()->DesignTopModule()),
-                     dspTiles);
-    m_floorPlanningWidget->setDspTiles(std::move(dspTiles));
-  }
-
   // [aurora2#1725 stage P7] design_resources.json -- per-instance clb/dsp/bram in ONE
   // schema whatever point the flow has reached (floorplanning/design_resources.py, A.13.5).
   // Written by RunDesignResources() at synthesis (tier 1) and placement (tier 2). Must be
