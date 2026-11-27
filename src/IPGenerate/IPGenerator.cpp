@@ -817,7 +817,8 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
       return TCL_ERROR;
     }
     if (!out_location.empty()) {
-      generator->setIpOutputLocation(mod_name, version, out_location);
+      if (generated)
+        generator->setIpOutputLocation(mod_name, version, out_location);
     } else {
       out_location = generator->GetProjectIPsPath();
     }
@@ -898,10 +899,11 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
     IPInstance* instance =
         new IPInstance(ip_name, version, def, parameters, mod_name, out_location);
     instance->Generated(generated);
-    if (!generator->AddIPInstance(instance)) {
+    if (!generator->AddIPInstance(instance, !generated)) {
       ok = false;
       auto kept = generator->IPInstances();
-      if (std::find(kept.begin(), kept.end(), instance) == kept.end())
+      if (std::find(kept.begin(), kept.end(), instance) == kept.end() &&
+          instance != generator->PreviewInstance())
         delete instance;
     }
     return ok ? TCL_OK : TCL_ERROR;
@@ -956,7 +958,7 @@ bool IPGenerator::RegisterCommands(TclInterpreter* interp, bool batchMode) {
   return true;
 }
 
-bool IPGenerator::AddIPInstance(IPInstance* instance) {
+bool IPGenerator::AddIPInstance(IPInstance* instance, bool preview) {
   bool status = true;
   const IPDefinition* def = instance->Definition();
 
@@ -985,9 +987,10 @@ bool IPGenerator::AddIPInstance(IPInstance* instance) {
     return other->ModuleName() == instance->ModuleName() &&
            (sameVersion(other) || !other->Generated());
   };
-  m_instances.erase(
-      std::remove_if(m_instances.begin(), m_instances.end(), isReplaced),
-      m_instances.end());
+  if (!preview)
+    m_instances.erase(
+        std::remove_if(m_instances.begin(), m_instances.end(), isReplaced),
+        m_instances.end());
 
   // Check parameters
   std::set<std::string> legalParams;
@@ -1045,7 +1048,10 @@ bool IPGenerator::AddIPInstance(IPInstance* instance) {
       status = false;
     }
   }
-  m_instances.push_back(instance);
+  if (!preview)
+    m_instances.push_back(instance);
+  else if (m_preview.get() != instance)
+    m_preview.reset(instance);
   return status;
 }
 
@@ -1546,6 +1552,9 @@ std::vector<std::filesystem::path> IPGenerator::GetDesignFiles(
     for (const auto& entry : std::filesystem::directory_iterator(srcPath)) {
       paths.push_back(entry.path());
     }
+    // Directory order differs between file systems; design sources keep this
+    // order, so sort it.
+    std::sort(paths.begin(), paths.end());
   }
 
   return paths;
@@ -1571,6 +1580,7 @@ std::vector<std::filesystem::path> IPGenerator::GetCacheFiles(
         paths.push_back(entry.path());
       }
     }
+    std::sort(paths.begin(), paths.end());
   }
 
   return paths;

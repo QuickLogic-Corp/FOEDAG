@@ -745,6 +745,7 @@ void QLSettingsManager::populateSettingsWidget() {
   QHBoxLayout* dlg_widgetslayout = new QHBoxLayout();
   stackedWidget = new QStackedWidget();
   listWidget = new QListWidget();
+  listWidget->setObjectName("taskSettingsCategories");
   // https://stackoverflow.com/a/48336420/3379867
   listWidget->setStyleSheet(
             "QListWidget {\
@@ -803,6 +804,7 @@ void QLSettingsManager::populateSettingsWidget() {
     // container widget for each 'category' -> this will be each 'page' of the QStackedWidget
     // this container widget will contain all the 'subcategories' of the category -> hence a QTabWidget for each category
     QTabWidget* categoryWidget = new QTabWidget();
+    categoryWidget->setObjectName("taskSettingsTabs_" + QString::fromStdString(categoryId));
     categoryWidget->setProperty("settings_category_id", QString::fromStdString(categoryId));
 
     for (auto [subcategoryId, subcategoryJson] : categoryJson.items()) {
@@ -994,10 +996,12 @@ void QLSettingsManager::populateSettingsWidget() {
     dlg_buttonslayout = new QHBoxLayout();
     // make the buttons for the actions in the settings dialog
     button_reset = new QPushButton("Reset");
+    button_reset->setObjectName("taskSettingsReset");
     button_reset->setToolTip("Discard any modifications, reload from current settings JSON");
     button_reset->setDisabled(true);
     QObject::connect(button_reset, &QPushButton::released, this, &QLSettingsManager::handleResetButtonClicked);
     button_apply = new QPushButton("Apply");
+    button_apply->setObjectName("taskSettingsApply");
     button_apply->setToolTip("Apply the modifications to the current settings JSON");
     button_apply->setDisabled(true);
     QObject::connect(button_apply, &QPushButton::released, this, &QLSettingsManager::handleApplyButtonClicked);
@@ -1527,11 +1531,13 @@ bool QLSettingsManager::saveJSONSettings() {
     // ask user to confirm the changes, before saving into JSON
 
       QDialog dialog;
+      dialog.setObjectName("settingsChangesDialog");
       dialog.setWindowTitle("Settings Changes!");
       QVBoxLayout* dialogLayout = new QVBoxLayout();
       dialog.setLayout(dialogLayout);
 
       QListWidget* listOfChangesWidget = new QListWidget();
+      listOfChangesWidget->setObjectName("settingsChangesList");
       listOfChangesWidget->setAlternatingRowColors(true);
 
       for(std::string change_item: settings_json_change_list) {

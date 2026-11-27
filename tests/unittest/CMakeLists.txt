@@ -33,10 +33,13 @@ set (CPP_LIST
 #    PinAssignment/PinAssignmentCreator_test.cpp // TODO @volodymyrk RG-181
 #    PinAssignment/PinsBaseModel_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/PortsLoader_test.cpp
+    PinAssignment/PcfObserver_test.cpp
+    PinAssignment/PortsView_test.cpp
 #    PinAssignment/PackagePinsLoader_test.cpp // TODO @volodymyrk RG-181
     PinAssignment/QLPackagePinsLoader_test.cpp
     Settings/Settings_test.cpp
     IPGenerator/IPGenerator_test.cpp
+    IPGenerator/IPDialogBox_gui_test.cpp
     FloorPlanning/FloorPlanning_test.cpp
     NewProject/source_grid_test.cpp
     Utils/sequential_map_test.cpp
@@ -44,6 +47,7 @@ set (CPP_LIST
     PinAssignment/TestLoader.cpp
     PinAssignment/TestPortsLoader.cpp
     Compiler/CompilerDefines_test.cpp
+    Compiler/WildcardFileFinder_test.cpp
     Compiler/QLDeviceManager_test.cpp
     Compiler/QLDeviceLayoutInfo_test.cpp
     Compiler/QLDevicePath_test.cpp
@@ -61,11 +65,17 @@ set (CPP_LIST
     Compiler/DumpOptionsGuard_test.cpp
     Compiler/EncryptedCopy_test.cpp
     Compiler/ClockBinding_test.cpp
+    Compiler/QtPlatformPlugin_test.cpp
     Main/EventLoopProbe_test.cpp
+    Main/ReportView_gui_test.cpp
     ProjectFile/ProjectFileLoader_test.cpp
     PinAssignment/PortsModel_test.cpp
     PinAssignment/PinAssignmentBaseView_test.cpp
     Simulation/Simulation_test.cpp
+    GuiTestFramework/GuiTestHub_test.cpp
+    GuiTestFramework/GuiTestRunner_test.cpp
+    GuiTestFramework/GuiRecorder_test.cpp
+    GuiTestFramework/GuiScreenshot_test.cpp
 
 )
 
@@ -76,6 +86,7 @@ if (USE_IPA)
     InteractivePathAnalysis/TelegramParser_test.cpp
     InteractivePathAnalysis/TelegramBuffer_test.cpp
     InteractivePathAnalysis/NCriticalPathModel_test.cpp
+    InteractivePathAnalysis/NCriticalPathView_test.cpp
     InteractivePathAnalysis/VprProcess_test.cpp
   )
 endif()

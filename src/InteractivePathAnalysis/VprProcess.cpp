@@ -28,9 +28,73 @@
 
 #include "SimpleLogger.h"
 
+#include <cstdlib>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace FOEDAG {
 
+namespace {
+// Every live Process. Aurora exits through Tcl's exit, which calls C exit()
+// and so destroys no widget: a VPR server left running would outlive aurora
+// and, on Windows, keep its inherited stdout open.
+QSet<Process*>& liveProcesses() {
+  static QSet<Process*> processes;
+  return processes;
+}
+
+#ifdef _WIN32
+// On Windows, Tcl's exit can end the process without running atexit handlers,
+// so each child also goes into a job that Windows kills when aurora ends,
+// however it ends. The handle is never closed: the OS closes it at exit.
+void killWithThisProcess(qint64 pid) {
+  static HANDLE job = []() {
+    HANDLE handle = CreateJobObjectW(nullptr, nullptr);
+    if (handle) {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+      limits.BasicLimitInformation.LimitFlags =
+          JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      SetInformationJobObject(handle, JobObjectExtendedLimitInformation,
+                              &limits, sizeof(limits));
+    }
+    return handle;
+  }();
+  if (!job || pid <= 0) return;
+  HANDLE process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, FALSE,
+                               static_cast<DWORD>(pid));
+  if (!process) return;
+  if (!AssignProcessToJobObject(job, process))
+    SimpleLogger::instance().error("could not tie the process to aurora:",
+                                   QString::number(GetLastError()));
+  CloseHandle(process);
+}
+#endif
+}  // namespace
+
+void Process::killAllAtExit() {
+  for (Process* process : liveProcesses()) {
+    if (process->state() != QProcess::NotRunning) {
+      process->kill();
+      process->waitForFinished(1000);
+    }
+  }
+}
+
 Process::Process(const QString& name) : m_name(name) {
+  // The set first: it is then destroyed only after the atexit handler ran.
+  liveProcesses().insert(this);
+  static const bool registered = std::atexit(&Process::killAllAtExit) == 0;
+  Q_UNUSED(registered);
+#ifdef _WIN32
+  connect(this, &QProcess::started, this,
+          [this]() { killWithThisProcess(processId()); });
+#endif
+
   if (m_forwardProcessLog) {
     connect(this, &QProcess::readyReadStandardOutput, this, [this]() {
       QByteArray output = readAllStandardOutput();
@@ -65,7 +129,10 @@ Process::Process(const QString& name) : m_name(name) {
   m_prevState = state();
 }
 
-Process::~Process() { stopAndWaitProcess(); }
+Process::~Process() {
+  liveProcesses().remove(this);
+  stopAndWaitProcess();
+}
 
 void Process::stopAndWaitProcess() {
   m_watcherTimer.stop();

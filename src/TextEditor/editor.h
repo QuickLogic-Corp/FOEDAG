@@ -27,12 +27,19 @@ enum FileType {
 
 class Editor : public QWidget {
   Q_OBJECT
+  // Lets GUI scenarios read and type the text with gui_get / gui_set_text.
+  Q_PROPERTY(QString text READ text WRITE setText NOTIFY textEdited)
+  // First line of the selection, from 0; -1 when nothing is selected.
+  Q_PROPERTY(int selectedLine READ selectedLine)
  public:
   explicit Editor(QString strFileName, int iFileType,
                   QWidget* parent = nullptr);
 
   QString getFileName() const;
   bool isModified() const;
+  QString text() const;
+  int selectedLine() const;
+  void setText(const QString& text);
   void SetFileWatcher(QFileSystemWatcher* watcher);
 
   void FindFirst(const QString& strWord);
@@ -48,6 +55,8 @@ class Editor : public QWidget {
 
  signals:
   void EditorModificationChanged(bool m);
+  // A user edit; loading the file does not count. Lets --record see typing.
+  void textEdited();
   void ShowSearchDialog(QString);
 
  public slots:
@@ -70,6 +79,7 @@ class Editor : public QWidget {
  private:
   QString m_strFileName;
   QsciScintilla* m_scintilla;
+  bool m_loading{false};
 
   QToolBar* m_toolBar;
   QAction* m_actSearch;

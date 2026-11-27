@@ -2,7 +2,6 @@
 
 #include <QDebug>
 #include <QDir>
-#include <QDirIterator>
 #include <QFileInfo>
 #include <QMenu>
 #include <QMessageBox>
@@ -30,6 +29,7 @@ SourcesForm::SourcesForm(QWidget *parent)
   ui->setupUi(this);
 
   m_treeSrcHierachy = new QTreeWidget(ui->m_tabHierarchy);
+  m_treeSrcHierachy->setObjectName("sourcesTree");
   m_treeSrcHierachy->setSelectionMode(
       QAbstractItemView::SelectionMode::ExtendedSelection);
 
@@ -64,8 +64,7 @@ ProjectManager *SourcesForm::ProjManager() { return m_projManager; }
 void SourcesForm::CreateConstraint() { showAddFileDialog(GT_CONSTRAINTS); }
 
 void SourcesForm::SetCurrentFileItem(const QString &strFileName) {
-  QString filename = strFileName.right(strFileName.size() -
-                                       (strFileName.lastIndexOf("/") + 1));
+  QString filename = QFileInfo(strFileName).fileName();
   QList<QTreeWidgetItem *> listItem = m_treeSrcHierachy->findItems(
       filename, Qt::MatchContains | Qt::MatchRecursive);
   foreach (auto item, listItem) {
@@ -541,16 +540,19 @@ void SourcesForm::CreateActions() {
   connect(m_actCloseProject, SIGNAL(triggered()), this, SIGNAL(CloseProject()));
 
   m_actReconfigureIp = new QAction(tr("Reconfigure IP"), m_treeSrcHierachy);
+  m_actReconfigureIp->setObjectName("actionReconfigureIp");
   connect(m_actReconfigureIp, &QAction::triggered, this,
           &SourcesForm::SlotReConfigureIp);
 
   m_actRemoveIp = new QAction(tr("Remove IP from Project"), m_treeSrcHierachy);
+  m_actRemoveIp->setObjectName("actionRemoveIp");
   m_actRemoveIp->setToolTip(
       "Remove the selectd IP instance from the project. Its build files will "
       "remain.");
   connect(m_actRemoveIp, &QAction::triggered, this, &SourcesForm::SlotRemoveIp);
 
   m_actDeleteIp = new QAction(tr("Delete IP"), m_treeSrcHierachy);
+  m_actDeleteIp->setObjectName("actionDeleteIp");
   m_actDeleteIp->setToolTip(
       "Remove the selectd IP instance from the project and delete its build "
       "files.");
@@ -572,10 +574,12 @@ void SourcesForm::CreateActions() {
           &SourcesForm::SlotWaveForm);
 
   m_actProjectSettings = new QAction(tr("Project settings"), m_treeSrcHierachy);
+  m_actProjectSettings->setObjectName("actionProjectSettings");
   connect(m_actProjectSettings, &QAction::triggered, this,
           &SourcesForm::OpenProjectSettings);
 
   m_actAddIpToProject = new QAction(tr("Add IP to Design"), m_treeSrcHierachy);
+  m_actAddIpToProject->setObjectName("actionAddIpToDesign");
   connect(m_actAddIpToProject, &QAction::triggered, this,
           &SourcesForm::SlotAddIPToDesign);
 }
@@ -611,8 +615,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     QTreeWidgetItem *parentItem{topitemDS};
     for (auto &strfile : listDesFile) {
       if (parentItem) {
-        QString filename =
-            strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+        QString filename = QFileInfo(strfile).fileName();
         QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
         itemf->setText(0, filename);
         itemf->setData(0, Qt::UserRole, strfile);
@@ -660,8 +663,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     QString strTarget = m_projManager->getConstrTargetFile(str);
     for (auto &strfile : listConstrFile) {
       if (parentItem) {
-        QString filename =
-            strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+        QString filename = QFileInfo(strfile).fileName();
         QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
         if (filename == strTarget) {
           itemf->setText(0, filename + SRC_TREE_FLG_TARGET);
@@ -684,8 +686,7 @@ void SourcesForm::CreateFolderHierachyTree() {
 
   for (auto &strfile : listConstrFile) {
     if (parentItem) {
-      QString filename =
-          strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+      QString filename = QFileInfo(strfile).fileName();
       QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
       if (filename == strTarget) {
         itemf->setText(0, filename + SRC_TREE_FLG_TARGET);
@@ -714,8 +715,7 @@ void SourcesForm::CreateFolderHierachyTree() {
     QTreeWidgetItem *parentItem{topitemSS};
     for (auto &strfile : listSimFile) {
       if (parentItem) {
-        QString filename =
-            strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+        QString filename = QFileInfo(strfile).fileName();
         QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItem);
         itemf->setText(0, filename);
         itemf->setData(0, Qt::UserRole, strfile);
@@ -771,8 +771,7 @@ void SourcesForm::CreateFolderHierachyTree() {
   QTreeWidgetItem *parentItemConfS{topitemConfS};
   for (auto &strfile : listConfFile) {
     if (parentItemConfS) {
-      QString filename =
-          strfile.right(strfile.size() - (strfile.lastIndexOf("/") + 1));
+      QString filename = QFileInfo(strfile).fileName();
       QTreeWidgetItem *itemf = new QTreeWidgetItem(parentItemConfS);
       itemf->setText(0, filename);
       itemf->setData(0, Qt::UserRole, strfile);
@@ -813,12 +812,12 @@ void SourcesForm::AddIpInstanceTree(QTreeWidgetItem *topItem) {
       QString srcDirStr =
           QString::fromStdString(FileUtils::GetFullPath(srcDirPath).string());
 
-      // Grab and add all files from the IP src dir (non-recursive)
-      QDirIterator it(srcDirStr, QDir::Files);
-      while (it.hasNext()) {
-        QFile file(it.next());
+      // Grab and add all files from the IP src dir (non-recursive), by name:
+      // directory order differs between file systems
+      const QFileInfoList files =
+          QDir(srcDirStr).entryInfoList(QDir::Files, QDir::Name);
+      for (const QFileInfo &info : files) {
         QTreeWidgetItem *itemFile = new QTreeWidgetItem(itemIp);
-        QFileInfo info(file);
         itemFile->setText(0, info.fileName());
         itemFile->setData(0, Qt::UserRole, info.absoluteFilePath());
         itemFile->setIcon(0, QIcon(":/img/file.png"));

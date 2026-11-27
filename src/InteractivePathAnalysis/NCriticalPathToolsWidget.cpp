@@ -83,6 +83,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
   setLayout(layout);
 
   QPushButton* bnPathsOptions = new QPushButton("Configuration");
+  bnPathsOptions->setObjectName("ipaConfigButton");
   bnPathsOptions->setToolTip(
       tr("grouped project settings relevant for the Interactive Path Analysis "
          "Tool"));
@@ -91,6 +92,7 @@ NCriticalPathToolsWidget::NCriticalPathToolsWidget(
 
   // bnRunPnRView
   m_bnRunPnRView = new QPushButton("Run P&&R View");
+  m_bnRunPnRView->setObjectName("ipaRunPnRViewButton");
   m_bnRunPnRView->setToolTip(
       tr("run P&R View manually if it was terminated or closed"));
   layout->addWidget(m_bnRunPnRView);
@@ -205,6 +207,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
   }
 
   m_pathsOptionsMenu = new CustomMenu(caller);
+  m_pathsOptionsMenu->setNamePrefix("ipaConfig");
   m_pathsOptionsMenu->setButtonToolTips(
       tr("apply interactive path analysis configuration and save it to main "
          "project settings file"),
@@ -241,6 +244,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
 
   //
   m_cbHighlightMode = new QComboBox;
+  m_cbHighlightMode->setObjectName("ipaHighlightMode");
   m_cbHighlightMode->setToolTip(
       m_parameters->getHighLightModeToolTip().c_str());
   for (const std::string& item : m_parameters->getHighLightAvailableOptions()) {
@@ -251,6 +255,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
 
   //
   m_cbDrawCritPathContour = new QCheckBox;
+  m_cbDrawCritPathContour->setObjectName("ipaDrawPathContour");
   m_cbDrawCritPathContour->setToolTip(
       m_parameters->getIsDrawCriticalPathContourEnabledToolTip().c_str());
   addRowToFormLayout(formLayout, tr("Draw path contour:"),
@@ -258,6 +263,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
 
   //
   m_cbPathType = new QComboBox;
+  m_cbPathType->setObjectName("ipaPathType");
   m_cbPathType->setToolTip(m_parameters->getPathTypeToolTip().c_str());
   for (const std::string& item :
        m_parameters->getCritPathTypeAvailableOptions()) {
@@ -267,6 +273,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
 
   //
   m_cbDetail = new QComboBox;
+  m_cbDetail->setObjectName("ipaDetail");
   m_cbDetail->setToolTip(m_parameters->getPathDetailLevelToolTip().c_str());
   for (const std::string& item :
        m_parameters->getPathDetailAvailableOptions()) {
@@ -276,6 +283,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
 
   //
   m_leNCriticalPathNum = new QLineEdit();
+  m_leNCriticalPathNum->setObjectName("ipaNPaths");
   m_leNCriticalPathNum->setToolTip(
       m_parameters->getCriticalPathNumToolTip().c_str());
   QIntValidator intValidator(m_leNCriticalPathNum);
@@ -285,6 +293,7 @@ void NCriticalPathToolsWidget::setupCriticalPathsOptionsMenu(
                      m_leNCriticalPathNum);
 
   m_cbIsLogToFileEnabled = new QCheckBox("");
+  m_cbIsLogToFileEnabled->setObjectName("ipaLogToFile");
   m_cbIsLogToFileEnabled->setMinimumHeight(25);
   m_cbIsLogToFileEnabled->setToolTip(
       m_parameters->getIsLogToFileEnabledToolTip().c_str());

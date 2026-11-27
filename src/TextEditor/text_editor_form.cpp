@@ -17,6 +17,7 @@ void TextEditorForm::InitForm() {
   }
 
   m_tab_editor = new QTabWidget(this);
+  m_tab_editor->setObjectName("textEditorTabs");
   m_tab_editor->setTabsClosable(true);
   connect(m_tab_editor, SIGNAL(tabCloseRequested(int)), this,
           SLOT(SlotTabCloseRequested(int)));

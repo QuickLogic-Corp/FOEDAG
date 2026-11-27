@@ -504,6 +504,10 @@ class CompilerOpenFPGA_ql : public Compiler {
   std::string m_customYosysScript;
   std::string m_pb_pin_fixup;
 
+  // Packed, Placed or Routed, from the VPR files on disk (or the vpr > filename
+  // settings), for Timing Analysis.
+  void restoreStateFromVprFiles();
+
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
   CommandWrapperPtr BaseStaCommand();
 #else // ENABLE_INCREMENTAL_COMPILATION_FOR_STA

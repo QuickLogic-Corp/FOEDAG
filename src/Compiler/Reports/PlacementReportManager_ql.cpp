@@ -140,6 +140,8 @@ static const QRegularExpression PLACEMENT_RESOURCE_REGEXP{"Placement resource us
 
 static const QString CREATE_DEVICE_SECTION{"# Create Device"};
 static const QString PLACEMENT_SECTION{"# Placement"};
+// Newer VPR names the annealer in the header.
+static const QString SA_PLACEMENT_SECTION{"# SA Placement"};
 
 static const QRegularExpression FIND_STAT_TIMING{
     "([-]?(([0-9]*[.])?[0-9]+) (ns?(?=,)|.*|MHz))"};
@@ -236,6 +238,9 @@ void PlacementReportManager::parseLogFile() {
                                         m_createDeviceKeys);
     else if (line.startsWith(PLACEMENT_SECTION))
       lineNr = parseErrorWarningSection(in, lineNr, PLACEMENT_SECTION,
+                                        m_placementKeys);
+    else if (line.startsWith(SA_PLACEMENT_SECTION))
+      lineNr = parseErrorWarningSection(in, lineNr, SA_PLACEMENT_SECTION,
                                         m_placementKeys);
     ++lineNr;
   }

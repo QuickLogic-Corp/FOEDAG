@@ -33,9 +33,25 @@
 #include "TelegramParser.h"
 #include "ZlibUtils.h"
 
+#include <QtGlobal>
+
 namespace FOEDAG {
 
 namespace client {
+
+namespace {
+
+// AURORA_DEBUG_IPA_TELEGRAM logs each sent telegram in full and each response,
+// so a GUI test can check what IPA asked VPR and how VPR answered.
+bool logFullTelegrams() {
+  return qEnvironmentVariableIsSet("AURORA_DEBUG_IPA_TELEGRAM");
+}
+
+std::string telegramText(const std::string& body) {
+  return logFullTelegrams() ? body : getTruncatedMiddleStr(body);
+}
+
+}  // namespace
 
 GateIO::GateIO(const NCriticalPathParametersPtr& parameters)
     : m_parameters(parameters),
@@ -145,8 +161,12 @@ void GateIO::handleResponse(const QByteArray& bytes, bool isCompressed) {
             getPrettyDurationStrFromMs(durationMs).c_str());
       }
 
-      // SimpleLogger::instance().debug("cmd:", cmd, "status:", status, "data:",
-      // getTruncatedMiddleStr(data.toStdString()).c_str());
+      if (logFullTelegrams()) {
+        // The data stays shortened: a path list answer is the whole report.
+        SimpleLogger::instance().log(
+            "received job", jobId, "cmd", cmd, "status", int(status), "data[",
+            getTruncatedMiddleStr(data.toStdString()).c_str(), "]");
+      }
       if (status) {
         switch (cmd) {
           case comm::CMD_GET_PATH_LIST_ID:
@@ -188,12 +208,12 @@ void GateIO::sendRequest(const comm::TelegramFrame& frame,
     }
     SimpleLogger::instance().debug(
         "sent", frame.header.info().c_str(), " data[",
-        getTruncatedMiddleStr(frame.body.to_string()).c_str(), "]",
+        telegramText(frame.body.to_string()).c_str(), "]",
         QString("requested by [%1]").arg(initiator));
   } else {
     SimpleLogger::instance().error(
         "unable to send", frame.header.info().c_str(), " data[",
-        getTruncatedMiddleStr(frame.body.to_string()).c_str(), "]",
+        telegramText(frame.body.to_string()).c_str(), "]",
         QString("requested by [%1]").arg(initiator));
   }
 }

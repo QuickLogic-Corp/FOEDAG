@@ -46,6 +46,9 @@ public:
   bool isBaseFileNameOnlyAvailable() const { return !m_baseFileName.empty() && !hasProfiles(); }
 
   std::string defaultProfile() const;
+  // The file one view shows: the default profile's, else the base file; empty
+  // when neither exists.
+  std::filesystem::path defaultFilePath() const;
 
 private:
   std::filesystem::path m_path;

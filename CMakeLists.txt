@@ -123,6 +123,7 @@ add_subdirectory(src/NewFile)
 add_subdirectory(src/ProjNavigator)
 add_subdirectory(src/DesignRuns)
 add_subdirectory(src/Console)
+add_subdirectory(src/GuiTestFramework)
 add_subdirectory(src/Main)
 add_subdirectory(src/Compiler)
 add_subdirectory(src/Simulation)
@@ -386,6 +387,7 @@ add_dependencies(tcl_static tcl_build)
 add_dependencies(foedag-bin tcl_build)
 add_dependencies(designruns_bin tcl_build)
 add_dependencies(foedagcore tcl_build)
+add_dependencies(guitestframework tcl_build)
 add_dependencies(console_debug tcl_build)
 add_dependencies(newfile tcl_stubb_build)
 add_dependencies(newfile_bin tcl_stubb_build)
@@ -542,6 +544,13 @@ install (
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/${TCL_STUBB_LIB}
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag/lib)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # Tcl looks for its script library in <prefix>/lib/tcl8.6 (always "lib",
+  # never lib64); its compiled-in path points into the build tree.
+  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib/tcl8.6
+                    ${CMAKE_CURRENT_BINARY_DIR}/lib/tcl8
+          DESTINATION lib)
+endif()
 install (
   FILES ${CMAKE_CURRENT_BINARY_DIR}/lib/${ZLIB_STATIC_LIB}
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/foedag/lib)  

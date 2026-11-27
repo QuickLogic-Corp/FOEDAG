@@ -61,6 +61,7 @@ const QStringList sourceGrid::uniqueExtentions{
 sourceGrid::sourceGrid(QWidget *parent) : QWidget(parent) {
   m_lisFileData.clear();
   m_btnAddFile = new QPushButton(tr("Add File..."), this);
+  m_btnAddFile->setObjectName("sourceGridAddFile");
   connect(m_btnAddFile, &QPushButton::clicked, this, &sourceGrid::AddFiles);
   m_btnAddDri = new QPushButton(tr("Add Directory"
                                    "..."),
@@ -95,6 +96,7 @@ sourceGrid::sourceGrid(QWidget *parent) : QWidget(parent) {
   hbox->setSpacing(1);
 
   m_tableViewSrc = new QTableView(this);
+  m_tableViewSrc->setObjectName("sourceGridView");
 
   // Set properties
   m_tableViewSrc->verticalHeader()->hide();

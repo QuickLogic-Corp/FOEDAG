@@ -91,6 +91,7 @@ PinAssignmentCreator::PinAssignmentCreator(const PinAssignmentData &data,
   m_baseModel->setCollisionDetector(collisionDetector);
 
   auto portsView = new PortsView(m_baseModel);
+  portsView->setObjectName("pinPlannerPortsView");
   connect(portsView, &PortsView::selectionHasChanged, this,
           &PinAssignmentCreator::changed);
   m_portsView = CreateLayoutedWidget(portsView);
@@ -140,13 +141,16 @@ void PinAssignmentCreator::forceNextPcfFileCheck()
   m_pcfObserver->forceNextCheck();
 }
 
-std::pair<QString, bool> PinAssignmentCreator::generatePcf() const {
+void PinAssignmentCreator::checkPcfFileNow()
+{
+  m_pcfObserver->checkNow();
+}
+
+QString PinAssignmentCreator::generatePcf() const {
   QString pcf;
 
   const QSet<QString> ports = QtUtils::convertToSet(m_baseModel->portsModel()->listModel()->stringList());
   const QSet<QString> pins = QtUtils::convertToSet(m_baseModel->packagePinModel()->listModel()->stringList());
-
-  bool foundInvalidConnection = false;
 
   const auto pinMap = m_baseModel->pinMap();
   for (auto it = pinMap.constBegin(); it != pinMap.constEnd(); ++it) {
@@ -155,17 +159,15 @@ std::pair<QString, bool> PinAssignmentCreator::generatePcf() const {
     QString assignment{QString("set_io %1 %2\n").arg(port, pin)};
     if (!ports.contains(port)) {
       //qInfo() << QString("skip assignment [%1], because of not existed port [%2]").arg(assignment).arg(port);
-      foundInvalidConnection = true;
       continue;
     }
     if (!pins.contains(pin)) {
       //qInfo() << QString("skip assignment [%1], because of not existed pin [%2]").arg(assignment).arg(pin);
-      foundInvalidConnection = true;
       continue;
     }
     pcf.append(assignment);
   }
-  return std::make_pair(pcf, foundInvalidConnection);
+  return pcf;
 }
 
 // internally PinAssignmentCreator expects sdc custom format not pcf, so we do pcf to sdc conversion
@@ -197,6 +199,8 @@ QWidget *PinAssignmentCreator::CreateLayoutedWidget(QWidget *main) {
 
   ErrorsModel* errorsModel = new ErrorsModel(m_baseModel);
   ErrorsView* errorsView = new ErrorsView(errorsModel);
+  if (qobject_cast<PortsView*>(main))
+    errorsView->setObjectName("pinPlannerErrorsView");
   connect(errorsView, &ErrorsView::openFileRequested, this, [this](){
     emit openPcfFileRequested(m_data.pinFile);
   });

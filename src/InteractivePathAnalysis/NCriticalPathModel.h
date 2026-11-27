@@ -67,6 +67,8 @@ class NCriticalPathModel final : public QAbstractItemModel {
       const QModelIndex& parent = QModelIndex()) const override final;
 
   bool isSelectable(const QModelIndex& index) const;
+  // True while a resize waits for the line limiter to wrap the items again.
+  bool lineLimitPending() const { return m_lineLimiterTimer.isActive(); }
 
  public slots:
   void loadFromString(QString rawData);

@@ -8,6 +8,7 @@ using namespace FOEDAG;
 Editor::Editor(QString strFileName, int iFileType, QWidget *parent)
     : QWidget(parent) {
   m_strFileName = strFileName;
+  setObjectName("editor_" + QFileInfo(strFileName).fileName());
   m_toolBar = new QToolBar(this);
   m_toolBar->setIconSize(QSize(32, 32));
   InitToolBar();
@@ -41,6 +42,21 @@ Editor::Editor(QString strFileName, int iFileType, QWidget *parent)
 QString Editor::getFileName() const { return m_strFileName; }
 
 bool Editor::isModified() const { return m_scintilla->isModified(); }
+
+QString Editor::text() const { return m_scintilla->text(); }
+
+int Editor::selectedLine() const {
+  int lineFrom{-1}, indexFrom{-1}, lineTo{-1}, indexTo{-1};
+  m_scintilla->getSelection(&lineFrom, &indexFrom, &lineTo, &indexTo);
+  return lineFrom;
+}
+
+// Replaces the whole text as one undoable edit, so the editor counts as
+// modified and Save is enabled, as after typing.
+void Editor::setText(const QString &text) {
+  m_scintilla->selectAll();
+  m_scintilla->replaceSelectedText(text);
+}
 
 void Editor::SetFileWatcher(QFileSystemWatcher *watcher) {
   m_fileWatcher = watcher;
@@ -144,7 +160,10 @@ void Editor::QscintillaModificationChanged(bool m) {
   emit EditorModificationChanged(m);
 }
 
-void Editor::QScintillaTextChanged() { UpdateToolBarStates(); }
+void Editor::QScintillaTextChanged() {
+  UpdateToolBarStates();
+  if (!m_loading) emit textEdited();
+}
 
 void Editor::InitToolBar() {
   m_actSearch = new QAction(m_toolBar);
@@ -155,6 +174,7 @@ void Editor::InitToolBar() {
   m_toolBar->addSeparator();
 
   m_actSave = new QAction(m_toolBar);
+  m_actSave->setObjectName("editorSave_" + QFileInfo(m_strFileName).fileName());
   // m_actSave->setIcon( QIcon(""));
   m_actSave->setText(tr("&Save"));
   m_actSave->setShortcut(tr("Ctrl+S"));
@@ -279,7 +299,9 @@ void Editor::SetScintillaText(QString strFileName) {
 
   QTextStream in(&file);
   QApplication::setOverrideCursor(Qt::WaitCursor);
+  m_loading = true;
   m_scintilla->setText(in.readAll());
+  m_loading = false;
   QApplication::restoreOverrideCursor();
 
   m_scintilla->setModified(false);

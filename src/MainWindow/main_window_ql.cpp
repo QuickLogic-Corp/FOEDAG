@@ -472,7 +472,7 @@ void MainWindow::addPinPlannerRefreshButton(QDockWidget* dock) {
   layout->addWidget(new QLabel{dock->windowTitle()});
 
   auto saveButton = new QPushButton;
-  saveButton->setObjectName("saveButton");
+  saveButton->setObjectName("savePcfButton");
   connect(saveButton, &QPushButton::clicked, this,
           &MainWindow::saveActionTriggered);
   saveButton->setSizePolicy(
@@ -501,7 +501,7 @@ QWidget* MainWindow::createPinPlannerToolBar(PinAssignmentCreator* creator) cons
   auto saveButton = new QPushButton;
   connect(creator, &PinAssignmentCreator::allowSaving, saveButton, &QPushButton::setEnabled);
 
-  saveButton->setObjectName("saveButton");
+  saveButton->setObjectName("savePcfButton");
   connect(saveButton, &QPushButton::clicked, this,
           &MainWindow::saveActionTriggered);
   saveButton->setSizePolicy(
@@ -513,6 +513,7 @@ QWidget* MainWindow::createPinPlannerToolBar(PinAssignmentCreator* creator) cons
   layout->addWidget(saveButton);
 
   QLabel* warningIcon = new QLabel;
+  warningIcon->setObjectName("pinPlannerOutdatedIcon");
   QPixmap pixmap(":/images/error.png");
   pixmap = pixmap.scaled(16, 16, Qt::KeepAspectRatio, Qt::SmoothTransformation);
   warningIcon->setPixmap(pixmap);
@@ -881,12 +882,12 @@ bool MainWindow::saveConstraintFile() {
 #else
 bool MainWindow::saveConstraintFile() {
   if (!m_pinAssignmentCreator) return false;
-  auto [pcf, refreshUI] = m_pinAssignmentCreator->generatePcf();
+  const QString pcf = m_pinAssignmentCreator->generatePcf();
   FileUtils::WriteToFile(m_projectManager->getPcfFilePath().toStdString(), pcf.toStdString());
+  // Reload now, so the timer does not take this write for an outside edit and
+  // drop pins set after Save.
+  m_pinAssignmentCreator->checkPcfFileNow();
   updateSourceTree();
-  if (refreshUI) {
-    m_pinAssignmentCreator->refresh();
-  }
   return true;
 }
 #endif
@@ -1055,6 +1056,7 @@ void MainWindow::createActions() {
   connect(newAction, SIGNAL(triggered()), this, SLOT(newFile()));
 
   openProjectAction = new QAction(tr("Open &Project..."), this);
+  openProjectAction->setObjectName("actionOpenProject");
   openProjectAction->setToolTip(tr("Open a new project"));
   connect(openProjectAction, SIGNAL(triggered()), this,
           SLOT(openProjectDialog()));
@@ -1073,6 +1075,7 @@ void MainWindow::createActions() {
       m_settings.value(DEFAULT_PROJECT_PATH, QString{}).toString());
   connect(newProjdialog, SIGNAL(accepted()), this, SLOT(newDialogAccepted()));
   newProjectAction = new QAction(tr("&New Project..."), this);
+  newProjectAction->setObjectName("actionNewProject");
   newProjectAction->setToolTip(tr("Create a new project"));
   connect(newProjectAction, SIGNAL(triggered()), this, SLOT(newProjectDlg()));
 
@@ -1082,10 +1085,12 @@ void MainWindow::createActions() {
   connect(openFile, SIGNAL(triggered()), this, SLOT(openFileSlot()));
 
   exitAction = new QAction(tr("E&xit"), this);
+  exitAction->setObjectName("actionExit");
   exitAction->setShortcut(tr("Ctrl+Q"));
   exitAction->setToolTip(tr("Exit the application"));
 
   startAction = new QAction(tr("Start"), this);
+  startAction->setObjectName("actionStart");
   startAction->setIcon(QIcon(":/images/play.png"));
   startAction->setToolTip(tr("Start compilation tasks"));
 
@@ -1111,6 +1116,7 @@ void MainWindow::createActions() {
   connect(clearCompilationStatesAction, &QAction::triggered, this, &MainWindow::clearCompilationStates);
 
   aboutAction = new QAction(tr("About"), this);
+  aboutAction->setObjectName("actionAbout");
 #ifdef __APPLE__
   // Keep About in Help: Qt moves it to the app menu, leaving Help empty and hidden.
   aboutAction->setMenuRole(QAction::NoRole);
@@ -1139,12 +1145,14 @@ void MainWindow::createActions() {
   });
 
   pinAssignmentAction = new QAction(tr("Pin Planner"), this);
+  pinAssignmentAction->setObjectName("actionPinPlanner");
   pinAssignmentAction->setCheckable(true);
   pinAssignmentAction->setEnabled(false);
   connect(pinAssignmentAction, &QAction::triggered, this,
           &MainWindow::pinAssignmentActionTriggered);
 
   ipConfiguratorAction = new QAction(tr("IP Configurator"), this);
+  ipConfiguratorAction->setObjectName("actionIpConfigurator");
   ipConfiguratorAction->setCheckable(true);
 #ifdef USE_UPSTREAM_IP_CONFIGURATOR
   ipConfiguratorAction->setEnabled(false);
@@ -1185,6 +1193,7 @@ void MainWindow::createActions() {
           &MainWindow::onShowStopMessage);
 
   bitstreamAction = new QAction(tr("Enable/Disable bitstream"), this);
+  bitstreamAction->setObjectName("actionEnableBitstream");
   bitstreamAction->setCheckable(true);
   connect(bitstreamAction, &QAction::toggled, this,
           &MainWindow::bitstreamEnable);
@@ -2277,6 +2286,9 @@ void MainWindow::pinAssignmentActionTriggered() {
 #else
     m_pinAssignmentDocks = {portsDockWidget};
 #endif
+    // Docked as a tab beside the console; show it rather than leave it behind.
+    // The tab exists only once the dock layout has run, so raise it after.
+    QTimer::singleShot(0, portsDockWidget, &QWidget::raise);
 
   } else {
     if (saveAction->isEnabled()) {

@@ -563,7 +563,6 @@ void CompilerOpenFPGA_ql::Help(std::ostream* out) {
   (*out) << "   --help           : This help" << std::endl;
   (*out) << "   --version        : Version" << std::endl;
   (*out) << "   --batch          : Tcl only, no GUI" << std::endl;
-  (*out) << "   --replay <script>: Replay GUI test" << std::endl;
   (*out) << "   --script <script>: Execute a Tcl script" << std::endl;
   (*out) << "   --project <project file>: Open a project" << std::endl;
   (*out) << "   --compiler <name>: Compiler name {openfpga...}, default is "
@@ -6227,6 +6226,16 @@ bool CompilerOpenFPGA_ql::collectStaDevices(std::map<std::string, QLDeviceTarget
   return true;
 }
 
+// The route file the base VPR command passes: the vpr > filename > route_file
+// setting, else <project>_post_synth.route, both relative to the project dir.
+static std::filesystem::path designRouteFile(ProjectManager* projectManager) {
+  const std::filesystem::path projectPath{projectManager->projectPath()};
+  const std::string custom =
+      QLSettingsManager::getStringValue("vpr", "filename", "route_file");
+  if (!custom.empty()) return projectPath / custom;
+  return projectPath / (projectManager->projectName() + "_post_synth.route");
+}
+
 QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staProfile) const
 {
   std::map<std::string, QLDeviceTarget> devices;
@@ -6239,6 +6248,71 @@ QLDeviceTarget CompilerOpenFPGA_ql::getDeviceByStaProfile(const std::string staP
   }
 
   return QLDeviceTarget();
+}
+
+void CompilerOpenFPGA_ql::restoreStateFromVprFiles() {
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
+      Message("Attempting to read the net file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
+        Message("Found the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+        m_state = State::Packed;
+      } else {
+        ErrorMessage("Could not find the net file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
+      }
+  } else { 
+    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.net");
+    Message("Attempting to read the net file from: " + net_file_path.string());
+    if (fs::exists(net_file_path)) {
+      Message("Found the net file in: " + net_file_path.string());
+      m_state = State::Packed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
+      Message("Attempting to read the place file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
+        Message("Found the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+        m_state = State::Placed;
+      } else {
+        ErrorMessage("Could not find the place file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
+      }
+  } else { 
+    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.place");
+    Message("Attempting to read the place file from: " + place_file_path.string());
+    if (fs::exists(place_file_path)) {
+      Message("Found the place file in: " + place_file_path.string());
+      m_state = State::Placed;
+    }
+  }
+
+  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
+      Message("Attempting to read the route file from: " + 
+        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
+        Message("Found the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+        m_state = State::Routed;
+      } else {
+        ErrorMessage("Could not find the route file in: " + 
+          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
+      }
+  } else { 
+    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
+      std::string(ProjManager()->projectName() + "_post_synth.route");
+    Message("Attempting to read the route file from: " + route_file_path.string());
+    if (fs::exists(route_file_path)) {
+      Message("Found the route file in: " + route_file_path.string());
+      m_state = State::Routed;
+    }
+  }
 }
 
 #ifdef ENABLE_INCREMENTAL_COMPILATION_FOR_STA
@@ -6416,6 +6490,27 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
     // run sta with current device
     devices[""] = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
   }
+
+  // With flat routing, each corner's STA re-routes for its own architecture
+  // (uniqueStaVprOptions, #1267) and rewrites the design's route file, which
+  // a later STA or bitstream run loads with the PnR architecture. Put the
+  // design's routing back once the corners are done.
+  const std::filesystem::path routeFile = designRouteFile(ProjManager());
+  const std::filesystem::path routeBackup = routeFile.string() + ".pre_sta";
+  std::error_code copyError;
+  const bool restoreRoute =
+      !devices.count("") &&
+      std::filesystem::copy_file(routeFile, routeBackup,
+                                 std::filesystem::copy_options::overwrite_existing,
+                                 copyError);
+  auto restore = sg::make_scope_guard([&] {
+    if (!restoreRoute) return;
+    std::error_code error;
+    std::filesystem::copy_file(routeBackup, routeFile,
+                               std::filesystem::copy_options::overwrite_existing,
+                               error);
+    std::filesystem::remove(routeBackup, error);
+  });
 
   for (const auto& [profile, device]: devices) {
     if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {
@@ -6670,6 +6765,9 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 // hence, we can also be at Placed state here.
   // state check: requires "Placed"/"Routed" to be completed.
   // we should be *atleast* at "Placed"/"Routed" or later state.
+  // As on Linux: a status check may have dropped the state although the VPR
+  // files are there, such as for a project whose task records a batch run made.
+  restoreStateFromVprFiles();
   if( (m_state == State::Placed) ||
       (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
@@ -6685,68 +6783,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
 
   // state check: requires "Routed" to be completed.
   // we should be *atleast* at "Routed" or later state.
-  if(!QLSettingsManager::getStringValue("vpr", "filename", "net_file").empty() ) {
-      Message("Attempting to read the net file from: " + 
-        QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
-      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "net_file")))) {
-        Message("Found the net file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
-        m_state = State::Packed;
-      } else {
-        ErrorMessage("Could not find the net file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "net_file"));
-      }
-  } else { 
-    std::filesystem::path net_file_path = std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.net");
-    Message("Attempting to read the net file from: " + std::string(net_file_path));
-    if (fs::exists(net_file_path)) {
-      Message("Found the net file in: " + std::string(net_file_path));
-      m_state = State::Packed;
-    }
-  }
-
-  if(!QLSettingsManager::getStringValue("vpr", "filename", "place_file").empty() ) {
-      Message("Attempting to read the place file from: " + 
-        QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
-      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "place_file")))) {
-        Message("Found the place file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
-        m_state = State::Placed;
-      } else {
-        ErrorMessage("Could not find the place file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "place_file"));
-      }
-  } else { 
-    std::filesystem::path place_file_path = std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.place");
-    Message("Attempting to read the place file from: " + std::string(place_file_path));
-    if (fs::exists(place_file_path)) {
-      Message("Found the place file in: " + std::string(place_file_path));
-      m_state = State::Placed;
-    }
-  }
-
-  if(!QLSettingsManager::getStringValue("vpr", "filename", "route_file").empty() ) {
-      Message("Attempting to read the route file from: " + 
-        QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
-      if (fs::exists(std::filesystem::path(QLSettingsManager::getStringValue("vpr", "filename", "route_file")))) {
-        Message("Found the route file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
-        m_state = State::Routed;
-      } else {
-        ErrorMessage("Could not find the route file in: " + 
-          QLSettingsManager::getStringValue("vpr", "filename", "route_file"));
-      }
-  } else { 
-    std::filesystem::path route_file_path = std::filesystem::path(ProjManager()->projectPath()) /
-      std::string(ProjManager()->projectName() + "_post_synth.route");
-    Message("Attempting to read the route file from: " + route_file_path.string());
-    if (fs::exists(route_file_path)) {
-      Message("Found the route file in: " + route_file_path.string());
-      m_state = State::Routed;
-    }
-  }
+  restoreStateFromVprFiles();
   if( (m_state == State::Routed) ||
       (m_state == State::TimingAnalyzed) ||
       (m_state == State::PowerAnalyzed) ||
@@ -6812,6 +6849,27 @@ bool CompilerOpenFPGA_ql::TimingAnalysis() {
   if (m_engineSelected) {
     cleanRemovedStaProfiles(devices);
   }
+
+  // With flat routing, each corner's STA re-routes for its own architecture
+  // (uniqueStaVprOptions, #1267) and rewrites the design's route file, which
+  // a later STA or bitstream run loads with the PnR architecture. Put the
+  // design's routing back once the corners are done.
+  const std::filesystem::path routeFile = designRouteFile(ProjManager());
+  const std::filesystem::path routeBackup = routeFile.string() + ".pre_sta";
+  std::error_code copyError;
+  const bool restoreRoute =
+      !devices.count("") &&
+      std::filesystem::copy_file(routeFile, routeBackup,
+                                 std::filesystem::copy_options::overwrite_existing,
+                                 copyError);
+  auto restore = sg::make_scope_guard([&] {
+    if (!restoreRoute) return;
+    std::error_code error;
+    std::filesystem::copy_file(routeBackup, routeFile,
+                               std::filesystem::copy_options::overwrite_existing,
+                               error);
+    std::filesystem::remove(routeBackup, error);
+  });
 
   for (const auto& [profile, device]: devices) {
     if (QLDeviceManager::getInstance()->isDeviceTargetValid(device)) {

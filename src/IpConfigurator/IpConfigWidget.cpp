@@ -73,6 +73,7 @@ IpConfigWidget::IpConfigWidget(QWidget* parent /*nullptr*/,
   topLayout->addWidget(scrollArea);
 
   // Add VLNV meta text description
+  m_metaLabel.setObjectName("ipDetailsLabel");
   containerLayout->addWidget(&m_metaLabel);
   QSpacerItem *spacer = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
   containerLayout->addItem(spacer);
@@ -96,11 +97,11 @@ void IpConfigWidget::CreateParamFields() {
       m_meta = FOEDAG::getIpInfoFromPath(def->FilePath());
       Compiler* compiler = GlobalSession->GetCompiler();
       auto generator = compiler->GetIPGenerator();
-      for (IPInstance* inst : generator->IPInstances()) {
-        if (inst->IPName() != m_requestedIpName.toStdString()) continue;
+      if (IPInstance* preview = generator->PreviewInstance();
+          preview && preview->IPName() == m_requestedIpName.toStdString())
         m_details = FOEDAG::readIpDetails(
-            generator->GetTmpCachePath(inst).parent_path() / "details.json");
-      }
+            generator->GetTmpCachePath(preview).parent_path() /
+            "details.json");
       // set default module name to the BuildName provided by the generate
       // script otherwise default to the to the VLNV name
       std::string build_name = def->BuildName();

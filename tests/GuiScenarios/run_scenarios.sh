@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# Runs device-free GUI scenarios with "<binary> --replay", one run dir each.
+# usage: GUI_TEST_FRAMEWORK_TARGET_BIN=<binary> run_scenarios.sh [--debug] [--show | --interactive [--timeout ms] | --roundtrip] [scenario.tcl ...]
+#   GUI_TEST_FRAMEWORK_TARGET_BIN: the GUI application to test, a path or a name on PATH; no scenarios: all here
+#   --show: use the platform's own Qt display instead of offscreen, to watch the run
+#   --interactive: as --show, and run each line only after Space is pressed
+#     --timeout ms: or once a line has waited that long (default -1: wait for Space)
+#   --debug: as --show (or with --interactive), plus a window with the script's
+#     progress, breakpoints and Run; at the end it shows the result and the
+#     application stays open until that window is closed
+#   --roundtrip: replay each scenario with --record, replay the recording
+#     unchanged after the scenario's setup lines (G-015), and compare the
+#     actions both runs performed, with variables substituted (G-013)
+# A scenario with "# expect: <text>" lines is a negative script: it passes only
+# if <binary> exits non-zero and its FAIL line contains every expected text.
+# GUI_TEST_FRAMEWORK_RUN_TIMEOUT: seconds before a run is taken as hung (3600).
+# GUI_TEST_FRAMEWORK_STRICT_WARN=1: a false gui_warn is a FAIL line and fails the
+# run, which still goes on to its end, to list the known issues still open.
+# GUI_TEST_FRAMEWORK_GOLDEN_DIR turns the screenshot gate on; without it,
+# screenshots are only saved. Negative scripts always use golden/ here, whose
+# goldens fail on any machine. GUI_TEST_FRAMEWORK_GOLDEN=update (gen-goldens mode)
+# skips negative scripts.
+set -u
+
+platform=(env QT_QPA_PLATFORM=offscreen)
+interactive=0
+roundtrip=0
+debug=0
+if [ "${1:-}" = --debug ]; then
+  debug=1
+  shift
+  case "${1:-}" in
+    --show | --interactive) ;;
+    --roundtrip) echo "[error] --debug does not go with --roundtrip" >&2; exit 1 ;;
+    *) set -- --show "$@" ;;
+  esac
+fi
+case "${1:-}" in
+  --show | --interactive)
+    [ "$1" = --interactive ] && interactive=1
+    if [ "$(uname)" = Linux ] && [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+      echo "[error] $1 needs a display; DISPLAY and WAYLAND_DISPLAY are unset" >&2
+      exit 1
+    fi
+    shift
+    hold_timeout=-1
+    if [ $interactive -eq 1 ] && [ "${1:-}" = "--timeout" ]; then
+      case "${2:-}" in
+        -1) ;;
+        '' | *[!0-9]*) echo "[error] --timeout needs milliseconds, or -1" >&2; exit 1 ;;
+      esac
+      hold_timeout=$2
+      shift 2
+    fi
+    platform=(env -u QT_QPA_PLATFORM GUI_TEST_FRAMEWORK_SHOW=1 GUI_TEST_FRAMEWORK_INTERACTIVE=$interactive
+      GUI_TEST_FRAMEWORK_INTERACTIVE_TIMEOUT=$hold_timeout GUI_TEST_FRAMEWORK_DEBUG=$debug)
+    ;;
+  --roundtrip)
+    roundtrip=1
+    shift
+    # Recordings name their checkpoint screenshots after the recording, so
+    # there are no goldens to compare them with.
+    GUI_TEST_FRAMEWORK_GOLDEN_DIR=
+    ;;
+esac
+
+if [ -z "${GUI_TEST_FRAMEWORK_TARGET_BIN:-}" ]; then
+  echo "[error] set GUI_TEST_FRAMEWORK_TARGET_BIN=<binary>, the GUI application to test" >&2
+  exit 1
+fi
+# Each run starts in its own dir, so the binary needs an absolute path.
+case "$GUI_TEST_FRAMEWORK_TARGET_BIN" in
+  */*) binary=$(cd "$(dirname "$GUI_TEST_FRAMEWORK_TARGET_BIN")" && pwd)/$(basename "$GUI_TEST_FRAMEWORK_TARGET_BIN") ;;
+  *)
+    binary=$(type -P "$GUI_TEST_FRAMEWORK_TARGET_BIN") || {
+      echo "[error] $GUI_TEST_FRAMEWORK_TARGET_BIN is not on PATH" >&2
+      exit 1
+    }
+    ;;
+esac
+echo "binary: $binary"
+here=$(cd "$(dirname "$0")" && pwd)
+if [ $# -eq 0 ]; then set -- "$here"/*.tcl; fi
+out=${GUI_TEST_FRAMEWORK_OUT_DIR:-$PWD/gui-scenarios}
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+
+# The limit only ends a hung run. A busy build node can run a scenario many
+# times slower than an idle one, so it is set far above any normal run. A
+# paused interactive or debug session must not be killed by it.
+limit=""
+if [ $interactive -eq 0 ] && [ $debug -eq 0 ] && command -v timeout >/dev/null 2>&1; then
+  limit="timeout ${GUI_TEST_FRAMEWORK_RUN_TIMEOUT:-3600}"
+fi
+
+# run <run dir> <binary args...>: one run in a fresh dir, log in replay.log.
+run() {
+  local dir=$1
+  shift
+  rm -rf "$dir"
+  mkdir -p "$dir/eula"
+  # The EULA dialog is shown once per install; pre-accept it so every run
+  # starts the same way. Settings and the home directory (which holds the
+  # user's device registry) go to the run dir, and the device-data variables
+  # are dropped, so a local run is as device-free as CI.
+  : > "$dir/eula/AURORA_EULA_ACCEPTED.txt"
+  mkdir -p "$dir/home"
+  (cd "$dir" &&
+    AURORA_IMAGE_DOCKER_SCRIPTS_DIR="$dir/eula" XDG_CONFIG_HOME="$dir/config" \
+      HOME="$dir/home" USERPROFILE="$dir/home" \
+      AURORA2_DEVICE_DATA_DIR= AURORA2_DEVICE_DATA_PATH= \
+      GUI_TEST_FRAMEWORK_GOLDEN_DIR="$golden" \
+      GUI_TEST_FRAMEWORK_TRACE=$([ $roundtrip -eq 1 ] && echo "$dir/actions.trace") \
+      "${platform[@]}" $limit "$binary" "$@" 2>&1 |
+      if [ $interactive -eq 1 ] || [ $debug -eq 1 ]; then tee "$dir/replay.log"; else cat > "$dir/replay.log"; fi
+    exit "${PIPESTATUS[0]}")
+}
+
+passed=0
+failed=0
+skipped=0
+report_only=""
+for scenario in "$@"; do
+  scenario=$(cd "$(dirname "$scenario")" && pwd)/$(basename "$scenario")
+  name=$(basename "$scenario" .tcl)
+  dir=$out/$name
+  negative=0
+  grep -q '^# expect: ' "$scenario" && negative=1
+  if [ $roundtrip -eq 1 ] && [ $negative -eq 1 ]; then continue; fi
+  if [ $negative -eq 1 ] && [ "${GUI_TEST_FRAMEWORK_GOLDEN:-}" = update ]; then
+    skipped=$((skipped + 1))
+    echo "SKIP $name (gen-goldens mode)"
+    continue
+  fi
+  golden=${GUI_TEST_FRAMEWORK_GOLDEN_DIR:-}
+  [ $negative -eq 1 ] && golden=$here/golden
+
+  reason=""
+  if [ $roundtrip -eq 1 ]; then
+    recording=$out/$name.recording.tcl
+    run "$dir" --replay "$scenario" --record "$recording"
+    rc=$?
+    if [ $rc -ne 0 ] || ! grep -q '^PASS: ' "$dir/replay.log"; then
+      reason="the scenario failed with --record"
+    elif grep -q '^# UNRECORDED' "$recording"; then
+      reason="the recording has # UNRECORDED lines"
+    elif grep -q '^gui_test_checkpoint' "$scenario" && ! grep -q '^gui_assert' "$recording"; then
+      reason="the checkpoints wrote no gui_assert lines"
+    elif grep -qE '^[[:space:]]*after[[:space:]]+[0-9]' "$recording"; then
+      reason="the recording has a fixed delay"
+    else
+      # The recorder sees only the GUI, so the scenario's setup (its lines
+      # before gui_start, such as building a fixture project) goes first.
+      replay=$out/$name.replay.tcl
+      awk 'FNR == NR { if (/^gui_start/) done = 1
+                       if (!done && !/^[[:space:]]*(#|$)/) setup = setup $0 "\n"
+                       next }
+           /^gui_start/ && !put { printf "%s", setup; put = 1 }
+           { print }' "$scenario" "$recording" > "$replay"
+      run "$out/$name.replayed" --replay "$replay"
+      rc=$?
+      if [ $rc -ne 0 ] || ! grep -q '^PASS: ' "$out/$name.replayed/replay.log"; then
+        reason="the recording does not replay"
+        dir=$out/$name.replayed
+      elif ! diff "$dir/actions.trace" "$out/$name.replayed/actions.trace" \
+          > "$dir/actions.diff"; then
+        reason="the recording does other actions, see $dir/actions.diff"
+      fi
+    fi
+  else
+    run "$dir" --replay "$scenario"
+    rc=$?
+    fail_line=$(grep -m1 '^FAIL: ' "$dir/replay.log")
+    if [ $negative -eq 1 ]; then
+      [ $rc -ne 0 ] || reason="it passed"
+      while IFS= read -r expect; do
+        case "$fail_line" in *"$expect"*) ;; *) reason="FAIL line lacks: $expect" ;; esac
+      done < <(sed -n 's/^# expect: //p' "$scenario")
+    elif [ $rc -ne 0 ] || ! grep -q '^PASS: ' "$dir/replay.log"; then
+      reason="exit $rc"
+    fi
+  fi
+
+  if [ -z "$reason" ]; then
+    passed=$((passed + 1))
+    echo "PASS $name"
+    grep -A1 '^WARN: ' "$dir/replay.log" | sed 's/^/    /'
+  else
+    failed=$((failed + 1))
+    echo "FAIL $name ($reason; log $dir/replay.log)"
+    grep -A1 '^FAIL: ' "$dir/replay.log" | sed 's/^/    /'
+    grep -A1 '^WARN: ' "$dir/replay.log" | sed 's/^/    /'
+  fi
+  steps=$(grep '^REPORT-ONLY ' "$dir/replay.log" 2>/dev/null)
+  if [ -n "$steps" ]; then
+    sed 's/^/    /' <<< "$steps"
+    report_only+=$(sed 's/^REPORT-ONLY /  /' <<< "$steps")$'\n'
+  fi
+done
+
+# Report-only steps no longer guard their screen, so the list stays in sight.
+[ -z "$report_only" ] || printf 'Report-only steps:\n%s' "$report_only"
+
+echo "GUI scenarios: $passed passed, $failed failed, $skipped skipped"
+[ $failed -eq 0 ]

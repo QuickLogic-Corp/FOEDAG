@@ -44,6 +44,9 @@ class RoundProgressWidget;
 
 class NCriticalPathView final : public QTreeView {
   Q_OBJECT
+  Q_PROPERTY(QString selectedPathElements READ getSelectedPathElements)
+  // GUI tests take a screenshot only when this is false (GuiScreenshot::settle)
+  Q_PROPERTY(bool guiTestSettling READ guiTestSettling)
 
   const int INDENT_SIZE = 150;
 
@@ -55,6 +58,7 @@ class NCriticalPathView final : public QTreeView {
   void hideBusyOverlay();
 
   void clear();
+  bool guiTestSettling() const;
 
  protected:
   void resizeEvent(QResizeEvent*) override final;

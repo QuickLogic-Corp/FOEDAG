@@ -20,8 +20,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
 
+#include <QStringList>
 #include <QWidget>
 
+class QTreeWidget;
 class QTreeWidgetItem;
 
 namespace FOEDAG {
@@ -31,9 +33,13 @@ class MessageItemParser;
 
 class MessagesTabWidget final : public QWidget {
   Q_OBJECT
+  // For GUI tests: one "<task>\t<line>\t<text>" per message row. Task rows
+  // and linked rows show a label instead of their item text.
+  Q_PROPERTY(QStringList taskMessages READ taskMessages)
  public:
   MessagesTabWidget(const TaskManager &taskManager);
   ~MessagesTabWidget();
+  QStringList taskMessages() const;
 
  private slots:
   // Reacts on double click on one of tree items.
@@ -45,6 +51,8 @@ class MessagesTabWidget final : public QWidget {
   QTreeWidgetItem *createItem(const QString &message);
   static QString createLink(const QString &str);
   const TaskManager &m_taskManager;
+  QTreeWidget *m_tree{nullptr};
+  QStringList m_taskTitles;
   QVector<QTreeWidgetItem *> m_convertToLabel;
   const QVector<MessageItemParser *> m_parsers;
 };

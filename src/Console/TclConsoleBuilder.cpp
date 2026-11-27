@@ -19,6 +19,7 @@ QWidget *createConsole(TclInterp *interp,
                    &SearchWidget::search);
 
   auto tool = new QToolButton{};
+  tool->setObjectName("consoleClear");
   tool->setToolTip(QString{"Clear console"});
   QObject::connect(tool, &QToolButton::clicked, console,
                    &TclConsoleWidget::clearText);

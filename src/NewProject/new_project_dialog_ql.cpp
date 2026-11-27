@@ -59,16 +59,23 @@ class CustomTabStyle : public QProxyStyle {
 newProjectDialog::newProjectDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::newProjectDialog), m_index(INDEX_LOCATION) {
   ui->setupUi(this);
+  // The uic default "m_tabWidget" is shared with the Sources panel.
+  ui->m_tabWidget->setObjectName("newProjectTabs");
   setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint);
   BackBtn = new QPushButton("Back", this);
+  BackBtn->setObjectName("newProjectBack");
   ui->buttonBox->addButton(BackBtn, QDialogButtonBox::ButtonRole::ActionRole);
   connect(BackBtn, &QPushButton::clicked, this, &newProjectDialog::on_back);
 
   NextBtn = new QPushButton("Next", this);
+  NextBtn->setObjectName("newProjectNext");
   ui->buttonBox->addButton(NextBtn, QDialogButtonBox::ButtonRole::ActionRole);
   connect(NextBtn, &QPushButton::clicked, this, &newProjectDialog::on_next);
 
   ui->buttonBox->button(QDialogButtonBox::Ok)->setText("Finish");
+  ui->buttonBox->button(QDialogButtonBox::Ok)->setObjectName("newProjectFinish");
+  ui->buttonBox->button(QDialogButtonBox::Cancel)
+      ->setObjectName("newProjectCancel");
   ui->m_tabWidget->tabBar()->setStyle(new CustomTabStyle);
   connect(ui->m_tabWidget, &QTabWidget::currentChanged, this,
           &newProjectDialog::updateSummaryPage);

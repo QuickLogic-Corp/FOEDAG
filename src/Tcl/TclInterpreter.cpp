@@ -23,6 +23,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 #include <QSysInfo>
 
+#include "GuiTestFramework/GuiTestRunner.h"
+
 using namespace FOEDAG;
 
 #include <tcl.h>
@@ -76,6 +78,14 @@ void TclInterpreter::registerCmd(const std::string &cmdName, Tcl_CmdProc proc,
 }
 
 std::string TclInterpreter::evalGuiTestFile(const std::string &filename) {
+  if (GuiTestRunner::isSyncScript(filename)) {
+    const std::string call_test =
+        "proc call_test { } {\n gui_test_run {" + filename + "}\n}\n";
+    if (Tcl_Eval(interp, call_test.c_str()) >= TCL_ERROR)
+      return "Tcl Error: " + std::string(Tcl_GetStringResult(interp));
+    return {};
+  }
+
   QString testHarness = R"(
   proc test_harness { gui_script } {
     global CONT errorInfo

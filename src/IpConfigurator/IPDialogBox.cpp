@@ -221,14 +221,10 @@ void IPDialogBox::handleEditorChanged(const QString& customId,
     // restore values
     restoreProperties(properties);
     ui->labelSummary->setText(GenerateSummary(newJson));
-    auto instances = generator->IPInstances();
 #ifdef USE_UPSTREAM
-    auto foundIp = std::find_if(
-        instances.begin(), instances.end(), [this](IPInstance* inst) {
-          return inst->IPName() == m_requestedIpName.toStdString();
-        });
-    if (foundIp != instances.end())
-      LoadImage(generator->GetTmpCachePath(*foundIp).parent_path());
+    if (IPInstance* preview = generator->PreviewInstance();
+        preview && preview->IPName() == m_requestedIpName.toStdString())
+      LoadImage(generator->GetTmpCachePath(preview).parent_path());
 #endif
   } else {
     showInvalidParametersWarning(this);
@@ -530,9 +526,8 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
   std::string newJson{};
   std::filesystem::path executable{};
 
-  for (IPInstance* inst : generator->IPInstances()) {
-    if (inst->IPName() != ipName.toStdString()) continue;
-
+  if (IPInstance* inst = generator->PreviewInstance();
+      inst && inst->IPName() == ipName.toStdString()) {
     // Create output directory
     const std::filesystem::path& out_path = inst->OutputLocation();
     if (!std::filesystem::exists(out_path)) {

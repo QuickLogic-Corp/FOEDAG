@@ -57,6 +57,7 @@ NCriticalPathView::NCriticalPathView(QWidget* parent)
     : QTreeView(parent),
       m_sourceModel(new NCriticalPathModel(this)),
       m_filterModel(new NCriticalPathFilterModel(this)) {
+  setObjectName("ipaPathView");
   setupModels();
 
   setSelectionMode(QAbstractItemView::MultiSelection);
@@ -76,6 +77,7 @@ NCriticalPathView::NCriticalPathView(QWidget* parent)
 
   // setup expand controls
   m_bnExpandCollapse = new QPushButton(this);
+  m_bnExpandCollapse->setObjectName("ipaExpandButton");
   m_bnExpandCollapse->setToolTip(tr("expand/collapse critical path items"));
   m_bnExpandCollapse->setFixedSize(iconSize, iconSize);
   QObject::connect(m_bnExpandCollapse, &QPushButton::clicked, this, [this]() {
@@ -92,6 +94,7 @@ NCriticalPathView::NCriticalPathView(QWidget* parent)
 
   // setup clear bn
   m_bnClearSelection = new QPushButton(this);
+  m_bnClearSelection->setObjectName("ipaClearSelectionButton");
   m_bnClearSelection->setToolTip(
       tr("clear selected critical paths and selected critical path elements"));
   m_bnClearSelection->setFixedSize(iconSize, iconSize);
@@ -139,6 +142,10 @@ void NCriticalPathView::mousePressEvent(QMouseEvent* event) {
   QModelIndex index = indexAt(eventPos);
   if (index.isValid()) {
     if (event->button() == Qt::RightButton) {
+      // A left press schedules a scroll to its row, run ~0.5 s later if that
+      // row is still current. This press skips the base handler that would
+      // cancel it, so without this the view jumps away after the expand.
+      selectionModel()->setCurrentIndex(index, QItemSelectionModel::NoUpdate);
       if (isExpanded(index)) {
         collapse(index);
       } else {
@@ -268,6 +275,7 @@ void NCriticalPathView::setupFilterMenu() {
     return;
   }
   m_bnFilter = new QPushButton(this);
+  m_bnFilter->setObjectName("ipaFilterButton");
   m_bnFilter->setToolTip(
       tr("configure filter criteria that will affect which critical path items "
          "will be visible"));
@@ -275,6 +283,7 @@ void NCriticalPathView::setupFilterMenu() {
   m_bnFilter->setFixedSize(iconSize, iconSize);
   m_bnFilter->setIcon(QIcon(":/search.png"));
   m_filterMenu = new CustomMenu(m_bnFilter);
+  m_filterMenu->setNamePrefix("ipaFilter");
   m_filterMenu->setButtonToolTips(tr("apply filter criteria"),
                                   tr("discard filter criteria"));
   m_filterMenu->setAlignment(Qt::AlignRight);
@@ -284,6 +293,8 @@ void NCriticalPathView::setupFilterMenu() {
 
   m_inputFilter = new NCriticalPathFilterWidget(tr("Input Nodes:"));
   m_outputFilter = new NCriticalPathFilterWidget(tr("Output Nodes:"));
+  m_inputFilter->setNamePrefix("ipaInputFilter");
+  m_outputFilter->setNamePrefix("ipaOutputFilter");
 
   connect(m_filterMenu, &CustomMenu::accepted, this, [this]() {
     m_inputFilter->onAccepted();
@@ -329,6 +340,10 @@ void NCriticalPathView::onActualDataCleared() {
   m_inputFilter->clear();
   m_outputFilter->clear();
   m_filterModel->clear();
+}
+
+bool NCriticalPathView::guiTestSettling() const {
+  return m_sourceModel && m_sourceModel->lineLimitPending();
 }
 
 void NCriticalPathView::resizeEvent(QResizeEvent* event) {

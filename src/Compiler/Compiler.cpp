@@ -104,7 +104,6 @@ void Compiler::Help(std::ostream* out) {
   (*out) << "   --help           : This help" << std::endl;
   (*out) << "   --version        : Version" << std::endl;
   (*out) << "   --batch          : Tcl only, no GUI" << std::endl;
-  (*out) << "   --replay <script>: Replay GUI test" << std::endl;
   (*out) << "   --script <script>: Execute a Tcl script" << std::endl;
   (*out) << "   --project <project file>: Open a project" << std::endl;
   (*out) << "   --compiler <name>: Compiler name {openfpga...}, default is "
@@ -2735,6 +2734,8 @@ void Compiler::SetEnvironmentVariable(const std::string variable,
 
 std::string Compiler::getQtPlatformPluginFor(bool gui) {
   if (!gui) return "offscreen";
+  // A GUI test runs aurora offscreen, often with no X server: the VPR viewer follows it.
+  if (qgetenv("QT_QPA_PLATFORM") == "offscreen") return "offscreen";
 #ifdef __linux__
   // Avoid Wayland: the GUI needs X11 on Ubuntu 22.04+ Wayland sessions.
   return "xcb";

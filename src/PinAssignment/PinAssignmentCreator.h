@@ -61,7 +61,8 @@ class PinAssignmentCreator : public QObject {
   QString generateSdc() const;
 #else
   void forceNextPcfFileCheck();
-  std::pair<QString, bool> generatePcf() const;
+  void checkPcfFileNow();
+  QString generatePcf() const;
   static QList<QString> convertPcfToSdcCommands(const QList<PcfLineFrame>& lineFrames);
 #endif
   PinsBaseModel *baseModel() const;

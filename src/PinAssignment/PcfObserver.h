@@ -4,6 +4,7 @@
 #include <QTimer>
 #include <QDateTime>
 #include <QString>
+#include <QStringList>
 #include <QSet>
 #include <QHash>
 #include <QVector>
@@ -47,6 +48,7 @@ public:
   const QVector<QVector<QString>>& errors() const { return m_errors; }
   bool hasErrors() const { return !m_errors.isEmpty(); }
   void forceNextCheck();
+  void checkNow();
 
 signals:
   void contentChecked(bool status);
@@ -61,6 +63,7 @@ private:
   PackagePinsModel* m_pinsModel{nullptr};
   QTimer m_checkTimer;
   QDateTime m_lastModified;
+  QStringList m_checkedPorts;
 
   QList<PcfLineFrame> m_lineFrames;
   QVector<QVector<QString>> m_errors;
