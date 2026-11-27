@@ -12516,6 +12516,29 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
       // workaround for enabling usage of '-lib' option, suggested by yosyshq
       // add the following line in the ys script:
       fileList += std::string("verific -cfg veri_create_empty_box 1\n");
+#if(AURORA_USE_TABBYCAD == 1)
+      // Verific Sep26 (TabbyCAD 0.70) turns x*42 into (x*21)<<1 via a sliced product, which the
+      // DSP-V4 adder/accumulator match rejects. Older Verific errors on the unknown setting: probe once.
+      static std::optional<bool> keep_multipliers;
+      if (!keep_multipliers) {
+        const std::filesystem::path tabby_yosys =
+            GetSession()->Context()->BinaryPath() / ".." / "tabby" / "bin" /
+#ifdef _WIN32
+            "yosys_verific.exe";
+#else
+            "yosys_verific";
+#endif
+        const std::vector<std::string> probe_args{
+            "-q", "-p", "verific -cfg db_do_not_optimize_multiplier 1"};
+        std::ostringstream sink;
+        keep_multipliers =
+            FileUtils::FileExists(tabby_yosys) &&
+            FileUtils::ExecuteSystemCommand(tabby_yosys.string(), probe_args, &sink, 60000).code == 0;
+      }
+      if (*keep_multipliers) {
+        fileList += std::string("verific -cfg db_do_not_optimize_multiplier 1\n");
+      }
+#endif // #if(AURORA_USE_TABBYCAD == 1)
 
       // ProjectManager::addIncludePath(const std::string& includePath)
       for (auto path : ProjManager()->includePathList()) {
