@@ -174,6 +174,7 @@ private:
     std::map<std::string, InstanceVerdict> m_verdicts;
     std::map<std::string, InstancePlacement> m_placements;
     bool m_atomListVisible = false;
+    bool m_atomRowsBuilt = false;  // the per-atom rows exist in the model
     AtomMappingReport m_atomMappingReport;
     std::vector<std::string> m_untypedAtoms;
 

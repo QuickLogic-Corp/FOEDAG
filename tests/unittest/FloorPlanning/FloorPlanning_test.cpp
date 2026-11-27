@@ -792,6 +792,7 @@ TEST(SynthResourceHierarchyTree, AParentListsTheAtomsNoChildHolds)
         {"block_inst.FIFO_INST", {"block_inst.FIFO_INST.U1"}},
     });
     widget.build(fp::NaturalStringSet{"top", "block_inst", "block_inst.FIFO_INST"});
+    widget.setAtomListVisible(true);  // atom rows are built only when shown
 
     auto* model = widget.findChild<QStandardItemModel*>();
     ASSERT_NE(model, nullptr);
@@ -819,6 +820,7 @@ TEST(SynthResourceHierarchyTree, AnAtomRowNamesTheInstanceItBelongsTo)
         {"core.u_mul0", {"core.prod0[0]", "core.prod0[1]"}},
     });
     widget.build(fp::NaturalStringSet{"top", "core", "core.u_mul0"});
+    widget.setAtomListVisible(true);  // atom rows are built only when shown
 
     auto* model = widget.findChild<QStandardItemModel*>();
     ASSERT_NE(model, nullptr);
@@ -1032,6 +1034,33 @@ TEST(SynthResourceHierarchyTree, HidingTheAtomListClearsFindAtom)
 
     EXPECT_TRUE(tree.find->text().isEmpty());
     EXPECT_FALSE(tree.hidden(tree.item("core.u_mem")));
+}
+
+TEST(SynthResourceHierarchyTree, AtomRowsAreBuiltOnlyOnceTheAtomListIsShown)
+{
+    // A debug view, and costly on a large design: nothing is built while it is hidden.
+    fp::SynthResourceHierarchyWidget widget;
+    widget.setTopInstance("top");
+    widget.setAtomNames({{"core", {"core.prod0[0]", "core.prod0[1]"}},
+                         {"core.u_mul0", {"core.prod0[0]", "core.prod0[1]"}}});
+    widget.build(fp::NaturalStringSet{"top", "core", "core.u_mul0"});
+    QStandardItem* leaf = itemWithPath(
+        widget.findChild<QStandardItemModel*>()->invisibleRootItem(), "core.u_mul0");
+    ASSERT_NE(leaf, nullptr);
+    auto atomRows = [leaf]() {
+        int count = 0;
+        for (int row = 0; row < leaf->rowCount(); ++row) {
+            count += leaf->child(row, 0)->data(kAtomRowRoleForTest).toBool() ? 1 : 0;
+        }
+        return count;
+    };
+    EXPECT_EQ(atomRows(), 0);
+
+    widget.setAtomListVisible(true);
+    EXPECT_EQ(atomRows(), 2);
+    widget.setAtomListVisible(false);
+    widget.setAtomListVisible(true);
+    EXPECT_EQ(atomRows(), 2) << "built once, not again on every toggle";
 }
 
 TEST(SynthResourceHierarchyTree, FindAtomShowsOnlyWithTheAtomList)
@@ -2293,7 +2322,7 @@ std::map<std::string, int> atomRows(const fp::SelectedResourcesWidget* widget)
 TEST(SelectedResources, TallyCountsAtomsByTypeAndRoundsClbUp)
 {
     // The arithmetic on its own, with no widget: dsp/bram atoms are one tile each, clb atoms
-    // pack many to a tile and round up. Shared with Partition's required columns, so a
+    // pack many to a tile and round up. Shared with DeviceGrid::requiredResources(), so a
     // change here would move both.
     const fp::ResourceTally empty = fp::tallyResources({}, 14);
     EXPECT_EQ(empty.clbTiles, 0);

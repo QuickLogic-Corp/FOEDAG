@@ -1245,6 +1245,13 @@ void SynthResourceHierarchyWidget::addHeaderWidget(QWidget* widget)
 void SynthResourceHierarchyWidget::setAtomListVisible(bool visible)
 {
     m_atomListVisible = visible;
+    if (visible && !m_atomRowsBuilt && m_hasAtomNames) {
+        // Same order as build(): verdicts and placement icons go over what this re-hides.
+        QSignalBlocker blocker(m_model);
+        populateAtomColumns();
+        applyInstanceVerdicts();
+        applyPlacementVerdicts();
+    }
     m_leFindAtom->setHidden(!visible);
     if (!visible) m_leFindAtom->clear();
     // Kept as a member and re-applied from build() too: the model is cleared there, which
@@ -1390,7 +1397,11 @@ void SynthResourceHierarchyWidget::applyInstanceVerdicts()
 
 void SynthResourceHierarchyWidget::populateAtomColumns()
 {
+    m_atomRowsBuilt = false;
     if (!m_hasAtomNames) return;
+    // Per-atom rows are a debug view, and on a large design (dart: 43k atoms, six items a row,
+    // two trees) costly; built only while the atom list is shown. See setAtomListVisible().
+    const bool buildRows = m_atomListVisible;
 
     // [aurora2#1725] Leaves with no atoms are tallied here, not logged: FloorPlanningWidget
     // reads the tally back and reports it once, rather than once per tree.
@@ -1434,10 +1445,14 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     // One child row per atom, so each can be selected and copied. Its RTL Names cell names
     // the owner: a parent's own atoms follow its children, and would otherwise read as the
     // last child's.
-    auto appendAtomRows = [&atomTile, &atomPrimitive](QStandardItem* parent,
+    auto appendAtomRows = [&atomTile, &atomPrimitive, buildRows](QStandardItem* parent,
                                                       const std::string& ownerPath,
                                                       const std::vector<std::string>& atoms,
                                                       const std::map<std::string, int>& resourceTypes) {
+        if (!buildRows) {
+            for (const auto& n : atoms) atomPrimitive(n, resourceTypes);  // untypedAtoms() report
+            return;
+        }
         QFont ownerFont = parent->font();
         ownerFont.setItalic(true);
         for (const auto& n : atoms) {
@@ -1539,6 +1554,7 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     };
 
     populateRecursive(m_model->invisibleRootItem(), "");
+    m_atomRowsBuilt = buildRows;
 }
 
 void SynthResourceHierarchyWidget::onItemChanged(QStandardItem* item, bool reportChanges)

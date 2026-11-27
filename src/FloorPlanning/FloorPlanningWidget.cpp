@@ -278,6 +278,16 @@ FloorPlanningWidget::FloorPlanningWidget(const QString& projectName, QWidget* pa
         tr("Debug: show each instance's netlist atom names, and each atom's\n"
            "primitive (its Yosys cell type)."));
     connect(m_actShowAtomList, &QAction::toggled, this, [this](bool on) {
+        if (on && QMessageBox::warning(
+                      this, tr("Warning"),
+                      tr("The atom list is meant for debugging. On a large design it can "
+                         "slow the tool down noticeably. Show it anyway?"),
+                      QMessageBox::Ok | QMessageBox::Cancel,
+                      QMessageBox::Cancel) != QMessageBox::Ok) {
+            QSignalBlocker block(m_actShowAtomList);
+            m_actShowAtomList->setChecked(false);
+            return;
+        }
         m_synthResourcesWidget->setAtomListVisible(on);
         m_partitionResourcesWidget->setAtomListVisible(on);
         saveOptions();
