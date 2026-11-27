@@ -1188,6 +1188,53 @@ TEST_F(IpProjectCopy, IgnoresThePreviewAndSimulationTrees) {
   EXPECT_TRUE(whyNot.empty()) << whyNot;
 }
 
+TEST_F(IpProjectCopy, ACopyIsJudgedOnItsParametersAlone) {
+  // The fixture's cache file carries another build directory and a
+  // netlists_fingerprint from an earlier version: neither is looked at.
+  const auto copy = MakeCopy(root, "fpu0", kRecorded) / "fpu0";
+  const auto params = Params(
+      {{"width", "8"}, {"mode", "fast"}, {"sync", "true"}, {"ratio", "1.5"}});
+  EXPECT_TRUE(
+      IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", params, &whyNot))
+      << whyNot;
+
+  EXPECT_FALSE(IPGenerator::IsGeneratedCopy(
+      copy, "ip_v1_0", "fpu0", Params({{"width", "16"}}), &whyNot));
+  EXPECT_NE(whyNot.find("other parameters"), std::string::npos) << whyNot;
+
+  // Nothing generated for that module: not a copy, and no reason to give.
+  whyNot.clear();
+  EXPECT_FALSE(IPGenerator::IsGeneratedCopy(copy.parent_path() / "other",
+                                            "ip_v1_0", "other", params,
+                                            &whyNot));
+  EXPECT_TRUE(whyNot.empty()) << whyNot;
+}
+
+TEST_F(IpProjectCopy, ACopyBelongsToTheDeviceItWasGeneratedFor) {
+  const std::string device = "   \"target_device\": \"fam/fdy/12nm/dev_a\",\n";
+  const auto copy = MakeCopy(root, "fpu0", device) / "fpu0";
+  EXPECT_TRUE(IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", {},
+                                           &whyNot, "fam/fdy/12nm/dev_a"))
+      << whyNot;
+  // No target device selected: nothing to compare with.
+  EXPECT_TRUE(
+      IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", {}, &whyNot))
+      << whyNot;
+
+  EXPECT_FALSE(IPGenerator::IsGeneratedCopy(copy, "ip_v1_0", "fpu0", {},
+                                            &whyNot, "fam/fdy/12nm/dev_b"));
+  EXPECT_NE(whyNot.find("fam/fdy/12nm/dev_a"), std::string::npos) << whyNot;
+  EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
+                                             &whyNot, "fam/fdy/12nm/dev_b")
+                  .empty());
+
+  // A copy from before the device was recorded is taken for any device.
+  const auto older = MakeCopy(root, "older") / "older";
+  EXPECT_TRUE(IPGenerator::IsGeneratedCopy(older, "ip_v1_0", "older", {},
+                                           &whyNot, "fam/fdy/12nm/dev_b"))
+      << whyNot;
+}
+
 TEST_F(IpProjectCopy, AnInstanceOnTheStandInResolvesToTheCopy) {
   const auto versionDir = MakeCopy(root, "fpu0", "   \"width\": 8,\n");
   auto params = Params({{"width", "8"}});
