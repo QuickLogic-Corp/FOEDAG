@@ -3194,9 +3194,12 @@ bool CompilerOpenFPGA_ql::Synthesize() {
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
   // [aurora2#1725] A custom script without -owner_table writes no owner table, so the
-  // previous run's would otherwise describe a netlist that no longer exists.
+  // previous run's would otherwise describe a netlist that no longer exists. The same holds
+  // for the debug dump, written only with AURORA_FLOORPLANNING_DEBUG but read for DSP tiles.
   std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) / "atomsets.json");
   std::filesystem::remove(FloorplanningArtifact("atomsets.json"));
+  std::filesystem::remove(fp::postSynthDebugJson(ProjManager()->projectPath(),
+                                                 ProjManager()->DesignTopModule()));
 
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
