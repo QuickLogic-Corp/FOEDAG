@@ -346,7 +346,11 @@ struct IPAvailability {
 
 class IPDefinition {
  public:
-  enum class IPType { LiteXGenerator, Other };
+  // ProjectCopy stands in for an IP that is in no catalog any more but that
+  // the project generated earlier (IPGenerator::FindGeneratedCopy). Its file
+  // path is the copy's <vendor>/<library>/<name>/<version> directory, and it
+  // is never added to the catalog.
+  enum class IPType { LiteXGenerator, Other, ProjectCopy };
   IPDefinition(IPType type, const std::string& name,
                const std::string& build_name,
                const std::filesystem::path& filePath,

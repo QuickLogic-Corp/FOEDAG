@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 #include <cassert>
 
 #include "nlohmann_json/json.hpp"
@@ -103,6 +104,20 @@ class IPGenerator {
                                   const std::filesystem::path& srcDir,
                                   const std::string& baseName,
                                   const std::string& line);
+
+  // Looks under `ipsRoot` for the copy of `ipName` that ipgenerate wrote
+  // earlier for module `moduleName`, so that a project keeps building after
+  // the IP left every catalog. A copy is a directory
+  // <ipsRoot>/<vendor>/<library>/<name>/<version>/<moduleName>/ holding the
+  // instance cache file <ipName>_<moduleName>.json and a non-empty src/. It is
+  // usable only with the parameters it was generated with, which that file
+  // records. Returns the <version> directory, or an empty path; `whyNot` is
+  // set when a copy exists but was refused. Touches nothing but the file
+  // system, so a test can run it on a temporary tree.
+  static std::filesystem::path FindGeneratedCopy(
+      const std::filesystem::path& ipsRoot, const std::string& ipName,
+      const std::string& moduleName, const std::vector<SParameter>& parameters,
+      std::string* whyNot = nullptr);
 
   IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
@@ -190,6 +205,9 @@ private:
   // Device catalog root (weakly canonical) whose IPs are in the catalog;
   // empty when none. Maintained by SyncDeviceCatalog().
   std::filesystem::path m_deviceCatalogRoot;
+  // Stand-in definitions (IPType::ProjectCopy) that configure_ip created for
+  // IPs found only in the project. Instances point at them.
+  std::vector<std::unique_ptr<IPDefinition>> m_projectCopies;
 
   void dumpDeviceInfo(const std::filesystem::path&);
   void dumpParameterModifications(const std::filesystem::path&);

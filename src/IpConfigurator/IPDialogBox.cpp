@@ -544,6 +544,10 @@ std::pair<std::string, std::string> IPDialogBox::generateNewJson(
       case IPDefinition::IPType::Other: {
         break;
       }
+      case IPDefinition::IPType::ProjectCopy: {
+        // No generator behind it, so there is nothing to preview.
+        break;
+      }
       case IPDefinition::IPType::LiteXGenerator: {
         executable = def->FilePath();
         std::filesystem::path jsonFile = generator->GetTmpCachePath(inst);
