@@ -2807,6 +2807,53 @@ CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanning
   return tool;
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::SynthesisYosysExecutable() {
+  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
+  if(m_useVerific) {
+#if(AURORA_USE_TABBYCAD == 1)
+    yosys_executable_path = GetSession()->Context()->BinaryPath() /
+                            ".." /
+                            "tabby" /
+                            "bin" /
+#ifdef _WIN32
+                            "yosys_verific.exe";
+#else
+                            "yosys_verific";
+#endif
+    if (!FileUtils::FileExists(yosys_executable_path)) {
+      ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
+                   "found: " + yosys_executable_path.string());
+      return {};
+    }
+#else
+    Message("Verific parser requested but this build was configured without "
+            "TabbyCAD; synthesis uses " + yosys_executable_path.string());
+#endif // #if(AURORA_USE_TABBYCAD == 1)
+  }
+  return yosys_executable_path;
+}
+
+bool CompilerOpenFPGA_ql::SynthPassHasOwnerTable(const std::filesystem::path& yosys,
+                                                 const std::string& pass) {
+  const std::string key = yosys.string() + "\n" + pass;
+  auto it = m_ownerTableSupport.find(key);
+  if (it != m_ownerTableSupport.end()) return it->second;
+  std::ostringstream help;
+  const bool ran =
+      FileUtils::ExecuteSystemCommand(yosys.string(),
+                                      {"-Q", "-p", "plugin -i ql-qlf; help " + pass},
+                                      &help, 60000)
+          .code == 0;
+  const bool supported = ran && help.str().find("-owner_table") != std::string::npos;
+  if (!supported) {
+    WarningMessage(yosys.string() + ": " + pass +
+                   " has no -owner_table (an older synthesis plugin), so synthesis "
+                   "writes no owner table.");
+  }
+  m_ownerTableSupport[key] = supported;
+  return supported;
+}
+
 // [aurora2#1725 review F1] Once per compiler instance, not once per stage: all three
 // callers hit the same missing owner table for the same reason, so saying it three times
 // would look like three different problems.
@@ -2814,8 +2861,8 @@ void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
   if (m_floorplanningVerificationWarned) return;
   m_floorplanningVerificationWarned = true;
   WarningMessage(
-      "Floorplanning verification unavailable: synthesis wrote no owner table (a custom "
-      "Yosys script without the synthesis pass's -owner_table), so instance validation, "
+      "Floorplanning verification unavailable: synthesis wrote no owner table (an older "
+      "synthesis plugin, or a custom Yosys script without -owner_table or -blif), so instance validation, "
       "resource reporting and constraint-compliance checking are skipped. A .qdc whose "
       "set_region names anything but ports cannot be applied without the table: "
       "constraint generation stops and asks to re-run synthesis.");
@@ -13184,10 +13231,11 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
 #define STRINGIZE2(s) #s
 #define STRINGIZE(s) STRINGIZE2(s)
-  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
+  const std::string synth_pass_name{STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)};
 #else
-  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
+  const std::string synth_pass_name{"synth_quicklogic"};
 #endif
+  yosysScript->apply("${QL_SYNTH_PASS_NAME}", synth_pass_name);
 
   if (!ProjManager()->DesignTopModule().empty()) {
     yosysScript->apply("${TOP_MODULE_DIRECTIVE}", "-top " + ProjManager()->DesignTopModule());
@@ -13418,11 +13466,28 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosysScript->addFile(rel_ip_blif);
   }
 
+  const std::filesystem::path yosys_executable_path = SynthesisYosysExecutable();
+  if (yosys_executable_path.empty()) return {};
+
   // [aurora2#1725] The owner table: which RTL instance owns each atom of the BLIF. The
-  // panel, the constraint writer and the checks all read it.
-  yosys_options += " -owner_table " + FloorplanningPrefix() + "_atomsets.json";
-  if (m_useVerific && m_projManager->synthesisTool() != Synplify) {
-    yosys_options += " -owner_front_end verific";
+  // panel, the constraint writer and the checks all read it. The pass refuses -owner_table
+  // without -blif, so a template line that passes the options without -blif gets none.
+  bool options_with_blif = true;
+  {
+    std::istringstream lines{GetYosysScriptTemplate()};
+    for (std::string line; std::getline(lines, line);) {
+      if (line.find("${YOSYS_OPTIONS}") != std::string::npos &&
+          line.find("-blif") == std::string::npos) {
+        options_with_blif = false;
+      }
+    }
+  }
+  if (options_with_blif &&
+      SynthPassHasOwnerTable(yosys_executable_path, synth_pass_name)) {
+    yosys_options += " -owner_table " + FloorplanningPrefix() + "_atomsets.json";
+    if (m_useVerific && m_projManager->synthesisTool() != Synplify) {
+      yosys_options += " -owner_front_end verific";
+    }
   }
 
   // synth_options from Tcl: no template has ${OPTIMIZATION}, so this is their only way into synth_ql.
@@ -13491,29 +13556,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   }
 #endif // #if UPSTREAM_UNUSED
 
-
-  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-  if(m_useVerific) {
-#if(AURORA_USE_TABBYCAD == 1)
-    yosys_executable_path = GetSession()->Context()->BinaryPath() /
-                            ".." /
-                            "tabby" /
-                            "bin" /
-#ifdef _WIN32
-                            "yosys_verific.exe";
-#else
-                            "yosys_verific";
-#endif
-    if (!FileUtils::FileExists(yosys_executable_path)) {
-      ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
-                   "found: " + yosys_executable_path.string());
-      return {};
-    }
-#else
-    Message("Verific parser requested but this build was configured without "
-            "TabbyCAD; synthesis uses " + yosys_executable_path.string());
-#endif // #if(AURORA_USE_TABBYCAD == 1)
-  }
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   command->setScriptRenderer(yosysScript);

@@ -695,6 +695,13 @@ private:
   bool m_floorplanningVerificationWarned = false;
   void WarnFloorplanningVerificationUnavailable();
 
+  // [aurora2#1725] The yosys that runs synthesis: TabbyCAD's for Verific, else the bundled one.
+  std::filesystem::path SynthesisYosysExecutable();
+  // [aurora2#1725] Whether that yosys's synthesis pass has -owner_table; probed once per binary,
+  // since an older plugin fails the whole run on an unknown option.
+  bool SynthPassHasOwnerTable(const std::filesystem::path& yosys, const std::string& pass);
+  std::map<std::string, bool> m_ownerTableSupport;
+
   // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
   // schema the FloorPlanning UI sizes regions against, via
   // scripts/floorplanning/design_resources.py. Best-effort like RunValidateInstances()
