@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <unordered_set>
 #include <map>
+#include <set>
 #include <filesystem>
 #include <optional>
 #include <regex>
@@ -580,6 +581,51 @@ public:
   void appendPath(const std::string& parameter, const std::filesystem::path& file, const std::string& mask = "") {
     appendArgument(parameter, file.string(), mask);
     handlePath(file, mask);
+  }
+
+  // Drops every "--flag [values...]" group whose flag is in `flags`. A group runs
+  // up to the next token that starts with "--", so a flag with no value or with
+  // several values goes whole. Appends each dropped group, as text, to `dropped`.
+  static std::vector<std::string> removeOptionGroups(const std::vector<std::string>& tokens,
+                                                     const std::set<std::string>& flags,
+                                                     std::vector<std::string>* dropped = nullptr) {
+    std::vector<std::string> kept;
+    for (size_t i = 0; i < tokens.size();) {
+      if (flags.count(tokens[i]) == 0) {
+        kept.push_back(tokens[i++]);
+        continue;
+      }
+      std::string group = tokens[i++];
+      while (i < tokens.size() && tokens[i].rfind("--", 0) != 0) {
+        group += ' ' + tokens[i++];
+      }
+      if (dropped) {
+        dropped->push_back(group);
+      }
+    }
+    return kept;
+  }
+
+  // removeOptionGroups() on this command, its argv and its string alike; returns
+  // the dropped groups. Files a dropped group named stay declared, so the
+  // incremental checks see one input too many, never one too few.
+  std::vector<std::string> removeOptions(const std::set<std::string>& flags) {
+    std::vector<std::string> dropped;
+    std::vector<std::string> words;
+    std::istringstream stream(m_string);
+    for (std::string word; stream >> word;) {
+      words.push_back(word);
+    }
+    std::vector<std::string> kept = removeOptionGroups(words, flags, &dropped);
+    if (dropped.empty()) {
+      return dropped;  // leave the command as it was
+    }
+    m_string = StringUtils::join(kept, " ");
+    m_argv = removeOptionGroups(m_argv, flags);
+    for (const std::string& flag : flags) {
+      m_arguments.erase(flag);
+    }
+    return dropped;
   }
 
   void prepend(const std::string& parameter, const std::string& value = "") {

@@ -79,6 +79,33 @@ TEST(CommandWrapper, to_string)
     EXPECT_EQ("cmd --p1 v1 --p2 --p3 v3 --file1 filepath1 filepath2 filepath3 --file4 filepath4", command.string());
 }
 
+TEST(CommandWrapper, remove_options)
+{
+    CommandWrapper command{"vpr arch.xml design.blif"};
+    command.append("--seed", "3");
+    command.append("--place");
+    command.append("--moves a b");  // a flag with two values
+    command.append("--offset", "-1");  // a value that starts with '-'
+
+    const std::vector<std::string> dropped =
+        command.removeOptions({"--seed", "--place", "--moves", "--absent"});
+
+    EXPECT_EQ((std::vector<std::string>{"--seed 3", "--place", "--moves a b"}), dropped);
+    EXPECT_EQ("vpr arch.xml design.blif --offset -1", command.string());
+    EXPECT_EQ((std::vector<std::string>{"vpr", "arch.xml", "design.blif", "--offset", "-1"}),
+              command.argv());
+    EXPECT_EQ(0u, command.arguments().count("--seed"));
+    EXPECT_EQ(1u, command.arguments().count("--offset"));
+}
+
+TEST(CommandWrapper, remove_options_absent_flag_keeps_command)
+{
+    CommandWrapper command{"vpr  arch.xml design.blif --seed 3"};
+
+    EXPECT_TRUE(command.removeOptions({"--absent"}).empty());
+    EXPECT_EQ("vpr  arch.xml design.blif --seed 3", command.string());
+}
+
 TEST(CommandWrapper, compare_matches)
 {
     ScopedFile filePath1{std::filesystem::path{"filepath1"}, "content for filepath1..."};

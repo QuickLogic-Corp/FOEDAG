@@ -3419,11 +3419,6 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
     netlistFile =
         FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
-#if UPSTREAM_UNUSED
-  std::string pnrOptions;
-  if (!PnROpt().empty()) pnrOptions += " " + PnROpt();
-  if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
-#endif // #if UPSTREAM_UNUSED
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
@@ -3571,6 +3566,59 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
 
   // return tuple of full vpr command, as well as just the options for use by clients
   return std::make_tuple(base_vpr_command, vpr_options);
+}
+
+static std::vector<std::string> splitWords(const std::string& text) {
+  std::vector<std::string> words;
+  std::istringstream stream(text);
+  for (std::string word; stream >> word;) {
+    words.push_back(word);
+  }
+  return words;
+}
+
+// The "--flag" words of the pnr_options; empty when none are set.
+static std::set<std::string> optionFlags(const std::vector<std::string>& options) {
+  std::set<std::string> flags;
+  for (const std::string& word : options) {
+    if (word.rfind("--", 0) == 0) {
+      flags.insert(word);
+    }
+  }
+  return flags;
+}
+
+void CompilerOpenFPGA_ql::applyPnrOptions(CommandWrapper& command) {
+  const std::vector<std::string> options = splitWords(PnROpt());
+  if (options.empty()) {
+    return;
+  }
+  const std::vector<std::string> dropped = command.removeOptions(optionFlags(options));
+  if (!dropped.empty() && !s_describeOnly) {
+    WarningMessage("pnr_options replaces " + StringUtils::join(dropped, ", ") +
+                   " in the VPR command");
+  }
+  command.append(StringUtils::join(options, " "));
+}
+
+void CompilerOpenFPGA_ql::applyPnrOptions(std::string& command, bool warn) {
+  const std::vector<std::string> options = splitWords(PnROpt());
+  if (options.empty()) {
+    return;
+  }
+  std::vector<std::string> dropped;
+  const std::vector<std::string> kept =
+      CommandWrapper::removeOptionGroups(splitWords(command), optionFlags(options), &dropped);
+  if (!dropped.empty()) {
+    // Option-only strings (BaseVprCommandLEGACY()'s second element) start with a space.
+    const bool leading_space = !command.empty() && command.front() == ' ';
+    command = (leading_space ? " " : "") + StringUtils::join(kept, " ");
+    if (warn && !s_describeOnly) {
+      WarningMessage("pnr_options replaces " + StringUtils::join(dropped, ", ") +
+                     " in the VPR command");
+    }
+  }
+  command += " " + StringUtils::join(options, " ");
 }
 
 CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_target, const VprStageCfg& cfg) {
@@ -3820,11 +3868,6 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
     netlistFile =
         FileUtils::RelativeTo(designNetlist, ProjManager()->projectPath()).string();
   }
-#if UPSTREAM_UNUSED
-  std::string pnrOptions;
-  if (!PnROpt().empty()) pnrOptions += " " + PnROpt();
-  if (!PerDevicePnROptions().empty()) pnrOptions += " " + PerDevicePnROptions();
-#endif // #if UPSTREAM_UNUSED
 
   // QLDeviceTarget device_target = QLDeviceManager::getInstance()->getCurrentDeviceTarget();
 
@@ -6860,6 +6903,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     if(!profile.empty()){
       taCommand += uniqueStaVprOptions();
     }
+    applyPnrOptions(taCommand);
 
     const int status = ExecuteAndMonitorQtApplication(taCommand, IsVprGuiCommand(taCommand));
     if (status) {
@@ -6890,6 +6934,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
     std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
     std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
     std::string command = base_vpr_command + " --gen_post_synthesis_netlist on";
+    applyPnrOptions(command);
     std::ofstream ofs(sta_cmd_filepath);
     ofs.close();
     int status = ExecuteAndMonitorQtApplication(command, IsVprGuiCommand(command));
@@ -6971,6 +7016,7 @@ bool CompilerOpenFPGA_ql::TimingAnalysisHelper(const QLDeviceTarget& current_dev
 #endif // #ifdef _WIN32
 
     taCommand += std::string(" --analysis");
+    applyPnrOptions(taCommand);
 
     if (m_engineSelected && hasVprToken(taCommand, "--route")) {
       // REQ-016: STA that re-routes writes its own routing, never route's, and
@@ -7889,6 +7935,10 @@ std::string CompilerOpenFPGA_ql::FinishOpenFPGAScript(const std::string& script)
   std::tuple<std::string, std::string> baseVPRCommandTuple = BaseVprCommandLEGACY();
   std::string base_vpr_command = std::get<0>(baseVPRCommandTuple);
   std::string base_vpr_options = std::get<1>(baseVPRCommandTuple);
+  // the same options, in the full command and in the options-only form the
+  // device template takes; warn once.
+  applyPnrOptions(base_vpr_command);
+  applyPnrOptions(base_vpr_options, /*warn*/ false);
   std::string vpr_analysis_command = base_vpr_command;
   if (m_engineSelected) {
     m_bitstreamVprCommand = base_vpr_command;
@@ -13127,6 +13177,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPackingCommand() {
   }
 
   command->append("--pack");
+  applyPnrOptions(*command);
 
   if (m_engineSelected) {
     QLDeviceManager* devices = QLDeviceManager::getInstance();
@@ -13211,6 +13262,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getPlacementCommand() {
   //   Message("no pcf file found, skipping PinConstraints usage!");
   // }
 
+  applyPnrOptions(*command);
   return command;
 }
 
@@ -13700,6 +13752,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getRoutingCommand()
   command->append("--skip_sync_clustering_and_routing_results on");
   command->append("--analysis");
   command->append("--route");
+  applyPnrOptions(*command);
 
   return command;
 }
@@ -13741,6 +13794,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
     if(!profile.empty()){
       taCommand->append(uniqueStaVprOptions());
     }
+    applyPnrOptions(*taCommand);
 
     return taCommand;
   }
@@ -13751,6 +13805,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
     // allows SDF to be generated for OpenSTA
     CommandWrapperPtr command = BaseVprCommand();
     command->append("--gen_post_synthesis_netlist", "on");
+    applyPnrOptions(*command);
     return command;
   } 
   else {
@@ -13787,6 +13842,7 @@ CommandWrapperPtr CompilerOpenFPGA_ql::getTimingAnalysisCommand(const QLDeviceTa
 #endif // #ifdef _WIN32
 
     taCommand->append("--analysis");
+    applyPnrOptions(*taCommand);
   }
 
   return taCommand;
