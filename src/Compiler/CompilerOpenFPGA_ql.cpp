@@ -3017,12 +3017,13 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
   std::filesystem::path manifest_path = FloorplanningArtifact("constraints.manifest.json");
-  std::filesystem::path constraints_xml_path = projectPath / (projectName + "_constraints.xml");
   if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path)) {
     return true;  // nothing placed yet
   }
-  if (!FileUtils::FileExists(manifest_path) && !FileUtils::FileExists(constraints_xml_path)) {
-    return true;  // nothing constrained
+  // The writer leaves a manifest with every partition it writes. A constraints XML without
+  // one is older or hand-made, and its pin partitions can name ports VPR dropped.
+  if (!FileUtils::FileExists(manifest_path)) {
+    return true;
   }
 
   FloorplanningTool tool = ResolveFloorplanningTool(
@@ -3037,13 +3038,8 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   args.push_back(place_path.string());
   args.push_back("--net");
   args.push_back(net_path.string());
-  if (FileUtils::FileExists(manifest_path)) {
-    args.push_back("--manifest");
-    args.push_back(manifest_path.string());
-  } else {
-    args.push_back("--constraints-xml");
-    args.push_back(constraints_xml_path.string());
-  }
+  args.push_back("--manifest");
+  args.push_back(manifest_path.string());
   args.push_back("-o");
   args.push_back(compliance_rpt_path.string());
   // Every out-of-region atom, per instance, for the FloorPlanning panel.
