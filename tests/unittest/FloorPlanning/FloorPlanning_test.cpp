@@ -1056,22 +1056,40 @@ TEST(SynthResourceHierarchyTree, APatternPartitionTicksTheRowsItMatches)
               (std::set<std::string>{"cluster[0].clb.q", "cluster[1].clb.q"}));
 }
 
-TEST(SynthResourceHierarchyTree, EditingAPatternPartitionExpandsThePattern)
+TEST(SynthResourceHierarchyTree, AnUnrelatedTickKeepsThePattern)
 {
+    // Instances a later synthesis adds under cluster[*] must still fall inside the partition.
     PatternTree tree;
     QStandardItem* other = itemWithPath(tree.root, "other");
     ASSERT_NE(other, nullptr);
     other->setCheckState(Qt::Checked);
 
     const fp::HierarhyElements& elements = tree.partition->elements();
-    EXPECT_FALSE(elements.contains("cluster[*].*"));
+    EXPECT_TRUE(elements.contains("cluster[*].*"));
     EXPECT_TRUE(elements.contains("other"));
+    EXPECT_EQ(elements.size(), 2u) << "no row the pattern covers is listed on its own";
     std::set<std::string> atoms;
     for (const fp::HierarhyElement& element: elements) {
         atoms.insert(element.vprNames.begin(), element.vprNames.end());
     }
     EXPECT_EQ(atoms,
               (std::set<std::string>{"cluster[0].clb.q", "cluster[1].clb.q", "other.q"}));
+}
+
+TEST(SynthResourceHierarchyTree, UntickingACoveredRowExpandsThePattern)
+{
+    PatternTree tree;
+    QStandardItem* first = itemWithPath(tree.root, "cluster[0].clb");
+    ASSERT_NE(first, nullptr);
+    first->setCheckState(Qt::Unchecked);
+
+    const fp::HierarhyElements& elements = tree.partition->elements();
+    EXPECT_FALSE(elements.contains("cluster[*].*"));
+    std::set<std::string> atoms;
+    for (const fp::HierarhyElement& element: elements) {
+        atoms.insert(element.vprNames.begin(), element.vprNames.end());
+    }
+    EXPECT_EQ(atoms, (std::set<std::string>{"cluster[1].clb.q"}));
 }
 
 TEST(SynthResourceHierarchyTree, FlatDesignShowsTheTopAsItsOnlyRow)

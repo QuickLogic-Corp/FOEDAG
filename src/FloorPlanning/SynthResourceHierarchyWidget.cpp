@@ -759,12 +759,20 @@ void SynthResourceHierarchyWidget::selectPartition(const PartitionPtr& partition
 
 void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const PartitionPtr& partition) const
 {
+    // Patterns kept as written: their rows are left to them, so instances a later synthesis
+    // adds still fall inside the partition.
+    std::vector<std::string> keptPatterns;
     std::function<void(QStandardItem*, const std::string&, const PartitionPtr&)> fillPartitionSelectedElementsRecursive =
-        [&fillPartitionSelectedElementsRecursive, this](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
+        [&fillPartitionSelectedElementsRecursive, &keptPatterns, this](QStandardItem* item, const std::string& prefix, const PartitionPtr& partition)
     {
         if (!item) return;
 
         const std::string path = buildChildPath(prefix, item);
+        if (std::any_of(keptPatterns.begin(), keptPatterns.end(), [&](const std::string& pattern) {
+                return elementPatternCovers(pattern, path);
+            })) {
+            return;
+        }
 
         const Qt::CheckState st = item->isCheckable() ? item->checkState() : Qt::Unchecked;
 
@@ -800,34 +808,51 @@ void SynthResourceHierarchyWidget::fillPartitionWithSelectedElements(const Parti
 
     // Elements that name no row -- legacy atom names, typos, a pattern matching nothing -- are
     // not the tree's to drop. They are kept, and DeviceGrid reports them as not found.
-    std::set<std::string> rowPaths;
-    std::function<void(const QStandardItem*, const std::string&)> collectRowPaths =
+    std::map<std::string, const QStandardItem*> rows;
+    std::function<void(const QStandardItem*, const std::string&)> collectRows =
         [&](const QStandardItem* item, const std::string& prefix) {
             for (int row = 0; row < item->rowCount(); ++row) {
                 const QStandardItem* child = item->child(row, Column::Netlist);
                 if (child && !isVprDisplayRow(child)) {
                     const std::string path = buildChildPath(prefix, child);
-                    rowPaths.insert(path);
-                    collectRowPaths(child, path);
+                    rows[path] = child;
+                    collectRows(child, path);
                 }
             }
         };
     QStandardItem* root = m_model->invisibleRootItem();
-    collectRowPaths(root, "");
-    std::vector<HierarhyElement> notInTree;
+    collectRows(root, "");
+    std::vector<HierarhyElement> kept;
     for (const HierarhyElement& element: partition->elements()) {
-        const bool named = isElementPattern(element.path)
-            ? std::any_of(rowPaths.begin(), rowPaths.end(), [&](const std::string& path) {
-                  return elementPatternCovers(element.path, path);
-              })
-            : rowPaths.count(element.path) != 0;
-        if (!named) {
-            notInTree.push_back(element);
+        if (!isElementPattern(element.path)) {
+            if (rows.count(element.path) == 0) {
+                kept.push_back(element);
+            }
+            continue;
+        }
+        // A pattern stays until a row it covers is unticked: that is the only edit that turns
+        // it into the rows it matches today. A covered parent may show partly ticked, which
+        // is how a parent with every child ticked looks.
+        bool covers = false;
+        bool unticked = false;
+        for (const auto& [path, item]: rows) {
+            if (elementPatternCovers(element.path, path)) {
+                covers = true;
+                if (item->isCheckable() && item->checkState() == Qt::Unchecked) {
+                    unticked = true;
+                }
+            }
+        }
+        if (!covers || !unticked) {
+            kept.push_back(element);
+            if (covers) {
+                keptPatterns.push_back(element.path);
+            }
         }
     }
 
     partition->clearElemenets();
-    for (const HierarhyElement& element: notInTree) {
+    for (const HierarhyElement& element: kept) {
         partition->addElement(element);
     }
     for (int row = 0; row < root->rowCount(); ++row) {
