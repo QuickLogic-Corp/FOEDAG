@@ -3017,6 +3017,12 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
   std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
   std::filesystem::path manifest_path = FloorplanningArtifact("constraints.manifest.json");
+  // The last run's results go first: a check that skips or crashes must not leave them to
+  // read as this run's.
+  std::filesystem::path compliance_rpt_path = FloorplanningArtifact("constraint_compliance.rpt");
+  std::filesystem::path placement_json_path = FloorplanningArtifact("placement.json");
+  std::filesystem::remove(compliance_rpt_path);
+  std::filesystem::remove(placement_json_path);
   if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path)) {
     return true;  // nothing placed yet
   }
@@ -3031,7 +3037,6 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
       "constraint compliance");
   if (!tool.ready) return tool.result;
 
-  std::filesystem::path compliance_rpt_path = FloorplanningArtifact("constraint_compliance.rpt");
   std::vector<std::string> args;
   args.push_back(tool.script.string());
   args.push_back("--place");
@@ -3044,7 +3049,7 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   args.push_back(compliance_rpt_path.string());
   // Every out-of-region atom, per instance, for the FloorPlanning panel.
   args.push_back("--json");
-  args.push_back(FloorplanningArtifact("placement.json").string());
+  args.push_back(placement_json_path.string());
 
   const int status = RunFloorplanningStage(tool.python.string(), args);
   if (status == 0) {
