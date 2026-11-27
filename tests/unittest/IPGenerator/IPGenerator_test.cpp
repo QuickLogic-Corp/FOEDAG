@@ -1218,6 +1218,22 @@ TEST_F(IpProjectCopy, BuildDirAndFingerprintAreNotCompared) {
   EXPECT_TRUE(whyNot.empty()) << whyNot;
 }
 
+TEST_F(IpProjectCopy, AStringIsComparedAsGenerateWroteIt) {
+  // Generate() puts the argument between quotes as it is, so the file holds
+  // the escape sequences the argument was typed with.
+  const auto copy =
+      MakeCopy(root, "fpu0", "   \"path\": \"a\\\\b\",\n") / "fpu0";
+  EXPECT_TRUE(IPGenerator::GeneratedCopyMatches(
+      copy, "ip_v1_0", "fpu0", Params({{"path", "a\\\\b"}}), kNoDevice,
+      &whyNot))
+      << whyNot;
+  // Typed with one backslash, the argument reads back as a and a backspace,
+  // which is not the recorded a\b.
+  EXPECT_FALSE(IPGenerator::GeneratedCopyMatches(
+      copy, "ip_v1_0", "fpu0", Params({{"path", "a\\b"}}), kNoDevice,
+      &whyNot));
+}
+
 TEST_F(IpProjectCopy, ACopyBelongsToTheDeviceItWasGeneratedFor) {
   const std::string device = "   \"target_device\": \"fam/fdy/12nm/dev_a\",\n";
   const auto copy = MakeCopy(root, "fpu0", device) / "fpu0";

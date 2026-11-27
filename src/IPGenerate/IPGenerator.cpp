@@ -1050,14 +1050,14 @@ bool IPGenerator::GeneratedCopyMatches(
     const auto value = cache.find(param.Name());
     if (value == cache.end() || reserved.count(param.Name()) != 0) {
       same = false;
-    } else if (value->is_string()) {
-      same = value->get<std::string>() == param.GetSValue();
     } else {
-      // Numbers and booleans are stored unquoted. Compare the values, not
-      // the text, so that 1.50 matches a recorded 1.5.
-      const nlohmann::json given =
-          nlohmann::json::parse(param.GetSValue(), nullptr, false);
-      same = given == *value;
+      // Generate() writes a string value between quotes and any other value
+      // as given. Read the argument back the same way and compare the
+      // values, not the text, so that 1.50 matches a recorded 1.5.
+      const std::string given = param.GetSValue();
+      same = nlohmann::json::parse(
+                 value->is_string() ? "\"" + given + "\"" : given, nullptr,
+                 false) == *value;
     }
   }
   if (!same) {
