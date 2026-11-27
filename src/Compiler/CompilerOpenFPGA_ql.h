@@ -298,6 +298,11 @@ class CompilerOpenFPGA_ql : public Compiler {
   void onPcfFileSaved();
 
  public:
+  // [aurora2#1725] The Floor Planning panel asks for its reports: they run with every compile
+  // while it is open, and on opening it writes whichever is missing.
+  void setFloorplanningPanelOpen(bool open) { m_floorplanningPanelOpen = open; }
+  void RefreshFloorplanningReports();
+
   /// Register an annotated relative-placement IP netlist (via the
   /// `ip_add_to_design` Tcl command, either as an explicit .eblif/.blif path
   /// or auto-discovered from a catalog IP instance's rel_macro/ dir).
@@ -707,9 +712,16 @@ private:
   // scripts/floorplanning/design_resources.py. Best-effort like RunValidateInstances()
   // above: a missing input skips the stage rather than failing an already-succeeded compile.
   //
-  // maxTier caps what a given call may produce -- synthesis passes 1, placement 2 -- and
-  // the tier actually written is the highest the inputs on disk support, never above it.
-  bool RunDesignResources(int maxTier);
+  // How far the flow has got: after synthesis the counts come from the owner table (tier 1);
+  // after placement also from the .net/.place (tier 2), when both are on disk.
+  enum class FlowPoint { Synthesis, Placement };
+  bool RunDesignResources(FlowPoint reached);
+
+  // [aurora2#1725] The two reports above, only for a project that floorplans: its .qdc has a
+  // set_region, or the Floor Planning panel is open.
+  void RunFloorplanningReports(FlowPoint reached);
+  bool QdcHasSetRegion();
+  bool m_floorplanningPanelOpen = false;
 
   // [aurora2#1725 stage P7] False, with every failing atom on the console, when a listed
   // atom is not placed inside its partition's region; that fails placement.

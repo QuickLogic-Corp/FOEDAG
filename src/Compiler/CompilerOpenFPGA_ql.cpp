@@ -2908,8 +2908,40 @@ bool CompilerOpenFPGA_ql::RunValidateInstances() {
   return true;
 }
 
+bool CompilerOpenFPGA_ql::QdcHasSetRegion() {
+  const std::filesystem::path qdc = QLSettingsManager::getInstance()->getQDCFilePath();
+  if (qdc.empty() || !FileUtils::FileExists(qdc)) return false;
+  for (std::string line : fp::QdcSerializer::readCommands(qdc)) {
+    line = StringUtils::trim(line);
+    if (StringUtils::startsWith(line, "set_region ")) return true;
+  }
+  return false;
+}
+
+void CompilerOpenFPGA_ql::RunFloorplanningReports(FlowPoint reached) {
+  if (!m_floorplanningPanelOpen && !QdcHasSetRegion()) {
+    // Not wanted: drop the last run's reports, so the panel never reads stale ones.
+    if (reached == FlowPoint::Synthesis) {
+      std::filesystem::remove(FloorplanningArtifact("validation.json"));
+    }
+    std::filesystem::remove(FloorplanningArtifact("design_resources.json"));
+    return;
+  }
+  if (reached == FlowPoint::Synthesis) RunValidateInstances();
+  RunDesignResources(reached);
+}
+
+void CompilerOpenFPGA_ql::RefreshFloorplanningReports() {
+  if (!FileUtils::FileExists(FloorplanningArtifact("validation.json"))) {
+    RunValidateInstances();
+  }
+  if (!FileUtils::FileExists(FloorplanningArtifact("design_resources.json"))) {
+    RunDesignResources(FlowPoint::Placement);
+  }
+}
+
 // [aurora2#1725 stage P7] see the declaration in CompilerOpenFPGA_ql.h for the tier rules.
-bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
+bool CompilerOpenFPGA_ql::RunDesignResources(FlowPoint reached) {
   const std::string topModule = ProjManager()->DesignTopModule();
   const std::string projectName = ProjManager()->projectName();
   std::filesystem::path projectPath{ProjManager()->projectPath()};
@@ -2922,16 +2954,14 @@ bool CompilerOpenFPGA_ql::RunDesignResources(int maxTier) {
 
   // [aurora2#1725] Both tiers are post-synthesis, from the owner table; without one there
   // is nothing to report.
-  const bool useAtomsets = (maxTier >= 1) && FileUtils::FileExists(atomsets_path);
-  const bool usePlacement = (maxTier >= 2) && useAtomsets &&
+  const bool useAtomsets = FileUtils::FileExists(atomsets_path);
+  const bool usePlacement = reached == FlowPoint::Placement && useAtomsets &&
                             FileUtils::FileExists(net_path) &&
                             FileUtils::FileExists(place_path);
 
   if (!useAtomsets) {
     // Post-synthesis with no owner table: a script that did not write one.
-    if (maxTier >= 1) {
-      WarnFloorplanningVerificationUnavailable();
-    }
+    WarnFloorplanningVerificationUnavailable();
     return true;
   }
 
@@ -3125,8 +3155,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
             ", skipping synthesis.");
     // [aurora2#1725 stage P4] re-run even on a skip, so the notes match the owner table on
     // disk. Best-effort, like every stage this feature adds.
-    RunValidateInstances();
-    RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
+    RunFloorplanningReports(FlowPoint::Synthesis);
     return true;
   }
   #endif
@@ -3152,8 +3181,7 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
     // still runs even though synthesis itself didn't.
-    RunValidateInstances();
-    RunDesignResources(1);  // [aurora2#1725 stage P7] tier 1, same reasoning
+    RunFloorplanningReports(FlowPoint::Synthesis);
     return true;
   }
   // incr compilation
@@ -3181,12 +3209,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
-    // [aurora2#1725 stage P4] validation gate -- grade every instance against the
-    // synthesis output just produced. Best-effort.
-    RunValidateInstances();
-    // [aurora2#1725 stage P7] tier 2 -- exact per-instance primitive counts, now that
-    // atomsets.json describes the netlist just written.
-    RunDesignResources(1);
+    // [aurora2#1725 stage P4] grade every instance against the synthesis output just
+    // produced, and count its primitives. Best-effort.
+    RunFloorplanningReports(FlowPoint::Synthesis);
     return true;
   }
 }
@@ -6025,9 +6050,9 @@ bool CompilerOpenFPGA_ql::Placement() {
               .string())) {
     m_state = State::Placed;
     Message("Design " + ProjManager()->projectName() + " placement reused");
-    // [aurora2#1725 stage P7] tier 3 -- the .net/.place this path just found up-to-date
-    // are exactly what tier 3 reads, so regenerate even though VPR did not re-run.
-    RunDesignResources(2);
+    // [aurora2#1725 stage P7] placement counts -- the .net/.place this path just found up-to-date
+    // are exactly what they read, so regenerate even though VPR did not re-run.
+    RunFloorplanningReports(FlowPoint::Placement);
     return RunConstraintCompliance();
   }
 
@@ -6169,7 +6194,7 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement skipped, not required");
     Message("##################################################");
     m_state = State::Placed;
-    RunDesignResources(2);  // [aurora2#1725 stage P7] tier 2, same reasoning as above
+    RunFloorplanningReports(FlowPoint::Placement);  // [aurora2#1725 stage P7] same reasoning as above
     if (!RunConstraintCompliance()) {
       return false;
     }
@@ -6236,10 +6261,10 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
-  // [aurora2#1725 stage P7] tier 3 -- actual placed tiles, the only ground truth the
+  // [aurora2#1725 stage P7] placement counts -- actual placed tiles, the only ground truth the
   // FloorPlanning UI can compare its estimates against. Runs before the place2pcf.py
   // block below, which returns early when no pin table is found.
-  RunDesignResources(2);
+  RunFloorplanningReports(FlowPoint::Placement);
   // [aurora2#1725 stage P7] post-placement compliance: an atom outside its region fails
   // placement.
   if (!RunConstraintCompliance()) {

@@ -2650,6 +2650,7 @@ void MainWindow::floorPlanningActionTriggered()
         m_floorPlanningWidget->deleteLater();
         m_floorPlanningWidget = nullptr;
       }
+      static_cast<CompilerOpenFPGA_ql*>(m_compiler)->setFloorplanningPanelOpen(false);
       QSignalBlocker sblocker(floorPlanningAction);
       floorPlanningAction->setChecked(false);
   };
@@ -2760,6 +2761,8 @@ void MainWindow::floorPlanningActionTriggered()
 
     m_floorPlanningWidget->setDeviceGridDescriptor(descriptor);
 
+    compiler->setFloorplanningPanelOpen(true);
+    compiler->RefreshFloorplanningReports();
     QString loadError;
     if (!loadFloorPlanningData(loadError)) {
       QMessageBox::critical(this, "Floor Planning cannot be started.", loadError);
