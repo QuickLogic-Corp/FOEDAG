@@ -76,7 +76,9 @@ bool loadOwnerTable(const std::filesystem::path& path, OwnerTable& table, std::s
                 continue;
             }
             const std::string name = atom["name"].get<std::string>();
-            const std::string type = atom.value("type", "");
+            const auto typeIt = atom.find("type");
+            const std::string type =
+                (typeIt != atom.end() && typeIt->is_string()) ? typeIt->get<std::string>() : "";
             if (type == "$const") {
                 continue;
             }

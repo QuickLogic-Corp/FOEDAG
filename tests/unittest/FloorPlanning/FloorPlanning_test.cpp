@@ -3431,12 +3431,14 @@ TEST(OwnerTable, WrongTypedEntriesAreSkippedNotAnException)
                                     "atomsets.json", R"({"schema_version": 2, "netlist_sha256": "a",
         "top": "top", "instances": [{"path": 5}, {"path": ["core"]}],
         "atoms": [{"name": 7}, {"name": "x", "type": "$lut", "owners": "core"},
-                  {"name": "y", "type": "$lut", "owners": [["core"]]}]})");
+                  {"name": "y", "type": "$lut", "owners": [["core"]]},
+                  {"name": "z", "type": 3, "owners": [["core"]]}]})");
     fp::OwnerTable table;
     std::string error;
     bool loaded = false;
     EXPECT_NO_THROW(loaded = fp::loadOwnerTable(path, table, error));
     ASSERT_TRUE(loaded) << error;
     EXPECT_EQ(table.instances, (std::vector<std::string>{"core"}));
-    EXPECT_EQ(table.atomNames.at("core"), (std::vector<std::string>{"y"}));
+    EXPECT_EQ(table.atomNames.at("core"), (std::vector<std::string>{"y", "z"}));
+    EXPECT_EQ(table.atomTypes.at("z"), "") << "a type that is not a string is unknown";
 }

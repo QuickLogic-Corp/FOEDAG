@@ -2769,12 +2769,13 @@ void CompilerOpenFPGA_ql::ResetFloorplanningStageLog() {
 }
 
 // Runs one helper script, with its stdout AND stderr appended to the stage log rather than
-// echoed to the console. Returns the script's exit code.
+// echoed to the console. Returns the script's exit code, or -1 when it did not start or did not
+// exit normally.
 int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
                                                const std::vector<std::string>& args) {
   std::ofstream log(FloorplanningStageLog(), std::ios_base::app);
   std::ostream* out = log.is_open() ? static_cast<std::ostream*>(&log) : m_out;
-  return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).realCode;
+  return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).code;
 }
 
 // [aurora2#1725] The prelude every floorplanning helper stage shares: resolve the
@@ -3054,6 +3055,12 @@ bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
   const int status = RunFloorplanningStage(tool.python.string(), args);
   if (status == 0) {
     return true;
+  }
+  if (status < 0) {
+    ErrorMessage("Design " + projectName +
+                 " constraint-compliance check (floorplanning/constraint_compliance.py) could "
+                 "not run, see " + FloorplanningStageLog().string());
+    return false;
   }
   // Exit 3: the .place was made from another .net, and the report says only that.
   const bool stale = status == 3;
