@@ -58,8 +58,10 @@ struct Mask {
 QImage capture(QWidget *widget, const QList<Mask> &maskWidgets,
                const QList<QRect> &maskRects);
 
-// Grabs until two grabs in a row are identical. False if the image is
-// still changing when the timeout expires ("unstable").
+// Grabs until two grabs in a row are identical and no visible widget in it
+// has the property guiTestSettling set to true, which a widget sets while a
+// deferred update of its look is pending. False if that does not happen
+// before the timeout expires ("unstable").
 bool settle(QWidget *widget, const QList<Mask> &maskWidgets,
             const QList<QRect> &maskRects, int timeoutMs, QImage *image);
 

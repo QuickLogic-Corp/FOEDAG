@@ -342,6 +342,10 @@ void NCriticalPathView::onActualDataCleared() {
   m_filterModel->clear();
 }
 
+bool NCriticalPathView::guiTestSettling() const {
+  return m_sourceModel && m_sourceModel->lineLimitPending();
+}
+
 void NCriticalPathView::resizeEvent(QResizeEvent* event) {
   updateControlsLocation();
   QFontMetrics fontMetrics(font());

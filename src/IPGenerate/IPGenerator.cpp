@@ -1552,6 +1552,9 @@ std::vector<std::filesystem::path> IPGenerator::GetDesignFiles(
     for (const auto& entry : std::filesystem::directory_iterator(srcPath)) {
       paths.push_back(entry.path());
     }
+    // Directory order differs between file systems; design sources keep this
+    // order, so sort it.
+    std::sort(paths.begin(), paths.end());
   }
 
   return paths;
@@ -1577,6 +1580,7 @@ std::vector<std::filesystem::path> IPGenerator::GetCacheFiles(
         paths.push_back(entry.path());
       }
     }
+    std::sort(paths.begin(), paths.end());
   }
 
   return paths;

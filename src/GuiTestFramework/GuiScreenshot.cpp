@@ -118,6 +118,14 @@ QImage capture(QWidget *widget, const QList<Mask> &maskWidgets,
   return image;
 }
 
+static bool settling(QWidget *widget) {
+  QList<QWidget *> widgets = widget->findChildren<QWidget *>();
+  widgets.append(widget);
+  return std::any_of(widgets.begin(), widgets.end(), [](QWidget *w) {
+    return w->isVisible() && w->property("guiTestSettling").toBool();
+  });
+}
+
 bool settle(QWidget *widget, const QList<Mask> &maskWidgets,
             const QList<QRect> &maskRects, int timeoutMs, QImage *image) {
   QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
@@ -128,7 +136,7 @@ bool settle(QWidget *widget, const QList<Mask> &maskWidgets,
   while (true) {
     wait(kSettlePollMs);
     QImage current = capture(widget, maskWidgets, maskRects);
-    if (current == previous) {
+    if (current == previous && !settling(widget)) {
       *image = current;
       return true;
     }

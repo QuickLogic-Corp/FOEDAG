@@ -205,6 +205,21 @@ TEST(GuiScreenshot, Settle) {
   Flicker never{-1};
   never.show();
   EXPECT_FALSE(settle(&never, {}, {}, 500, &image)) << "reported as unstable";
+
+  // A still widget that reports a pending update is not settled until the
+  // update is done.
+  QLabel pending{"pending"};
+  pending.setProperty("guiTestSettling", true);
+  pending.show();
+  QTimer::singleShot(300, &pending, [&pending]() {
+    pending.setProperty("guiTestSettling", false);
+  });
+  timer.restart();
+  EXPECT_TRUE(settle(&pending, {}, {}, kDefaultSettleMs, &image));
+  EXPECT_GE(timer.elapsed(), 300);
+
+  pending.setProperty("guiTestSettling", true);
+  EXPECT_FALSE(settle(&pending, {}, {}, 500, &image)) << "reported as unstable";
 }
 
 // U-020: display mode reports a mismatch without failing; gen-goldens mode is
