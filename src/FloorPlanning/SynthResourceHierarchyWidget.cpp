@@ -1411,8 +1411,8 @@ void SynthResourceHierarchyWidget::populateAtomColumns()
     m_untypedAtoms.clear();
 
     // [aurora2#2377] The Type and Primitive cells of one atom. m_atomTypes (this atom's real
-    // Yosys cell type, from <top>_post_synth_debug.json) is ground truth and wins when
-    // present; a project with no debug json falls back to the pre-2377 guess --
+    // Yosys cell type, from the owner table) is ground truth and wins when present; an atom
+    // the table gives no type falls back to the pre-2377 guess --
     // classifyAtomType()'s name-substring check for the tile type, and a search of the
     // enclosing scope's atomsets.json resource tally for the primitive. Neither signal
     // finding anything is worth surfacing: it means this atom's own name and its scope's
