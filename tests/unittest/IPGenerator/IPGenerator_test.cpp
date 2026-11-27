@@ -1041,4 +1041,176 @@ TEST(IPWrapperStamp, WrapperNameMatchesTheGeneratorConvention) {
   EXPECT_EQ("inst1" + std::string("_") + meta.version, "inst1_V1_0");
 }
 
+// A project keeps building after its IP left every catalog: configure_ip falls
+// back to the copy ipgenerate wrote earlier.
+class IpProjectCopy : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    root = std::filesystem::temp_directory_path() / "foedag_project_copy_test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+  }
+  void TearDown() override { std::filesystem::remove_all(root); }
+
+  // What ipgenerate leaves under `base` for IP ip_v1_0 and module `module`:
+  // the cache file, holding `parameters` ahead of the keys Generate() adds,
+  // and one source file. Returns the <version> directory.
+  std::filesystem::path MakeCopy(const std::filesystem::path& base,
+                                 const std::string& module,
+                                 const std::string& parameters = "") {
+    const auto versionDir = base / "vendor" / "library" / "ip" / "v1_0";
+    const auto copy = versionDir / module;
+    std::filesystem::create_directories(copy / "src");
+    std::ofstream(copy / "src" / (module + ".v"))
+        << "module " << module << "();\nendmodule\n";
+    std::ofstream(copy / ("ip_v1_0_" + module + ".json"))
+        << "{\n"
+        << parameters << "   \"build_dir\": \"" << base.generic_string()
+        << "\",\n   \"build_name\": \"" << module
+        << "\",\n   \"build\": true,\n   \"json\": \"ip_v1_0_" << module
+        << ".json\",\n   \"netlists_fingerprint\": \"a.eblif:1:2;\",\n"
+        << "   \"json_template\": false\n}\n";
+    return versionDir;
+  }
+
+  static std::vector<SParameter> Params(
+      std::initializer_list<std::pair<std::string, std::string>> values) {
+    std::vector<SParameter> params;
+    for (const auto& [name, value] : values) params.emplace_back(name, value);
+    return params;
+  }
+
+  const std::string kRecorded =
+      "   \"width\": 8,\n   \"mode\": \"fast\",\n   \"sync\": true,\n"
+      "   \"ratio\": 1.5,\n";
+  std::filesystem::path root;
+  std::string whyNot;
+};
+
+TEST_F(IpProjectCopy, FindsTheCopyOfTheModule) {
+  const auto versionDir = MakeCopy(root, "fpu0");
+  EXPECT_EQ(
+      IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {}, &whyNot),
+      versionDir);
+  EXPECT_TRUE(whyNot.empty()) << whyNot;
+}
+
+TEST_F(IpProjectCopy, NoCopyIsReportedWithoutAReason) {
+  EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
+                                             &whyNot)
+                  .empty());
+  EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root / "missing", "ip_v1_0",
+                                             "fpu0", {}, &whyNot)
+                  .empty());
+  MakeCopy(root, "fpu0");
+  // Another module, another IP, and the degenerate names.
+  for (const auto& [ip, module] :
+       std::vector<std::pair<std::string, std::string>>{{"ip_v1_0", "fpu1"},
+                                                        {"ip_v2_0", "fpu0"},
+                                                        {"ip_v1_0", ""},
+                                                        {"", "fpu0"}}) {
+    EXPECT_TRUE(
+        IPGenerator::FindGeneratedCopy(root, ip, module, {}, &whyNot).empty())
+        << ip << " " << module;
+  }
+  EXPECT_TRUE(whyNot.empty()) << whyNot;
+}
+
+TEST_F(IpProjectCopy, AcceptsTheParametersItWasGeneratedWith) {
+  const auto versionDir = MakeCopy(root, "fpu0", kRecorded);
+  // 1.50 is the same number as the recorded 1.5.
+  EXPECT_EQ(IPGenerator::FindGeneratedCopy(
+                root, "ip_v1_0", "fpu0",
+                Params({{"width", "8"},
+                        {"mode", "fast"},
+                        {"sync", "true"},
+                        {"ratio", "1.50"}}),
+                &whyNot),
+            versionDir)
+      << whyNot;
+}
+
+TEST_F(IpProjectCopy, RefusesOtherParameters) {
+  MakeCopy(root, "fpu0", kRecorded);
+  const std::vector<std::vector<SParameter>> others{
+      // one value changed
+      Params({{"width", "16"}, {"mode", "fast"}, {"sync", "true"},
+              {"ratio", "1.5"}}),
+      // a string that only looks alike
+      Params({{"width", "8"}, {"mode", "\"fast\""}, {"sync", "true"},
+              {"ratio", "1.5"}}),
+      // one parameter dropped
+      Params({{"width", "8"}, {"mode", "fast"}, {"sync", "true"}}),
+      // one parameter added
+      Params({{"width", "8"}, {"mode", "fast"}, {"sync", "true"},
+              {"ratio", "1.5"}, {"depth", "4"}}),
+      // a key Generate() writes is not a parameter
+      Params({{"width", "8"}, {"mode", "fast"}, {"sync", "true"},
+              {"build", "true"}}),
+      {}};
+  for (const auto& params : others) {
+    whyNot.clear();
+    EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", params,
+                                               &whyNot)
+                    .empty());
+    EXPECT_NE(whyNot.find("other parameters"), std::string::npos) << whyNot;
+    EXPECT_NE(whyNot.find((root / "vendor" / "library" / "ip" / "v1_0" / "fpu0")
+                              .string()),
+              std::string::npos)
+        << whyNot;
+  }
+}
+
+TEST_F(IpProjectCopy, RefusesACopyItCannotUse) {
+  const auto copy = MakeCopy(root, "fpu0") / "fpu0";
+  std::filesystem::remove(copy / "src" / "fpu0.v");
+  EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
+                                             &whyNot)
+                  .empty());
+  EXPECT_NE(whyNot.find("no source files"), std::string::npos) << whyNot;
+
+  MakeCopy(root, "fpu0");
+  std::ofstream(copy / "ip_v1_0_fpu0.json") << "{ not json";
+  whyNot.clear();
+  EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
+                                             &whyNot)
+                  .empty());
+  EXPECT_NE(whyNot.find("cannot be read"), std::string::npos) << whyNot;
+}
+
+TEST_F(IpProjectCopy, IgnoresThePreviewAndSimulationTrees) {
+  // Both repeat the layout one level below the IPs root.
+  MakeCopy(root / ".tmp", "fpu0");
+  MakeCopy(root / "simulation", "fpu0");
+  EXPECT_TRUE(IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", {},
+                                             &whyNot)
+                  .empty());
+  EXPECT_TRUE(whyNot.empty()) << whyNot;
+}
+
+TEST_F(IpProjectCopy, AnInstanceOnTheStandInResolvesToTheCopy) {
+  const auto versionDir = MakeCopy(root, "fpu0", "   \"width\": 8,\n");
+  auto params = Params({{"width", "8"}});
+  ASSERT_EQ(
+      IPGenerator::FindGeneratedCopy(root, "ip_v1_0", "fpu0", params, &whyNot),
+      versionDir);
+
+  Compiler* compiler = new Compiler();
+  IPGenerator* ipGen = new IPGenerator(PathUtils::instance().installDir(),
+                                       new IPCatalog(), compiler);
+  IPDefinition* standIn =
+      new IPDefinition(IPDefinition::IPType::ProjectCopy, "ip_v1_0", "fpu0",
+                       versionDir, {}, {});
+  ipGen->setIpOutputLocation("fpu0", "V1_0", root);
+  IPInstance* instance =
+      new IPInstance("ip_v1_0", "V1_0", standIn, params, "fpu0", root);
+  instance->Generated(true);
+  // The stand-in lists no parameters; the instance's are not "unknown".
+  EXPECT_TRUE(ipGen->AddIPInstance(instance));
+  EXPECT_EQ(ipGen->GetBuildDir(instance), versionDir / "fpu0");
+  const auto files = ipGen->GetDesignFiles(instance);
+  ASSERT_EQ(files.size(), 1u);
+  EXPECT_EQ(files.front(), versionDir / "fpu0" / "src" / "fpu0.v");
+}
+
 }  // namespace FOEDAG
