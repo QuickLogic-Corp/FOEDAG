@@ -91,6 +91,11 @@ public:
         return !m_hasUnsavedChanges;
     }
 
+    // Before the panel goes away with unsaved edits: asks to save, Yes / No / Cancel, or only
+    // Discard / Cancel when errors block the save. False when the edits stay; dropping them
+    // leaves nothing unsaved to ask about again.
+    bool confirmClose();
+
     void setDeviceGridDescriptor(const DeviceGridDescriptorPtr& deviceDescriptor);
     void setQdcFilePath(const std::filesystem::path&, bool load = true);
 

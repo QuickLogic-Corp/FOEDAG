@@ -304,7 +304,8 @@ void MainWindow::ProgressVisible(bool visible) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-  if (confirmExitProgram()) {
+  if (confirmExitProgram() &&
+      (!m_floorPlanningWidget || m_floorPlanningWidget->confirmClose())) {
     if (m_floorPlanningWidget) {
       // [aurora2#1725] Destroy the panel here and now rather than close()ing it. close()
       // goes through the closed() handler, which disposes of the widget with deleteLater();
@@ -396,6 +397,9 @@ void MainWindow::openProjectDialog(const QString& dir) {
 bool MainWindow::closeProject(bool force, bool skipWelcomePage) {
   if (m_projectManager && m_projectManager->HasDesign()) {
     if (!force && !confirmCloseProject()) {
+      return false;
+    }
+    if (!force && m_floorPlanningWidget && !m_floorPlanningWidget->confirmClose()) {
       return false;
     }
 
@@ -2776,6 +2780,11 @@ void MainWindow::floorPlanningActionTriggered()
 
   } else {
     if (m_floorPlanningWidget) {
+      if (!m_floorPlanningWidget->confirmClose()) {
+        QSignalBlocker sblocker(floorPlanningAction);
+        floorPlanningAction->setChecked(true);
+        return;
+      }
       cleanFloorPlanningUI();
     }
   }

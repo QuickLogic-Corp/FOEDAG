@@ -678,8 +678,44 @@ void FloorPlanningWidget::resizeEvent(QResizeEvent* event)
     }
 }
 
+bool FloorPlanningWidget::confirmClose()
+{
+    if (!m_hasUnsavedChanges) {
+        return true;
+    }
+    // Errors block the save, so offering Yes would only fail: keep the edits or drop them.
+    if (!m_deviceWidget->isSaveQdcAllowed()) {
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this, tr("Warning"),
+            tr("Floor planning data were modified, but cannot be saved: the floorplan has "
+               "errors, listed in Issues. Do you want to discard the changes?"),
+            QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Discard) {
+            return false;
+        }
+        m_hasUnsavedChanges = false;
+        return true;
+    }
+    // The same prompt as the Pin Planner's.
+    const QMessageBox::StandardButton answer = QMessageBox::question(
+        this, tr("Warning"), tr("Floor planning data were modified. Do you want to save it?"),
+        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
+    if (answer == QMessageBox::Yes) {
+        return saveUnsavedChanges();
+    }
+    if (answer == QMessageBox::No) {
+        m_hasUnsavedChanges = false;
+        return true;
+    }
+    return false;  // Cancel, or the box's close button
+}
+
 void FloorPlanningWidget::closeEvent(QCloseEvent* event)
 {
+  if (!confirmClose()) {
+    event->ignore();
+    return;
+  }
   emit closed();
   QWidget::closeEvent(event);
 }

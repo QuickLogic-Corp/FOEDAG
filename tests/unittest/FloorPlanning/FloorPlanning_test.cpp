@@ -3169,6 +3169,36 @@ TEST(FloorplanRefresh, ARefusedSaveKeepsThePartitionAndSaysWhy)
     EXPECT_FALSE(table->findItems("p_invalid", Qt::MatchExactly).isEmpty());
 }
 
+TEST(FloorplanClose, WithErrorsTheOnlyChoicesAreDiscardOrCancel)
+{
+    fp::FloorPlanningWidget panel(QStringLiteral("close-test"));
+    prepare(panel, 1366);
+    EXPECT_TRUE(panel.confirmClose()) << "nothing unsaved, nothing to ask";
+
+    auto* grid = panel.findChild<fp::DeviceGridWidget*>();
+    ASSERT_NE(grid, nullptr);
+    grid->createNewPartition("p_invalid");  // no elements, no region: an error
+    ASSERT_TRUE(panel.hasUnsavedChanges());
+
+    auto answer = [](QMessageBox::StandardButton button, QMessageBox::StandardButtons& shown) {
+        QTimer::singleShot(0, [button, &shown]() {
+            if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
+                shown = box->standardButtons();
+                box->button(button)->click();
+            }
+        });
+    };
+    QMessageBox::StandardButtons shown;
+    answer(QMessageBox::Cancel, shown);
+    EXPECT_FALSE(panel.confirmClose());
+    EXPECT_EQ(shown, QMessageBox::Discard | QMessageBox::Cancel) << "no save while errors block it";
+    EXPECT_TRUE(panel.hasUnsavedChanges());
+
+    answer(QMessageBox::Discard, shown);
+    EXPECT_TRUE(panel.confirmClose());
+    EXPECT_FALSE(panel.hasUnsavedChanges());
+}
+
 namespace {
 
 struct ArrayTree {
