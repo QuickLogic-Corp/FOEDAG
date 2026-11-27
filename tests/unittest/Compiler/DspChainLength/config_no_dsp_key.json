@@ -1,0 +1,27 @@
+{
+  "CONFIG_FILE_VERSION": "v3.0",
+  "DEVICE_DATA_VERSION": "v2.0",
+  "CUSTOMER_NAME": "TURNKEY-FPGA3030-2024Q3",
+  "DEVICE_SIZE": "30x30",
+  "TAPEOUT_DATE": "",
+  "AURORA_SETTINGS_TEMPLATE": "aurora/settings_template.json",
+  "AURORA_YOSYS_TEMPLATE_SCRIPT": "aurora/aurora_template_script.ys",
+  "AURORA_SYNPLIFY_TEMPLATE_SCRIPT": "aurora/aurora_template_script.prj",
+  "AURORA_OPENFPGA_TEMPLATE_SCRIPT": "aurora/aurora_template_script.openfpga",
+  "POWER_TEMPLATE": "aurora/power_template.json",
+  "PIN_TABLE": "aurora/pin_table.csv",
+  "FABRIC_KEY": "aurora/fabric_key.xml",
+  "FIXED_SIM_OPENFPGA": "aurora/fixed_sim_openfpga.xml",
+  "REPACK_DESIGN_CONSTRAINT": "aurora/repack_design_constraint.xml",
+  "BITSTREAM_ANNOTATION": "aurora/bitstream_annotation.xml",
+  "FPGA_IO_MAP": "aurora/fpga_io_map.xml",
+  "CORNER_VPR_ARCH": "vpr.xml",
+  "CORNER_RRGRAPH_BIN": "rr_graph.bin",
+  "CORNER_ROUTER_LOOKAHEAD_BIN": "router_lookahead.bin",
+  "CORNER_OPENFPGA_ARCH": "openfpga.xml",
+  "CORNER_POWER_DATA": "power_data.json",
+  "CORNERS": {
+    "SSPG_0P72_125C": "LVT/SSPG_0P72_125C"
+  },
+  "BRAM_TYPE": "TDP"
+}

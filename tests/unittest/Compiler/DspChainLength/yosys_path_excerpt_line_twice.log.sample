@@ -1,0 +1,22 @@
+3.23. Executing QL_DSPV4 pass.
+ql_dspv4: inferred 2 QL_DSP4 cell(s), 0 register stage(s) absorbed, 0 multiply idiom(s) left soft.
+ql_dspv4: modes inferred: MULT_ADD x1, MULT x1
+ql_dspv4: cascade: 1 PCIN link(s) in 1 chain(s), longest 2 (limit 2)
+ql_dspv4: operand-register walks that ended with nothing left to take (not stalls): 5 with no register on the operand, 0 having absorbed every stage present.
+<suppressed ~5 debug messages>
+
+3.25. Executing OPT_EXPR pass (perform const folding).
+
+3.26. Executing WREDUCE pass (reducing word size of cells).
+
+3.27. Executing QL_DSPV4 pass.
+ql_dspv4: inferred 0 QL_DSP4 cell(s), 0 register stage(s) absorbed, 0 multiply idiom(s) left soft.
+
+3.28. Executing QL_DSPV2_TO_DSPV4 pass (DSP-V2 -> DSP-V4, Phase 1).
+
+3.29. Executing QL_DSP4_CHECK pass.
+
+3.30. Executing QL_DSP4_CHAIN_REPORT pass.
+ql_dsp4_chain_report: longest DSP chain 2 (1 link(s) in 1 chain(s))
+<suppressed ~1 debug messages>
+ql_dsp4_chain_report: longest DSP chain 7 (6 link(s) in 1 chain(s))

@@ -1,0 +1,9 @@
+3.21. Executing WREDUCE pass (reducing word size of cells).
+
+3.22. Executing QL_DSPV2_TO_DSPV4 pass (DSP-V2 -> DSP-V4, Phase 1).
+
+3.23. Executing QL_DSP4_CHECK pass.
+
+3.24. Executing QL_DSP4_CHAIN_REPORT pass.
+ql_dsp4_chain_report: longest DSP chain 2 (1 link(s) in 1 chain(s))
+<suppressed ~1 debug messages>
