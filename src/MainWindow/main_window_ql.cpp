@@ -2425,6 +2425,7 @@ bool MainWindow::loadFloorPlanningData(QString& error)
   m_floorPlanningWidget->setAtomsPerTile(fp::FloorplanContext::kDefaultAtomsPerTile);
   m_floorPlanningWidget->context().netlistSha256 = table.netlistSha256;
   m_floorPlanningWidget->context().top = table.top;
+  m_floorPlanningWidget->context().mergedAtomOwners = table.mergedAtomOwners;
   m_floorPlanningWidget->setOwnAtomCounts(table.ownAtomCounts);
   m_floorPlanningWidget->setAtomNames(table.atomNames);
   m_floorPlanningWidget->setAtomResources(table.atomResources);

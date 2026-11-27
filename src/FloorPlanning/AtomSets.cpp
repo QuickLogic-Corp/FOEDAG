@@ -82,6 +82,14 @@ bool loadOwnerTable(const std::filesystem::path& path, OwnerTable& table, std::s
             table.atomTypes[name] = type;
             std::set<std::string> scopes;
             if (const auto owners = atom.find("owners"); owners != atom.end() && owners->is_array()) {
+                if (owners->size() > 1) {
+                    std::vector<std::string>& paths = table.mergedAtomOwners[name];
+                    for (const auto& owner : *owners) {
+                        if (owner.is_array()) {
+                            paths.push_back(dotted(owner, owner.size()));
+                        }
+                    }
+                }
                 for (const auto& owner : *owners) {
                     if (!owner.is_array()) {
                         continue;
@@ -198,6 +206,11 @@ const std::regex& patternRegex(const std::string& pattern)
 }
 
 }  // namespace
+
+bool elementPatternMatches(const std::string& pattern, const std::string& path)
+{
+    return std::regex_match(path, patternRegex(pattern));
+}
 
 bool elementPatternCovers(const std::string& pattern, const std::string& path)
 {

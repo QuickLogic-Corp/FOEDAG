@@ -35,6 +35,8 @@ struct OwnerTable {
     AtomResourceMap atomResources;               // subtree-inclusive, like atomNames
     AtomTypeMap atomTypes;
     std::map<std::string, int> ownAtomCounts;    // atoms an instance owns directly
+    // An atom synthesis merged from several instances -> their paths ("" is the top).
+    std::map<std::string, std::vector<std::string>> mergedAtomOwners;
 };
 
 // Reads the owner table. False, with `error` saying why, when the file is missing, is not
@@ -69,6 +71,8 @@ std::set<std::string> atomNamesFor(const AtomNameMap& atomNames, const std::stri
 bool isElementPattern(const std::string& element);
 // True when `path` is an instance the pattern selects, or lies inside one.
 bool elementPatternCovers(const std::string& pattern, const std::string& path);
+// True when the pattern selects `path` itself.
+bool elementPatternMatches(const std::string& pattern, const std::string& path);
 
 // [aurora2#1725] What a set of atoms costs in tiles.
 //

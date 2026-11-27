@@ -46,17 +46,8 @@ std::unordered_set<std::string> Partition::collectOverlappedElements(const Parti
         }
     };
 
+    // The same path in both is DeviceGrid::checkWriterClaims()'s error, not this warning.
     std::unordered_set<std::string> elements;
-    for (const HierarhyElement& element: partition.elements()) {
-        if (m_elements.contains(element.path)) {
-            elements.insert(element.path);
-        }
-    }
-    for (const HierarhyElement& element: m_elements) {
-        if (partition.elements().contains(element.path)) {
-            elements.insert(element.path);
-        }
-    }
     collectNested(partition.elements(), m_elements, elements);
     collectNested(m_elements, partition.elements(), elements);
     return elements;

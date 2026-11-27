@@ -1672,14 +1672,15 @@ TEST(FloorplanIssues, ARegionWithRoomToSpareIsNoIssueAtAll)
 namespace {
 
 // One partition naming `paths`, constrained to clb(2,2):clb(2,9).
-fp::PartitionPtr constrainNames(fp::DeviceGrid& device, const std::vector<std::string>& paths)
+fp::PartitionPtr constrainNames(fp::DeviceGrid& device, const std::vector<std::string>& paths,
+                                const std::string& name = "p")
 {
     fp::RegionPtr region = std::make_shared<fp::Region>(device.context()->nextRegionId++, 
         findBottomLeftTilePoint(device, {2, 2}).value(),
         findTopRightTilePoint(device, {2, 9}).value());
     region->setTiles(device.findTiles(region->rect()));
 
-    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), "p");
+    fp::PartitionPtr partition = std::make_shared<fp::Partition>(device.context(), name);
     for (const std::string& path: paths) {
         partition->addElement(fp::HierarhyElement{path, /*isLeaf*/ true});
     }
@@ -1792,6 +1793,80 @@ TEST(FloorplanIssues, AnOutPadIsAnErrorWithoutAPortList)
     constrainNames(device, {"out:dout"});
 
     EXPECT_TRUE(mentions(device.checkIssues()->errors, "names pads: 'out:dout'"));
+}
+
+TEST(FloorplanIssues, AnInstanceInTwoPartitionsIsAnError)
+{
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "core", "core.u_a"});
+    constrainNames(device, {"core"}, "p1");
+    constrainNames(device, {"core"}, "p2");
+
+    EXPECT_TRUE(mentions(device.checkIssues()->errors, "'core' is in partitions 'p1' and 'p2'"));
+}
+
+TEST(FloorplanIssues, AnInstanceInsideAnotherPartitionsInstanceIsNotAnError)
+{
+    // Each atom goes to its deepest constrained instance, so the writer takes this.
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "core", "core.u_a"});
+    constrainNames(device, {"core"}, "p1");
+    constrainNames(device, {"core.u_a"}, "p2");
+
+    EXPECT_FALSE(mentions(device.checkIssues()->errors, "is in partitions"));
+}
+
+TEST(FloorplanIssues, AGlobYieldsToAnExactNameButNotToAnotherGlob)
+{
+    {
+        fp::DeviceGrid device(genTestDescriptor());
+        device.setRtlInstances({"top", "u_a", "u_b"});
+        constrainNames(device, {"u_*"}, "p1");
+        constrainNames(device, {"u_a"}, "p2");
+        EXPECT_FALSE(mentions(device.checkIssues()->errors, "is in partitions"));
+    }
+    {
+        fp::DeviceGrid device(genTestDescriptor());
+        device.setRtlInstances({"top", "u_a", "u_b"});
+        constrainNames(device, {"u_*"}, "p1");
+        constrainNames(device, {"*_a"}, "p2");
+        EXPECT_TRUE(mentions(device.checkIssues()->errors, "'*_a' is in partitions 'p1' and 'p2'"));
+    }
+}
+
+TEST(FloorplanIssues, AnAtomNamedInTwoPartitionsIsAnError)
+{
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "core"});
+    device.context()->atomTypes = {{"q_reg", "sdffre"}};
+    constrainNames(device, {"q_reg"}, "p1");
+    constrainNames(device, {"q_reg"}, "p2");
+
+    EXPECT_TRUE(mentions(device.checkIssues()->errors, "atom 'q_reg' is in partitions 'p1' and 'p2'"));
+}
+
+TEST(FloorplanIssues, AMergedAtomOwnedFromTwoPartitionsIsAnError)
+{
+    // The second owner falls back to the top, which p1 holds.
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "u_a", "u_b"});
+    device.context()->top = "top";
+    device.context()->mergedAtomOwners = {{"bram0", {"u_a", "u_b"}}};
+    constrainNames(device, {"top"}, "p1");
+    constrainNames(device, {"u_a"}, "p2");
+
+    EXPECT_TRUE(mentions(device.checkIssues()->errors,
+                         "Atom 'bram0' holds logic of instances placed in partitions 'p1', 'p2'"));
+}
+
+TEST(FloorplanIssues, AMergedAtomOwnedFromOnePartitionIsNotAnError)
+{
+    fp::DeviceGrid device(genTestDescriptor());
+    device.setRtlInstances({"top", "u_a", "u_b"});
+    device.context()->mergedAtomOwners = {{"bram0", {"u_a", "u_b"}}};
+    constrainNames(device, {"u_a", "u_b"}, "p1");
+
+    EXPECT_FALSE(mentions(device.checkIssues()->errors, "holds logic of instances"));
 }
 
 TEST(FloorplanIssues, WithoutAnInstanceListNoNameIsChecked)
@@ -3200,6 +3275,19 @@ TEST(FloorPlanningLayout, OptionsSitsInTheRtlTreeWithOnlyTheAtomListAction)
     ASSERT_EQ(actions.size(), 1);
     EXPECT_EQ(actions.front()->text(), "Show Atom List and Primitive columns");
     EXPECT_TRUE(actions.front()->isCheckable());
+}
+
+TEST(FloorplanIssues, TheCheckerRefusesAMergedAtomFromTheOwnerTable)
+{
+    CheckerProject project;
+    project.writeTable(R"({"schema_version": 2, "netlist_sha256": "a", "top": "top",
+        "instances": [{"path": ["u_a"], "module": "m"}, {"path": ["u_b"], "module": "m"}],
+        "atoms": [{"name": "bram0", "type": "TDP36K", "owners": [["u_a"], ["u_b"]]}]})");
+    std::ofstream(project.qdc) << "set_region u_a clb(2,2):clb(4,4) p1\n"
+                                  "set_region u_b clb(6,6):clb(8,8) p2\n";
+
+    EXPECT_TRUE(mentions(project.check().errors,
+                         "Atom 'bram0' holds logic of instances placed in partitions 'p1', 'p2'"));
 }
 
 TEST(FloorplanIssues, TheCheckerReadsThePortsFromThePostSynthesisBlif)

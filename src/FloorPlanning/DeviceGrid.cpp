@@ -377,6 +377,166 @@ std::map<int, std::set<std::string>> DeviceGrid::atomsByDeepestElement() const
     return atoms;
 }
 
+// [aurora2#1725] generate_floorplanning.py's assign_partitions(), step for step, so the panel
+// refuses what the writer refuses: an instance or atom claimed by two partitions (exact names
+// first; a glob yields to an exact name elsewhere, with everything under it), and an atom
+// synthesis merged from instances in different partitions.
+void DeviceGrid::checkWriterClaims()
+{
+    const std::string& top = m_context->top;
+    std::set<std::string> instances = m_rtlInstances;
+    instances.erase(top);
+    const auto under = [](const std::string& path, const std::string& root) {
+        return root.empty() || path == root ||
+               (path.size() > root.size() && path.compare(0, root.size(), root) == 0 &&
+                path[root.size()] == '.');
+    };
+    // An instance, or the outermost instances under a generate label.
+    const auto scope = [&](const std::string& dotted) -> std::vector<std::string> {
+        if (instances.count(dotted) != 0) {
+            return {dotted};
+        }
+        const std::string prefix = dotted + ".";
+        std::vector<std::string> below;
+        for (auto it = instances.lower_bound(prefix);
+             it != instances.end() && it->compare(0, prefix.size(), prefix) == 0; ++it) {
+            below.push_back(*it);
+        }
+        std::vector<std::string> outermost;
+        for (const std::string& p : below) {
+            if (std::none_of(below.begin(), below.end(),
+                             [&](const std::string& q) { return q != p && under(p, q); })) {
+                outermost.push_back(p);
+            }
+        }
+        return outermost;
+    };
+    std::set<std::string> scopes;
+    for (const std::string& instance : instances) {
+        for (std::size_t dot = instance.find('.'); dot != std::string::npos;
+             dot = instance.find('.', dot + 1)) {
+            scopes.insert(instance.substr(0, dot));
+        }
+        scopes.insert(instance);
+    }
+    // The instance paths a name constrains; "" is the whole design.
+    const auto resolve = [&](std::string name, bool& glob) -> std::vector<std::string> {
+        if (name.size() >= 2 && name.compare(name.size() - 2, 2, ".*") == 0) {
+            name.resize(name.size() - 2);
+        }
+        glob = false;
+        if (name == "*" || name == top) {
+            return {""};
+        }
+        if (!isElementPattern(name)) {
+            return scope(name);
+        }
+        glob = true;
+        std::set<std::string> found;
+        for (const std::string& candidate : scopes) {
+            if (elementPatternMatches(name, candidate)) {
+                for (const std::string& path : scope(candidate)) {
+                    found.insert(path);
+                }
+            }
+        }
+        return {found.begin(), found.end()};
+    };
+
+    std::map<int, std::string> names;
+    std::map<std::string, int> constrained;
+    std::map<std::string, int> namedAtoms;
+    std::set<std::string> reported;
+    const auto claim = [&](std::map<std::string, int>& registry, const std::string& key,
+                           int id, const std::string& what) {
+        const auto [it, inserted] = registry.emplace(key, id);
+        if (inserted || it->second == id || !reported.insert(what).second) {
+            return;
+        }
+        m_issues->errors.insert(
+            {what + " is in partitions '" + names[it->second] + "' and '" + names[id] +
+                 "'; it can be in one partition only",
+             "Constraint generation stops on this. Keep it in one partition."});
+    };
+    struct Glob {
+        int id;
+        std::string name;
+        std::vector<std::string> paths;
+    };
+    std::vector<Glob> globs;
+    for (const auto& [id, partition] : m_partitions) {
+        names[id] = partition->name();
+        for (const HierarhyElement& element : partition->elements()) {
+            const std::string& name = element.path;
+            if (name.empty() || name == "$false" || name == "$true" || name == "$undef") {
+                continue;
+            }
+            bool glob = false;
+            const std::vector<std::string> paths = resolve(name, glob);
+            if (!paths.empty() && glob) {
+                globs.push_back({id, name, paths});
+            } else if (!paths.empty()) {
+                for (const std::string& path : paths) {
+                    claim(constrained, path, id, "'" + name + "'");
+                }
+            } else if (m_context->atomTypes.count(name) != 0) {
+                claim(namedAtoms, name, id, "atom '" + name + "'");
+            }
+        }
+    }
+    const std::map<std::string, int> exact = constrained;
+    for (const Glob& glob : globs) {
+        std::vector<std::string> taken;
+        for (const auto& [path, other] : exact) {
+            if (other == glob.id) {
+                continue;
+            }
+            for (const std::string& root : glob.paths) {
+                if (under(path, root)) {
+                    taken.push_back(path);
+                    break;
+                }
+            }
+        }
+        for (const std::string& path : glob.paths) {
+            if (std::none_of(taken.begin(), taken.end(),
+                             [&](const std::string& e) { return under(path, e); })) {
+                claim(constrained, path, glob.id, "'" + glob.name + "'");
+            }
+        }
+    }
+
+    for (const auto& [atom, owners] : m_context->mergedAtomOwners) {
+        if (namedAtoms.count(atom) != 0) {
+            continue;
+        }
+        std::set<int> hits;
+        for (std::string owner : owners) {
+            while (true) {
+                if (const auto it = constrained.find(owner); it != constrained.end()) {
+                    hits.insert(it->second);
+                    break;
+                }
+                if (owner.empty()) {
+                    break;
+                }
+                const std::size_t dot = owner.rfind('.');
+                owner = (dot == std::string::npos) ? "" : owner.substr(0, dot);
+            }
+        }
+        if (hits.size() > 1) {
+            std::string where;
+            for (int id : hits) {
+                where += (where.empty() ? "'" : ", '") + names[id] + "'";
+            }
+            m_issues->errors.insert(
+                {"Atom '" + atom + "' holds logic of instances placed in partitions " + where,
+                 "Synthesis merged them into one block, which can sit in one region only. "
+                 "Put those instances in one partition."});
+        }
+    }
+}
+
 const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
 {
     m_issues->clear();
@@ -637,6 +797,8 @@ const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
             }
         }
     }
+
+    checkWriterClaims();
 
     // elements overlapping
     for (auto pit1 = m_partitions.begin(); pit1 != m_partitions.end(); ++pit1) {

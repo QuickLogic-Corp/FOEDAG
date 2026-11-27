@@ -126,6 +126,8 @@ private:
     std::set<std::string> m_outputPorts;
     bool isPad(const std::string& name) const;
     bool isRtlInstanceOrParent(const std::string& path) const;
+    // The constraint writer's refusals (generate_floorplanning.py assign_partitions), as errors.
+    void checkWriterClaims();
 
     std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;
     std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;
