@@ -192,6 +192,12 @@ void NCriticalPathModel::loadItems(
   itemsHelperStructPtr->inputNodes.clear();
   itemsHelperStructPtr->outputNodes.clear();
 
+  // Wrap the new items to the view's width now: the limiter timer runs only on
+  // a resize, so without this they stay unwrapped until the next one.
+  if (m_lineCharsMaxNum > 0) {
+    applyLineCharsNum();
+  }
+
   emit loadFinished();
   SimpleLogger::instance().debug("load model finished");
 }

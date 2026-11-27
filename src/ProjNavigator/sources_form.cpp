@@ -2,7 +2,6 @@
 
 #include <QDebug>
 #include <QDir>
-#include <QDirIterator>
 #include <QFileInfo>
 #include <QMenu>
 #include <QMessageBox>
@@ -813,12 +812,12 @@ void SourcesForm::AddIpInstanceTree(QTreeWidgetItem *topItem) {
       QString srcDirStr =
           QString::fromStdString(FileUtils::GetFullPath(srcDirPath).string());
 
-      // Grab and add all files from the IP src dir (non-recursive)
-      QDirIterator it(srcDirStr, QDir::Files);
-      while (it.hasNext()) {
-        QFile file(it.next());
+      // Grab and add all files from the IP src dir (non-recursive), by name:
+      // directory order differs between file systems
+      const QFileInfoList files =
+          QDir(srcDirStr).entryInfoList(QDir::Files, QDir::Name);
+      for (const QFileInfo &info : files) {
         QTreeWidgetItem *itemFile = new QTreeWidgetItem(itemIp);
-        QFileInfo info(file);
         itemFile->setText(0, info.fileName());
         itemFile->setData(0, Qt::UserRole, info.absoluteFilePath());
         itemFile->setIcon(0, QIcon(":/img/file.png"));
