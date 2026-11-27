@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <mutex>
 #include <regex>
 #include <string_view>
 
@@ -179,7 +180,11 @@ namespace {
 // which elementPatternCovers() handles by walking up the path instead.
 const std::regex& patternRegex(const std::string& pattern)
 {
+    // The batch checker (compile thread) and the panel (GUI thread) both use it. A map node
+    // never moves, so the reference returned stays valid after the lock is released.
     static std::map<std::string, std::regex> cache;
+    static std::mutex mutex;
+    const std::lock_guard<std::mutex> lock(mutex);
     if (const auto it = cache.find(pattern); it != cache.end()) {
         return it->second;
     }

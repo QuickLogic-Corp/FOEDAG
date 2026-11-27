@@ -32,11 +32,13 @@
 #include <QTimer>
 #include <QSignalSpy>
 
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <set>
+#include <thread>
 
 #include "gtest/gtest.h"
 
@@ -557,6 +559,28 @@ TEST(ElementPattern, MatchesTheInstancesTheFlowWould)
     // A bare * is any text.
     EXPECT_TRUE(fp::elementPatternCovers("clust*[0].*", "cluster[0].clb"));
     EXPECT_FALSE(fp::elementPatternCovers("clust*[0].*", "cluster[1].clb"));
+}
+
+TEST(ElementPattern, TwoThreadsCanFillThePatternCacheAtOnce)
+{
+    // The batch checker runs on the compile thread while the panel runs on the GUI thread.
+    std::atomic<int> wrong{0};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&wrong] {
+            for (int i = 0; i < 300; ++i) {
+                const std::string pattern = "u" + std::to_string(i) + "_*";
+                if (!fp::elementPatternMatches(pattern, "u" + std::to_string(i) + "_a") ||
+                    fp::elementPatternMatches(pattern, "v_a")) {
+                    ++wrong;
+                }
+            }
+        });
+    }
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+    EXPECT_EQ(wrong, 0);
 }
 
 TEST(ElementPattern, CollectsTheAtomsOfEveryInstanceItMatches)
