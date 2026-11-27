@@ -73,6 +73,8 @@ public:
 
     const IssuesPtr& checkIssues();
     std::map<int, std::set<std::string>> atomsByDeepestElement() const;
+    // Partition id -> what its atoms need, each atom counted once (atomsByDeepestElement()).
+    std::map<int, ResourceTally> requiredResources() const;
     bool hasErrors() const { return !m_issues->errors.empty(); }
 
     // [aurora2#1725] RTL path -> how many atoms belong to that instance DIRECTLY, i.e. sit

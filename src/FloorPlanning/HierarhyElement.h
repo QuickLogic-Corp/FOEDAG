@@ -60,7 +60,7 @@ inline bool countsAsDspTile(const std::string& realType) {
 // design_resources.json also carries lut/ff/carry, which are not read here: the panel's own
 // atom-based tally already covers those post-synthesis.
 struct DesignResourceEntry {
-    int clbEst = 0;      // already in TILES, the unit Partition::*RequiredCount() reports
+    int clbEst = 0;      // already in TILES, the unit DeviceGrid::requiredResources() reports
     int dsp = 0;
     int bram = 0;
 

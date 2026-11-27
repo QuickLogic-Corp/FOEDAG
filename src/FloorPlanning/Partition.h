@@ -41,33 +41,10 @@ public:
     void addRegion(const RegionPtr& region);
     bool removeRegion(const RegionPtr& region);
 
-    void clearElemenets() {
-        m_elements.clear();
-        m_clbAtomCount = m_dspRequiredCount = m_bramRequiredCount = 0;
-        m_dspTileIds.clear();
-    }
-    void addElement(const HierarhyElement& element) {
-        m_elements.insert(element);
-        // [aurora2#1725] Running clb/dsp/bram counts, kept alongside the element set
-        // rather than recomputed by every UI consumer (view label today; more are
-        // coming) so they all read the same numbers without re-deriving them.
-        // "Required" because these come from the atoms assigned to the partition --
-        // what the design needs -- as opposed to *Available*Count() below, which is
-        // what the partition's regions physically have room for.
-        for (const std::string& atomName : element.vprNames) {
-            const auto typeIt = m_context->atomTypes.find(atomName);
-            const std::string realType =
-                (typeIt != m_context->atomTypes.end()) ? typeIt->second : "";
-            const QString type = classifyAtomType(atomName, realType);
-            if (type == "dsp") {
-                if (const auto tile = m_context->dspTiles.find(atomName);
-                    tile != m_context->dspTiles.end()) {
-                    if (m_dspTileIds.insert(tile->second).second) ++m_dspRequiredCount;
-                } else if (countsAsDspTile(realType)) ++m_dspRequiredCount;
-            } else if (type == "bram") ++m_bramRequiredCount;
-            else ++m_clbAtomCount;
-        }
-    }
+    void clearElemenets() { m_elements.clear(); }
+    // What the partition needs is DeviceGrid::requiredResources(): an atom counts once, for
+    // the partition of its deepest element.
+    void addElement(const HierarhyElement& element) { m_elements.insert(element); }
 
     // [aurora2#1725 stage P7] What design_resources.json contributes to this partition.
     //
@@ -130,24 +107,8 @@ public:
     const HierarhyElements& elements() const { return m_elements; }
     const std::map<int, RegionPtr> regions() const { return m_regions; }
 
-    // [aurora2#1725] Every *RequiredCount() is in TILES, the unit *AvailableCount() below
-    // reports, so the two can be compared (PartitionsListWidget's columns, DeviceGrid's
-    // under-provisioned check). A dsp/bram atom IS one tile, but clb atoms are luts and
-    // flops that pack many-to-a-tile, so that count has to be divided down: fft256's whole
-    // "dut" is 19029 clb atoms, which is 1360 tiles at 14 atoms/tile, not 19029 of them.
-    // A sizing hint, deliberately conservative -- the packer fits that design in 799 clb --
-    // but in the same unit as what a region actually offers, which the raw atom count is not.
-    // The estimate contribution is already in tiles (design_resources.json's clb_est
-    // carries the A.13.2b safety margin), so it is added after the atom->tile division,
-    // not before it.
-    int clbRequiredCount() const {
-        return (m_clbAtomCount + m_context->atomsPerTile - 1) / m_context->atomsPerTile;
-    }
-    int dspRequiredCount() const { return m_dspRequiredCount; }
-    int bramRequiredCount() const { return m_bramRequiredCount; }
-
     // [aurora2#1725] Tile counts by type across every region of this partition --
-    // what's physically available, as opposed to *Required*Count() above. Computed
+    // what's physically available, as opposed to DeviceGrid::requiredResources(). Computed
     // on demand rather than cached: a region's tiles can change after addRegion()
     // (resize/move), and Partition isn't notified of that, so a cached count would
     // go stale.
@@ -171,10 +132,6 @@ private:
 
     HierarhyElements m_elements;
     std::map<int, RegionPtr> m_regions;
-    int m_clbAtomCount = 0;
-    int m_dspRequiredCount = 0;
-    std::set<std::string> m_dspTileIds;
-    int m_bramRequiredCount = 0;
 
     void updateRect();
     QColor colorFromIndex(int index) const;

@@ -568,7 +568,7 @@ void SynthResourceHierarchyWidget::onPartitionsChanged(const std::map<int, Parti
 {
     // [aurora2#1725] Re-derive real atom names for elements that were loaded
     // without them. QdcSerializer::load() builds each partition's elements from
-    // RTL paths alone (a .qdc has no atom data), so clb/dsp/bram *RequiredCount()
+    // RTL paths alone (a .qdc has no atom data), so the required clb/dsp/bram
     // reads back 0 until this runs -- exactly the gap that made re-checking a tree
     // item "fix" it: fillPartitionWithSelectedElements() does this same lookup,
     // just only for whichever one partition is currently selected. Only elements still

@@ -72,6 +72,8 @@ public:
         m_device.setRtlInstances(std::move(rtlInstances));
     }
 
+    std::map<int, ResourceTally> requiredResources() const { return m_device.requiredResources(); }
+
     void clearPartitions();
     void createNewPartition(const std::string& partitionName = "");
     void removeSelected();

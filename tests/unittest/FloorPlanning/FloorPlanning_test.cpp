@@ -1199,43 +1199,74 @@ fp::DesignResourceEntry entry(int clbEst, int dsp, int bram)
 
 }  // namespace
 
+// One partition holding `elements`, and what DeviceGrid says it needs.
+fp::ResourceTally requiredFor(fp::DeviceGrid& device, const std::vector<fp::HierarhyElement>& elements,
+                              const std::string& name = "p")
+{
+    auto partition = std::make_shared<fp::Partition>(device.context(), name);
+    for (const fp::HierarhyElement& element : elements) {
+        partition->addElement(element);
+    }
+    device.addPartition(partition);
+    return device.requiredResources().at(partition->id());
+}
+
 TEST(PartitionResources, AnElementWithNoAtomsContributesNothing)
 {
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    fp::DeviceGrid device(genTestDescriptor());
+    const auto ctx = device.context();
     // The panel does not open before synthesis, so an element with no atoms is a genuinely
     // empty instance rather than a not-yet-synthesised one. It must contribute 0 -- there is
     // no longer a pre-synthesis estimate to stand in, and inventing one would size a region
     // for logic that does not exist.
     ctx->designResources = makeResources(1, {{"i_mul_24", entry(40, 4, 0)}});
 
-    fp::Partition partition(ctx, "p");
-    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
-
-    EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_EQ(partition.dspRequiredCount(), 0);
-
+    const fp::ResourceTally need = requiredFor(device, {{"i_mul_24", /*isLeaf*/ true}});
+    EXPECT_EQ(need.clbTiles, 0);
+    EXPECT_EQ(need.dsp, 0);
 }
 
 TEST(PartitionResources, AtomsAreTheOnlySourceOfTheRequiredColumns)
 {
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    fp::DeviceGrid device(genTestDescriptor());
+    const auto ctx = device.context();
     // An element that HAS atoms is counted from them, exactly. design_resources.json names
     // this instance with a clb_est of 40 and that figure must not reach the column.
     ctx->designResources = makeResources(1, {{"i_mul_24", entry(40, 4, 0)}});
 
-    fp::Partition partition(ctx, "p");
-    partition.addElement(fp::HierarhyElement{
-        "i_mul_24", /*isLeaf*/ true,
-        std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}});
+    const fp::ResourceTally need = requiredFor(
+        device, {{"i_mul_24", /*isLeaf*/ true,
+                  std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}}});
+    EXPECT_EQ(need.clbTiles, 1);  // 3 atoms / 14 per tile, rounded up
+    EXPECT_EQ(need.dsp, 0);
+}
 
-    EXPECT_EQ(partition.clbRequiredCount(), 1);  // 3 atoms / 14 per tile, rounded up
-    EXPECT_EQ(partition.dspRequiredCount(), 0);
+TEST(PartitionResources, AnAtomCountsOnceForItsDeepestElement)
+{
+    // A parent lists its child's atoms too. The child's partition takes them, as the
+    // Issues list and the constraint writer count them.
+    fp::DeviceGrid device(genTestDescriptor());
+    const fp::HierarhyElement parent{"core", true, {"core.a", "core.u.b", "core.u.c"}};
+    const fp::HierarhyElement child{"core.u", true, {"core.u.b", "core.u.c"}};
+    device.context()->setAtomsPerTile(1);
 
+    EXPECT_EQ(requiredFor(device, {parent, child}).clbTiles, 3) << "not 5";
+
+    fp::DeviceGrid split(genTestDescriptor());
+    split.context()->setAtomsPerTile(1);
+    EXPECT_EQ(requiredFor(split, {parent}, "p1").clbTiles, 3);
+    const fp::ResourceTally inner = requiredFor(split, {child}, "p2");
+    EXPECT_EQ(inner.clbTiles, 2);
+    const std::map<int, fp::ResourceTally> all = split.requiredResources();
+    int total = 0;
+    for (const auto& [id, tally] : all) total += tally.clbTiles;
+    EXPECT_EQ(total, 3) << "the parent's partition gives up the child's atoms";
 }
 
 TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
 {
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    fp::DeviceGrid device(genTestDescriptor());
+    const auto ctx = device.context();
     // One DSP-V4 is several QL_DSP4_* leaf atoms in one tile; only its QL_DSP4_MULT
     // counts, in both the partition column and the selection tally.
     const std::set<std::string> atoms{"u.QL_DSP4.u_mult", "u.QL_DSP4.g_acc.ff",
@@ -1245,10 +1276,9 @@ TEST(PartitionResources, ADspV4CountsOneTilePerMultiplier)
                                 {"u.QL_DSP4.g_add.u_alu", "QL_DSP4_ALU_ADD"}};
     ctx->atomTypes = types;
 
-    fp::Partition partition(ctx, "p");
-    partition.addElement(fp::HierarhyElement{"u", /*isLeaf*/ true, atoms});
-    EXPECT_EQ(partition.dspRequiredCount(), 1);
-    EXPECT_EQ(partition.clbRequiredCount(), 0);
+    const fp::ResourceTally need = requiredFor(device, {{"u", /*isLeaf*/ true, atoms}});
+    EXPECT_EQ(need.dsp, 1);
+    EXPECT_EQ(need.clbTiles, 0);
 
     const fp::ResourceTally tally = fp::tallyResources(atoms, 14, types);
     EXPECT_EQ(tally.dsp, 1);
@@ -1340,72 +1370,42 @@ TEST(DspTiles, ASelectionWithoutTheMultiplierStillCountsItsTile)
 
 TEST(DspTiles, APartitionCountsEachTileOnceAcrossItsElements)
 {
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    fp::DeviceGrid device(genTestDescriptor());
+    const auto ctx = device.context();
     const TwoDspTiles netlist;
     ASSERT_TRUE(netlist.loaded);
     ctx->atomTypes = netlist.types;
     ctx->dspTiles = netlist.tiles;
 
-    fp::Partition partition(ctx, "p");
-    partition.addElement(fp::HierarhyElement{"core.u_mul0", true, {kAccA}});
-    EXPECT_EQ(partition.dspRequiredCount(), 1);
-    partition.addElement(fp::HierarhyElement{"core", true, {kMulA, kAluA}});
-    EXPECT_EQ(partition.dspRequiredCount(), 1);
-    partition.addElement(fp::HierarhyElement{"core.u_mul1", true, {kAccB}});
-    EXPECT_EQ(partition.dspRequiredCount(), 2);
-
-    partition.clearElemenets();
-    EXPECT_EQ(partition.dspRequiredCount(), 0);
-
+    EXPECT_EQ(requiredFor(device, {{"core.u_mul0", true, {kAccA}},
+                                   {"core", true, {kMulA, kAluA}},
+                                   {"core.u_mul1", true, {kAccB}}})
+                  .dsp,
+              2);
 }
 
 TEST(PartitionResources, DesignResourceEntriesNeverFeedThePerPartitionTally)
 {
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
+    fp::DeviceGrid device(genTestDescriptor());
+    const auto ctx = device.context();
     // The entries NEST -- an ancestor's counts already include its descendants' -- so adding
     // them to a per-partition tally would double-count a partition holding both a parent and
     // a child. The tally is atom-based for exactly that reason.
     ctx->designResources = makeResources(2, {{"i_mul_24", entry(40, 4, 0)}});
 
-    fp::Partition partition(ctx, "p");
-    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
-
-    EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_EQ(partition.dspRequiredCount(), 0);
-
+    const fp::ResourceTally need = requiredFor(device, {{"i_mul_24", /*isLeaf*/ true}});
+    EXPECT_EQ(need.clbTiles, 0);
+    EXPECT_EQ(need.dsp, 0);
 }
 
 TEST(PartitionResources, NoDesignResourcesFileLeavesTheOldBehaviourUntouched)
 {
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
     // A project that has never been compiled, or a device whose template has no P2/P3
     // blocks, must behave exactly as it did before this stage existed.
+    fp::DeviceGrid device(genTestDescriptor());
 
-    fp::Partition partition(ctx, "p");
-    partition.addElement(fp::HierarhyElement{"i_mul_24", /*isLeaf*/ true});
-
-    EXPECT_EQ(partition.clbRequiredCount(), 0);
-    EXPECT_FALSE(ctx->designResources.valid());
-}
-
-TEST(PartitionResources, ClearingElementsAlsoClearsTheTally)
-{
-    const auto ctx = std::make_shared<fp::FloorplanContext>();
-    // clearElemenets() is what a reload goes through; atoms surviving it would be counted a
-    // second time when the elements come back.
-
-    fp::Partition partition(ctx, "p");
-    const fp::HierarhyElement element{
-        "i_mul_24", /*isLeaf*/ true,
-        std::set<std::string>{"i_mul_24.a0", "i_mul_24.a1", "i_mul_24.a2"}};
-    partition.addElement(element);
-    ASSERT_EQ(partition.clbRequiredCount(), 1);
-
-    partition.clearElemenets();
-    EXPECT_EQ(partition.clbRequiredCount(), 0);
-
-    partition.addElement(element);
-    EXPECT_EQ(partition.clbRequiredCount(), 1);  // not 2
+    EXPECT_EQ(requiredFor(device, {{"i_mul_24", /*isLeaf*/ true}}).clbTiles, 0);
+    EXPECT_FALSE(device.context()->designResources.valid());
 }
 
 // [aurora2#1725 stage P7] tier-2 measured tiles, and the ancestor collapse they need.
@@ -1609,7 +1609,7 @@ TEST(FloorplanIssues, AClbShortfallIsAWarningNamingThePartition)
     // clb(2,2):clb(2,4) is 3 clb tiles; 100 atoms at 14 per tile needs 8.
     fp::PartitionPtr partition = constrain(device, {2, 2}, {2, 4}, atoms("dut.i_a.lut", 100));
     ASSERT_EQ(partition->clbAvailableCount(), 3);
-    ASSERT_EQ(partition->clbRequiredCount(), 8);
+    ASSERT_EQ(device.requiredResources().at(partition->id()).clbTiles, 8);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
     EXPECT_TRUE(mentions(issues->warnings, "needs 8 clb tiles but only 3 available"));
@@ -1626,7 +1626,7 @@ TEST(FloorplanIssues, ADspShortfallIsAnErrorToo)
         constrain(device, {7, 2}, {7, 5}, atoms("dut.i_a.QL_DSPV2_MULT_", 9));
     const int available = partition->dspAvailableCount();
     ASSERT_GT(available, 0);
-    ASSERT_GT(partition->dspRequiredCount(), available);
+    ASSERT_GT(device.requiredResources().at(partition->id()).dsp, available);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
     EXPECT_TRUE(mentions(issues->errors,
@@ -1645,7 +1645,7 @@ TEST(FloorplanIssues, EnoughClbTilesButNoPackingSlackIsAWarningToo)
     // 3 clb tiles for 29 atoms -> 3 required, exactly met, nothing spare.
     fp::PartitionPtr partition = constrain(device, {2, 2}, {2, 4}, atoms("dut.i_a.lut", 29));
     ASSERT_EQ(partition->clbAvailableCount(), 3);
-    ASSERT_EQ(partition->clbRequiredCount(), 3);
+    ASSERT_EQ(device.requiredResources().at(partition->id()).clbTiles, 3);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();
     EXPECT_TRUE(mentions(issues->warnings, "little packing slack"));
@@ -1661,7 +1661,7 @@ TEST(FloorplanIssues, ARegionWithRoomToSpareIsNoIssueAtAll)
     // clb(2,2):clb(2,9) is 8 clb tiles; 29 atoms need 3, so there is well over the 25%
     // headroom the margin asks for.
     fp::PartitionPtr partition = constrain(device, {2, 2}, {2, 9}, atoms("dut.i_a.lut", 29));
-    ASSERT_EQ(partition->clbRequiredCount(), 3);
+    ASSERT_EQ(device.requiredResources().at(partition->id()).clbTiles, 3);
     ASSERT_GE(partition->clbAvailableCount(), 4);
 
     const fp::DeviceGrid::IssuesPtr issues = device.checkIssues();

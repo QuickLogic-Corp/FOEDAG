@@ -31,7 +31,9 @@ signals:
     void partitionRemoveRequested(int partitionId);
 
 public slots:
-    void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions);
+    // `required` is DeviceGrid::requiredResources(): the same counts the Issues list checks.
+    void onPartitionsChanged(const std::map<int, PartitionPtr>& partitions,
+                             const std::map<int, ResourceTally>& required);
     void onPartitionSelectedOutside(const PartitionPtr& partition);
     void unselectPartition();
 

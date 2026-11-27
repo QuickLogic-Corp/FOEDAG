@@ -417,7 +417,8 @@ void FloorPlanningWidget::onPartitionsChanged(const std::map<int, PartitionPtr>&
 {
     m_synthResourcesWidget->onPartitionsChanged(partitions);
     m_partitionResourcesWidget->onPartitionsChanged(partitions);
-    m_partitionsListWidget->onPartitionsChanged(partitions);
+    // After the two trees above, which fill in the elements' atoms.
+    m_partitionsListWidget->onPartitionsChanged(partitions, m_deviceWidget->requiredResources());
 
     // The list stays enabled even when empty -- its "+" row is how the first partition is
     // created, and disabling the widget would disable that too.

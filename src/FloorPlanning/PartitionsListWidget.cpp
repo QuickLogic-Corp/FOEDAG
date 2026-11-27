@@ -215,7 +215,8 @@ void PartitionsListWidget::buildNewPartitionRow(int row)
     m_tableWidget->setCellWidget(row, Column::Name, host);
 }
 
-void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions)
+void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>& partitions,
+                                               const std::map<int, ResourceTally>& required)
 {
     m_tableWidget->clearContents();
     // +1 for the trailing "New partition" row, which is not a partition and is skipped by
@@ -250,9 +251,11 @@ void PartitionsListWidget::onPartitionsChanged(const std::map<int, PartitionPtr>
                             "count the placer will use."));
             return item;
         };
-        m_tableWidget->setItem(row, Column::Clb, resourceItem(partition->clbRequiredCount(), partition->clbAvailableCount()));
-        m_tableWidget->setItem(row, Column::Dsp, resourceItem(partition->dspRequiredCount(), partition->dspAvailableCount()));
-        m_tableWidget->setItem(row, Column::Bram, resourceItem(partition->bramRequiredCount(), partition->bramAvailableCount()));
+        const auto need = required.find(id);
+        const ResourceTally tally = (need != required.end()) ? need->second : ResourceTally{};
+        m_tableWidget->setItem(row, Column::Clb, resourceItem(tally.clbTiles, partition->clbAvailableCount()));
+        m_tableWidget->setItem(row, Column::Dsp, resourceItem(tally.dsp, partition->dspAvailableCount()));
+        m_tableWidget->setItem(row, Column::Bram, resourceItem(tally.bram, partition->bramAvailableCount()));
 
         // [aurora2#1725 stage P7] Tier 2: CLB tiles the placer actually used. Blank until a
         // placement exists, because there is no honest number to show before then.

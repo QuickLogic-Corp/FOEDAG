@@ -537,6 +537,17 @@ void DeviceGrid::checkWriterClaims()
     }
 }
 
+std::map<int, ResourceTally> DeviceGrid::requiredResources() const
+{
+    std::map<int, std::set<std::string>> owned = atomsByDeepestElement();
+    std::map<int, ResourceTally> required;
+    for (const auto& [id, partition] : m_partitions) {
+        required[id] = tallyResources(owned[id], m_context->atomsPerTile, m_context->atomTypes,
+                                      m_context->dspTiles);
+    }
+    return required;
+}
+
 const DeviceGrid::IssuesPtr& DeviceGrid::checkIssues()
 {
     m_issues->clear();
