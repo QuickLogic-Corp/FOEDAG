@@ -3131,6 +3131,20 @@ std::vector<std::string> CompilerOpenFPGA_ql::rrGraphOffsetOptions(
   return options;
 }
 
+static bool hasVprToken(const std::string& command, const std::string& token);
+
+// True when one of the custom_vpr_options_str settings (all stages, or a single stage)
+// already carries the flag. vpr refuses an option that is given twice, so a default
+// must stay out of the command when the project sets the option itself.
+static bool customVprOptionsSet(const std::string& flag) {
+  for(const char* subcategory : {"custom", "pack", "place", "route", "analysis"}) {
+    if(hasVprToken(QLSettingsManager::getStringValue("vpr", subcategory, "custom_vpr_options_str"), flag)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(QLDeviceTarget device_target) {
 
   // note: at this point, the current_path() is the project 'source' directory.
@@ -3321,6 +3335,13 @@ std::tuple<std::string, std::string> CompilerOpenFPGA_ql::BaseVprCommandLEGACY(Q
   }
   else if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "unchecked" ) {
     vpr_options += std::string(" --absorb_buffer_luts off");
+  }
+
+  // vpr merges constant generators of the same value unless told otherwise. An undriven
+  // clock pin ($undef in the BLIF) then puts $false on a clock pin, and vpr leaves the
+  // whole $false net unrouted. Keep them as separate nets.
+  if( !customVprOptionsSet("--merge_constant_generators") ) {
+    vpr_options += std::string(" --merge_constant_generators off");
   }
 
   // parse vpr pack options: nothing here
@@ -3782,6 +3803,13 @@ CommandWrapperPtr CompilerOpenFPGA_ql::BaseVprCommand(QLDeviceTarget device_targ
   }
   else if( QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") == "unchecked" ) {
     command->append("--absorb_buffer_luts", "off");
+  }
+
+  // vpr merges constant generators of the same value unless told otherwise. An undriven
+  // clock pin ($undef in the BLIF) then puts $false on a clock pin, and vpr leaves the
+  // whole $false net unrouted. Keep them as separate nets.
+  if( !customVprOptionsSet("--merge_constant_generators") ) {
+    command->append("--merge_constant_generators", "off");
   }
 
   // parse vpr pack options: nothing here
