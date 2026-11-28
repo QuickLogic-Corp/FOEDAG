@@ -15,32 +15,22 @@
 namespace fp {
 
 class Region {
-    static int s_idGenerator;
 public:
-    static void resetIdGenerator() { s_idGenerator = 0; }
-
     enum HandlerRole {
         TL, TR, BL, BR, MOVE, REMOVE
     };
 
-    Region(const QPointF& point) {
+    // id: unique within the owning DeviceGrid, from its FloorplanContext::nextRegionId.
+    Region(int id, const QPointF& point) : m_id(id) {
         m_startPos = point;
         m_stopPosOpt = std::nullopt;
-
-        m_id = s_idGenerator++;
     }
-    Region(const QPointF& startPos, const QPointF& stopPos)
-    {
+    Region(int id, const QPointF& startPos, const QPointF& stopPos) : m_id(id) {
         m_startPos = startPos;
         setStopPos(stopPos);
-
-        m_id = s_idGenerator++;
     }
-    Region(const QRectF& rect)
-    {
+    Region(int id, const QRectF& rect) : m_id(id) {
         setRect(rect);
-
-        m_id = s_idGenerator++;
     }
 
     int id() const { return m_id; }

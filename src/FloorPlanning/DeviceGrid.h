@@ -8,6 +8,7 @@
 
 #include <unordered_map>
 #include <map>
+#include <set>
 
 namespace fp {
 
@@ -34,6 +35,8 @@ public:
     ~DeviceGrid()=default;
 
     void constructTiles(const DeviceGridDescriptorPtr& device);
+
+    const FloorplanContextPtr& context() const { return m_context; }
     void clearPartitions() {
         m_partitions.clear();
     }
@@ -42,6 +45,7 @@ public:
     void removePartition(const PartitionPtr&);
     const PartitionPtr& partition(int partitionId) const;
     void refreshPartition(const PartitionPtr&);
+    void refreshPartitions();
 
     bool removeRegion(const RegionPtr&);
 
@@ -68,7 +72,38 @@ public:
     Tile::Index toTopRightGridIndex(const TileDescriptor&) const;
 
     const IssuesPtr& checkIssues();
+    std::map<int, std::set<std::string>> atomsByDeepestElement() const;
+    // Partition id -> what its atoms need, each atom counted once (atomsByDeepestElement()).
+    std::map<int, ResourceTally> requiredResources() const;
     bool hasErrors() const { return !m_issues->errors.empty(); }
+
+    // [aurora2#1725] RTL path -> how many atoms belong to that instance DIRECTLY, i.e. sit
+    // in it rather than in one of its sub-instances. Counted from atomsets.json by
+    // FloorPlanningWidget::setAtomNames(). Only the counts, not the names: checkIssues()
+    // needs to know whether an instance has own logic at stake, not what it is.
+    void setOwnAtomCounts(std::map<std::string, int> ownAtomCounts) {
+        m_ownAtomCounts = std::move(ownAtomCounts);
+    }
+
+    // [aurora2#1725 stage P4] Instances graded "deleted" in validation.json. A .qdc may
+    // still name one; checkIssues() says so, because such a constraint matches no atom.
+    void setDeletedInstances(std::unordered_set<std::string> deletedInstances) {
+        m_deletedInstances = std::move(deletedInstances);
+    }
+
+    // Every RTL instance path, from the owner table. checkIssues() flags a partition element
+    // that is neither one of them nor a parent of one. Empty skips that check.
+    void setRtlInstances(std::set<std::string> rtlInstances) {
+        m_rtlInstances = std::move(rtlInstances);
+    }
+
+    // The top module's ports, from the post-synthesis BLIF. checkIssues() refuses a partition
+    // element that is a pad: an input port, an out: pad, or a glob that matches only ports.
+    // Empty still catches out: pads, which need no list.
+    void setPorts(std::set<std::string> inputs, std::set<std::string> outputs) {
+        m_inputPorts = std::move(inputs);
+        m_outputPorts = std::move(outputs);
+    }
 
     QPointF bottomLeftPoint(const Tile::Index&) const;
     QPointF topRightPoint(const Tile::Index&) const;
@@ -77,6 +112,7 @@ public:
 
 private:
     DeviceGridDescriptorPtr m_descriptor;
+    FloorplanContextPtr m_context = std::make_shared<FloorplanContext>();
 
     IssuesPtr m_issues;
 
@@ -84,6 +120,16 @@ private:
     std::unordered_map<Tile::Index, Tile::Index> m_tileFragments;
 
     std::map<int, PartitionPtr> m_partitions;
+
+    std::map<std::string, int> m_ownAtomCounts;
+    std::unordered_set<std::string> m_deletedInstances;
+    std::set<std::string> m_rtlInstances;
+    std::set<std::string> m_inputPorts;
+    std::set<std::string> m_outputPorts;
+    bool isPad(const std::string& name) const;
+    bool isRtlInstanceOrParent(const std::string& path) const;
+    // The constraint writer's refusals (generate_floorplanning.py assign_partitions), as errors.
+    void checkWriterClaims();
 
     std::unordered_set<Tile::Index> m_overlappedConflictingIndexes;
     std::unordered_set<Tile::Index> m_overlappedNonConflictingIndexes;

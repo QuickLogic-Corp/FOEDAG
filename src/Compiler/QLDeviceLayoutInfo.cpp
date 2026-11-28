@@ -523,13 +523,13 @@ void QLDeviceLayoutInfo::setPackedLayoutSource(PackedLayoutSource source) {
   s_packedLayoutSource = std::move(source);
 }
 
-void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target) {
+void QLDeviceLayoutInfo::refresh(QLDeviceTarget device_target, bool packSucceeded) {
   if (projectPath().empty()) {
     // No project: device selection in the new-project wizard has nowhere to write
     // and nothing to invalidate.
     return;
   }
-  QLDeviceLayoutInfo layout_info(device_target);
+  QLDeviceLayoutInfo layout_info(device_target, packSucceeded);
   if (!layout_info.resolved()) {
     // Under the engine, a pack whose outputs are still as it wrote them vouches
     // for the layout they were made for.

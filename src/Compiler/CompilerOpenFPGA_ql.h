@@ -33,7 +33,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <QString>
 
 #include "Compiler/Compiler.h"
-#include "Compiler/BlifParser.h"
 #include "Compiler/CommandWrapper.h"
 #include "Compiler/TaskCompilationStateManager.h"
 #include "Compiler/EngineBackend.h"
@@ -88,6 +87,7 @@ class CompilerOpenFPGA_ql : public Compiler {
     m_architectureFile = path;
   }
 
+  std::filesystem::path getPostSynthVerilogFilePath() const;
   std::filesystem::path getPostSynthNetFilePath() const;
   std::filesystem::path getPostSynthBlifFilePath() const;
   std::filesystem::path getDesignSourceNetlistPath() const;
@@ -297,6 +297,12 @@ class CompilerOpenFPGA_ql : public Compiler {
   void onQdcFileSaved();
   void onPcfFileSaved();
 
+ public:
+  // [aurora2#1725] The Floor Planning panel asks for its reports: they run with every compile
+  // while it is open, and on opening it writes whichever is missing.
+  void setFloorplanningPanelOpen(bool open) { m_floorplanningPanelOpen = open; }
+  void RefreshFloorplanningReports();
+
   /// Register an annotated relative-placement IP netlist (via the
   /// `ip_add_to_design` Tcl command, either as an explicit .eblif/.blif path
   /// or auto-discovered from a catalog IP instance's rel_macro/ dir).
@@ -357,6 +363,8 @@ class CompilerOpenFPGA_ql : public Compiler {
   virtual bool Analyze();
   virtual bool Synthesize();
   virtual bool Packing();
+  void reportPackOverflows();
+  void reportUnplacedBlocks();
   virtual bool GlobalPlacement();
   virtual bool Placement();
   virtual bool ConvertSdcPinConstrainToPcf(std::vector<std::string>&);
@@ -522,7 +530,6 @@ private:
   std::vector<std::filesystem::path> m_TempFileList;
   std::filesystem::path m_cryptdbPath;
 
-  BlifParser m_blifParser;
   /// Set only by the verific_parser Tcl command; unset means "not mentioned".
   std::optional<bool> m_useVerificFromTcl;
   std::unique_ptr<IncrementalBackend> m_incrementalBackend;
@@ -632,6 +639,93 @@ private:
   bool batchScriptSession() const;
   EngineRunHolds m_runHolds{EngineRunLock::instance()};
   std::atomic<bool> m_runLockWarned{false};
+
+  // [aurora2#1725 stage P4] Notes how synthesis left each RTL instance (validation.json,
+  // via scripts/floorplanning/validate_instances.py), for the panel. Best-effort: without
+  // an owner table it is skipped, and synthesis has already succeeded.
+  bool RunValidateInstances();
+
+  // [aurora2#1725] "<project>_floorplanning" -- the stem every artifact this feature
+  // generates is named after, so a project directory shows at a glance which files the
+  // floorplanning flow owns. Use this rather than rebuilding the string at each call
+  // site; the device template gets it as ${FLOORPLANNING_PREFIX}.
+  std::string FloorplanningPrefix();
+
+  // Path to "<project>_floorplanning_<suffix>" inside the project directory.
+  std::filesystem::path FloorplanningArtifact(const std::string& suffix);
+
+  // atomsets.json, resolved to the name the device template actually wrote.
+  std::filesystem::path FloorplanningAtomsets();
+
+  // Absolute path to a script under <install>/scripts, or empty when it is not installed.
+  // Never probes above <install>: from dev/ that reaches the source checkout and hides
+  // scripts missing from the package.
+  std::filesystem::path InstalledScript(const std::filesystem::path& rel_path);
+
+  // [aurora2#1725] "<project>_floorplanning_stages.log" -- where the helper stages this
+  // feature adds write what they have to say. They are diagnostics, not compile stages the
+  // user asked for, so their chatter belongs in an artifact rather than in the console and
+  // aurora.log, which is where it went at first and where master has nothing like it.
+  std::filesystem::path FloorplanningStageLog();
+
+  // Truncate the stage log, so it describes the run in progress and not the whole session.
+  void ResetFloorplanningStageLog();
+
+  // Run one helper script with its output appended to the stage log instead of echoed.
+  // Returns the script's exit code.
+  int RunFloorplanningStage(const std::string& command,
+                            const std::vector<std::string>& args);
+
+  // [aurora2#1725] What a floorplanning helper stage needs before it can run, and what
+  // its caller should return when it cannot. `ready` false means "stop now and return
+  // `result`" -- which is false for a missing script (a broken installation) and, for a
+  // missing python, true: the stage is skipped after its compile step already succeeded.
+  struct FloorplanningTool {
+    std::filesystem::path script;
+    std::filesystem::path python;
+    bool ready = false;
+    bool result = false;
+  };
+
+  // Locate one script under scripts/floorplanning/ and the interpreter to run it with.
+  // `label` names the stage in the error text ("Instance validation"); `skipPhrase` is
+  // the wording used when python is absent and the stage is skipped ("instance
+  // validation").
+  FloorplanningTool ResolveFloorplanningTool(const std::string& scriptName,
+                                             const std::string& label,
+                                             const std::string& skipPhrase);
+
+  // [aurora2#1725 review F1] RunValidateInstances() and RunDesignResources() skip when there
+  // is no owner table; say so once, as a warning, rather than from every stage.
+  bool m_floorplanningVerificationWarned = false;
+  void WarnFloorplanningVerificationUnavailable();
+
+  // [aurora2#1725] The yosys that runs synthesis: TabbyCAD's for Verific, else the bundled one.
+  std::filesystem::path SynthesisYosysExecutable();
+  // [aurora2#1725] Whether that yosys's synthesis pass has -owner_table; probed once per binary,
+  // since an older plugin fails the whole run on an unknown option.
+  bool SynthPassHasOwnerTable(const std::filesystem::path& yosys, const std::string& pass);
+  std::map<std::string, bool> m_ownerTableSupport;
+
+  // [aurora2#1725 stage P7] resource reporting -- writes design_resources.json, the one
+  // schema the FloorPlanning UI sizes regions against, via
+  // scripts/floorplanning/design_resources.py. Best-effort like RunValidateInstances()
+  // above: a missing input skips the stage rather than failing an already-succeeded compile.
+  //
+  // How far the flow has got: after synthesis the counts come from the owner table (tier 1);
+  // after placement also from the .net/.place (tier 2), when both are on disk.
+  enum class FlowPoint { Synthesis, Placement };
+  bool RunDesignResources(FlowPoint reached);
+
+  // [aurora2#1725] The two reports above, only for a project that floorplans: its .qdc has a
+  // set_region, or the Floor Planning panel is open.
+  void RunFloorplanningReports(FlowPoint reached);
+  bool QdcHasSetRegion();
+  bool m_floorplanningPanelOpen = false;
+
+  // [aurora2#1725 stage P7] False, with every failing atom on the console, when a listed
+  // atom is not placed inside its partition's region; that fails placement.
+  bool RunConstraintCompliance();
 
   std::unordered_map<int, CommandWrapperPtr> getSynthesisCommands();
   CommandWrapperPtr getPackingCommand();

@@ -70,6 +70,7 @@
 #include "ProjNavigator/tcl_command_integration.h"
 #include "Utils/FileUtils.h"
 #include "Utils/LogUtils.h"
+#include "Utils/PathUtils.h"
 #include "Utils/StringUtils.h"
 #include "nlohmann_json/json.hpp"
 #include "scope_guard/scope_guard.hpp"
@@ -90,6 +91,9 @@
 #include "QLSettingsManager.h"
 #include "QLMetricsManager.h"
 #include "FloorPlanning/QdcSerializer.h"
+#include "FloorPlanning/FloorplanChecker.h"
+#include "FloorPlanning/PackOverflow.h"
+#include "FloorPlanning/FloorplanningPaths.h"
 
 extern const char* foedag_version_number;
 extern const char* foedag_build_date;
@@ -2732,6 +2736,347 @@ bool CompilerOpenFPGA_ql::Analyze() {
   return true;
 }
 
+std::string CompilerOpenFPGA_ql::FloorplanningPrefix() {
+  return fp::floorplanningPrefix(ProjManager()->projectName());
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::FloorplanningArtifact(const std::string& suffix) {
+  return fp::floorplanningArtifact(std::filesystem::path{ProjManager()->projectPath()},
+                                   ProjManager()->projectName(), suffix);
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::FloorplanningAtomsets() {
+  return fp::floorplanningArtifactOrBare(std::filesystem::path{ProjManager()->projectPath()},
+                                         ProjManager()->projectName(), "atomsets.json");
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::InstalledScript(
+    const std::filesystem::path& rel_path) {
+  const std::filesystem::path candidate =
+      (PathUtils::instance().installDir() / "scripts" / rel_path).lexically_normal();
+  return std::filesystem::exists(candidate) ? candidate : std::filesystem::path{};
+}
+
+// [aurora2#1725] Where the helper stages' diagnostic chatter goes instead of the console
+// and aurora.log, one file per project truncated at the start of each run. Not redirected:
+// ErrorMessage() on a failed stage, and the stage-P7 verdicts the user actually asked for.
+std::filesystem::path CompilerOpenFPGA_ql::FloorplanningStageLog() {
+  return FloorplanningArtifact("stages.log");
+}
+
+void CompilerOpenFPGA_ql::ResetFloorplanningStageLog() {
+  std::ofstream truncate(FloorplanningStageLog(), std::ios_base::trunc);
+}
+
+// Runs one helper script, with its stdout AND stderr appended to the stage log rather than
+// echoed to the console. Returns the script's exit code, or -1 when it did not start or did not
+// exit normally.
+int CompilerOpenFPGA_ql::RunFloorplanningStage(const std::string& command,
+                                               const std::vector<std::string>& args) {
+  std::ofstream log(FloorplanningStageLog(), std::ios_base::app);
+  std::ostream* out = log.is_open() ? static_cast<std::ostream*>(&log) : m_out;
+  return FileUtils::ExecuteSystemCommand(command, args, out, /*timeout_ms*/ -1).code;
+}
+
+// [aurora2#1725] The prelude every floorplanning helper stage shares: resolve the
+// installed script and python.
+CompilerOpenFPGA_ql::FloorplanningTool CompilerOpenFPGA_ql::ResolveFloorplanningTool(
+    const std::string& scriptName, const std::string& label, const std::string& skipPhrase) {
+  FloorplanningTool tool;
+
+  tool.script = InstalledScript(std::filesystem::path("floorplanning") / scriptName);
+  if (tool.script.empty()) {
+    ErrorMessage("Cannot locate scripts/floorplanning/" + scriptName + " in the installation. " +
+                 label + " failed!");
+    return tool;  // ready=false, result=false: a broken installation is an error
+  }
+
+#ifdef _WIN32
+  tool.python = std::filesystem::path{"python.exe"};
+#else // _WIN32
+  tool.python = std::filesystem::path{"python3"};
+#endif // _WIN32
+
+  if (!FileUtils::IsSystemCommandAvailable(tool.python.string())) {
+    ErrorMessage("System " + tool.python.string() + " is not found; skipping " +
+                 skipPhrase + " (" + scriptName + ").");
+    tool.result = true;
+    return tool;
+  }
+
+  tool.ready = true;
+  return tool;
+}
+
+std::filesystem::path CompilerOpenFPGA_ql::SynthesisYosysExecutable() {
+  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
+  if(m_useVerific) {
+#if(AURORA_USE_TABBYCAD == 1)
+    yosys_executable_path = GetSession()->Context()->BinaryPath() /
+                            ".." /
+                            "tabby" /
+                            "bin" /
+#ifdef _WIN32
+                            "yosys_verific.exe";
+#else
+                            "yosys_verific";
+#endif
+    if (!FileUtils::FileExists(yosys_executable_path)) {
+      ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
+                   "found: " + yosys_executable_path.string());
+      return {};
+    }
+#else
+    Message("Verific parser requested but this build was configured without "
+            "TabbyCAD; synthesis uses " + yosys_executable_path.string());
+#endif // #if(AURORA_USE_TABBYCAD == 1)
+  }
+  return yosys_executable_path;
+}
+
+bool CompilerOpenFPGA_ql::SynthPassHasOwnerTable(const std::filesystem::path& yosys,
+                                                 const std::string& pass) {
+  const std::string key = yosys.string() + "\n" + pass;
+  auto it = m_ownerTableSupport.find(key);
+  if (it != m_ownerTableSupport.end()) return it->second;
+  std::ostringstream help;
+  const bool ran =
+      FileUtils::ExecuteSystemCommand(yosys.string(),
+                                      {"-Q", "-p", "plugin -i ql-qlf; help " + pass},
+                                      &help, 60000)
+          .code == 0;
+  const bool supported = ran && help.str().find("-owner_table") != std::string::npos;
+  if (!supported) {
+    WarningMessage(yosys.string() + ": " + pass +
+                   " has no -owner_table (an older synthesis plugin), so synthesis "
+                   "writes no owner table.");
+  }
+  m_ownerTableSupport[key] = supported;
+  return supported;
+}
+
+// [aurora2#1725 review F1] Once per compiler instance, not once per stage: all three
+// callers hit the same missing owner table for the same reason, so saying it three times
+// would look like three different problems.
+void CompilerOpenFPGA_ql::WarnFloorplanningVerificationUnavailable() {
+  if (m_floorplanningVerificationWarned) return;
+  m_floorplanningVerificationWarned = true;
+  WarningMessage(
+      "Floorplanning verification unavailable: synthesis wrote no owner table (an older "
+      "synthesis plugin, or a custom Yosys script without -owner_table or -blif), so instance validation, "
+      "resource reporting and constraint-compliance checking are skipped. A .qdc whose "
+      "set_region names anything but ports cannot be applied without the table: "
+      "constraint generation stops and asks to re-run synthesis.");
+}
+
+// [aurora2#1725 stage P4] Notes, per RTL instance, how synthesis left it, from the owner
+// table synthesis just wrote -- see scripts/floorplanning/validate_instances.py. For the
+// panel only: nothing downstream gates on it.
+bool CompilerOpenFPGA_ql::RunValidateInstances() {
+  const std::string topModule = ProjManager()->DesignTopModule();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+  std::filesystem::remove(FloorplanningArtifact("validation.json"));
+
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
+  if (!FileUtils::FileExists(atomsets_path)) {
+    WarnFloorplanningVerificationUnavailable();
+    return true;
+  }
+
+  // Best-effort: synthesis has already succeeded by the time this runs.
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "validate_instances.py", "Instance validation",
+      "instance validation");
+  if (!tool.ready) return tool.result;
+
+  std::filesystem::path synth_log_path = projectPath / (topModule + "_synth.log");
+  std::vector<std::string> args;
+  args.push_back(tool.script.string());
+  args.push_back("--atomsets");
+  args.push_back(atomsets_path.string());
+  if (FileUtils::FileExists(synth_log_path)) {
+    args.push_back("--synth-log");
+    args.push_back(synth_log_path.string());
+  }
+  args.push_back("-o");
+  args.push_back(FloorplanningArtifact("validation.json").string());
+
+  if (RunFloorplanningStage(tool.python.string(), args) != 0) {
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " instance validation (floorplanning/validate_instances.py) failed, see " +
+                 FloorplanningStageLog().string());
+  }
+  return true;
+}
+
+bool CompilerOpenFPGA_ql::QdcHasSetRegion() {
+  const std::filesystem::path qdc = QLSettingsManager::getInstance()->getQDCFilePath();
+  if (qdc.empty() || !FileUtils::FileExists(qdc)) return false;
+  for (std::string line : fp::QdcSerializer::readCommands(qdc)) {
+    line = StringUtils::trim(line);
+    if (StringUtils::startsWith(line, "set_region ")) return true;
+  }
+  return false;
+}
+
+void CompilerOpenFPGA_ql::RunFloorplanningReports(FlowPoint reached) {
+  if (!m_floorplanningPanelOpen && !QdcHasSetRegion()) {
+    // Not wanted: drop the last run's reports, so the panel never reads stale ones.
+    if (reached == FlowPoint::Synthesis) {
+      std::filesystem::remove(FloorplanningArtifact("validation.json"));
+    }
+    std::filesystem::remove(FloorplanningArtifact("design_resources.json"));
+    return;
+  }
+  if (reached == FlowPoint::Synthesis) RunValidateInstances();
+  RunDesignResources(reached);
+}
+
+void CompilerOpenFPGA_ql::RefreshFloorplanningReports() {
+  if (!FileUtils::FileExists(FloorplanningArtifact("validation.json"))) {
+    RunValidateInstances();
+  }
+  if (!FileUtils::FileExists(FloorplanningArtifact("design_resources.json"))) {
+    RunDesignResources(FlowPoint::Placement);
+  }
+}
+
+// [aurora2#1725 stage P7] see the declaration in CompilerOpenFPGA_ql.h for the tier rules.
+bool CompilerOpenFPGA_ql::RunDesignResources(FlowPoint reached) {
+  const std::string topModule = ProjManager()->DesignTopModule();
+  const std::string projectName = ProjManager()->projectName();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  std::filesystem::path atomsets_path = FloorplanningAtomsets();
+  // VPR names these after the project, not the top module -- see Placement(), which
+  // builds the same two paths to decide whether placement can be reused.
+  std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
+  std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
+
+  // [aurora2#1725] Both tiers are post-synthesis, from the owner table; without one there
+  // is nothing to report.
+  const bool useAtomsets = FileUtils::FileExists(atomsets_path);
+  const bool usePlacement = reached == FlowPoint::Placement && useAtomsets &&
+                            FileUtils::FileExists(net_path) &&
+                            FileUtils::FileExists(place_path);
+
+  if (!useAtomsets) {
+    // Post-synthesis with no owner table: a script that did not write one.
+    WarnFloorplanningVerificationUnavailable();
+    return true;
+  }
+
+  // Best-effort: the compile stage itself has already succeeded.
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "design_resources.py", "Design-resource extraction",
+      "resource reporting");
+  if (!tool.ready) return tool.result;
+  const std::filesystem::path& design_resources_script_path = tool.script;
+  const std::filesystem::path& python_exec = tool.python;
+
+  std::filesystem::path design_resources_path = FloorplanningArtifact("design_resources.json");
+  // Persists across tier 1 and tier 2's separate invocations, unlike design_resources_path
+  // above, which each of them overwrites. Once tier 2 supplies clb_actual, the script
+  // appends the error against that run's own clb_est.
+  std::filesystem::path estimation_log_path =
+      FloorplanningArtifact("resource_estimation.log");
+
+  std::vector<std::string> args;
+  args.push_back(design_resources_script_path.string());
+  args.push_back("--atomsets");
+  args.push_back(atomsets_path.string());
+  if (usePlacement) {
+    args.push_back("--net");
+    args.push_back(net_path.string());
+    args.push_back("--place");
+    args.push_back(place_path.string());
+  }
+  args.push_back("--estimation-log");
+  args.push_back(estimation_log_path.string());
+  args.push_back("-o");
+  args.push_back(design_resources_path.string());
+
+  int status = RunFloorplanningStage(python_exec.string(), args);
+  if (status != 0) {
+    // Best-effort, as above: report it, but a resource-report failure must not fail a
+    // compile stage that has already succeeded.
+    ErrorMessage("Design " + ProjManager()->projectName() +
+                 " resource reporting (floorplanning/design_resources.py) failed, see " +
+                 FloorplanningStageLog().string());
+  }
+  return true;
+}
+
+// [aurora2#1725 stage P7] post-placement compliance -- see
+// scripts/floorplanning/constraint_compliance.py. Every atom the constraints list must be
+// placed inside its partition's region; one that is not fails placement, with the atoms on
+// the console (REQ-006).
+bool CompilerOpenFPGA_ql::RunConstraintCompliance() {
+  const std::string projectName = ProjManager()->projectName();
+  std::filesystem::path projectPath{ProjManager()->projectPath()};
+
+  std::filesystem::path net_path = projectPath / (projectName + "_post_synth.net");
+  std::filesystem::path place_path = projectPath / (projectName + "_post_synth.place");
+  std::filesystem::path manifest_path = FloorplanningArtifact("constraints.manifest.json");
+  // The last run's results go first: a check that skips or crashes must not leave them to
+  // read as this run's.
+  std::filesystem::path compliance_rpt_path = FloorplanningArtifact("constraint_compliance.rpt");
+  std::filesystem::path placement_json_path = FloorplanningArtifact("placement.json");
+  std::filesystem::remove(compliance_rpt_path);
+  std::filesystem::remove(placement_json_path);
+  if (!FileUtils::FileExists(net_path) || !FileUtils::FileExists(place_path)) {
+    return true;  // nothing placed yet
+  }
+  // The writer leaves a manifest with every partition it writes. A constraints XML without
+  // one is older or hand-made, and its pin partitions can name ports VPR dropped.
+  if (!FileUtils::FileExists(manifest_path)) {
+    return true;
+  }
+
+  FloorplanningTool tool = ResolveFloorplanningTool(
+      "constraint_compliance.py", "Constraint-compliance check",
+      "constraint compliance");
+  if (!tool.ready) return tool.result;
+
+  std::vector<std::string> args;
+  args.push_back(tool.script.string());
+  args.push_back("--place");
+  args.push_back(place_path.string());
+  args.push_back("--net");
+  args.push_back(net_path.string());
+  args.push_back("--manifest");
+  args.push_back(manifest_path.string());
+  args.push_back("-o");
+  args.push_back(compliance_rpt_path.string());
+  // Every out-of-region atom, per instance, for the FloorPlanning panel.
+  args.push_back("--json");
+  args.push_back(placement_json_path.string());
+
+  const int status = RunFloorplanningStage(tool.python.string(), args);
+  if (status == 0) {
+    return true;
+  }
+  if (status < 0) {
+    ErrorMessage("Design " + projectName +
+                 " constraint-compliance check (floorplanning/constraint_compliance.py) could "
+                 "not run, see " + FloorplanningStageLog().string());
+    return false;
+  }
+  // Exit 3: the .place was made from another .net, and the report says only that.
+  const bool stale = status == 3;
+  std::ifstream report(compliance_rpt_path);
+  for (std::string line; std::getline(report, line);) {
+    if (stale || line.find("FAIL") != std::string::npos || line.rfind("PARTITION", 0) == 0) {
+      ErrorMessage("Floor plan compliance: " + line);
+    }
+  }
+  ErrorMessage("Design " + projectName +
+               (stale ? " placement is not of the current packed netlist; re-run placement, "
+                      : " placement does not honour its region constraints, ") +
+               "see " + compliance_rpt_path.string());
+  return false;
+}
+
 bool CompilerOpenFPGA_ql::Synthesize() {
   // Using a Scope Guard so this will fire even if we exit mid function
   // This will fire when the containing function goes out of scope
@@ -2776,6 +3121,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   }
 #endif // #if UPSTREAM_UNUSED
 
+  // [aurora2#1725] Start this compile's stage log from empty.
+  ResetFloorplanningStageLog();
+
   const std::unordered_map<int, CommandWrapperPtr> commandsMap = getSynthesisCommands();
 
   if(m_projManager->projectType() == RTL && m_projManager->synthesisTool() == Synplify)
@@ -2813,6 +3161,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   if (!DesignChanged(yosysScript, script_path, output_path)) {
     Message("Design didn't change: " + ProjManager()->projectName() +
             ", skipping synthesis.");
+    // [aurora2#1725 stage P4] re-run even on a skip, so the notes match the owner table on
+    // disk. Best-effort, like every stage this feature adds.
+    RunFloorplanningReports(FlowPoint::Synthesis);
     return true;
   }
   #endif
@@ -2836,6 +3187,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     Message("Synthesis(yosys) skipped, not required");
     Message("##################################################");
     m_state = State::Synthesized;
+    // [aurora2#1725 stage P4] see the DesignChanged() skip path above for why this
+    // still runs even though synthesis itself didn't.
+    RunFloorplanningReports(FlowPoint::Synthesis);
     return true;
   }
   // incr compilation
@@ -2846,6 +3200,10 @@ bool CompilerOpenFPGA_ql::Synthesize() {
   std::filesystem::remove(
       std::filesystem::path(ProjManager()->projectPath()) /
       std::string(ProjManager()->projectName() + "_post_synth.v"));
+  // [aurora2#1725] A custom script without -owner_table writes no owner table, so the
+  // previous run's would otherwise describe a netlist that no longer exists.
+  std::filesystem::remove(std::filesystem::path(ProjManager()->projectPath()) / "atomsets.json");
+  std::filesystem::remove(FloorplanningArtifact("atomsets.json"));
 
   Message("Synthesis command: " + command->string());
   int status = ExecuteAndMonitorSystemCommand(command->string());
@@ -2859,6 +3217,9 @@ bool CompilerOpenFPGA_ql::Synthesize() {
     m_state = State::Synthesized;
     Message("Design " + ProjManager()->projectName() + " is synthesized");
     backend().storeTaskCommand(static_cast<int>(Action::Synthesis), std::to_string(SynthesisTool::Yosys), command);
+    // [aurora2#1725 stage P4] grade every instance against the synthesis output just
+    // produced, and count its primitives. Best-effort.
+    RunFloorplanningReports(FlowPoint::Synthesis);
     return true;
   }
 }
@@ -2896,7 +3257,7 @@ std::string CompilerOpenFPGA_ql::GetYosysScriptTemplate() const {
                                 std::string(m_aurora_template_script_yosys_path.string()));
       Message("Using Internal Yosys Template Script.");
       scriptTemplate = qlYosysScript;
-    } 
+    }
   } else {
     scriptTemplate = m_customYosysScript;
   }
@@ -4546,6 +4907,50 @@ static bool readCustomLayoutYML(const std::filesystem::path& custom_layout_yml_f
 }
 
 
+namespace {
+std::string readWholeFile(const fs::path& path) {
+  std::ifstream in(path);
+  return std::string(std::istreambuf_iterator<char>(in), {});
+}
+}  // namespace
+
+// [aurora2#1725] Names the partitions VPR could not pack into their regions, so the user
+// knows which one to extend.
+void CompilerOpenFPGA_ql::reportPackOverflows() {
+  const fs::path dir = ProjManager()->projectPath();
+  const fs::path log = dir / "vpr_stdout.log";
+  const fs::path constraints = dir / (ProjManager()->projectName() + "_constraints.xml");
+  if (!fs::exists(log) || !fs::exists(constraints)) return;
+  const std::vector<fp::PackOverflow> overflows =
+      fp::findPackOverflows(readWholeFile(log), readWholeFile(constraints));
+  for (const fp::PackOverflow& overflow : overflows) {
+    ErrorMessage("Floor plan: " + fp::packOverflowMessage(overflow));
+  }
+  if (!overflows.empty()) {
+    Message(fp::packOverflowNote());
+  }
+}
+
+// [aurora2#1725] Names the partition of each block VPR found no free tile for: packing
+// passed, but the regions leave no room to place what it made.
+void CompilerOpenFPGA_ql::reportUnplacedBlocks() {
+  const fs::path dir = ProjManager()->projectPath();
+  const fs::path log = dir / "vpr_stdout.log";
+  const fs::path net = dir / (ProjManager()->projectName() + "_post_synth.net");
+  const fs::path constraints = dir / (ProjManager()->projectName() + "_constraints.xml");
+  if (!fs::exists(log) || !fs::exists(net) || !fs::exists(constraints)) return;
+  const std::vector<fp::UnplacedBlock> blocks = fp::findUnplacedBlocks(
+      readWholeFile(log), readWholeFile(net), readWholeFile(constraints));
+  bool constrained = false;
+  for (const fp::UnplacedBlock& block : blocks) {
+    ErrorMessage("Floor plan: " + fp::unplacedBlockMessage(block));
+    constrained = constrained || !block.partitions.empty();
+  }
+  if (constrained) {
+    Message(fp::packOverflowNote());
+  }
+}
+
 bool CompilerOpenFPGA_ql::Packing() {
 #ifndef DISABLE_COMPILER_TEMP_FILES_GUARD_WORKAROUND
   auto tmpFilesGuard = sg::make_scope_guard([this] {
@@ -5271,9 +5676,8 @@ bool CompilerOpenFPGA_ql::Packing() {
     // use a basic blif file for generating the rr_graph.bin and router_lookahead.bin
     // this requires us to run pack and place (router_lookahead is only generated in place)
     std::filesystem::path blif_filepath = 
-            std::filesystem::canonical(GlobalSession->Context()->DataPath() /
-            std::filesystem::path("..") /
-            std::filesystem::path("scripts") / 
+            std::filesystem::canonical(PathUtils::instance().installDir() /
+            std::filesystem::path("scripts") /
             "and2.blif");
 
     m_autoLayoutGeneratedRRGraphBinPath = 
@@ -5468,6 +5872,7 @@ bool CompilerOpenFPGA_ql::Packing() {
 
   CleanTempFiles();
   if (status) {
+    reportPackOverflows();
     ErrorMessage("Design " + ProjManager()->projectName() + " packing failed");
     return false;
   } else {
@@ -5479,11 +5884,12 @@ bool CompilerOpenFPGA_ql::Packing() {
     backend().storeTaskCommand(static_cast<int>(Action::Pack), command);
   }
   m_state = State::Packed;
-  // Best effort. add_layout.py has run, but resolving a deferred AUTO/RESOURCES
-  // geometry needs the PACKING task at Success, which cannot happen until this
-  // function returns - so for those devices this clears device_layout.json and the
-  // next stage's setCurrentDeviceTarget() writes it. FIXED/CUSTOM resolve here.
-  QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget());
+  // add_layout.py has run by now, so AUTO and RESOURCES finally have a geometry.
+  // packSucceeded: Compile() only marks PACKING's task Success after this
+  // function returns, so without it refresh() would see the task still
+  // InProgress and refuse to trust the auto_device.log this very call just wrote.
+  QLDeviceLayoutInfo::refresh(QLDeviceManager::getInstance()->getCurrentDeviceTarget(),
+                             /*packSucceeded*/ true);
   Message("Design " + ProjManager()->projectName() + " is packed");
   return true;
 }
@@ -5680,7 +6086,10 @@ bool CompilerOpenFPGA_ql::Placement() {
               .string())) {
     m_state = State::Placed;
     Message("Design " + ProjManager()->projectName() + " placement reused");
-    return true;
+    // [aurora2#1725 stage P7] placement counts -- the .net/.place this path just found up-to-date
+    // are exactly what they read, so regenerate even though VPR did not re-run.
+    RunFloorplanningReports(FlowPoint::Placement);
+    return RunConstraintCompliance();
   }
 
   std::string netlistFile = ProjManager()->projectName() + "_post_synth.blif";
@@ -5821,6 +6230,10 @@ bool CompilerOpenFPGA_ql::Placement() {
     Message("Placement skipped, not required");
     Message("##################################################");
     m_state = State::Placed;
+    RunFloorplanningReports(FlowPoint::Placement);  // [aurora2#1725 stage P7] same reasoning as above
+    if (!RunConstraintCompliance()) {
+      return false;
+    }
     if (m_engineSelected) {
       QLMetricsManager::getInstance()->parseMetricsForAction(Action::Detailed);
     }
@@ -5870,6 +6283,7 @@ bool CompilerOpenFPGA_ql::Placement() {
                                                           IsVprGuiCommand(command->string()));
   CleanTempFiles();
   if (status) {
+    reportUnplacedBlocks();
     ErrorMessage("Design " + ProjManager()->projectName() +
                  " placement failed");
     return false;
@@ -5883,6 +6297,15 @@ bool CompilerOpenFPGA_ql::Placement() {
   }
   m_state = State::Placed;
   Message("Design " + ProjManager()->projectName() + " is placed");
+  // [aurora2#1725 stage P7] placement counts -- actual placed tiles, the only ground truth the
+  // FloorPlanning UI can compare its estimates against. Runs before the place2pcf.py
+  // block below, which returns early when no pin table is found.
+  RunFloorplanningReports(FlowPoint::Placement);
+  // [aurora2#1725 stage P7] post-placement compliance: an atom outside its region fails
+  // placement.
+  if (!RunConstraintCompliance()) {
+    return false;
+  }
 
   // RPM-authoring project: (re)package the IP from this fresh placement.
   if (RpmAuthorProjectActive() && !PackageRpmAuthorProject()) {
@@ -5891,11 +6314,11 @@ bool CompilerOpenFPGA_ql::Placement() {
     return false;
   }
 
-   std::filesystem::path place2pcf_script_path =
-    GetSession()->Context()->DataPath() /
-    std::filesystem::path("..") /
-    std::filesystem::path("scripts") /
-    std::filesystem::path("place2pcf.py");
+  const std::filesystem::path place2pcf_script_path = InstalledScript("place2pcf.py");
+  if (place2pcf_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/place2pcf.py in the installation. Place2PCF Failed!");
+    return false;
+  }
 
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
   if (pinTableFile.empty()){
@@ -5955,9 +6378,9 @@ bool CompilerOpenFPGA_ql::Placement() {
     args.push_back(clocksFile.string());
   }
 
-  int place2pcf_status = FileUtils::ExecuteSystemCommand(place2pcf_command, args, m_out, /*timeout_ms*/-1).realCode;
+  int place2pcf_status = FileUtils::ExecuteSystemCommand(place2pcf_command, args, m_out, /*timeout_ms*/-1).code;
 
-  if (place2pcf_status == 1) { //Failure
+  if (place2pcf_status != 0) {
     ErrorMessage("Design " + ProjManager()->projectName() +
                 " Place2PCF Failed!");
     return false;
@@ -8814,11 +9237,13 @@ bool CompilerOpenFPGA_ql::buildBitstreamEncode(uint32_t stages, EncodeJob& job) 
   const std::filesystem::path projectPath(ProjManager()->projectPath());
   const std::string projectName = ProjManager()->projectName();
 
-  // Vendored encoder, resolved via the same scripts root as other utilities.
   const std::filesystem::path script =
-      GetSession()->Context()->DataPath() / std::filesystem::path("..") /
-      std::filesystem::path("scripts") / std::filesystem::path("bitstream") /
-      std::filesystem::path("aurora_bitstream_encode.py");
+      InstalledScript(std::filesystem::path("bitstream") / "aurora_bitstream_encode.py");
+  if (script.empty()) {
+    ErrorMessage("Cannot locate scripts/bitstream/aurora_bitstream_encode.py in the "
+                 "installation; skipping secure bitstream post-process.");
+    return false;
+  }
 
 #ifdef _WIN32
   std::filesystem::path python_exec{"python.exe"};
@@ -9213,6 +9638,10 @@ bool CompilerOpenFPGA_ql::GeneratePinConstraints(std::string& filepath_fpga_fix_
   return FileUtils::FileExists(ProjManager()->projectPath() / filepath_fpga_fix_pins_place);
 }
 
+std::filesystem::path CompilerOpenFPGA_ql::getPostSynthVerilogFilePath() const {
+  return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.v");
+}
+
 std::filesystem::path CompilerOpenFPGA_ql::getPostSynthNetFilePath() const {
   return std::filesystem::path(ProjManager()->projectPath()) / std::string(ProjManager()->projectName() + "_post_synth.net");
 }
@@ -9435,23 +9864,6 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     return false;
   }
 
-  std::filesystem::path netlist_path = getPostSynthBlifFilePath();
-
-  if (!fs::exists(netlist_path)){
-    if (!s_describeOnly) {
-      ErrorMessage("Post Synthesis blif Was Not Found!\n");
-      ErrorMessage("Design " + ProjManager()->projectName() + " IO Floor Plan Generation Failed!\n");
-    }
-    return false;
-  }
-
-  // Only a QDC's set_region needs the netlist parsed; a status query on the GUI
-  // thread skips it otherwise.
-  if (!s_describeOnly || fs::exists(QLSettingsManager::getInstance()->getQDCFilePath())) {
-    m_blifParser.load(netlist_path);
-  }
-  //m_blifParser.printHierachy(); // debug
-  
   auto [pinTableFile, error] = findCurrentDevicePinTableCsv();
 
   std::filesystem::path filepath_fpga_io_map_xml;
@@ -9469,14 +9881,29 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       {"bottom", &bottomSet}
     };
 
-    std::unordered_map<std::string, std::unordered_set<std::string>> partitionMap;
+    // [aurora2#1725] Partitions in .qdc order. Lines naming one partition are one partition,
+    // as the panel and the batch checker read them; an unnamed line is a partition of its
+    // own, which generate_floorplanning.py names region<i>_partition.
+    struct RegionGroup {
+      std::string name;
+      std::vector<std::string> regions;
+      std::vector<std::string> elements;
+    };
+    std::vector<RegionGroup> regionGroups;
 
     std::vector<std::string> lines = fp::QdcSerializer::readCommands(floor_planning_constraint_filepath);
     for (std::string line: lines) {
+      // [aurora2#1725] readCommands() returns comments as well as commands, so that saving
+      // the .qdc cannot destroy them. They are not commands.
+      line = StringUtils::trim(line);
+      if (line.empty() || line[0] == '#') {
+        continue;
+      }
+
       std::istringstream iss(line);
       std::string token, signalName;
       iss >> token;
-    
+
       static std::unordered_set<std::string> supportedCommands = {"set_io_side", "set_region"};
       if (supportedCommands.find(token) == supportedCommands.end()){
         ErrorMessage("Invalid QDC command '" + token + "'. Available commands are [" + StringUtils::toString(supportedCommands)+ "].");
@@ -9484,9 +9911,10 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       }
 
       if (token == "set_io_side") {
-        iss >> signalName;
+        std::istringstream io(line.substr(0, line.find('#')));
+        io >> token >> signalName;
         std::string side;
-        while (iss >> side) {
+        while (io >> side) {
           StringUtils::toLower(side); 
           auto it = sideMap.find(side);
           if (it != sideMap.end()) {
@@ -9495,39 +9923,34 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
         }
         signalName.clear();
       } else if (token == "set_region") {
-        iss >> signalName;
-        std::vector<std::string> elements;
-        std::vector<std::string> patterns = StringUtils::tokenize(signalName, ",");
-        for (const std::string& pattern: patterns) {
-          std::vector<std::string> patternElements = m_blifParser.findMatchingNames(pattern);
-          if (patternElements.empty()) {
-            ErrorMessage("QDC file contains invalid hierarchy pattern '" + pattern + "' in line: " + line + "\n");
-            return false;
-          } else {
-            elements.push_back(pattern);
+        // [aurora2#1725] Read by the parser the panel and the batch checker use. Names go
+        // through as written: generate_floorplanning.py resolves them against the owner
+        // table, and refuses one that names nothing.
+        const std::optional<fp::SetRegionCommand> command = fp::QdcSerializer::parseSetRegion(line);
+        if (!command) {
+          ErrorMessage("Invalid set_region command: '" + line + "'. Expected set_region "
+                       "<instances> <regions> [<partition name>].");
+          return false;
+        }
+        auto group = std::find_if(regionGroups.begin(), regionGroups.end(),
+                                  [&command](const RegionGroup& g) {
+                                    return !command->partitionName.empty() &&
+                                           g.name == command->partitionName;
+                                  });
+        if (group == regionGroups.end()) {
+          group = regionGroups.insert(regionGroups.end(), RegionGroup{command->partitionName, {}, {}});
+        }
+        for (std::string region : command->regions) {
+          StringUtils::toLower(region);
+          if (std::find(group->regions.begin(), group->regions.end(), region) == group->regions.end()) {
+            group->regions.push_back(region);
           }
         }
-
-        std::string partition;
-        iss >> partition;
-        bool hasPartition = !iss.fail();
-
-        std::string partitionName; // optional partitionName as last argument, to keep compatibility with old qdc format
-        iss >> partitionName;
-        bool hasPartitionName = !iss.fail();
-
-        if (hasPartition) {
-          StringUtils::toLower(partition);
-          std::string partitionKey = hasPartitionName ? partitionName + "|" + partition : partition;
-          if (partitionMap.find(partitionKey) == partitionMap.end()) {
-            partitionMap[partitionKey] = {};
-          }
-          for (const std::string& element: elements) {
-            partitionMap[partitionKey].insert(element);
+        for (const std::string& element : command->elements) {
+          if (std::find(group->elements.begin(), group->elements.end(), element) == group->elements.end()) {
+            group->elements.push_back(element);
           }
         }
-
-        signalName.clear();
       }
     }
 
@@ -9537,8 +9960,10 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     std::string bottomStr = StringUtils::toString(bottomSet);
 
     std::string partitionStr;
-    for (const auto& [partition, patternsSet]: partitionMap) {
-      partitionStr += "partition:" + partition + "|" + StringUtils::toString(patternsSet) + ";";
+    for (const RegionGroup& group : regionGroups) {
+      partitionStr += "partition:" + (group.name.empty() ? "" : group.name + "|") +
+                      StringUtils::join(group.regions, ",") + "|" +
+                      StringUtils::join(group.elements, ",") + ";";
     }
 
     // Output results
@@ -9556,11 +9981,60 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
     }
     region_groups_str = leftStr + rightStr + topStr + bottomStr + partitionStr;
   }
+  // [aurora2#1725 REQ-004] Check the floorplan before handing it to generate_floorplanning.py.
+  // The panel does this continuously -- under-provisioned regions, overlaps, constraints
+  // naming an instance synthesis deleted, a parent whose own logic no partition takes -- but
+  // a batch compile never constructs the panel, so none of it was ever said out loud; the
+  // flow ran and the packer quietly dealt with whatever it was given.
+  //
+  // Errors stop the compile here, matching the panel's own refusal to save such a .qdc:
+  // failing at the point it is read names the offending partition far more usefully than
+  // whatever the packer does with it later. Warnings are advisory and let it proceed.
+  if (!s_describeOnly && fs::exists(floor_planning_constraint_filepath)) {
+    fp::DeviceGrid::Issues issues;
+    std::string checkError;
+    const bool checked = fp::FloorplanChecker::check(
+        std::filesystem::path(ProjManager()->projectPath()),
+        ProjManager()->projectName(),
+        ProjManager()->DesignTopModule(),
+        floor_planning_constraint_filepath,
+        QLDeviceLayoutInfo::deviceLayoutJSONPath(),
+        issues, checkError);
+
+    if (!checkError.empty()) {
+      // No usable owner table or device description: nothing can be sized (F4).
+      ErrorMessage("Floor plan check failed: " + checkError);
+      return false;
+    } else if (checked) {
+      for (const auto& [where, what] : issues.errors) {
+        ErrorMessage("Floor plan: " + where + ": " + what);
+      }
+      for (const auto& [where, what] : issues.warnings) {
+        Message("Floor plan warning: " + where + ": " + what);
+      }
+      if (issues.isEmpty()) {
+        Message("Floor plan check: no issues found in " +
+                floor_planning_constraint_filepath.filename().string());
+      } else if (issues.errors.empty()) {
+        Message("Floor plan check: " + std::to_string(issues.warnings.size()) +
+                " warning(s). Continuing -- these are estimates, the packer decides.");
+      } else {
+        ErrorMessage("Floor plan check failed: " + std::to_string(issues.errors.size()) +
+                     " error(s), " + std::to_string(issues.warnings.size()) + " warning(s) in " +
+                     floor_planning_constraint_filepath.filename().string() +
+                     ". Fix the constrained regions and re-run.");
+        return false;
+      }
+    }
+  }
+
   std::filesystem::path generate_floorplanning_script_path =
-      GetSession()->Context()->DataPath() /
-      std::filesystem::path("..") /
-      std::filesystem::path("scripts") /
-      std::filesystem::path("generate_floorplanning.py");
+      InstalledScript(std::filesystem::path("generate_floorplanning.py"));
+  if (generate_floorplanning_script_path.empty()) {
+    ErrorMessage("Cannot locate scripts/generate_floorplanning.py in the "
+                 "installation. Floorplanning constraint generation failed!");
+    return false;
+  }
       
       
   std::filesystem::path netlistFile = getPostSynthBlifFilePath();
@@ -9631,6 +10105,12 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
   args.push_back(deviceLayoutFile.string());
   args.push_back("--output_path");
   args.push_back(output_path.string());
+  // VPR absorbs buffer LUTs unless the setting turns it off; the writer must not list them.
+  args.push_back("--absorb_buffer_luts");
+  args.push_back(QLSettingsManager::getStringValue("vpr", "netlist", "absorb_buffer_luts") ==
+                         "unchecked"
+                     ? "off"
+                     : "on");
 
   if(fs::exists(pinTableFile)) {
     args.push_back("--pin_table_file");
@@ -9705,6 +10185,9 @@ bool CompilerOpenFPGA_ql::buildFloorplan(FloorplanJob& job) {
       job.removeBeforeRun.push_back(std::filesystem::path(ProjManager()->projectPath()) / stale);
     }
   } else {
+    // A run the writer skips must not leave VPR the previous .qdc's partitions.
+    job.removeBeforeRun.push_back(std::filesystem::path(ProjManager()->projectPath()) /
+                                  (ProjManager()->projectName() + "_constraints.xml"));
     job.removeBeforeRun.push_back(repack_constraints_out);
     job.removeBeforeRun.push_back(storedRepackConstraintsPath(ProjManager()->projectPath(),
                                                               ProjManager()->projectName()));
@@ -9871,23 +10354,8 @@ bool CompilerOpenFPGA_ql::GenerateRelMacroConstraints(const std::string& netlist
     return false;
   }
 
-  // Locate the installed script. DataPath varies with the install layout
-  // (<install>/share/aurora in the aurora tree), so probe the plausible
-  // roots: <install>/scripts (aurora layout) and DataPath()/../scripts.
-  std::filesystem::path generate_constraints_script_path;
-  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
-  const std::filesystem::path script_rel_path =
-      std::filesystem::path("scripts") /
-      std::filesystem::path("rel_macro_placement") /
-      std::filesystem::path("blif_rel_macro_constraints.py");
-  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
-    std::filesystem::path candidate =
-        (root / script_rel_path).lexically_normal();
-    if (fs::exists(candidate)) {
-      generate_constraints_script_path = candidate;
-      break;
-    }
-  }
+  const std::filesystem::path generate_constraints_script_path = InstalledScript(
+      std::filesystem::path("rel_macro_placement") / "blif_rel_macro_constraints.py");
   if (generate_constraints_script_path.empty()) {
     ErrorMessage(
         "Cannot locate scripts/rel_macro_placement/"
@@ -10082,22 +10550,8 @@ bool CompilerOpenFPGA_ql::PackageRpmAuthorProject() {
     return false;
   }
 
-  // Locate the installed packaging driver, same probing as
-  // GenerateRelMacroConstraints above.
-  std::filesystem::path driver_script_path;
-  const std::filesystem::path data_path = GetSession()->Context()->DataPath();
-  const std::filesystem::path script_rel_path =
-      std::filesystem::path("scripts") /
-      std::filesystem::path("rel_macro_placement") /
-      std::filesystem::path("package_rpm_ip.py");
-  for (const auto& root : {data_path / ".." / "..", data_path / ".."}) {
-    std::filesystem::path candidate =
-        (root / script_rel_path).lexically_normal();
-    if (fs::exists(candidate)) {
-      driver_script_path = candidate;
-      break;
-    }
-  }
+  const std::filesystem::path driver_script_path =
+      InstalledScript(std::filesystem::path("rel_macro_placement") / "package_rpm_ip.py");
   if (driver_script_path.empty()) {
     ErrorMessage(
         "Cannot locate scripts/rel_macro_placement/package_rpm_ip.py in the "
@@ -12857,23 +13311,15 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   
   yosysScript->apply("${PLUGIN_LOAD}", std::string("plugin -i ql-qlf"));
 
-  // Aurora's floorplanning runs after synthesis (scripts/generate_floorplanning.py
-  // feeding VPR's --read_vpr_constraints), so these Yosys-level hooks have nothing
-  // to emit; substitute empty until such a feature exists. EVAL-MSC-CUSTOM ships
-  // them in its .ys, and without this every Yosys flow on it dies in yosys with
-  // "No such command: ${FLOORPLANNING_PRE_SYNTH}". Templates omitting them are
-  // unaffected: apply() on an absent placeholder is a no-op.
-  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}", std::string(""));
-  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}", std::string(""));
-
 #if defined (AURORA_YOSYS_SYNTH_PASS_NAME)
 // https://stackoverflow.com/questions/2751870/how-exactly-does-the-double-stringize-trick-work
 #define STRINGIZE2(s) #s
 #define STRINGIZE(s) STRINGIZE2(s)
-  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string(STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)));
+  const std::string synth_pass_name{STRINGIZE(AURORA_YOSYS_SYNTH_PASS_NAME)};
 #else
-  yosysScript->apply("${QL_SYNTH_PASS_NAME}", std::string("synth_quicklogic"));
+  const std::string synth_pass_name{"synth_quicklogic"};
 #endif
+  yosysScript->apply("${QL_SYNTH_PASS_NAME}", synth_pass_name);
 
   if (!ProjManager()->DesignTopModule().empty()) {
     yosysScript->apply("${TOP_MODULE_DIRECTIVE}", "-top " + ProjManager()->DesignTopModule());
@@ -12898,10 +13344,13 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     
     // we have a valid SDC file
     std::filesystem::path aurora_yosys_import_script_path =
-        GetSession()->Context()->DataPath() /
-        std::filesystem::path("..") /
-        std::filesystem::path("scripts") /
-        std::filesystem::path("aurora_yosys_import.tcl");
+        InstalledScript("aurora_yosys_import.tcl");
+    if (aurora_yosys_import_script_path.empty()) {
+      ErrorMessage("Cannot locate scripts/aurora_yosys_import.tcl in the installation; "
+                   "reading the synthesis SDC will fail.");
+      aurora_yosys_import_script_path =
+          PathUtils::instance().installDir() / "scripts" / "aurora_yosys_import.tcl";
+    }
 
     yosysScript->apply("${PLUGIN_LOAD_SDC}", std::string("plugin -i sdc"));
 
@@ -12926,7 +13375,21 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   }
   // ---------------------------------------------------------------- synth_sdc_file --
 
+  // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
+  // [aurora2#1725] synth_ql -owner_table writes the owner table itself (yosys_options
+  // below), so these template hooks run nothing; they stay for templates that name them.
   std::filesystem::path output_blif_filepath{ProjManager()->projectName() + "_post_synth.blif"};
+  yosysScript->apply("${FLOORPLANNING_PRE_SYNTH}", std::string(""));
+  yosysScript->apply("${FLOORPLANNING_POST_SYNTH}", std::string(""));
+  // -- floorplanning_pre_synth / floorplanning_post_synth ---------------------------
+
+  // -- floorplanning_prefix ---------------------------------------------------------
+  // [aurora2#1725] Every artifact the floorplanning flow generates is named
+  // "<project>_floorplanning_<artifact>", so it is obvious in a project directory which
+  // files this feature owns. A device template may name its own outputs after it too.
+  yosysScript->apply("${FLOORPLANNING_PREFIX}", FloorplanningPrefix());
+  // -- floorplanning_prefix ---------------------------------------------------------
+
   yosysScript->apply("${OUTPUT_BLIF}", output_blif_filepath.string());
   yosysScript->addFile(output_blif_filepath);
 
@@ -13066,6 +13529,30 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
     yosysScript->addFile(rel_ip_blif);
   }
 
+  const std::filesystem::path yosys_executable_path = SynthesisYosysExecutable();
+  if (yosys_executable_path.empty()) return {};
+
+  // [aurora2#1725] The owner table: which RTL instance owns each atom of the BLIF. The
+  // panel, the constraint writer and the checks all read it. The pass refuses -owner_table
+  // without -blif, so a template line that passes the options without -blif gets none.
+  bool options_with_blif = true;
+  {
+    std::istringstream lines{GetYosysScriptTemplate()};
+    for (std::string line; std::getline(lines, line);) {
+      if (line.find("${YOSYS_OPTIONS}") != std::string::npos &&
+          line.find("-blif") == std::string::npos) {
+        options_with_blif = false;
+      }
+    }
+  }
+  if (options_with_blif &&
+      SynthPassHasOwnerTable(yosys_executable_path, synth_pass_name)) {
+    yosys_options += " -owner_table " + FloorplanningPrefix() + "_atomsets.json";
+    if (m_useVerific && m_projManager->synthesisTool() != Synplify) {
+      yosys_options += " -owner_front_end verific";
+    }
+  }
+
   // synth_options from Tcl: no template has ${OPTIMIZATION}, so this is their only way into synth_ql.
   if (!SynthMoreOpt().empty()) {
     yosys_options += " " + SynthMoreOpt();
@@ -13132,29 +13619,6 @@ std::unordered_map<int, CommandWrapperPtr> CompilerOpenFPGA_ql::getSynthesisComm
   }
 #endif // #if UPSTREAM_UNUSED
 
-
-  std::filesystem::path yosys_executable_path = m_yosysExecutablePath;
-  if(m_useVerific) {
-#if(AURORA_USE_TABBYCAD == 1)
-    yosys_executable_path = GetSession()->Context()->BinaryPath() /
-                            ".." /
-                            "tabby" /
-                            "bin" /
-#ifdef _WIN32
-                            "yosys_verific.exe";
-#else
-                            "yosys_verific";
-#endif
-    if (!FileUtils::FileExists(yosys_executable_path)) {
-      ErrorMessage("Verific parser requested but the TabbyCAD Yosys was not "
-                   "found: " + yosys_executable_path.string());
-      return {};
-    }
-#else
-    Message("Verific parser requested but this build was configured without "
-            "TabbyCAD; synthesis uses " + yosys_executable_path.string());
-#endif // #if(AURORA_USE_TABBYCAD == 1)
-  }
 
   CommandWrapperPtr command = std::make_shared<CommandWrapper>();
   command->setScriptRenderer(yosysScript);

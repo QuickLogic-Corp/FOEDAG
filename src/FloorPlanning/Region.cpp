@@ -4,8 +4,6 @@
 
 namespace fp {
 
-int Region::s_idGenerator = 0;
-
 void Region::setTiles(const std::unordered_map<Tile::Index, TilePtr>& tiles)
 {
     m_tiles = tiles;

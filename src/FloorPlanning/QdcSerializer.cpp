@@ -1,4 +1,6 @@
 #include "QdcSerializer.h"
+
+#include "AtomSets.h"
 #include "DeviceGrid.h"
 #include "HierarhyElement.h"
 #include "Utils/FileUtils.h"
@@ -6,7 +8,114 @@
 
 #include <QDebug>
 
+#include <map>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
 namespace fp {
+
+namespace {
+
+bool isBlank(char c) { return c == ' ' || c == '\t' || c == '\r'; }
+
+std::string unquote(const std::string& word)
+{
+    if (word.size() >= 2 && word.front() == '"' && word.back() == '"') {
+        return word.substr(1, word.size() - 2);
+    }
+    return word;
+}
+
+// A name with a blank, comma or '#' would otherwise read back as several words, a list or a
+// comment.
+std::string quoteIfNeeded(const std::string& name)
+{
+    return (name.find_first_of(" \t,#") == std::string::npos) ? name : '"' + name + '"';
+}
+
+// Splits on commas outside quotes and parentheses.
+std::vector<std::string> splitList(const std::string& word)
+{
+    std::vector<std::string> items;
+    std::string current;
+    bool quoted = false;
+    int depth = 0;
+    auto flush = [&]() {
+        if (!current.empty()) {
+            items.push_back(unquote(current));
+        }
+        current.clear();
+    };
+    for (char c : word) {
+        if (c == '"') {
+            quoted = !quoted;
+        } else if (!quoted && c == '(') {
+            ++depth;
+        } else if (!quoted && c == ')') {
+            --depth;
+        } else if (!quoted && depth == 0 && c == ',') {
+            flush();
+            continue;
+        }
+        current += c;
+    }
+    flush();
+    return items;
+}
+
+}  // namespace
+
+std::optional<SetRegionCommand> QdcSerializer::parseSetRegion(const std::string& line)
+{
+    SetRegionCommand command;
+    std::vector<std::string> words;
+    std::string current;
+    bool quoted = false;
+    int depth = 0;
+    bool gap = false;
+    for (std::size_t i = 0; i < line.size(); ++i) {
+        const char c = line[i];
+        if (!quoted && c == '#') {
+            command.comment = line.substr(i);
+            FOEDAG::StringUtils::trim(command.comment);
+            break;
+        }
+        if (!quoted && isBlank(c)) {
+            gap = true;
+            continue;
+        }
+        if (gap && depth == 0 && !current.empty() && current.back() != ',' && c != ',') {
+            words.push_back(current);
+            current.clear();
+        }
+        gap = false;
+        if (c == '"') {
+            quoted = !quoted;
+        } else if (!quoted && c == '(') {
+            ++depth;
+        } else if (!quoted && c == ')') {
+            --depth;
+        }
+        current += c;
+    }
+    if (!current.empty()) {
+        words.push_back(current);
+    }
+
+    if (quoted || depth != 0 || words.size() < 3 || words.size() > 4 || words[0] != "set_region") {
+        return std::nullopt;
+    }
+    command.elements = splitList(words[1]);
+    command.regions = splitList(words[2]);
+    if (words.size() == 4) {
+        command.partitionName = unquote(words[3]);
+    }
+    if (command.elements.empty() || command.regions.empty()) {
+        return std::nullopt;
+    }
+    return command;
+}
 
 bool QdcSerializer::save(const DeviceGrid& device, const std::filesystem::path& overrideFilePath)
 {
@@ -26,15 +135,19 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
             continue;
         }
 
-        // collect netlist elements
+        // [aurora2#1725 stage P1] RTL names only -- never element.vprNames, and never a
+        // pattern derived from the tree's shape. Writing resolved VPR atom names is what
+        // produced the defect this feature fixes: an enumerated .qdc can never be complete,
+        // and those names are in a different namespace from the atoms VPR places (A.P3).
+        //
+        // A whole-instance selection is written as the plain RTL path -- "dut.instPerm20009",
+        // not "dut.instPerm20009.*". REQ-003 reserves that ".*" wildcard for
+        // _constraints.xml generation; GenerateIOFloorPlanConstraints() appends it itself for
+        // the tokens it recognises as instances, so writing it here loses nothing.
         std::string elementsStr = "";
         int elementsCounter = 0;
         for (const HierarhyElement& element: partition->elements()) {
-            if (element.isLeaf) {
-                elementsStr += element.path;
-            } else {
-                elementsStr += element.path + ".*";
-            }
+            elementsStr += quoteIfNeeded(element.path);
             elementsCounter++;
             if (elementsCounter < partition->elements().size()) {
                 elementsStr += ",";
@@ -95,7 +208,12 @@ std::string QdcSerializer::serialize(const DeviceGrid& device)
         line += " ";
         line += lfCommandDelimiter();
 
-        line += partition->name();
+        line += quoteIfNeeded(partition->name());
+
+        if (!partition->comment().empty()) {
+            line += "  ";
+            line += partition->comment();
+        }
 
         line += "\n\n";
 
@@ -117,92 +235,116 @@ void QdcSerializer::load(DeviceGrid& device, const std::filesystem::path& overri
 
 void QdcSerializer::load(DeviceGrid& device, const std::vector<std::string>& lines)
 {
-    auto splitRegionsIgnoringParens = [](const std::string& s, char delimiter)->std::vector<std::string> {
-        std::vector<std::string> result;
-        std::string current;
-
-        int depth = 0;
-
-        for (char c : s) {
-            if (c == '(') {
-                depth++;
-                current += c;
-            } else if (c == ')') {
-                depth--;
-                current += c;
-            } else if (c == delimiter && depth == 0) {
-                result.push_back(current);
-                current.clear();
-            } else {
-                current += c;
-            }
-        }
-
-        if (!current.empty()) {
-            result.push_back(current);
-        }
-
-        return result;
-    };
-
     m_reservedContent.clear();
     device.clearPartitions();
-    Partition::resetIdGenerator();
-    Region::resetIdGenerator();
+    device.context()->resetIds();
+
+    // A partition named on several lines is one partition with the union of their elements
+    // and regions; two partitions with one name would collide in _constraints.xml.
+    std::map<std::string, PartitionPtr> partitionsByName;
 
     for (const std::string& line: lines) {
         if (FOEDAG::StringUtils::startsWith(line, "set_region")) {
-            std::vector<std::string> cmdTokens = FOEDAG::StringUtils::tokenize(line, " ");
-            // extract partition name [optionally]
-            std::string partitionName = "";
-            if (cmdTokens.size() == 4) {
-                partitionName = cmdTokens[3];
-            }
+            const std::optional<SetRegionCommand> command = parseSetRegion(line);
 
-            PartitionPtr partition = std::make_shared<Partition>(partitionName);
-            device.addPartition(partition);
+            // [aurora2#1725] Parse every region BEFORE anything reaches the device. The
+            // partition used to be added first and each region restored as it parsed, so one
+            // bad coordinate left a partition holding elements and no region; serialize()
+            // skips only partitions with no ELEMENTS, so the next save rewrote it without the
+            // region and a typo in a hand-edited .qdc silently destroyed the constraint it
+            // was in.
+            //
+            // A line we cannot fully parse is kept in m_reservedContent instead, which save()
+            // writes back, so the file survives the round trip untouched and the user can fix
+            // the typo by hand. The partition is not created: a half-loaded one is exactly
+            // what caused the loss.
+            std::vector<std::pair<Tile::Index, Tile::Index>> parsedRegions;
+            bool regionsOk = true;
 
-            if (cmdTokens.size() >= 3) {
-                // extract elements
-                std::vector<std::string> pathesDirtyTokens = FOEDAG::StringUtils::tokenize(cmdTokens[1], ",");
-                for (std::string path: pathesDirtyTokens) {
-                    if (FOEDAG::StringUtils::endsWith(path, ".*")) {
-                        FOEDAG::StringUtils::removeSuffix(path, ".*");
-                        partition->addElement(HierarhyElement{path, false});
-                    } else {
-                        partition->addElement(HierarhyElement{path, true});
-                    }
-                }
-
-                // extract regions
-                std::vector<std::string> regionsStr = splitRegionsIgnoringParens(cmdTokens[2], ',');
-                for (const std::string& regionStr: regionsStr) {
+            if (command) {
+                for (const std::string& regionStr: command->regions) {
                     std::vector<std::string> regionTokens = FOEDAG::StringUtils::tokenize(regionStr, ":");
+                    std::optional<TileDescriptor> bottomLeftOpt;
+                    std::optional<TileDescriptor> topRightOpt;
+
                     if (regionTokens.size() == 1) {
-                        // special case
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
-                        if (bottomLeftGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftIndex = device.toBottomLeftGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            Tile::Index topRightIndex = device.toTopRightGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
-                        } else {
+                        // special case: a single tile is its own bottom-left and top-right
+                        bottomLeftOpt = extractGridCoord(regionTokens[0]);
+                        topRightOpt = bottomLeftOpt;
+                        if (!bottomLeftOpt) {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract start and end points";
                         }
                     } else if (regionTokens.size() == 2) {
-                        std::optional<TileDescriptor> bottomLeftGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[0]);
-                        std::optional<TileDescriptor> topRightGridCoordTileDescriptorOpt = extractGridCoord(regionTokens[1]);
-
-                        if (bottomLeftGridCoordTileDescriptorOpt && topRightGridCoordTileDescriptorOpt) {
-                            Tile::Index bottomLeftIndex = device.toBottomLeftGridIndex(bottomLeftGridCoordTileDescriptorOpt.value());
-                            Tile::Index topRightIndex = device.toTopRightGridIndex(topRightGridCoordTileDescriptorOpt.value());
-                            device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
-                        } else {
+                        bottomLeftOpt = extractGridCoord(regionTokens[0]);
+                        topRightOpt = extractGridCoord(regionTokens[1]);
+                        if (!bottomLeftOpt || !topRightOpt) {
                             qCritical() << "syntax error for regions" << QString::fromStdString(regionStr) << "coudn't extract bottomLeft or topRight indexes";
                         }
                     } else {
                         qCritical() << "syntax error for regions" << QString::fromStdString(regionStr);
                     }
+
+                    if (!bottomLeftOpt || !topRightOpt) {
+                        regionsOk = false;
+                        break;
+                    }
+                    parsedRegions.emplace_back(device.toBottomLeftGridIndex(bottomLeftOpt.value()),
+                                               device.toTopRightGridIndex(topRightOpt.value()));
                 }
+            } else {
+                regionsOk = false;
+            }
+
+            if (!regionsOk) {
+                qCritical() << "keeping the unparsable line as-is so saving cannot discard it:"
+                            << QString::fromStdString(line);
+                m_reservedContent += line + "\n";
+                continue;
+            }
+
+            const std::string& partitionName = command->partitionName;
+            PartitionPtr partition;
+            if (const auto named = partitionsByName.find(partitionName);
+                !partitionName.empty() && named != partitionsByName.end()) {
+                partition = named->second;
+                if (!command->comment.empty()) {
+                    partition->setComment(partition->comment().empty()
+                                              ? command->comment
+                                              : partition->comment() + " " + command->comment);
+                }
+            } else {
+                partition = std::make_shared<Partition>(device.context(), partitionName);
+                partition->setComment(command->comment);
+                device.addPartition(partition);
+                if (!partitionName.empty()) {
+                    partitionsByName[partitionName] = partition;
+                }
+            }
+
+            // A ".*" suffix is still accepted: serialize() wrote one for every non-leaf
+            // element until stage P1, and the testcase .qdc files are hand-written in that
+            // form. It is stripped rather than kept, so the path stored here is the RTL name
+            // in both cases and a load/save round trip normalises the older form to it.
+            //
+            // isLeaf is a note about the tree, not about the file, and a bare path cannot say
+            // which it was -- so it never decides anything outside the panel, which recomputes
+            // it from the rows it actually has (see fillPartitionWithSelectedElements()).
+            for (std::string path: command->elements) {
+                const bool subtree = FOEDAG::StringUtils::endsWith(path, ".*");
+                if (isElementPattern(subtree ? path.substr(0, path.size() - 2) : path)) {
+                    // A pattern stays as written: without its ".*" the flow would match
+                    // only atoms named exactly like it.
+                    partition->addElement(HierarhyElement{path, false});
+                } else if (subtree) {
+                    FOEDAG::StringUtils::removeSuffix(path, ".*");
+                    partition->addElement(HierarhyElement{path, false});
+                } else {
+                    partition->addElement(HierarhyElement{path, true});
+                }
+            }
+
+            for (const auto& [bottomLeftIndex, topRightIndex]: parsedRegions) {
+                device.restoreRegion(partition, bottomLeftIndex, topRightIndex);
             }
         } else {
             m_reservedContent += line + "\n";
@@ -214,7 +356,6 @@ std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path
 {
     std::vector<std::string> commands;
     std::string content = FOEDAG::FileUtils::GetFileContent(filePath);
-    FOEDAG::StringUtils::replaceAllInPlace(content, "  ", " ");
 
     // Fixes CRLF -> LF, valid case for WIN32 platform
     FOEDAG::StringUtils::replaceAllInPlace(content, "\r", "");
@@ -228,15 +369,19 @@ std::vector<std::string> QdcSerializer::readCommands(const std::filesystem::path
     for (std::string line: lines) {
       line = FOEDAG::StringUtils::trim(line);
 
-      // drop comment part
-      if (auto pos = line.find("#"); pos != std::string::npos) {
-        line = line.substr(0, pos); // drop commented part of line
-      }
-
       if (line.empty()){
         continue; // Skip empty line
       }
 
+      // [aurora2#1725] Comments are user content and are returned intact -- whole-line ones
+      // for load() to keep in m_reservedContent, trailing ones for it to carry on the
+      // partition they annotate. They used to be stripped here and dropped, and since
+      // m_reservedContent is filled only from the lines load() receives, every comment in
+      // the .qdc was destroyed by the next save. The testcase .qdc files carry their entire
+      // rationale in such headers.
+      //
+      // Consumers therefore have to expect them: see GenerateIOFloorPlanConstraints(),
+      // which would otherwise read a comment's first word as a command name.
       commands.push_back(line);
     }
 
@@ -248,9 +393,20 @@ std::optional<TileDescriptor> QdcSerializer::extractGridCoord(const std::string&
     static auto extractGridCoord = [](const std::string& idxStr, Tile::Type type)->std::optional<TileDescriptor> {
         std::vector<std::string> tokens = FOEDAG::StringUtils::tokenize(idxStr, ",");
         if (tokens.size() == 2) {
-            int col = std::stoi(tokens[0]);
-            int row = std::stoi(tokens[1]);
-            return TileDescriptor{Tile::Index(col, row), type};
+            // [aurora2#1725] The .qdc is user-editable, so these tokens are untrusted:
+            // "clb(abc,2)" makes std::stoi throw invalid_argument and a large value makes it
+            // throw out_of_range. Nothing anywhere in the load path catches -- not
+            // QdcSerializer, not DeviceGrid, not FloorPlanningWidget -- and load() runs from
+            // a Qt slot on panel open and on the Load button, so the throw took the IDE down
+            // over a typo. Reported as a syntax error instead, which is what every other
+            // malformed-region path here already does.
+            try {
+                int col = std::stoi(tokens[0]);
+                int row = std::stoi(tokens[1]);
+                return TileDescriptor{Tile::Index(col, row), type};
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
         }
         return std::nullopt;
     };

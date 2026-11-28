@@ -6,10 +6,9 @@
 
 namespace fp {
 
-int Partition::s_idGenerator = 0;
-
-Partition::Partition(const std::string& name): m_name(name) {
-  m_id = s_idGenerator++;
+Partition::Partition(FloorplanContextPtr context, const std::string& name)
+    : m_context(std::move(context)), m_name(name) {
+  m_id = m_context->nextPartitionId++;
   setColor(colorFromIndex(m_id));
   if (m_name.empty()) {
     m_name = "partition" + std::to_string(m_id);
@@ -25,17 +24,32 @@ void Partition::setColor(const QColor& color)
 
 std::unordered_set<std::string> Partition::collectOverlappedElements(const Partition& partition) const
 {
+    // [aurora2#1725] An element covers its whole subtree, so "the same element in two
+    // partitions" is not only an identical path: an instance here and something nested
+    // inside it there claim the same atoms just as surely. Exact-path comparison alone
+    // missed that, which is how partition1 could hold dut.instPerm20009 while partition2
+    // held dut.instPerm20009.in_sw_0_0 with nothing reported -- and VPR cannot honour it,
+    // a cluster sitting in one region only. The nested path is the one named, since that
+    // is the narrower claim and the one to drop to resolve it.
+    auto collectNested = [](const HierarhyElements& inner, const HierarhyElements& outer,
+                            std::unordered_set<std::string>& into) {
+        for (const HierarhyElement& element: inner) {
+            std::size_t dot = element.path.rfind('.');
+            while (dot != std::string::npos) {
+                const std::string ancestor = element.path.substr(0, dot);
+                if (outer.contains(ancestor)) {
+                    into.insert(element.path);
+                    break;
+                }
+                dot = ancestor.rfind('.');
+            }
+        }
+    };
+
+    // The same path in both is DeviceGrid::checkWriterClaims()'s error, not this warning.
     std::unordered_set<std::string> elements;
-    for (const HierarhyElement& element: partition.elements()) {
-        if (m_elements.contains(element.path)) {
-            elements.insert(element.path);
-        }
-    }
-    for (const HierarhyElement& element: m_elements) {
-        if (partition.elements().contains(element.path)) {
-            elements.insert(element.path);
-        }
-    }
+    collectNested(partition.elements(), m_elements, elements);
+    collectNested(m_elements, partition.elements(), elements);
     return elements;
 }
 
