@@ -28,6 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <string>
 #include <vector>
 #include <map>
+#include <memory>
 #include <cassert>
 
 #include "nlohmann_json/json.hpp"
@@ -103,6 +104,48 @@ class IPGenerator {
                                   const std::filesystem::path& srcDir,
                                   const std::string& baseName,
                                   const std::string& line);
+
+  // True when `copy`, the build directory of an instance
+  // (<vendor>/<library>/<name>/<version>/<moduleName>/, what GetBuildDir()
+  // returns), holds what ipgenerate wrote for this request: the cache file
+  // <ipName>_<moduleName>.json is there and records exactly the -P set in
+  // `parameters` (names and values as given; defaults are not filled in)
+  // and, when the file and `targetDevice` both name a device, the same
+  // device. This is the whole reuse test of ipgenerate. No catalog is looked
+  // at, so that updating or reinstalling a catalog does not replace what a
+  // project was built with; delete_ip, then configure_ip and ipgenerate,
+  // takes the catalog's IP again.
+  // Without a cache file the result is false and `whyNot` is left alone.
+  // With one that cannot be read, or that records other parameters or
+  // another device, the result is false and `whyNot` gets one sentence that
+  // says which; it is worded for configure_ip's fallback, the only caller
+  // that reports it. Only reads the file system, so a test can run it on a
+  // temporary tree.
+  static bool GeneratedCopyMatches(const std::filesystem::path& copy,
+                                   const std::string& ipName,
+                                   const std::string& moduleName,
+                                   const std::vector<SParameter>& parameters,
+                                   const std::string& targetDevice,
+                                   std::string* whyNot = nullptr);
+
+  // For an IP that is in no catalog, so that no definition tells its vendor,
+  // library and version: looks under `ipsRoot` for a copy of `ipName` and
+  // module `moduleName` that GeneratedCopyMatches() accepts and that has a
+  // non-empty src/. Returns the <vendor>/<library>/<name>/<version>
+  // directory above that copy, which is what a stand-in definition is built
+  // on (IPDefinition::IPType::ProjectCopy), or an empty path. `whyNot` is
+  // set as by GeneratedCopyMatches(), and also when the copy has no sources.
+  static std::filesystem::path FindGeneratedCopy(
+      const std::filesystem::path& ipsRoot, const std::string& ipName,
+      const std::string& moduleName, const std::vector<SParameter>& parameters,
+      const std::string& targetDevice, std::string* whyNot = nullptr);
+
+  // What a generated copy is tied to besides its parameters:
+  // <family>/<foundry>/<node>/<device> of the target device in lower case,
+  // empty when none is selected. Recorded in the cache file of every copy.
+  // Layout and corner are left out: the IP catalogs are per device, not per
+  // layout or corner.
+  std::string TargetDeviceKey() const;
 
   IPGenerator(const std::filesystem::path& installDir, IPCatalog* catalog, Compiler* compiler);
   virtual ~IPGenerator() {}
@@ -190,6 +233,9 @@ private:
   // Device catalog root (weakly canonical) whose IPs are in the catalog;
   // empty when none. Maintained by SyncDeviceCatalog().
   std::filesystem::path m_deviceCatalogRoot;
+  // Stand-in definitions (IPType::ProjectCopy) that configure_ip created for
+  // IPs found only in the project. Instances point at them.
+  std::vector<std::unique_ptr<IPDefinition>> m_projectCopyDefinitions;
 
   void dumpDeviceInfo(const std::filesystem::path&);
   void dumpParameterModifications(const std::filesystem::path&);

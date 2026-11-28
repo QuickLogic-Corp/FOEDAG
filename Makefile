@@ -200,6 +200,8 @@ test/batch: run-cmake-release
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ipgenerate_modules.tcl
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ipgenerate_cache.tcl
 	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ip_version_clash.tcl
+	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ip_project_copy_generate.tcl
+	./build/bin/aurora --batch --script tests/Testcases/IPGenerate/test_ip_project_copy_reuse.tcl
 #	./build/bin/aurora --batch --script tests/Testcases/DesignQuery/test_parse_design_data.tcl
 	./build/bin/aurora --batch --script tests/Testcases/project_file/test.tcl
 	./build/bin/aurora --batch --script tests/Testcases/oneff_close/oneff.tcl
